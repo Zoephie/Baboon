@@ -27,7 +27,10 @@ impl NamedFunction {
 
 /// The `mapping_function` `name` under `holder`, as the engine's function:
 /// a later engine's blob, a Halo 2 byte block, or Halo 2's laid-out fields.
-pub(in crate::app::model_preview) fn tag_function_at(holder: &TagStruct<'_>, name: &str) -> Option<TagFunction> {
+pub(in crate::app::model_preview) fn tag_function_at(
+    holder: &TagStruct<'_>,
+    name: &str,
+) -> Option<TagFunction> {
     let Some(field) = holder.field_path(&format!("{name}/data")) else {
         return h2_laid_out_function(holder.descend(name)?);
     };

@@ -65,7 +65,10 @@ fn shape_named(name: &str) -> u32 {
     }
 }
 
-pub(super) fn read_tracer(reader: &TagReader, element: TagStruct<'_>) -> Option<H4TracerDefinition> {
+pub(super) fn read_tracer(
+    reader: &TagReader,
+    element: TagStruct<'_>,
+) -> Option<H4TracerDefinition> {
     if has_flag(element, "flags", "disabled for debugging") {
         return None;
     }
@@ -124,7 +127,11 @@ pub(super) fn read_tracer(reader: &TagReader, element: TagStruct<'_>) -> Option<
     let uv_tiling = vector("uv tiling").map(|tiling| if tiling == 0.0 { 1.0 } else { tiling });
     let most_profiles = (length.most() * density.most()) as i32;
     let tracer = TracerDefinition {
-        shape: shape_named(&element.read_enum_option("profile shape").unwrap_or_default()),
+        shape: shape_named(
+            &element
+                .read_enum_option("profile shape")
+                .unwrap_or_default(),
+        ),
         ngon_sides: element
             .read_int_any("number of n-gon sides")
             .unwrap_or(0)

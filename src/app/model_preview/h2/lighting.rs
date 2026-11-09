@@ -3,9 +3,9 @@
 
 use eframe::glow::{self, HasContext as _};
 
-use super::super::*;
 use super::super::common::features::paths;
-use super::super::dx9::passes::{H2DefaultLight, Dx9Layer};
+use super::super::dx9::passes::{Dx9Layer, H2DefaultLight};
+use super::super::*;
 
 /// Draw the object's sphere lights over `order`, each over its diffuse and
 /// specular layers.
@@ -30,11 +30,15 @@ pub(in crate::app::model_preview) unsafe fn draw_h2_point_lights(
                 continue;
             };
             let (light, draws) = super::lights::overbrighten(&light);
-            let specular = H2DefaultLight { color: light.specular, ..light };
+            let specular = H2DefaultLight {
+                color: light.specular,
+                ..light
+            };
             for _ in 0..draws {
-                for (layer, light) in
-                    [(point.diffuse_layer(), &light), (Dx9Layer::LightSpecular, &specular)]
-                {
+                for (layer, light) in [
+                    (point.diffuse_layer(), &light),
+                    (Dx9Layer::LightSpecular, &specular),
+                ] {
                     core.draw_h2_passes(gl, frame, slot, order, layer, Some(light));
                 }
             }
@@ -72,7 +76,11 @@ pub(in crate::app::model_preview) unsafe fn draw_h2_gel_lights(
                 core.draw_h2_passes(gl, frame, slot, order, Dx9Layer::GelMask, Some(&light));
                 masked = true;
             }
-            let layer = if specular { Dx9Layer::LightFrustum } else { Dx9Layer::LightGel };
+            let layer = if specular {
+                Dx9Layer::LightFrustum
+            } else {
+                Dx9Layer::LightGel
+            };
             for _ in 0..draws {
                 core.draw_h2_passes(gl, frame, slot, order, layer, Some(&light));
             }

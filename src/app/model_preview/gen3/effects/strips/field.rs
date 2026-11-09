@@ -25,7 +25,10 @@ impl Gen3StripField {
     ) {
         if self.running.len() != strips.len() || self.time.is_none_or(|last| time < last) {
             self.running = (0..strips.len())
-                .map(|at| RunningContrail { random: at as u32 * 977 + 1, ..Default::default() })
+                .map(|at| RunningContrail {
+                    random: at as u32 * 977 + 1,
+                    ..Default::default()
+                })
                 .collect();
             self.carried = vec![BTreeMap::new(); strips.len()];
             self.time = Some(time);
@@ -44,7 +47,15 @@ impl Gen3StripField {
                 let carried = &mut self.carried[index];
                 for &(id, place) in &live {
                     let (born, follower) = carried.entry(id).or_insert_with(|| {
-                        (time, RunningContrail { random: (id as u32).wrapping_mul(977) | 1, previous: place, location: Some(place), ..Default::default() })
+                        (
+                            time,
+                            RunningContrail {
+                                random: (id as u32).wrapping_mul(977) | 1,
+                                previous: place,
+                                location: Some(place),
+                                ..Default::default()
+                            },
+                        )
                     });
                     if let Some(state) = strip.state(None, time, *born) {
                         follower.location = Some(place);
@@ -58,7 +69,9 @@ impl Gen3StripField {
                         follower.location = None;
                     }
                 }
-                carried.retain(|_, (_, follower)| follower.location.is_some() || !follower.profiles.is_empty());
+                carried.retain(|_, (_, follower)| {
+                    follower.location.is_some() || !follower.profiles.is_empty()
+                });
                 continue;
             }
             let at = strip.origin(bones);
@@ -74,11 +87,19 @@ impl Gen3StripField {
             let onset = onsets.of(strip.object, &strip.scale_by, values.as_ref(), time);
             let state = strip.state(values.as_ref(), time, onset);
             if let Some(state) = state {
-                let state = StripState { speed: running.speed, ..state };
+                let state = StripState {
+                    speed: running.speed,
+                    ..state
+                };
                 running.pulse(contrail, &strip.look, &state, at, dt);
                 running.update(contrail, &state, dt);
             } else {
-                let rest = StripState { game_time: time.rem_euclid(1.0), age: 1.0, seeds: strip.seeds, ..Default::default() };
+                let rest = StripState {
+                    game_time: time.rem_euclid(1.0),
+                    age: 1.0,
+                    seeds: strip.seeds,
+                    ..Default::default()
+                };
                 running.update(contrail, &rest, dt);
             }
         }
@@ -103,17 +124,22 @@ impl Gen3StripField {
                 let followers = self.carried.get(index).into_iter().flatten();
                 followers
                     .flat_map(|(_, (born, follower))| {
-                        strip.contrail_vertices(contrail, follower, None, view, lighting, time, *born, stops)
+                        strip.contrail_vertices(
+                            contrail, follower, None, view, lighting, time, *born, stops,
+                        )
                     })
                     .collect()
             }
-            StripKind::Beam(beam) => strip.beam_vertices(beam, values, bones, view, time, onset, stops),
-            StripKind::Contrail(contrail) => self
-                .running
-                .get(index)
-                .map_or_else(Vec::new, |running| {
-                    strip.contrail_vertices(contrail, running, values, view, lighting, time, onset, stops)
-                }),
+            StripKind::Beam(beam) => {
+                strip.beam_vertices(beam, values, bones, view, time, onset, stops)
+            }
+            StripKind::Contrail(contrail) => {
+                self.running.get(index).map_or_else(Vec::new, |running| {
+                    strip.contrail_vertices(
+                        contrail, running, values, view, lighting, time, onset, stops,
+                    )
+                })
+            }
         }
     }
 }

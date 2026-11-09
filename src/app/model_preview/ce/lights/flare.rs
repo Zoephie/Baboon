@@ -22,30 +22,50 @@ pub(crate) struct CeFlare {
 pub(super) fn read_flare(reader: &TagReader, path: &str) -> Option<CeFlare> {
     let tag = reader.load(path, "lens_flare", b"lens").ok()?;
     let root = tag.root();
-    let bitmap = root.read_tag_ref_path("bitmap").filter(|bitmap| !bitmap.is_empty())?;
+    let bitmap = root
+        .read_tag_ref_path("bitmap")
+        .filter(|bitmap| !bitmap.is_empty())?;
     let mut images = Vec::new();
     let mut indices = Vec::new();
     let mut reflections = Vec::new();
     for reflection in elements(root, "reflections") {
         let index = reflection.read_int_any("bitmap index").unwrap_or(0).max(0) as usize;
-        let image = indices.iter().position(|known| *known == index).or_else(|| {
-            let image = decode_image(reader, &bitmap, SamplerKind::Texture2D, index)?;
-            images.push(Arc::new(image));
-            indices.push(index);
-            Some(images.len() - 1)
-        })?;
+        let image = indices
+            .iter()
+            .position(|known| *known == index)
+            .or_else(|| {
+                let image = decode_image(reader, &bitmap, SamplerKind::Texture2D, index)?;
+                images.push(Arc::new(image));
+                indices.push(index);
+                Some(images.len() - 1)
+            })?;
         let radius = reflection.read_real_bounds("radius");
         let brightness = reflection.read_fraction_bounds("brightness");
         reflections.push(CeReflection {
-            align_with_screen_center: has_flag(reflection, "flags", "align rotation with screen center"),
-            radius_not_scaled_by_distance: has_flag(reflection, "flags", "radius NOT scaled by distance"),
-            radius_scaled_by_occlusion: has_flag(reflection, "flags", "radius scaled by occlusion factor"),
+            align_with_screen_center: has_flag(
+                reflection,
+                "flags",
+                "align rotation with screen center",
+            ),
+            radius_not_scaled_by_distance: has_flag(
+                reflection,
+                "flags",
+                "radius NOT scaled by distance",
+            ),
+            radius_scaled_by_occlusion: has_flag(
+                reflection,
+                "flags",
+                "radius scaled by occlusion factor",
+            ),
             image,
             position: reflection.read_real("position").unwrap_or(0.0),
             rotation: reflection.read_real("rotation offset").unwrap_or(0.0),
             radius: [radius.lower, radius.upper],
             brightness: [brightness.lower, brightness.upper],
-            brightness_scaled_by: reflection.read_int_any("brightness scaled by").unwrap_or(0).max(0) as usize,
+            brightness_scaled_by: reflection
+                .read_int_any("brightness scaled by")
+                .unwrap_or(0)
+                .max(0) as usize,
             tint: argb(reflection, "tint color"),
             lower: argb(reflection, "color lower bound"),
             upper: argb(reflection, "color upper bound"),
@@ -54,7 +74,10 @@ pub(super) fn read_flare(reader: &TagReader, path: &str) -> Option<CeFlare> {
                 has_flag_in_any(reflection, "flags", "interpolate color in hsv"),
                 has_flag_in_any(reflection, "flags", "...more colors"),
             ),
-            animation_function: reflection.read_int_any("animation function").unwrap_or(0).max(0) as usize,
+            animation_function: reflection
+                .read_int_any("animation function")
+                .unwrap_or(0)
+                .max(0) as usize,
             animation_period: reflection.read_real("animation period").unwrap_or(0.0),
             animation_phase: reflection.read_real("animation phase").unwrap_or(0.0),
         });
@@ -67,8 +90,12 @@ pub(super) fn read_flare(reader: &TagReader, path: &str) -> Option<CeFlare> {
             root.read_real("far fade distance").unwrap_or(0.0),
         ],
         corona_scale: [
-            root.read_real("horizontal scale").filter(|scale| *scale != 0.0).unwrap_or(1.0),
-            root.read_real("vertical scale").filter(|scale| *scale != 0.0).unwrap_or(1.0),
+            root.read_real("horizontal scale")
+                .filter(|scale| *scale != 0.0)
+                .unwrap_or(1.0),
+            root.read_real("vertical scale")
+                .filter(|scale| *scale != 0.0)
+                .unwrap_or(1.0),
         ],
         rotation_function: root.read_int_any("rotation function").unwrap_or(0),
         // Tool's postprocess takes nothing, or a whole turn in degrees, for one.

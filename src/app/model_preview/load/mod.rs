@@ -1,12 +1,12 @@
 //! Preview tag loading and render-model resolution.
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
-use super::*;
-use super::dx9::passes::h2_prt_lights;
-use super::h2::prt::read_h2_prt;
-use std::sync::Arc;
 use super::common::geometry::{Overflow, VertexBase};
 use super::common::marker::{MarkerFrame, attach_point, attach_vector};
+use super::dx9::passes::h2_prt_lights;
+use super::h2::prt::read_h2_prt;
+use super::*;
+use std::sync::Arc;
 
 pub(in crate::app::model_preview) mod reader;
 pub(in crate::app) use reader::TagReader;
@@ -27,15 +27,15 @@ pub(in crate::app::model_preview) use jobs::*;
 mod guard;
 pub(in crate::app::model_preview) use guard::{feature, feature_into};
 mod render_model;
-pub(in crate::app::model_preview) use render_model::*;
 pub(in crate::app) use render_model::build_render_preview;
+pub(in crate::app::model_preview) use render_model::*;
 mod games;
 use games::{add_overlay_shaders, load_ce_object};
 mod object;
 pub(in crate::app::model_preview) use object::*;
 mod model;
-use model::*;
 use super::common::geometry::expand_preview_bounds_local;
+use model::*;
 mod cx;
 pub(in crate::app::model_preview) use cx::*;
 
@@ -84,11 +84,17 @@ fn load_tag_preview(
         return load_render_tag(model_tag, entry);
     }
     if blam_tags::game::Game::of(model_tag) == blam_tags::game::Game::Halo1
-        && is_object_family_group(model_tag.header.group_tag, reader.and_then(|reader| reader.source.game()))
+        && is_object_family_group(
+            model_tag.header.group_tag,
+            reader.and_then(|reader| reader.source.game()),
+        )
     {
         return load_ce_object(model_tag, entry, reader, settings);
     }
-    if is_object_family_group(model_tag.header.group_tag, reader.and_then(|reader| reader.source.game())) {
+    if is_object_family_group(
+        model_tag.header.group_tag,
+        reader.and_then(|reader| reader.source.game()),
+    ) {
         return load_object(model_tag, entry, names, reader, settings);
     }
     if matches!(&group, b"coll" | b"phmo") {
@@ -103,7 +109,9 @@ fn load_tag_preview(
     // Halo: Campaign Evolved — the `.model` (hlmt) has no `render model` ref;
     // geometry lives in UE5 SkeletalMeshes reached via `DA_MeshSynchronization`.
     // Reconstruct the cross-game RenderModel and feed the standard pipeline.
-    if let Some(result) = load_campaign_evolved_preview(model_tag, entry, reader, settings.high_detail) {
+    if let Some(result) =
+        load_campaign_evolved_preview(model_tag, entry, reader, settings.high_detail)
+    {
         return result;
     }
     load_model(model_tag, entry, names, reader)

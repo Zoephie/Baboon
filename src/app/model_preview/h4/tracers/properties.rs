@@ -120,7 +120,8 @@ pub(super) struct TracerProperty {
 impl TracerProperty {
     pub(super) fn read(holder: TagStruct<'_>, name: &str) -> Option<Self> {
         let property = holder.descend(name)?;
-        let input = |field: &str| state_named(&property.read_enum_option(field).unwrap_or_default());
+        let input =
+            |field: &str| state_named(&property.read_enum_option(field).unwrap_or_default());
         Some(Self {
             input: input("Input Variable"),
             range: input("Range Variable"),

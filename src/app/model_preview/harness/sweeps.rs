@@ -2,12 +2,12 @@
 //! sweeps of a family's or a kit's passes through translation and the driver.
 
 use super::super::*;
-use eframe::glow::{self, HasContext as _};
-use std::sync::Arc;
 use super::gl::headless_gl;
 use super::shot::*;
 use crate::core::game::GameId;
 use crate::core::source::TagSource;
+use eframe::glow::{self, HasContext as _};
+use std::sync::Arc;
 
 /// What one pass reads: `H3_PASS=<family>|<template>|<entry>` and
 /// `BLAM_TEST_H3EK` to the tags folder.
@@ -18,7 +18,11 @@ fn h3_pass_inputs() {
         return;
     };
     let root = std::env::var("BLAM_TEST_H3EK").unwrap();
-    let game = if root.contains("reach") { GameId::HaloReach } else { GameId::Halo3 };
+    let game = if root.contains("reach") {
+        GameId::HaloReach
+    } else {
+        GameId::Halo3
+    };
     let source = TagSource::LooseFolder {
         root: root.clone().into(),
         game: Some(game),
@@ -28,10 +32,22 @@ fn h3_pass_inputs() {
     let pass = if let Some(file) = spec.strip_prefix("explicit|") {
         Gen3Sources::new(&source).explicit_pass(file).unwrap()
     } else {
-        let [family, template, entry]: [&str; 3] = spec.split('|').collect::<Vec<_>>().try_into().unwrap();
-        let definition = read_h3_definition(&crate::app::model_preview::load::TagReader::new(&source), &format!("shaders\\{family}")).unwrap();
-        let options: Vec<usize> = template.split('_').filter_map(|digit| digit.parse().ok()).collect();
-        Arc::new(Gen3Sources::new(&source).translate_entry(&definition, &options, entry, VERTEX_SKINNED).unwrap())
+        let [family, template, entry]: [&str; 3] =
+            spec.split('|').collect::<Vec<_>>().try_into().unwrap();
+        let definition = read_h3_definition(
+            &crate::app::model_preview::load::TagReader::new(&source),
+            &format!("shaders\\{family}"),
+        )
+        .unwrap();
+        let options: Vec<usize> = template
+            .split('_')
+            .filter_map(|digit| digit.parse().ok())
+            .collect();
+        Arc::new(
+            Gen3Sources::new(&source)
+                .translate_entry(&definition, &options, entry, VERTEX_SKINNED)
+                .unwrap(),
+        )
     };
     for (name, ty) in &pass.uniforms {
         eprintln!("NOTE UNIFORM {name} {ty:?}");
@@ -48,7 +64,9 @@ fn h3_pass_inputs() {
 /// `H3_SWEEP=<limit>` and `BLAM_TEST_H3EK` to the tags folder.
 #[test]
 fn h3_sweep() {
-    use super::super::gen3::shaders::{Gen3Sources, VERTEX_RIGID, VERTEX_SKINNED, read_h3_definition};
+    use super::super::gen3::shaders::{
+        Gen3Sources, VERTEX_RIGID, VERTEX_SKINNED, read_h3_definition,
+    };
     let Ok(limit) = std::env::var("H3_SWEEP") else {
         return;
     };
@@ -67,27 +85,42 @@ fn h3_sweep() {
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let gl = headless_gl();
-    let definition = read_h3_definition(&crate::app::model_preview::load::TagReader::new(&source), &format!("shaders\\{family}")).unwrap();
+    let definition = read_h3_definition(
+        &crate::app::model_preview::load::TagReader::new(&source),
+        &format!("shaders\\{family}"),
+    )
+    .unwrap();
     let mut sources = Gen3Sources::new(&source);
     let folder = format!("{root}/shaders/{family}_templates");
     let mut templates: Vec<String> = std::fs::read_dir(&folder)
         .unwrap()
         .flatten()
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter_map(|name| name.strip_suffix(".render_method_template").map(str::to_owned))
+        .filter_map(|name| {
+            name.strip_suffix(".render_method_template")
+                .map(str::to_owned)
+        })
         .collect();
     templates.sort();
     let (mut good, mut translation, mut compile) = (0, 0, 0);
     let mut seen: HashMap<String, usize> = HashMap::new();
     for template in templates.iter().take(limit) {
-        let options: Vec<usize> = template.split('_').filter_map(|digit| digit.parse().ok()).collect();
+        let options: Vec<usize> = template
+            .split('_')
+            .filter_map(|digit| digit.parse().ok())
+            .collect();
         for entry in &definition.entry_points {
             for vertex_type in [VERTEX_RIGID, VERTEX_SKINNED] {
                 match sources.translate_entry(&definition, &options, entry, vertex_type) {
                     Err(error) => {
                         translation += 1;
                         let key: String = error.chars().take(140).collect();
-                        if *seen.entry(key.clone()).and_modify(|count| *count += 1).or_insert(1) == 1 {
+                        if *seen
+                            .entry(key.clone())
+                            .and_modify(|count| *count += 1)
+                            .or_insert(1)
+                            == 1
+                        {
                             eprintln!("NOTE TR {template} {entry}: {key}");
                         }
                     }
@@ -95,7 +128,10 @@ fn h3_sweep() {
                         let mut failed = false;
                         let program = unsafe { gl.create_program().unwrap() };
                         let mut shaders = Vec::new();
-                        for (kind, text) in [(glow::VERTEX_SHADER, &pass.vertex), (glow::FRAGMENT_SHADER, &pass.pixel)] {
+                        for (kind, text) in [
+                            (glow::VERTEX_SHADER, &pass.vertex),
+                            (glow::FRAGMENT_SHADER, &pass.pixel),
+                        ] {
                             unsafe {
                                 let shader = gl.create_shader(kind).unwrap();
                                 shaders.push(shader);
@@ -106,11 +142,28 @@ fn h3_sweep() {
                                     failed = true;
                                     let log = gl.get_shader_info_log(shader);
                                     let first = log.lines().next().unwrap_or("").to_owned();
-                                    if let Some(line) = first.split(':').nth(2).and_then(|n| n.trim().parse::<usize>().ok()) {
+                                    if let Some(line) = first
+                                        .split(':')
+                                        .nth(2)
+                                        .and_then(|n| n.trim().parse::<usize>().ok())
+                                    {
                                         let bad = text.lines().nth(line - 1).unwrap_or("");
-                                        let key: String = first.chars().skip(8).filter(|c| !c.is_ascii_digit()).take(70).collect();
-                                        if *seen.entry(key).and_modify(|count| *count += 1).or_insert(1) == 1 {
-                                            eprintln!("NOTE GL {template} {entry}: {first}\n    {}", bad.chars().take(170).collect::<String>());
+                                        let key: String = first
+                                            .chars()
+                                            .skip(8)
+                                            .filter(|c| !c.is_ascii_digit())
+                                            .take(70)
+                                            .collect();
+                                        if *seen
+                                            .entry(key)
+                                            .and_modify(|count| *count += 1)
+                                            .or_insert(1)
+                                            == 1
+                                        {
+                                            eprintln!(
+                                                "NOTE GL {template} {entry}: {first}\n    {}",
+                                                bad.chars().take(170).collect::<String>()
+                                            );
                                         }
                                     }
                                 }
@@ -125,8 +178,19 @@ fn h3_sweep() {
                                 if !gl.get_program_link_status(program) {
                                     failed = true;
                                     let log = gl.get_program_info_log(program);
-                                    let key: String = log.lines().next().unwrap_or("").chars().take(120).collect();
-                                    if *seen.entry(format!("LINK {key}")).and_modify(|count| *count += 1).or_insert(1) == 1 {
+                                    let key: String = log
+                                        .lines()
+                                        .next()
+                                        .unwrap_or("")
+                                        .chars()
+                                        .take(120)
+                                        .collect();
+                                    if *seen
+                                        .entry(format!("LINK {key}"))
+                                        .and_modify(|count| *count += 1)
+                                        .or_insert(1)
+                                        == 1
+                                    {
                                         eprintln!("NOTE LINK {template} {entry}: {key}");
                                     }
                                 }
@@ -175,13 +239,18 @@ fn h4_sweep() {
     };
     let gl = headless_gl();
     let mut tags = Vec::new();
-    let mut stack = vec![std::path::PathBuf::from(format!("{root}/shaders/material_shaders/{folder}"))];
+    let mut stack = vec![std::path::PathBuf::from(format!(
+        "{root}/shaders/material_shaders/{folder}"
+    ))];
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir).unwrap().flatten() {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path.extension().is_some_and(|extension| extension == "material_shader") {
+            } else if path
+                .extension()
+                .is_some_and(|extension| extension == "material_shader")
+            {
                 let relative = path.strip_prefix(&root).unwrap().with_extension("");
                 tags.push(relative.to_string_lossy().replace('/', "\\"));
             }
@@ -191,8 +260,16 @@ fn h4_sweep() {
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut note = |kind: &str, tag: &str, what: &str, error: &str| {
         let key: String = format!("{kind} {}", error.chars().take(140).collect::<String>());
-        if *seen.entry(key.clone()).and_modify(|count| *count += 1).or_insert(1) == 1 {
-            eprintln!("NOTE {kind} {tag} {what}: {}", error.chars().take(400).collect::<String>());
+        if *seen
+            .entry(key.clone())
+            .and_modify(|count| *count += 1)
+            .or_insert(1)
+            == 1
+        {
+            eprintln!(
+                "NOTE {kind} {tag} {what}: {}",
+                error.chars().take(400).collect::<String>()
+            );
         }
     };
     let compile = |kind: u32, text: &str| -> Result<glow::NativeShader, String> {
@@ -217,16 +294,28 @@ fn h4_sweep() {
         }
     };
     if let Ok(needle) = std::env::var("H4_DUMP") {
-        let shader = H4ShaderSource::read(&crate::app::model_preview::load::TagReader::new(&source), &tags[0]).unwrap();
+        let shader = H4ShaderSource::read(
+            &crate::app::model_preview::load::TagReader::new(&source),
+            &tags[0],
+        )
+        .unwrap();
         let tokens = shader.tokens(&H4_DEFINES).unwrap();
         let text: Vec<&str> = tokens.iter().map(|token| &*token.text).collect();
         let at = text.iter().position(|token| *token == needle).unwrap_or(0);
-        eprintln!("NOTE DUMP {}", text[at.saturating_sub(80)..(at + 40).min(text.len())].join(" "));
+        eprintln!(
+            "NOTE DUMP {}",
+            text[at.saturating_sub(80)..(at + 40).min(text.len())].join(" ")
+        );
         return;
     }
     let (mut good, mut parse_failed, mut translation, mut driver) = (0, 0, 0, 0);
     for tag in tags.iter().take(limit) {
-        let program = match H4ShaderSource::read(&crate::app::model_preview::load::TagReader::new(&source), tag).and_then(|shader| shader.program(&H4_DEFINES)) {
+        let program = match H4ShaderSource::read(
+            &crate::app::model_preview::load::TagReader::new(&source),
+            tag,
+        )
+        .and_then(|shader| shader.program(&H4_DEFINES))
+        {
             Ok(program) => program,
             Err(error) => {
                 parse_failed += 1;
@@ -235,7 +324,11 @@ fn h4_sweep() {
             }
         };
         for technique in &techniques {
-            if !program.techniques.iter().any(|candidate| &*candidate.name == technique.as_str()) {
+            if !program
+                .techniques
+                .iter()
+                .any(|candidate| &*candidate.name == technique.as_str())
+            {
                 continue;
             }
             let pixel = match translate_pass(&program, technique, "_default", Stage::Pixel) {
@@ -278,7 +371,12 @@ fn h4_sweep() {
                         good += 1;
                     } else {
                         driver += 1;
-                        note("LINK", tag, &format!("{technique} {pass}"), &gl.get_program_info_log(linked));
+                        note(
+                            "LINK",
+                            tag,
+                            &format!("{technique} {pass}"),
+                            &gl.get_program_info_log(linked),
+                        );
                     }
                     gl.delete_program(linked);
                     gl.delete_shader(vertex_shader);
@@ -292,7 +390,10 @@ fn h4_sweep() {
     for (error, count) in common.iter().take(15) {
         eprintln!("NOTE TOP {count} {error}");
     }
-    eprintln!("NOTE SWEEP {} tags: good {good} parse {parse_failed} translation {translation} driver {driver}", tags.len().min(limit));
+    eprintln!(
+        "NOTE SWEEP {} tags: good {good} parse {parse_failed} translation {translation} driver {driver}",
+        tags.len().min(limit)
+    );
 }
 
 /// What one Halo 4 pass reads: `H4_PASS=<material_shader>|<technique>|<vertex pass>`
@@ -310,13 +411,29 @@ fn h4_pass_inputs() {
         game: Some(GameId::Halo4),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
-    let [shader, technique, pass]: [&str; 3] = spec.split('|').collect::<Vec<_>>().try_into().unwrap();
-    let program = H4ShaderSource::read(&crate::app::model_preview::load::TagReader::new(&source), shader).unwrap().program(&H4_DEFINES).unwrap();
+    let [shader, technique, pass]: [&str; 3] =
+        spec.split('|').collect::<Vec<_>>().try_into().unwrap();
+    let program = H4ShaderSource::read(
+        &crate::app::model_preview::load::TagReader::new(&source),
+        shader,
+    )
+    .unwrap()
+    .program(&H4_DEFINES)
+    .unwrap();
     for technique in &program.techniques {
         let passes: Vec<String> = technique
             .passes
             .iter()
-            .map(|(name, shaders)| format!("{name}[{}]", shaders.iter().map(|shader| &*shader.stage).collect::<Vec<_>>().join(",")))
+            .map(|(name, shaders)| {
+                format!(
+                    "{name}[{}]",
+                    shaders
+                        .iter()
+                        .map(|shader| &*shader.stage)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            })
             .collect();
         eprintln!("NOTE TECHNIQUE {} {}", technique.name, passes.join(" "));
     }
@@ -329,7 +446,10 @@ fn h4_pass_inputs() {
             eprintln!("NOTE {stage:?} TEXTURE {name} {kind:?}");
         }
         for attribute in &translated.attributes {
-            eprintln!("NOTE {stage:?} IO {} {} {:?}", attribute.semantic, attribute.glsl, attribute.ty);
+            eprintln!(
+                "NOTE {stage:?} IO {} {} {:?}",
+                attribute.semantic, attribute.glsl, attribute.ty
+            );
         }
         if std::env::var_os("H4_PASS_SOURCE").is_some() {
             eprintln!("{}", translated.source);
@@ -408,17 +528,26 @@ fn h4_kit_sweep() {
             pitch: 0.3,
             kind: kind.clone(),
         };
-        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render(&gl, &mut renderer, &source, &shot, &options)));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            render(&gl, &mut renderer, &source, &shot, &options)
+        }));
         match caught {
             Ok(_) => good += 1,
             Err(panic) => {
                 let detail = crate::app::shell::worker::panic_detail(&*panic);
-                eprintln!("NOTE FAIL {model}: {}", detail.chars().take(200).collect::<String>());
+                eprintln!(
+                    "NOTE FAIL {model}: {}",
+                    detail.chars().take(200).collect::<String>()
+                );
                 failed.push(model.clone());
                 // A panic mid-frame can leave state bound; start clean.
                 renderer = ModelGlRenderer::new(&gl).unwrap();
             }
         }
     }
-    eprintln!("NOTE KIT {} models: good {good}, failed {}", models.len().min(limit), failed.len());
+    eprintln!(
+        "NOTE KIT {} models: good {good}, failed {}",
+        models.len().min(limit),
+        failed.len()
+    );
 }

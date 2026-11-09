@@ -54,7 +54,11 @@ impl ScreenChain {
     /// # Safety
     ///
     /// The context must be current on this thread.
-    pub(in crate::app::model_preview) unsafe fn uniform(&self, gl: &glow::Context, name: &str) -> Option<glow::NativeUniformLocation> {
+    pub(in crate::app::model_preview) unsafe fn uniform(
+        &self,
+        gl: &glow::Context,
+        name: &str,
+    ) -> Option<glow::NativeUniformLocation> {
         unsafe { gl.get_uniform_location(self.program, name) }
     }
 
@@ -91,7 +95,12 @@ impl ScreenChain {
     /// # Safety
     ///
     /// The context must be current on this thread.
-    pub(in crate::app::model_preview) unsafe fn end(&self, gl: &glow::Context, run: ChainRun, scene: glow::NativeFramebuffer) {
+    pub(in crate::app::model_preview) unsafe fn end(
+        &self,
+        gl: &glow::Context,
+        run: ChainRun,
+        scene: glow::NativeFramebuffer,
+    ) {
         unsafe {
             PassState::new()
                 .texture_on(glow::TEXTURE1, glow::TEXTURE_2D, None)
@@ -136,11 +145,22 @@ mod gl_tests {
         const FRAGMENT: &str = "#version 410\nuniform sampler2D source;\nuniform sampler2D added;\nout vec4 colour;\nvoid main() { colour = texelFetch(source, ivec2(0), 0) + texelFetch(added, ivec2(0), 0); }\n";
         let gl = headless_gl();
         unsafe {
-            let program = link(&gl, &[(glow::VERTEX_SHADER, VERTEX), (glow::FRAGMENT_SHADER, FRAGMENT)], &[]).unwrap();
-            let chain = ScreenChain { program, nothing: None };
+            let program = link(
+                &gl,
+                &[
+                    (glow::VERTEX_SHADER, VERTEX),
+                    (glow::FRAGMENT_SHADER, FRAGMENT),
+                ],
+                &[],
+            )
+            .unwrap();
+            let chain = ScreenChain {
+                program,
+                nothing: None,
+            };
             let vertex_array = gl.create_vertex_array().unwrap();
-            let [scene, input, target] =
-                [(); 3].map(|_| ColorTarget::new(&gl, [4, 4], Texels::RGBA8, Sampling::NEAREST).unwrap());
+            let [scene, input, target] = [(); 3]
+                .map(|_| ColorTarget::new(&gl, [4, 4], Texels::RGBA8, Sampling::NEAREST).unwrap());
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
             gl.viewport(1, 1, 2, 2);
             gl.enable(glow::SCISSOR_TEST);
@@ -152,15 +172,26 @@ mod gl_tests {
             gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
             assert_eq!(viewport, [1, 1, 2, 2]);
             assert!(gl.is_enabled(glow::SCISSOR_TEST));
-            assert_eq!(gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING), Some(scene.framebuffer));
+            assert_eq!(
+                gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING),
+                Some(scene.framebuffer)
+            );
             for unit in [glow::TEXTURE0, glow::TEXTURE1] {
                 gl.active_texture(unit);
-                assert_eq!(gl.get_parameter_texture(glow::TEXTURE_BINDING_2D), None, "unit {unit:#x}");
+                assert_eq!(
+                    gl.get_parameter_texture(glow::TEXTURE_BINDING_2D),
+                    None,
+                    "unit {unit:#x}"
+                );
             }
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, Some(input.texture));
             let filter = gl.get_tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER);
-            assert_eq!(filter, glow::NEAREST as i32, "the input is read by texel again");
+            assert_eq!(
+                filter,
+                glow::NEAREST as i32,
+                "the input is read by texel again"
+            );
             gl.bind_texture(glow::TEXTURE_2D, None);
             gl.bind_framebuffer(glow::FRAMEBUFFER, None);
             for made in [scene, input, target] {

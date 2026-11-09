@@ -74,16 +74,27 @@ pub(in crate::app::model_preview) trait FeatureList {
     fn clear(&mut self);
 }
 
-fn inputs_of<'a, T: Feature + 'a>(items: impl Iterator<Item = &'a T> + Clone, object: u8) -> Vec<&'a str> {
+fn inputs_of<'a, T: Feature + 'a>(
+    items: impl Iterator<Item = &'a T> + Clone,
+    object: u8,
+) -> Vec<&'a str> {
     let early = items.clone().flat_map(|item| item.inputs(object));
-    early.chain(items.flat_map(|item| item.late_inputs(object))).filter(|name| !name.is_empty()).collect()
+    early
+        .chain(items.flat_map(|item| item.late_inputs(object)))
+        .filter(|name| !name.is_empty())
+        .collect()
 }
 
 fn shown<'a, T: Feature + 'a>(
     items: impl Iterator<Item = &'a T>,
     selections: &HashMap<String, ModelRegionSelection>,
 ) -> Vec<bool> {
-    items.map(|item| item.only_under().is_none_or(|only| marker_active(only, selections))).collect()
+    items
+        .map(|item| {
+            item.only_under()
+                .is_none_or(|only| marker_active(only, selections))
+        })
+        .collect()
 }
 
 impl<T: Feature> FeatureList for Vec<T> {
@@ -154,7 +165,10 @@ impl FeatureShown {
     /// Whether each of the feature at `path` shows; empty for a path it
     /// doesn't have.
     pub(in crate::app::model_preview) fn list(&self, path: &str) -> &[bool] {
-        self.lists.iter().find(|(at, _)| *at == path).map_or(&[], |(_, list)| list.as_slice())
+        self.lists
+            .iter()
+            .find(|(at, _)| *at == path)
+            .map_or(&[], |(_, list)| list.as_slice())
     }
 
     /// Whether the `index`th of the feature at `path` shows: true for one it
@@ -212,7 +226,10 @@ pub(in crate::app::model_preview) trait Features {
 
 impl RenderModelPreview {
     /// Every feature the preview carries, in its fields' order.
-    pub(in crate::app::model_preview) fn each_feature(&self, visit: &mut dyn FnMut(&'static str, &dyn FeatureList)) {
+    pub(in crate::app::model_preview) fn each_feature(
+        &self,
+        visit: &mut dyn FnMut(&'static str, &dyn FeatureList),
+    ) {
         visit("particles", &self.particles);
         visit("antennas", &self.antennas);
         visit("cloth", &self.cloth);
@@ -226,7 +243,11 @@ impl RenderModelPreview {
 
     /// The names the feature at `path` reads on `object`, as
     /// [`FeatureList::inputs_of`] gives them; none for a path it doesn't have.
-    pub(in crate::app::model_preview) fn feature_inputs(&self, path: &str, object: u8) -> Vec<String> {
+    pub(in crate::app::model_preview) fn feature_inputs(
+        &self,
+        path: &str,
+        object: u8,
+    ) -> Vec<String> {
         let mut names = Vec::new();
         self.each_feature(&mut |at, list| {
             if at == path {
@@ -238,7 +259,10 @@ impl RenderModelPreview {
 
     /// [`each_feature`](Self::each_feature), lending each to change.
     #[cfg(test)]
-    pub(in crate::app::model_preview) fn each_feature_mut(&mut self, visit: &mut dyn FnMut(&'static str, &mut dyn FeatureList)) {
+    pub(in crate::app::model_preview) fn each_feature_mut(
+        &mut self,
+        visit: &mut dyn FnMut(&'static str, &mut dyn FeatureList),
+    ) {
         visit("particles", &mut self.particles);
         visit("antennas", &mut self.antennas);
         visit("cloth", &mut self.cloth);
@@ -276,7 +300,10 @@ impl RenderModelPreview {
     }
 
     /// Whether any feature answers `test`.
-    pub(in crate::app::model_preview) fn any_feature(&self, mut test: impl FnMut(&dyn FeatureList) -> bool) -> bool {
+    pub(in crate::app::model_preview) fn any_feature(
+        &self,
+        mut test: impl FnMut(&dyn FeatureList) -> bool,
+    ) -> bool {
         let mut any = false;
         self.each_feature(&mut |_, list| any = any || test(list));
         any
@@ -323,7 +350,11 @@ macro_rules! attached_feature {
 
             fn inputs(&self, object: u8) -> Vec<&str> {
                 let $item = self;
-                if $item.object == object { $inputs } else { Vec::new() }
+                if $item.object == object {
+                    $inputs
+                } else {
+                    Vec::new()
+                }
             }
         }
     };
@@ -379,15 +410,34 @@ mod tests {
         );
         assert_eq!(
             paths(&preview.h2),
-            ["h2.flares", "h2.point_lights", "h2.gel_lights", "h2.light_volumes", "h2.contrails", "h2.liquids"]
+            [
+                "h2.flares",
+                "h2.point_lights",
+                "h2.gel_lights",
+                "h2.light_volumes",
+                "h2.contrails",
+                "h2.liquids"
+            ]
         );
         assert_eq!(
             paths(&preview.gen3),
-            ["gen3.cheap_emitters", "gen3.flares", "gen3.light_volumes", "gen3.strips", "gen3.screen_effects"]
+            [
+                "gen3.cheap_emitters",
+                "gen3.flares",
+                "gen3.light_volumes",
+                "gen3.strips",
+                "gen3.screen_effects"
+            ]
         );
         assert_eq!(paths(&preview.h3), ["h3.lights", "h3.leaves"]);
-        assert_eq!(paths(&preview.reach), ["reach.lights", "reach.cheap_lights"]);
-        assert_eq!(paths(&preview.h4), ["h4.lights", "h4.cheap_lights", "h4.flares", "h4.tracers"]);
+        assert_eq!(
+            paths(&preview.reach),
+            ["reach.lights", "reach.cheap_lights"]
+        );
+        assert_eq!(
+            paths(&preview.h4),
+            ["h4.lights", "h4.cheap_lights", "h4.flares", "h4.tracers"]
+        );
         let mut all = Vec::new();
         preview.each_feature(&mut |path, _| all.push(path));
         assert_eq!(all.len(), 3 + 6 + 5 + 2 + 2 + 4 + 9);
@@ -402,7 +452,9 @@ mod tests {
                 continue;
             };
             for (path, extension, group) in *objects {
-                let data = crate::app::model_preview::harness::kit::kit_preview(&root, *game, path, extension, group);
+                let data = crate::app::model_preview::harness::kit::kit_preview(
+                    &root, *game, path, extension, group,
+                );
                 loaded.push((format!("{game:?} {path}"), data));
             }
         }
@@ -424,8 +476,15 @@ mod tests {
 
     #[test]
     fn a_list_offers_every_ones_inputs_before_any_ones_late_inputs() {
-        let list = vec![Named("scale a", "object a"), Named("scale b", ""), Named("", "object c")];
-        assert_eq!(list.inputs_of(0), ["scale a", "scale b", "object a", "object c"]);
+        let list = vec![
+            Named("scale a", "object a"),
+            Named("scale b", ""),
+            Named("", "object c"),
+        ];
+        assert_eq!(
+            list.inputs_of(0),
+            ["scale a", "scale b", "object a", "object c"]
+        );
     }
 
     #[test]
@@ -448,7 +507,11 @@ mod tests {
                 let mut preview = (*data.preview).clone();
                 assert!(preview.clear_feature(path), "{name}: {path}");
                 preview.each_feature(&mut |at, list| {
-                    assert_eq!(list.is_empty(), at == path || data.preview.feature_is_empty(at), "{name}: clearing {path} left {at}");
+                    assert_eq!(
+                        list.is_empty(),
+                        at == path || data.preview.feature_is_empty(at),
+                        "{name}: clearing {path} left {at}"
+                    );
                 });
             }
         }
@@ -475,7 +538,10 @@ mod tests {
             for object in 0..=8 {
                 data.preview.each_feature(&mut |path, list| {
                     let offers = !list.inputs_of(object).is_empty();
-                    assert!(!offers || listed.contains(&path), "{name}: {path} offers inputs but is not a slider source");
+                    assert!(
+                        !offers || listed.contains(&path),
+                        "{name}: {path} offers inputs but is not a slider source"
+                    );
                 });
             }
         }
@@ -501,7 +567,11 @@ mod tests {
                     let text = std::fs::read_to_string(&path).expect("a source file");
                     // Built in pieces, so this file's own text holds neither.
                     for spelled in [concat!("shown", ".is(\""), concat!("shown", ".list(\"")] {
-                        assert!(!text.contains(spelled), "{}: a path spelled by hand", path.display());
+                        assert!(
+                            !text.contains(spelled),
+                            "{}: a path spelled by hand",
+                            path.display()
+                        );
                     }
                 }
             }
@@ -515,7 +585,9 @@ mod tests {
         use crate::app::model_preview::harness::kit::kit_root;
         use crate::app::model_preview::{ModelPreviewState, ModelRegionSelection};
         use crate::core::game::GameId;
-        let Some(root) = kit_root(GameId::HaloReach) else { return };
+        let Some(root) = kit_root(GameId::HaloReach) else {
+            return;
+        };
         let path = "objects\\characters\\marine\\marine";
         let data = crate::app::model_preview::harness::kit::kit_preview(
             &root,
@@ -526,8 +598,13 @@ mod tests {
         );
         let shown = |permutation: &str| {
             let mut state = ModelPreviewState::default();
-            let selection = ModelRegionSelection { enabled: true, permutation: permutation.to_owned() };
-            state.region_selections.insert("flair_backpack".to_owned(), selection);
+            let selection = ModelRegionSelection {
+                enabled: true,
+                permutation: permutation.to_owned(),
+            };
+            state
+                .region_selections
+                .insert("flair_backpack".to_owned(), selection);
             let shown = super::FeatureShown::of(&data.preview, &state.region_selections);
             shown.list(super::paths::ANTENNAS).to_vec()
         };

@@ -13,7 +13,10 @@ pub(super) fn is_first_person_model(model_key: &str) -> bool {
 /// Find a character's UE asset root by locating the `*MeshSynchronization`
 /// data asset that imports this model's package, returning a
 /// `.../characters/<name>` path prefix.
-pub(super) fn cev_find_character_root(containers: &[MountedContainer], model_key: &str) -> Option<String> {
+pub(super) fn cev_find_character_root(
+    containers: &[MountedContainer],
+    model_key: &str,
+) -> Option<String> {
     let index = cev_path_index(containers);
     for (norm, container, entry) in &index.mesh_sync {
         let c = &containers[*container];
@@ -21,9 +24,13 @@ pub(super) fn cev_find_character_root(containers: &[MountedContainer], model_key
         let Ok(bytes) = c.archive.read(&e.path) else {
             continue;
         };
-        let Ok(hdr) =
-            FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None)
-        else {
+        let Ok(hdr) = FZenPackageHeader::deserialize(
+            &mut Cursor::new(&bytes[..]),
+            None,
+            CEV_CV,
+            CEV_HV,
+            None,
+        ) else {
             continue;
         };
         let hit = hdr.imported_package_names.iter().any(|p| {
@@ -51,7 +58,8 @@ pub(super) fn cev_find_character_root(containers: &[MountedContainer], model_key
 /// `FPackageObjectIndex` in O(1).
 const CEV_MESHSYNC_DA_CLASS: &str = "/Script/BlamSynchronization.BlamMeshSynchronizationDataAsset";
 
-const CEV_MESHSYNC_COMP_CLASS: &str = "/Script/BlamSynchronization.BlamMeshSynchronizationComponent";
+const CEV_MESHSYNC_COMP_CLASS: &str =
+    "/Script/BlamSynchronization.BlamMeshSynchronizationComponent";
 
 const CEV_MESHSYNC_COMP_BASE_CLASS: &str =
     "/Script/BlamSynchronization.BlamMeshSynchronizationComponentBase";
@@ -124,9 +132,14 @@ pub(super) fn cev_container_set_key(containers: &[MountedContainer]) -> String {
 pub(super) fn files_key<'a>(paths: impl Iterator<Item = &'a std::path::Path>) -> String {
     let stamp = |path: &std::path::Path| {
         let metadata = std::fs::metadata(path).ok();
-        let modified = metadata.as_ref().and_then(|metadata| metadata.modified().ok());
+        let modified = metadata
+            .as_ref()
+            .and_then(|metadata| metadata.modified().ok());
         let since = modified.and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok());
-        (metadata.map_or(0, |metadata| metadata.len()), since.map_or(0, |since| since.as_nanos()))
+        (
+            metadata.map_or(0, |metadata| metadata.len()),
+            since.map_or(0, |since| since.as_nanos()),
+        )
     };
     paths
         .map(|path| {
@@ -148,7 +161,9 @@ fn build_ce_path_index(containers: &[MountedContainer]) -> CevPathIndex {
 }
 
 /// Index `(container, entry, path)` in the order given.
-pub(super) fn index_ce_paths<'p>(paths: impl Iterator<Item = (usize, usize, &'p str)>) -> CevPathIndex {
+pub(super) fn index_ce_paths<'p>(
+    paths: impl Iterator<Item = (usize, usize, &'p str)>,
+) -> CevPathIndex {
     let mut by_file_name: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
     let mut mesh_sync = Vec::new();
     for (container, entry, path) in paths {
@@ -188,7 +203,8 @@ pub(super) fn cev_path_index(containers: &[MountedContainer]) -> Arc<CevPathInde
 /// falling back to a full read for the rare header that exceeds the window.
 pub(super) fn cev_read_header(archive: &IoStoreArchive, path: &str) -> Option<FZenPackageHeader> {
     if let Ok(bytes) = archive.read_prefix(path, 192 * 1024)
-        && let Ok(hdr) = FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None)
+        && let Ok(hdr) =
+            FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None)
     {
         return Some(hdr);
     }

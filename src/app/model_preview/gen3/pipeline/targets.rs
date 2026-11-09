@@ -28,10 +28,15 @@ pub(in crate::app::model_preview) struct Gen3Targets {
 }
 
 impl Gen3Targets {
-    pub(super) unsafe fn new(gl: &glow::Context, size: [i32; 2], depth: glow::NativeRenderbuffer) -> Option<Self> {
+    pub(super) unsafe fn new(
+        gl: &glow::Context,
+        size: [i32; 2],
+        depth: glow::NativeRenderbuffer,
+    ) -> Option<Self> {
         let mut made = Made::new(gl);
         unsafe {
-            let mut target = |internal| made.texture(size, Texels::float(internal), Sampling::NEAREST);
+            let mut target =
+                |internal| made.texture(size, Texels::float(internal), Sampling::NEAREST);
             let albedo = target(glow::RGBA16F)?;
             let normal = target(glow::RGBA16F)?;
             let accumulation = target(glow::RGBA16F)?;
@@ -39,14 +44,31 @@ impl Gen3Targets {
             let picture = target(glow::SRGB8_ALPHA8)?;
             let picture_framebuffer = made.framebuffer(&[(glow::COLOR_ATTACHMENT0, picture)])?;
             let behind_framebuffer = made.framebuffer(&[(glow::COLOR_ATTACHMENT0, behind)])?;
-            let albedo_framebuffer =
-                made.framebuffer(&[(glow::COLOR_ATTACHMENT0, albedo), (glow::COLOR_ATTACHMENT1, normal)])?;
+            let albedo_framebuffer = made.framebuffer(&[
+                (glow::COLOR_ATTACHMENT0, albedo),
+                (glow::COLOR_ATTACHMENT1, normal),
+            ])?;
             gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
-            gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(depth));
-            let accumulation_framebuffer = made.framebuffer(&[(glow::COLOR_ATTACHMENT0, accumulation)])?;
-            gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(depth));
-            let depth_copy =
-                made.depth(size, Texels::DEPTH24_STENCIL8, Sampling::NEAREST, glow::DEPTH_STENCIL_ATTACHMENT)?;
+            gl.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::DEPTH_STENCIL_ATTACHMENT,
+                glow::RENDERBUFFER,
+                Some(depth),
+            );
+            let accumulation_framebuffer =
+                made.framebuffer(&[(glow::COLOR_ATTACHMENT0, accumulation)])?;
+            gl.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::DEPTH_STENCIL_ATTACHMENT,
+                glow::RENDERBUFFER,
+                Some(depth),
+            );
+            let depth_copy = made.depth(
+                size,
+                Texels::DEPTH24_STENCIL8,
+                Sampling::NEAREST,
+                glow::DEPTH_STENCIL_ATTACHMENT,
+            )?;
             let distortion = made.color(size, Texels::float(glow::RG16F), Sampling::NEAREST)?;
             let scene_copy = made.color(size, Texels::RGBA16F, Sampling::NEAREST)?;
             made.keep();

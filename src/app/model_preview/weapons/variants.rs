@@ -1,13 +1,13 @@
 //! A model variant's child objects, `model_variant_create_children`'s list,
 //! attached at their markers.
 
-use blam_tags::{TagFile, TagStruct};
-use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::elements;
+use super::super::common::fields::holder_of;
 use super::super::load::build_render_preview;
 use super::super::*;
 use super::attached::{AttachedObject, fold_attached};
-use super::super::common::fields::holder_of;
+use crate::app::model_preview::common::marker::MarkerFrame;
+use blam_tags::{TagFile, TagStruct};
 
 /// The first owner a variant's child object takes, after the two hands.
 const FIRST_CHILD_OWNER: u8 = 3;
@@ -38,15 +38,23 @@ fn variant_objects(model: &TagFile) -> Vec<Vec<VariantObject>> {
                     path,
                 })
             };
-            elements(*variant, "objects").iter().filter_map(read).collect()
+            elements(*variant, "objects")
+                .iter()
+                .filter_map(read)
+                .collect()
         })
         .collect()
 }
 
 /// A child object's `.model`, and its variant by name, else its own default.
-fn child_model(reader: &TagReader, entry: &VariantObject) -> Option<(Arc<TagFile>, Arc<TagFile>, Option<ModelVariantPreview>)> {
+fn child_model(
+    reader: &TagReader,
+    entry: &VariantObject,
+) -> Option<(Arc<TagFile>, Arc<TagFile>, Option<ModelVariantPreview>)> {
     let extension = blam_tags::paths::group_tag_to_extension(entry.group)?;
-    let object = reader.load(&entry.path, extension, &entry.group.to_be_bytes()).ok()?;
+    let object = reader
+        .load(&entry.path, extension, &entry.group.to_be_bytes())
+        .ok()?;
     let model = holder_of(object.root(), "model")?.read_tag_ref_path("model")?;
     let model = reader.load(&model, "model", b"hlmt").ok()?;
     let chosen = object_variant(&object, &model, &entry.child_variant);
@@ -55,14 +63,20 @@ fn child_model(reader: &TagReader, entry: &VariantObject) -> Option<(Arc<TagFile
 
 /// The variant of `model` an object is made as: `wanted`, or with none the
 /// object's default, falling back to `default` and then the first.
-pub(in crate::app::model_preview) fn object_variant(object: &TagFile, model: &TagFile, wanted: &str) -> Option<ModelVariantPreview> {
+pub(in crate::app::model_preview) fn object_variant(
+    object: &TagFile,
+    model: &TagFile,
+    wanted: &str,
+) -> Option<ModelVariantPreview> {
     let variants = super::super::load::read_model_variants(model);
     let wanted = match wanted {
         "" => object_default_variant(object).unwrap_or_default(),
         name => name.to_owned(),
     };
     let chosen = variants.iter().find(|variant| variant.name == wanted);
-    let chosen = chosen.or(variants.iter().find(|variant| variant.name == "default")).or(variants.first());
+    let chosen = chosen
+        .or(variants.iter().find(|variant| variant.name == "default"))
+        .or(variants.first());
     chosen.cloned()
 }
 
@@ -102,19 +116,31 @@ pub(in crate::app::model_preview) fn attach_variant_objects(
         let base = tag_path::name(&entry.path);
         let seen = names.entry(base.to_owned()).or_insert(0);
         *seen += 1;
-        let name = if *seen == 1 { base.to_owned() } else { format!("{base} {seen}") };
+        let name = if *seen == 1 {
+            base.to_owned()
+        } else {
+            format!("{base} {seen}")
+        };
         let choices: Vec<(String, String)> = attached
             .regions
             .iter()
             .map(|region| {
-                let named = chosen.as_ref().and_then(|variant| variant.regions.get(&region.name));
-                let permutation = named.cloned().or_else(|| region.permutations.first().cloned());
-                (format!("{name}: {}", region.name), permutation.unwrap_or_default())
+                let named = chosen
+                    .as_ref()
+                    .and_then(|variant| variant.regions.get(&region.name));
+                let permutation = named
+                    .cloned()
+                    .or_else(|| region.permutations.first().cloned());
+                (
+                    format!("{name}: {}", region.name),
+                    permutation.unwrap_or_default(),
+                )
             })
             .collect();
         let variant = chosen.as_ref().map_or("", |variant| variant.name.as_str());
-        let folded =
-            fold_attached(reader, &object, &child_tag, variant, attached, parent, child, owner, &name, preview);
+        let folded = fold_attached(
+            reader, &object, &child_tag, variant, attached, parent, child, owner, &name, preview,
+        );
         attached_objects.extend(folded);
         for (region, permutation) in choices {
             // With no variant chosen, no child shows.

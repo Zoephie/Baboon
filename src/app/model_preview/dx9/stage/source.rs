@@ -1,7 +1,7 @@
 //! A stage's GLSL: its outputs, its drawn position and its full source.
 
-use super::*;
 use super::super::super::gl::glsl::fill;
+use super::*;
 
 impl Dx9VertexStage {
     fn outputs(self) -> &'static str {
@@ -187,9 +187,9 @@ impl Dx9VertexStage {
             Self::LightDiffuseTarget | Self::LightGelTarget | Self::LightFrustumTarget => {
                 "v_tc0 = vec4((gl_Position.xy + gl_Position.w) * 0.5, gl_Position.ww);"
             }
-            Self::CeTransparentReflection | Self::CeTransparentObject | Self::CeTransparentViewer => {
-                CE_TRANSPARENT_CUBE
-            }
+            Self::CeTransparentReflection
+            | Self::CeTransparentObject
+            | Self::CeTransparentViewer => CE_TRANSPARENT_CUBE,
             Self::CeTransparentScreen => {
                 "v_tc0 = vec4(row(0, vec3(gl_Position.xy, 0.0)) + u_texture_rows[0].w * (gl_Position.w - 1.0), \
                  row(1, vec3(gl_Position.xy, 0.0)) + u_texture_rows[1].w * (gl_Position.w - 1.0), 0.0, gl_Position.w);"
@@ -212,7 +212,10 @@ impl Dx9VertexStage {
             _ => "",
         };
         let prt = if matches!(self, Self::Prt | Self::PrtDetail) {
-            fill(include_str!("shaders/prt.glsl"), &[("prt_registers", &H2_PRT_REGISTERS)])
+            fill(
+                include_str!("shaders/prt.glsl"),
+                &[("prt_registers", &H2_PRT_REGISTERS)],
+            )
         } else {
             String::new()
         };

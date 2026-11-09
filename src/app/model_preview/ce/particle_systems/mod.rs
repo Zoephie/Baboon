@@ -14,14 +14,18 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_after, object_block};
-use super::super::common::view::{ViewFrame, posed_on};
-use crate::app::model_preview::common::point_physics::CePointPhysics;
-use super::super::*;
 use super::super::ce::random::CeRandom;
-use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
+use super::super::common::fields::{
+    elements, function_slot_of, has_flag, has_flag_after, object_block,
+};
+use super::super::common::view::{ViewFrame, posed_on};
+use super::super::*;
 use crate::app::model_preview::ce::blend::FramebufferBlend;
-use crate::app::model_preview::ce::sprite_sheet::{CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
+use crate::app::model_preview::ce::sprite_sheet::{
+    CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet,
+};
+use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
+use crate::app::model_preview::common::point_physics::CePointPhysics;
 
 mod read;
 pub(in crate::app::model_preview) use read::*;

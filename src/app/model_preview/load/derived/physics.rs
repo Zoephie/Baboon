@@ -84,7 +84,11 @@ fn push_physics_batch(preview: &mut RenderModelPreview, vertices: Vec<RenderMode
     if vertices.is_empty() {
         return;
     }
-    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), vertices.len(), Overflow::RefusesAppend) else {
+    let Some(vertex_base) = VertexBase::of(
+        preview.vertices.len(),
+        vertices.len(),
+        Overflow::RefusesAppend,
+    ) else {
         return;
     };
     let index_start = preview.indices.len() as u32;
@@ -215,7 +219,10 @@ pub(super) fn push_box(triples: &mut Vec<([f32; 3], [f32; 3])>, shape: &blam_tag
     }
 }
 
-pub(super) fn push_capsule(triples: &mut Vec<([f32; 3], [f32; 3])>, capsule: &blam_tags::JmsCapsule) {
+pub(super) fn push_capsule(
+    triples: &mut Vec<([f32; 3], [f32; 3])>,
+    capsule: &blam_tags::JmsCapsule,
+) {
     if !(capsule.radius.is_finite() && capsule.radius > 0.0 && capsule.height.is_finite()) {
         return;
     }

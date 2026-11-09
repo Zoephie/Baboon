@@ -137,7 +137,12 @@ fn type_slots<'a>(kind: TagStruct<'a>) -> (Vec<TagStruct<'a>>, Vec<TagStruct<'a>
     let set = (0..sets.len())
         .filter_map(|index| sets.element(index))
         .find(|set| set.read_string_id("label").as_deref() == Some(ANY));
-    set.map_or_else(Default::default, |set| (elements(set, "actions"), elements(set, "overlay animations")))
+    set.map_or_else(Default::default, |set| {
+        (
+            elements(set, "actions"),
+            elements(set, "overlay animations"),
+        )
+    })
 }
 
 pub(super) fn graph_entries(graph: &TagFile) -> Vec<GraphEntry> {
@@ -155,17 +160,26 @@ pub(super) fn graph_entries(graph: &TagFile) -> Vec<GraphEntry> {
     let clip_of = |slot: &TagStruct<'_>| {
         let reference = slot.descend("animation")?;
         // Only a graph's own: what `graph index` names lies in another.
-        if reference.read_int_any("graph index").is_some_and(|graph| graph >= 0) {
+        if reference
+            .read_int_any("graph index")
+            .is_some_and(|graph| graph >= 0)
+        {
             return None;
         }
-        names.get(usize::try_from(reference.read_block_index("animation")).ok()?).cloned()
+        names
+            .get(usize::try_from(reference.read_block_index("animation")).ok()?)
+            .cloned()
     };
     for mode in elements(holder, "modes") {
         for class in elements(mode, "weapon class") {
             for kind in elements(class, "weapon type") {
                 let (actions, overlays) = type_slots(kind);
                 entries.push(GraphEntry {
-                    slots: actions.iter().chain(&overlays).map(|slot| (label(*slot), clip_of(slot))).collect(),
+                    slots: actions
+                        .iter()
+                        .chain(&overlays)
+                        .map(|slot| (label(*slot), clip_of(slot)))
+                        .collect(),
                     mode: label(mode),
                     class: label(class),
                     kind: label(kind),
@@ -207,7 +221,11 @@ pub(super) fn graph_overlays(graph: &TagFile) -> BTreeSet<String> {
         for class in elements(mode, "weapon class") {
             for kind in elements(class, "weapon type") {
                 let (_, overlays) = type_slots(kind);
-                labels.extend(overlays.iter().filter_map(|overlay| overlay.read_string_id("label")));
+                labels.extend(
+                    overlays
+                        .iter()
+                        .filter_map(|overlay| overlay.read_string_id("label")),
+                );
             }
         }
     }
@@ -219,10 +237,11 @@ pub(in crate::app::model_preview) fn left_arm_nodes(graph: &TagFile) -> Vec<bool
     let Some(holder) = holder_of(graph.root(), "skeleton nodes") else {
         return Vec::new();
     };
-    let member = |node: &TagStruct<'_>| {
-        has_flag(*node, "model flags", "left arm member")
-    };
-    elements(holder, "skeleton nodes").iter().map(member).collect()
+    let member = |node: &TagStruct<'_>| has_flag(*node, "model flags", "left arm member");
+    elements(holder, "skeleton nodes")
+        .iter()
+        .map(member)
+        .collect()
 }
 
 pub(super) fn clips_without_ik(graph: &TagFile) -> BTreeSet<String> {
@@ -231,9 +250,12 @@ pub(super) fn clips_without_ik(graph: &TagFile) -> BTreeSet<String> {
     };
     let flagged = elements(holder, "animations").into_iter().filter(|clip| {
         // Reach and Halo 4 call them `user flags`.
-        has_flag(*clip, "playback flags", "disable weapon ik") || has_flag(*clip, "user flags", "disable weapon ik")
+        has_flag(*clip, "playback flags", "disable weapon ik")
+            || has_flag(*clip, "user flags", "disable weapon ik")
     });
-    flagged.filter_map(|clip| clip.read_string_id("name")).collect()
+    flagged
+        .filter_map(|clip| clip.read_string_id("name"))
+        .collect()
 }
 
 /// `unit_can_use_weapon`, in the mode a unit rests in: an idle for the class,
@@ -248,7 +270,9 @@ pub(super) fn accepts(graph: &[GraphEntry], class: &str, kind: &str) -> bool {
 }
 
 pub(super) fn string_id_in(tag: &TagFile, name: &str) -> String {
-    holder_of(tag.root(), name).and_then(|holder| holder.read_string_id(name)).unwrap_or_default()
+    holder_of(tag.root(), name)
+        .and_then(|holder| holder.read_string_id(name))
+        .unwrap_or_default()
 }
 
 /// Every node below `node`.
@@ -256,7 +280,11 @@ pub(super) fn descendants(preview: &RenderModelPreview, node: usize) -> Vec<usiz
     // No chain is longer than the node count; one that is loops back on itself.
     let below = |mut index: usize| {
         for _ in 0..preview.nodes.len() {
-            let Some(parent) = preview.nodes.get(index).and_then(|at| usize::try_from(at.parent).ok()) else {
+            let Some(parent) = preview
+                .nodes
+                .get(index)
+                .and_then(|at| usize::try_from(at.parent).ok())
+            else {
                 return false;
             };
             if parent == node {
@@ -266,13 +294,18 @@ pub(super) fn descendants(preview: &RenderModelPreview, node: usize) -> Vec<usiz
         }
         false
     };
-    (0..preview.nodes.len()).filter(|index| below(*index)).collect()
+    (0..preview.nodes.len())
+        .filter(|index| below(*index))
+        .collect()
 }
 
 /// A unit's graph, by way of its `.model`.
 pub(super) fn unit_graph(reader: &TagReader, unit: &TagFile) -> Option<Arc<TagFile>> {
     let model = holder_of(unit.root(), "model")?.read_tag_ref_path("model")?;
     let model = reader.load(&model, "model", b"hlmt").ok()?;
-    let graph = model.root().read_tag_ref_path("animation").filter(|path| !path.is_empty())?;
+    let graph = model
+        .root()
+        .read_tag_ref_path("animation")
+        .filter(|path| !path.is_empty())?;
     reader.load(&graph, "model_animation_graph", b"jmad").ok()
 }

@@ -12,9 +12,15 @@ pub(super) const MIRROR_U: u8 = 4;
 pub(super) const MIRROR_V: u8 = 8;
 
 /// `particle_next_sequence`: false where the particle dies.
-pub(super) fn next_sequence(particle: &mut CeParticle, def: &CeParticleDef, random: &mut CeRandom) -> bool {
+pub(super) fn next_sequence(
+    particle: &mut CeParticle,
+    def: &CeParticleDef,
+    random: &mut CeRandom,
+) -> bool {
     let [initial, looping, last] = def.sequence_counts;
-    let mut pick = |offset: i32, count: i32| def.first_sequence + offset + (random.next() * count as f32) as i32;
+    let mut pick = |offset: i32, count: i32| {
+        def.first_sequence + offset + (random.next() * count as f32) as i32
+    };
     particle.sequence = -1;
     if particle.phase == 0 {
         if initial > 0 {
@@ -73,7 +79,13 @@ fn next_frame(particle: &mut CeParticle, def: &CeParticleDef, random: &mut CeRan
 
 /// `particles_update` for one particle: how it ends, and the scale of any
 /// collision effect its hitting structure makes.
-pub(super) fn update_particle(particle: &mut CeParticle, def: &CeParticleDef, random: &mut CeRandom, ground: f32, dt: f32) -> (Fate, Option<f32>) {
+pub(super) fn update_particle(
+    particle: &mut CeParticle,
+    def: &CeParticleDef,
+    random: &mut CeRandom,
+    ground: f32,
+    dt: f32,
+) -> (Fate, Option<f32>) {
     let first = particle.age == 0.0;
     particle.age += dt;
     if particle.age >= particle.lifespan && !first && def.sequence_counts[2] == 0 {
@@ -138,13 +150,24 @@ pub(super) fn update_particle(particle: &mut CeParticle, def: &CeParticleDef, ra
             resting = true;
         }
         (None, Some(physics)) => {
-            if physics.step(&mut particle.place, &mut particle.velocity, radius, ground, dt) {
+            if physics.step(
+                &mut particle.place,
+                &mut particle.velocity,
+                radius,
+                ground,
+                dt,
+            ) {
                 // `particle_update_physics`: what it hit sets off its
                 // collision effect, as hard as it is going past half a unit.
-                let scale = (dot(particle.velocity, particle.velocity).sqrt() - 0.5).clamp(0.0, 1.0);
+                let scale =
+                    (dot(particle.velocity, particle.velocity).sqrt() - 0.5).clamp(0.0, 1.0);
                 collided = Some(scale);
                 if def.flags.dies_on_structure {
-                    let fate = if def.collision_effect.is_none() { Fate::Died } else { Fate::Deleted };
+                    let fate = if def.collision_effect.is_none() {
+                        Fate::Died
+                    } else {
+                        Fate::Deleted
+                    };
                     return (fate, collided);
                 }
                 resting = true;

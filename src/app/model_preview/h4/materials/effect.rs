@@ -29,7 +29,10 @@ impl H4EffectMaterial {
     }
 
     pub(crate) fn flag(&self, name: &str) -> bool {
-        self.bools.get(&name.to_ascii_lowercase()).copied().unwrap_or(false)
+        self.bools
+            .get(&name.to_ascii_lowercase())
+            .copied()
+            .unwrap_or(false)
     }
 }
 
@@ -56,7 +59,9 @@ pub(in crate::app::model_preview) fn resolve_h4_effect_material(
     let pass = Arc::new(pass);
     let baked = {
         let lookup = std::cell::RefCell::new(|path: &str| bitmap_kind(reader, path, caches));
-        bake(material, &shader.shader, &|path: &str| (lookup.borrow_mut())(path))
+        bake(material, &shader.shader, &|path: &str| {
+            (lookup.borrow_mut())(path)
+        })
     };
     // A parameter's value: the material's, else the shader's default.
     let mut reals = std::collections::BTreeMap::new();
@@ -68,7 +73,9 @@ pub(in crate::app::model_preview) fn resolve_h4_effect_material(
     }
     let mut textures: Vec<Gen3Texture> = Vec::new();
     for texture in &baked.textures {
-        let Some((uniform, kind)) = texture_uniform(&pass.textures, &texture.parameter) else { continue };
+        let Some((uniform, kind)) = texture_uniform(&pass.textures, &texture.parameter) else {
+            continue;
+        };
         if textures.iter().any(|known| known.uniform == uniform) {
             continue;
         }
@@ -77,23 +84,60 @@ pub(in crate::app::model_preview) fn resolve_h4_effect_material(
             TextureKind::Volume => SamplerKind::Volume,
             _ => SamplerKind::Texture2D,
         };
-        let Some((image, texels, mips)) = gen3_image(reader, &texture.bitmap, 0, sampler_kind, caches) else { continue };
+        let Some((image, texels, mips)) =
+            gen3_image(reader, &texture.bitmap, 0, sampler_kind, caches)
+        else {
+            continue;
+        };
         // A texture array holds the bitmap's images as its layers.
         let frames = if *kind == TextureKind::FlatArray {
             let tag = reader.load(&texture.bitmap, "bitmap", b"bitm").ok();
-            let count = tag.as_ref().map_or(1, |tag| elements(tag.root(), "bitmaps*").len().max(1));
+            let count = tag
+                .as_ref()
+                .map_or(1, |tag| elements(tag.root(), "bitmaps*").len().max(1));
             (0..count)
-                .filter_map(|at| gen3_image(reader, &texture.bitmap, at as i16, SamplerKind::Texture2D, caches))
+                .filter_map(|at| {
+                    gen3_image(
+                        reader,
+                        &texture.bitmap,
+                        at as i16,
+                        SamplerKind::Texture2D,
+                        caches,
+                    )
+                })
                 .map(|(image, ..)| image)
                 .collect()
         } else {
             Vec::new()
         };
-        let sampler = Sampler { address: [h4_address(texture.address_u), h4_address(texture.address_v)], filter: h4_filter(texture.filter) };
-        textures.push(Gen3Texture { uniform: uniform.to_owned(), image, texels, mips, sampler: Some(sampler), frames });
+        let sampler = Sampler {
+            address: [h4_address(texture.address_u), h4_address(texture.address_v)],
+            filter: h4_filter(texture.filter),
+        };
+        textures.push(Gen3Texture {
+            uniform: uniform.to_owned(),
+            image,
+            texels,
+            mips,
+            sampler: Some(sampler),
+            frames,
+        });
     }
-    let first_bitmap = baked.textures.first().map(|texture| texture.bitmap.clone()).filter(|path| !path.is_empty());
+    let first_bitmap = baked
+        .textures
+        .first()
+        .map(|texture| texture.bitmap.clone())
+        .filter(|path| !path.is_empty());
     let blend_mode = baked.alpha_blend_mode;
     let submit = H4Submit::new(baked, ENTRY_DEFAULT, ENTRY_DEFAULT, None);
-    Ok(H4EffectMaterial { pass, values: submit.baked_values(), submit, textures, blend_mode, first_bitmap, reals, bools })
+    Ok(H4EffectMaterial {
+        pass,
+        values: submit.baked_values(),
+        submit,
+        textures,
+        blend_mode,
+        first_bitmap,
+        reals,
+        bools,
+    })
 }

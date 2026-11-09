@@ -45,8 +45,7 @@ fn read_vector(holder: blam_tags::TagStruct<'_>, name: &str) -> Option<[f32; 2]>
 
 impl H4Camo {
     pub(crate) fn read(reader: &TagReader) -> Option<Self> {
-        let globals =
-            reader.load("globals\\globals", "globals", b"matg").ok()?;
+        let globals = reader.load("globals\\globals", "globals", b"matg").ok()?;
         let root = globals.root();
         let camo = super::super::common::fields::elements(root, "active camo")
             .into_iter()
@@ -98,8 +97,11 @@ mod tests {
     /// and scrolling at 0.01 a second; half camo still has its lit base.
     #[test]
     fn the_kits_full_camo_reads_its_curves_straight() {
-        let Some(source) = kit_source(GameId::Halo4) else { return };
-        let camo = H4Camo::read(&crate::app::model_preview::load::TagReader::new(&source)).expect("globals' active camo");
+        let Some(source) = kit_source(GameId::Halo4) else {
+            return;
+        };
+        let camo = H4Camo::read(&crate::app::model_preview::load::TagReader::new(&source))
+            .expect("globals' active camo");
         let full = camo.draw(1.0, 100.0);
         assert_eq!(full.factor[0], 1.0);
         assert!((full.factor[1] - 0.8914).abs() < 1e-3, "{full:?}");

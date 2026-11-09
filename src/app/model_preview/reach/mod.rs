@@ -3,16 +3,16 @@
 //! gen3 pipeline (`render.rs`): its frame values and lighting, the inline
 //! and screen lights, the self shadow, its bloom and composite.
 
-mod features;
-pub(in crate::app::model_preview) mod object;
 pub(in crate::app::model_preview) mod attached;
-pub(super) mod camo;
 pub(in crate::app::model_preview) mod bloom;
+pub(super) mod camo;
 pub(in crate::app::model_preview) mod composite;
-pub(in crate::app::model_preview) mod lighting;
+mod features;
 pub(in crate::app::model_preview) mod light_pass;
-pub(in crate::app::model_preview) mod pass_hooks;
+pub(in crate::app::model_preview) mod lighting;
 pub(super) mod lights;
+pub(in crate::app::model_preview) mod object;
+pub(in crate::app::model_preview) mod pass_hooks;
 pub(in crate::app::model_preview) mod render;
 pub(super) mod shadow;
 pub(in crate::app::model_preview) mod shadow_pass;

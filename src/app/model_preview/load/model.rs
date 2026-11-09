@@ -24,9 +24,19 @@ pub(super) fn load_model(
     // draw-time filters from then on.
     // Halo 4 shows every instance for a NONE group as Reach does (the 360's
     // 0x8325C1B8).
-    let reach = reader.is_some_and(|reader| matches!(reader.source.game(), Some(GameId::HaloReach | GameId::Halo4)));
+    let reach = reader.is_some_and(|reader| {
+        matches!(
+            reader.source.game(),
+            Some(GameId::HaloReach | GameId::Halo4)
+        )
+    });
     preview.instances.variants = read_variant_instances(model_tag, &preview.instances.names, reach);
-    let mut data = model_preview_data(render_entry.key, normalized, preview, read_model_variants(model_tag));
+    let mut data = model_preview_data(
+        render_entry.key,
+        normalized,
+        preview,
+        read_model_variants(model_tag),
+    );
     // The `.model` opened itself lists what its variants attach. An object
     // reaches here for its `.model` and attaches them once it has read its own.
     let opened = entry.group_tag == u32::from_be_bytes(*b"hlmt");
@@ -34,7 +44,13 @@ pub(super) fn load_model(
         matches!(
             &reader.source,
             TagSource::LooseFolder {
-                game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4),
+                game: Some(
+                    GameId::Halo2
+                        | GameId::Halo3
+                        | GameId::Halo3Odst
+                        | GameId::HaloReach
+                        | GameId::Halo4
+                ),
                 ..
             }
         )
@@ -43,9 +59,16 @@ pub(super) fn load_model(
         let preview = std::sync::Arc::make_mut(&mut data.preview);
         let variants = &mut data.variants;
         let attach = |preview: &mut RenderModelPreview| {
-            super::super::weapons::variants::attach_variant_objects(reader, model_tag, variants, preview)
+            super::super::weapons::variants::attach_variant_objects(
+                reader, model_tag, variants, preview,
+            )
         };
-        data.attached.extend(feature_into(&mut data.notes, "the variants' children", preview, attach));
+        data.attached.extend(feature_into(
+            &mut data.notes,
+            "the variants' children",
+            preview,
+            attach,
+        ));
     }
     Ok(data)
 }
@@ -93,4 +116,3 @@ pub(super) fn read_model_render(
         read_entry(&reader.unwrap().source, &render_entry).map_err(|error| error.to_string())?;
     Ok((render_entry, normalized, render_tag))
 }
-

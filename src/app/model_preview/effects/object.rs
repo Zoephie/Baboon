@@ -23,7 +23,11 @@ impl ObjectEffect {
     /// `effect_build_locations`' marker for a location.
     pub(in crate::app::model_preview) fn marker_of(&self, location: TagStruct<'_>) -> String {
         let marker = marker_name(location, "marker name");
-        if marker == REPLACE { self.marker.clone() } else { marker }
+        if marker == REPLACE {
+            self.marker.clone()
+        } else {
+            marker
+        }
     }
 
     /// `use parent position but world orientation`.
@@ -32,7 +36,10 @@ impl ObjectEffect {
     }
 
     pub(in crate::app::model_preview) fn times_of(&self, effect: TagStruct<'_>) -> EffectTimes {
-        EffectTimes { once: self.once, ..EffectTimes::read(effect) }
+        EffectTimes {
+            once: self.once,
+            ..EffectTimes::read(effect)
+        }
     }
 
     /// What a location named `name` (after `marker_of`) lands on. Reach's
@@ -42,7 +49,9 @@ impl ObjectEffect {
     /// marker. Anything else is `part_markers`'. A `replace` location is the
     /// marker itself and asks for no vector; after `marker_of` it reads as the
     /// marker's name, which no Reach attachment marker shares with a vector.
-    pub(in crate::app::model_preview) fn locations<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+    pub(in crate::app::model_preview) fn locations<
+        F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
+    >(
         &self,
         markers: &[RenderModelPreviewMarker],
         name: &str,
@@ -55,7 +64,13 @@ impl ObjectEffect {
         };
         match down {
             Some(z) if self.vectors && !name.eq_ignore_ascii_case(&self.marker) => {
-                vec![vector_marker(markers, &self.marker, name, [0.0, 0.0, z], frame)]
+                vec![vector_marker(
+                    markers,
+                    &self.marker,
+                    name,
+                    [0.0, 0.0, z],
+                    frame,
+                )]
             }
             _ => part_markers(markers, name, self.once),
         }
@@ -82,12 +97,26 @@ fn vector_marker<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
     direction: [f32; 3],
     frame: &F,
 ) -> RenderModelPreviewMarker {
-    let found = markers.iter().find(|marker| !at.is_empty() && marker.name.eq_ignore_ascii_case(at));
-    let (position, node_index, only_under) =
-        found.map_or(([0.0; 3], 0, None), |marker| (marker.position, marker.node_index, marker.only_under.clone()));
-    let probe = RenderModelPreviewMarker { node_index, axes: WORLD_AXES, scale: 1.0, ..Default::default() };
+    let found = markers
+        .iter()
+        .find(|marker| !at.is_empty() && marker.name.eq_ignore_ascii_case(at));
+    let (position, node_index, only_under) = found.map_or(([0.0; 3], 0, None), |marker| {
+        (
+            marker.position,
+            marker.node_index,
+            marker.only_under.clone(),
+        )
+    });
+    let probe = RenderModelPreviewMarker {
+        node_index,
+        axes: WORLD_AXES,
+        scale: 1.0,
+        ..Default::default()
+    };
     let (world, _) = frame(&probe);
-    let forward = unit_by_reciprocal(std::array::from_fn(|index| dot(world.axes[index], direction)));
+    let forward = unit_by_reciprocal(std::array::from_fn(|index| {
+        dot(world.axes[index], direction)
+    }));
     let up = unit_by_reciprocal(perpendicular(forward));
     RenderModelPreviewMarker {
         name: name.to_owned(),
@@ -107,7 +136,9 @@ pub(in crate::app::model_preview) fn part_markers(
     name: &str,
     once: bool,
 ) -> Vec<RenderModelPreviewMarker> {
-    let named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(name));
+    let named = markers
+        .iter()
+        .filter(|marker| marker.name.eq_ignore_ascii_case(name));
     let named: Vec<_> = named.take(MOST_MARKERS).cloned().collect();
     if !named.is_empty() {
         return named;
@@ -146,7 +177,10 @@ pub(super) fn axes_of_vector(forward: [f32; 3]) -> [[f32; 3]; 3] {
 }
 
 /// Every effect `object` and its `.model` name, attachments first.
-pub(in crate::app::model_preview) fn object_effects(reader: &TagReader, object: &TagFile) -> Vec<ObjectEffect> {
+pub(in crate::app::model_preview) fn object_effects(
+    reader: &TagReader,
+    object: &TagFile,
+) -> Vec<ObjectEffect> {
     let mut effects = Vec::new();
     let effect_group = u32::from_be_bytes(*b"effe");
     let reach = reader.source.game() == Some(crate::core::game::GameId::HaloReach);
@@ -159,8 +193,12 @@ pub(in crate::app::model_preview) fn object_effects(reader: &TagReader, object: 
                 effects.push(ObjectEffect {
                     path,
                     marker: marker_name(attachment, "marker"),
-                    scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
-                    secondary_by: attachment.read_string_id("secondary scale").unwrap_or_default(),
+                    scale_by: attachment
+                        .read_string_id("primary scale")
+                        .unwrap_or_default(),
+                    secondary_by: attachment
+                        .read_string_id("secondary scale")
+                        .unwrap_or_default(),
                     change_color: function_slot_of(attachment, "change color"),
                     once: false,
                     vectors: reach,

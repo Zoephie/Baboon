@@ -4,7 +4,8 @@ use super::*;
 
 pub(super) const CEV_CV: EIoStoreTocVersion = EIoStoreTocVersion::ReplaceIoChunkHashWithIoHash;
 
-pub(super) const CEV_HV: EIoContainerHeaderVersion = EIoContainerHeaderVersion::SoftPackageReferences;
+pub(super) const CEV_HV: EIoContainerHeaderVersion =
+    EIoContainerHeaderVersion::SoftPackageReferences;
 
 /// Halo: Campaign Evolved model preview. Returns `None` when this isn't a CE
 /// model (caller falls through to the classic render_model path); `Some(_)`

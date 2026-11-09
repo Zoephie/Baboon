@@ -66,14 +66,22 @@ impl Gen3Clock {
 impl Gen3Animation {
     /// `evaluate_function`: an object's named values, or else time around a
     /// period, which only a periodic function runs past 1.
-    pub(super) fn sample(&self, time: f32, owner: u8, values: Option<&FunctionValues>) -> (f32, f32) {
+    pub(super) fn sample(
+        &self,
+        time: f32,
+        owner: u8,
+        values: Option<&FunctionValues>,
+    ) -> (f32, f32) {
         // `object_get_function_value`: no name at all reads full, so a parameter
         // with an input and no range runs on its function's upper curve.
         let named = |name: &str| {
             if name.is_empty() {
                 return 1.0;
             }
-            values.and_then(|values| values.get(name)).copied().unwrap_or(0.0)
+            values
+                .and_then(|values| values.get(name))
+                .copied()
+                .unwrap_or(0.0)
         };
         let phase = self.clock.phase(&self.input, owner);
         if phase.is_none() && (!self.input.is_empty() || !self.range.is_empty()) {
@@ -84,11 +92,21 @@ impl Gen3Animation {
             (Gen3Clock::Reach, Some(phase)) if self.input == "unique_id" && !periodic => phase,
             _ => (time + phase.unwrap_or(0.0)) / self.period,
         };
-        if periodic { (input, 0.0) } else { (input.rem_euclid(1.0), 0.0) }
+        if periodic {
+            (input, 0.0)
+        } else {
+            (input.rem_euclid(1.0), 0.0)
+        }
     }
 
     /// Write this into `value`, the constant as it stands.
-    pub(crate) fn apply(&self, value: &mut [f32; 4], time: f32, owner: u8, values: Option<&FunctionValues>) {
+    pub(crate) fn apply(
+        &self,
+        value: &mut [f32; 4],
+        time: f32,
+        owner: u8,
+        values: Option<&FunctionValues>,
+    ) {
         let (input, range) = self.sample(time, owner, values);
         if self.writes == Gen3Animated::Color {
             let color = self.function.evaluate_color(input, range);
@@ -106,7 +124,13 @@ impl Gen3Animation {
     }
 
     /// `render_method_submit_volatile_per_node`'s choice among `count` images.
-    pub(crate) fn frame(&self, count: usize, time: f32, owner: u8, values: Option<&FunctionValues>) -> usize {
+    pub(crate) fn frame(
+        &self,
+        count: usize,
+        time: f32,
+        owner: u8,
+        values: Option<&FunctionValues>,
+    ) -> usize {
         let (input, range) = self.sample(time, owner, values);
         let frame = (self.function.evaluate(input, range) % count as f32).floor() as isize;
         frame.clamp(0, count as isize - 1) as usize

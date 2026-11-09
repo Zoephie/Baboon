@@ -5,17 +5,17 @@ use std::sync::Arc;
 
 use blam_tags::TagFile;
 
-use super::super::common::fields::{elements, object_block};
 use super::super::cloth::{H3Wind, away_from_pole, turned_about};
+use super::super::common::fields::{elements, object_block};
 use super::super::effects::marker_name;
-use super::super::particles::{ParticleCorner, SpriteShader};
-use super::super::gen3::shaders::Gen3Blend;
 use super::super::gen3::materials::read_h3_bitmap;
 use super::super::gen3::pipeline::EXPOSURE as H3_EXPOSURE;
+use super::super::gen3::shaders::Gen3Blend;
+use super::super::particles::{ParticleCorner, SpriteShader};
 use super::super::*;
-use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 use crate::app::model_preview::common::random::{high16_over_65536, lcg_step};
+use crate::core::h2_pixel_shader::SamplerKind;
 
 /// `k_maximum_leaves_per_system`.
 const MOST_LEAVES: usize = 64;
@@ -73,9 +73,6 @@ const TRIANGLES: [[usize; 3]; 14] = [
     [11, 9, 8],
 ];
 
-
-
-
 /// `matrix3x3_to_quaternion`, normalized, as `c_short_quaternion` stores it.
 /// A leaf's orientation lives only here between ticks, always a true rotation.
 fn packed(axes: [[f32; 3]; 3]) -> [i16; 4] {
@@ -118,18 +115,38 @@ fn unpacked(words: [i16; 4]) -> [[f32; 3]; 3] {
     let length = x * x + y * y + z * z + w * w;
     let scale = if length <= EPSILON { 0.0 } else { 2.0 / length };
     [
-        [1.0 - (z * z + y * y) * scale, (x * y + w * z) * scale, (x * z - w * y) * scale],
-        [(x * y - w * z) * scale, 1.0 - (z * z + x * x) * scale, (y * z + w * x) * scale],
-        [(x * z + w * y) * scale, (y * z - w * x) * scale, 1.0 - (y * y + x * x) * scale],
+        [
+            1.0 - (z * z + y * y) * scale,
+            (x * y + w * z) * scale,
+            (x * z - w * y) * scale,
+        ],
+        [
+            (x * y - w * z) * scale,
+            1.0 - (z * z + x * x) * scale,
+            (y * z + w * x) * scale,
+        ],
+        [
+            (x * z + w * y) * scale,
+            (y * z - w * x) * scale,
+            1.0 - (y * y + x * x) * scale,
+        ],
     ]
 }
 
 /// `normals_interpolate`.
 pub(in crate::app::model_preview) fn normals_between(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let angle = dot(a, b).clamp(-1.0, 1.0).acos();
-    let (from, axis, by) = if t <= 0.5 { (a, cross(a, b), angle * t) } else { (b, cross(b, a), angle * (1.0 - t)) };
+    let (from, axis, by) = if t <= 0.5 {
+        (a, cross(a, b), angle * t)
+    } else {
+        (b, cross(b, a), angle * (1.0 - t))
+    };
     let axis = unit_or_unchanged(axis);
-    if axis == [0.0; 3] { from } else { unit_or_unchanged(turned_about(from, axis, by)) }
+    if axis == [0.0; 3] {
+        from
+    } else {
+        unit_or_unchanged(turned_about(from, axis, by))
+    }
 }
 
 /// `matrix4x3_multiply(orientation, rotation)`, for a rotation about a world
@@ -189,7 +206,11 @@ impl H3LeavesAt {
         let span = self.cylinder * 2.0;
         std::array::from_fn(|axis| {
             let low = self.origin[axis] - self.cylinder;
-            if span > 0.0 { (((place[axis] - low) / span).clamp(0.0, 1.0) * 65535.0) as u16 } else { 0 }
+            if span > 0.0 {
+                (((place[axis] - low) / span).clamp(0.0, 1.0) * 65535.0) as u16
+            } else {
+                0
+            }
         })
     }
 
@@ -198,7 +219,11 @@ impl H3LeavesAt {
         let span = self.cylinder * 2.0;
         std::array::from_fn(|axis| {
             let low = self.origin[axis] - self.cylinder;
-            if span > 0.0 { f32::from(words[axis]) / 65535.0 * span + low } else { low }
+            if span > 0.0 {
+                f32::from(words[axis]) / 65535.0 * span + low
+            } else {
+                low
+            }
         })
     }
 
@@ -218,7 +243,8 @@ pub(in crate::app::model_preview) fn read_h3_leaves(
     middle: [f32; 3],
 ) -> Vec<H3LeavesAt> {
     let group = u32::from_be_bytes(*b"lswd");
-    let widgets = object_block(object, "widgets").map_or(Vec::new(), |holder| elements(holder, "widgets"));
+    let widgets =
+        object_block(object, "widgets").map_or(Vec::new(), |holder| elements(holder, "widgets"));
     let mut systems = Vec::new();
     for widget in widgets {
         let Some((found, path)) = widget.read_tag_ref_with_group("type") else {
@@ -231,28 +257,40 @@ pub(in crate::app::model_preview) fn read_h3_leaves(
             continue;
         };
         let root = tag.root();
-        let Some(plate) = root.read_tag_ref_path("bitmap sprite plate").filter(|path| !path.is_empty()) else {
+        let Some(plate) = root
+            .read_tag_ref_path("bitmap sprite plate")
+            .filter(|path| !path.is_empty())
+        else {
             continue;
         };
         let bitmap = reader.load(&plate, "bitmap", b"bitm").ok();
         let sprites = bitmap.as_ref().map_or(Vec::new(), |bitmap| {
-            elements(bitmap.root(), "sequences").first().map_or(Vec::new(), |sequence| elements(*sequence, "sprites"))
+            elements(bitmap.root(), "sequences")
+                .first()
+                .map_or(Vec::new(), |sequence| elements(*sequence, "sprites"))
         });
         let mut bitmap_index = 0;
         let types: Vec<LeafType> = elements(root, "leaf types")
             .iter()
             .map(|leaf| {
                 let real = |name: &str| leaf.read_real(name).unwrap_or(0.0);
-                let sprite = sprites.get(leaf.read_int_any("bitmap sprite index").unwrap_or(0).max(0) as usize);
+                let sprite = sprites
+                    .get(leaf.read_int_any("bitmap sprite index").unwrap_or(0).max(0) as usize);
                 if let Some(sprite) = sprite {
                     bitmap_index = sprite.read_int_any("bitmap index").unwrap_or(0) as i16;
                 }
                 let bounds = sprite.map_or([0.0, 1.0, 0.0, 1.0], |sprite| {
-                    ["left", "right", "top", "bottom"].map(|name| sprite.read_real(name).unwrap_or(0.0))
+                    ["left", "right", "top", "bottom"]
+                        .map(|name| sprite.read_real(name).unwrap_or(0.0))
                 });
                 let scale = leaf.read_real_bounds("geometry scale");
-                let friction = match leaf.field("air friction XY and Z").and_then(|field| field.value()) {
-                    Some(blam_tags::TagFieldData::FractionBounds(bounds)) => [bounds.lower, bounds.upper],
+                let friction = match leaf
+                    .field("air friction XY and Z")
+                    .and_then(|field| field.value())
+                {
+                    Some(blam_tags::TagFieldData::FractionBounds(bounds)) => {
+                        [bounds.lower, bounds.upper]
+                    }
                     _ => [0.0; 2],
                 };
                 LeafType {
@@ -276,7 +314,9 @@ pub(in crate::app::model_preview) fn read_h3_leaves(
             continue;
         };
         let name = marker_name(root, "marker attach name");
-        let marker = markers.iter().find(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(&name));
+        let marker = markers
+            .iter()
+            .find(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(&name));
         let real = |name: &str| root.read_real(name).unwrap_or(0.0);
         let bounds = |name: &str| {
             let bounds = root.read_real_bounds(name);
@@ -386,7 +426,11 @@ impl RunningLeaves {
         force[2] = -force[2].abs();
         let direction = force;
         let [low, high] = system.wind_range;
-        let strength = if low != 0.0 || high != 0.0 { strength.max(low).min(high) } else { strength };
+        let strength = if low != 0.0 || high != 0.0 {
+            strength.max(low).min(high)
+        } else {
+            strength
+        };
         let force = force.map(|axis| axis * dt * strength * 30.0);
         let force = away_from_pole([0.0, 0.0, 1.0], WIND_EXCLUSION, force);
         let share = (strength / (system.wind_scale * MOST_WIND).max(EPSILON)).clamp(0.0, 1.0);
@@ -404,12 +448,18 @@ impl RunningLeaves {
             leaf.normal = normals_between(leaf.normal, direction, dt);
             let [flat, fall] = kind.friction;
             for axis in 0..2 {
-                leaf.velocity[axis] = WIND_FRICTION * force[axis] * flat / dt + (1.0 - flat) * leaf.velocity[axis];
+                leaf.velocity[axis] =
+                    WIND_FRICTION * force[axis] * flat / dt + (1.0 - flat) * leaf.velocity[axis];
             }
-            leaf.velocity[2] = WIND_FRICTION * force[2] * fall / dt + (1.0 - fall) * leaf.velocity[2];
+            leaf.velocity[2] =
+                WIND_FRICTION * force[2] * fall / dt + (1.0 - fall) * leaf.velocity[2];
             let flutter = (alive + index as f32 * kind.flutter_phase) * kind.flutter_speed;
             let age_in = (leaf.age / 2.0).clamp(0.0, 1.0);
-            let mut pendulum = flutter.sin() * (kind.flutter_scale * 10.0) * ((1.0 - share) * kind.flitteriness) * dt * age_in;
+            let mut pendulum = flutter.sin()
+                * (kind.flutter_scale * 10.0)
+                * ((1.0 - share) * kind.flitteriness)
+                * dt
+                * age_in;
             let tumbling = ((share - 0.01).clamp(0.0, 0.99) / 0.99).max(0.02);
             let tumble = 5.0 * kind.tumble * tumbling * dt * speed.clamp(0.0, 1.0);
             let mut drift = [0.0; 3];
@@ -435,7 +485,8 @@ impl RunningLeaves {
                 }
                 let hung: [f32; 3] = std::array::from_fn(|axis| pivot[axis] - swung[axis]);
                 drift = std::array::from_fn(|axis| hung[axis] - place[axis]);
-                let mut normal = unit_or_unchanged(std::array::from_fn(|axis| pivot[axis] - hung[axis]));
+                let mut normal =
+                    unit_or_unchanged(std::array::from_fn(|axis| pivot[axis] - hung[axis]));
                 normal[2] *= if upward { 1.0 } else { -1.0 };
                 leaf.normal = normal;
                 let desired = normals_between(axes[0], normal, (1.0 - share) * dt);
@@ -447,7 +498,11 @@ impl RunningLeaves {
             }
             if tumble > 0.0 {
                 let across = unit_or_unchanged(cross([0.0, 0.0, 1.0], facing));
-                let across = if across == [0.0; 3] { [0.0, 1.0, 0.0] } else { across };
+                let across = if across == [0.0; 3] {
+                    [0.0, 1.0, 0.0]
+                } else {
+                    across
+                };
                 axes = multiplied(axes, across, tumble);
             }
             if kind.rotation > 0.0 {
@@ -462,7 +517,8 @@ impl RunningLeaves {
             for axis in 0..3 {
                 leaf.velocity[axis] += force[axis];
             }
-            let moved = std::array::from_fn(|axis| place[axis] + leaf.velocity[axis] * dt + drift[axis]);
+            let moved =
+                std::array::from_fn(|axis| place[axis] + leaf.velocity[axis] * dt + drift[axis]);
             leaf.position = system.word_position(moved);
         }
     }
@@ -500,7 +556,11 @@ impl H3LeafField {
                     ..Default::default()
                 })
                 .collect();
-            let settle = systems.iter().map(|system| system.lifetime).fold(0.0, f32::max).min(MOST_SETTLE);
+            let settle = systems
+                .iter()
+                .map(|system| system.lifetime)
+                .fold(0.0, f32::max)
+                .min(MOST_SETTLE);
             self.time = Some(time - settle);
         }
         // `widgets_update` runs `leaf_system_update` each frame, by the frame's time.
@@ -530,7 +590,8 @@ impl H3LeafField {
         let Some(running) = self.running.get(index) else {
             return vertices;
         };
-        let [red, green, blue] = [0, 1, 2].map(|channel| lighting[0][channel] * PROBE_CONSTANT * H3_EXPOSURE);
+        let [red, green, blue] =
+            [0, 1, 2].map(|channel| lighting[0][channel] * PROBE_CONSTANT * H3_EXPOSURE);
         for (at, leaf) in running.leaves.iter().enumerate() {
             let Some(leaf) = leaf else {
                 continue;
@@ -544,7 +605,11 @@ impl H3LeafField {
                 high16_over_65536(random)
             };
             let [low, high] = kind.scale;
-            let size = if low != 0.0 && high != 0.0 { low + next() * (high - low) } else { 0.02 };
+            let size = if low != 0.0 && high != 0.0 {
+                low + next() * (high - low)
+            } else {
+                0.02
+            };
             let places: Vec<[f32; 3]> = VERTICES
                 .iter()
                 .map(|[y, z]| {
@@ -560,7 +625,10 @@ impl H3LeafField {
             let [left, right, top, bottom] = kind.bounds;
             for corner in TRIANGLES.iter().flatten() {
                 let [y, z] = VERTICES[*corner];
-                let uv = [(right - left) * (y + 1.0) * 0.5 + left, (bottom - top) * (z + 1.0) * 0.5 + top];
+                let uv = [
+                    (right - left) * (y + 1.0) * 0.5 + left,
+                    (bottom - top) * (z + 1.0) * 0.5 + top,
+                ];
                 vertices.push(ParticleCorner {
                     place: places[*corner],
                     sprite: uv,
@@ -622,18 +690,31 @@ mod tests {
         let field = run(&system, 0.0);
         let leaves: Vec<_> = field.running[0].leaves.iter().flatten().collect();
         assert!(!leaves.is_empty());
-        assert!(leaves.iter().any(|leaf| system.place_of(leaf.position)[2] < 10.0), "they have been falling a while");
+        assert!(
+            leaves
+                .iter()
+                .any(|leaf| system.place_of(leaf.position)[2] < 10.0),
+            "they have been falling a while"
+        );
     }
 
     #[test]
     fn a_leaf_goes_when_its_lifetime_is_up() {
         let mut system = system();
         system.emission_rate = [1000.0, 1000.0];
-        let mut running = RunningLeaves { leaves: vec![None; MOST_LEAVES], random: 1, ..Default::default() };
+        let mut running = RunningLeaves {
+            leaves: vec![None; MOST_LEAVES],
+            random: 1,
+            ..Default::default()
+        };
         running.emit(&system, TICK);
         assert_eq!(running.leaves.iter().flatten().count(), 1);
         running.emit(&system, TICK);
-        assert_eq!(running.leaves.iter().flatten().count(), 1, "the next waits its turn");
+        assert_eq!(
+            running.leaves.iter().flatten().count(),
+            1,
+            "the next waits its turn"
+        );
         running.clean_up(&system, 3.9);
         assert_eq!(running.leaves.iter().flatten().count(), 1);
         running.clean_up(&system, 0.2);
@@ -656,7 +737,11 @@ mod tests {
         let mut system = system();
         system.cylinder = f32::MAX / 2.0;
         system.types[0].friction[1] = friction;
-        let mut running = RunningLeaves { leaves: vec![None; MOST_LEAVES], random: 1, ..Default::default() };
+        let mut running = RunningLeaves {
+            leaves: vec![None; MOST_LEAVES],
+            random: 1,
+            ..Default::default()
+        };
         running.emit(&system, TICK);
         (0..ticks).for_each(|_| running.update(&system, [0.0; 3], TICK));
         running.leaves[0].as_ref().unwrap().velocity[2]
@@ -690,7 +775,10 @@ mod tests {
             for leaf in field.running[0].leaves.iter().flatten() {
                 let axes = unpacked(leaf.orientation);
                 for axis in axes {
-                    assert!((dot(axis, axis) - 1.0).abs() < 1e-3, "tick {tick}: {axes:?}");
+                    assert!(
+                        (dot(axis, axis) - 1.0).abs() < 1e-3,
+                        "tick {tick}: {axes:?}"
+                    );
                 }
                 assert!(dot(axes[0], axes[1]).abs() < 1e-3, "tick {tick}: {axes:?}");
             }
@@ -708,17 +796,28 @@ mod tests {
             (unit_or_unchanged([1.0, 2.0, 3.0]), 2.5),
         ];
         for (axis, angle) in turns {
-            let axes = multiplied([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], axis, angle);
+            let axes = multiplied(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                axis,
+                angle,
+            );
             let back = unpacked(packed(axes));
             for (got, want) in back.iter().flatten().zip(axes.iter().flatten()) {
-                assert!((got - want).abs() < 1e-3, "{axis:?} {angle}: {back:?} {axes:?}");
+                assert!(
+                    (got - want).abs() < 1e-3,
+                    "{axis:?} {angle}: {back:?} {axes:?}"
+                );
             }
         }
     }
 
     #[test]
     fn a_skewed_matrix_comes_back_a_rotation() {
-        let back = unpacked(packed([[1.0, 0.02, 0.0], [0.0, 1.0, 0.03], [0.01, 0.0, 1.0]]));
+        let back = unpacked(packed([
+            [1.0, 0.02, 0.0],
+            [0.0, 1.0, 0.03],
+            [0.01, 0.0, 1.0],
+        ]));
         assert!((dot(back[0], back[0]) - 1.0).abs() < 1e-3);
         assert!(dot(back[0], back[1]).abs() < 1e-3);
     }
@@ -740,19 +839,30 @@ mod tests {
         let lighting = [[1.0; 4]; 10];
         let drawn = field.vertices(0, &system, &lighting);
         assert_eq!(drawn.len(), count * 14 * 3);
-        assert!(drawn.iter().all(|vertex| vertex.sprite.iter().all(|uv| (0.0..=1.0).contains(uv))));
+        assert!(
+            drawn
+                .iter()
+                .all(|vertex| vertex.sprite.iter().all(|uv| (0.0..=1.0).contains(uv)))
+        );
     }
 
     #[test]
     fn halfway_between_normals_lies_between_them() {
         let middle = normals_between([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.5);
         assert!((middle[0] - middle[1]).abs() < 1e-5 && (dot(middle, middle) - 1.0).abs() < 1e-5);
-        assert_eq!(normals_between([1.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.25), [1.0, 0.0, 0.0]);
+        assert_eq!(
+            normals_between([1.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.25),
+            [1.0, 0.0, 0.0]
+        );
     }
 
     #[test]
     fn a_turned_orientation_stays_square() {
-        let axes = multiplied([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], unit_or_unchanged([1.0, 2.0, 3.0]), 0.7);
+        let axes = multiplied(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            unit_or_unchanged([1.0, 2.0, 3.0]),
+            0.7,
+        );
         assert!((dot(axes[0], axes[0]) - 1.0).abs() < 1e-5);
         assert!(dot(axes[0], axes[1]).abs() < 1e-5);
     }

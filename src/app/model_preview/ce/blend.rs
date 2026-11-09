@@ -1,9 +1,7 @@
 //! Halo CE's framebuffer blend modes, which effects, particle systems, contrails and widgets draw with.
 
+use super::super::dx9::passes::{Dx9Blend, Dx9BlendEquation, Dx9BlendFactor};
 use blam_tags::TagStruct;
-use super::super::dx9::passes::{
-    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor,
-};
 
 /// A Halo CE `framebuffer blend function`, by name. A number the list does
 /// not name blends as alpha blend.
@@ -36,14 +34,19 @@ impl FramebufferBlend {
     /// `holder`'s `framebuffer blend function`.
     pub(in crate::app::model_preview) fn read(holder: TagStruct<'_>) -> Self {
         let held = holder.read_enum_option("framebuffer blend function");
-        let at = BLEND_FUNCTIONS.iter().position(|name| held.as_deref() == Some(*name));
+        let at = BLEND_FUNCTIONS
+            .iter()
+            .position(|name| held.as_deref() == Some(*name));
         at.map_or(Self::AlphaBlend, |at| Self::ALL[at])
     }
 
     /// Its place in the list: what the effect shader's `blend` and the
     /// shader passes' stage macros switch on.
     pub(in crate::app::model_preview) fn shader_number(self) -> i32 {
-        Self::ALL.iter().position(|blend| *blend == self).unwrap_or(0) as i32
+        Self::ALL
+            .iter()
+            .position(|blend| *blend == self)
+            .unwrap_or(0) as i32
     }
 
     /// `srcblend_table`, `destblend_table` and `blendop_table`.
@@ -59,7 +62,12 @@ impl FramebufferBlend {
             Self::AlphaMultiplyAdd => (Dx9BlendEquation::Add, One, OneMinusSrcAlpha),
             Self::AlphaBlend => (Dx9BlendEquation::Add, SrcAlpha, OneMinusSrcAlpha),
         };
-        Dx9Blend { equation, source, destination, constant: [0; 4] }
+        Dx9Blend {
+            equation,
+            source,
+            destination,
+            constant: [0; 4],
+        }
     }
 }
 

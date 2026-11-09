@@ -64,10 +64,22 @@ pub(in crate::app::model_preview) const LOAD_SET: &[(&str, GameId, &[(&str, &str
         GameId::Halo3Odst,
         &[
             ("objects\\characters\\odst\\odst", "biped", b"bipd"),
-            ("objects\\characters\\odst_recon\\odst_recon", "biped", b"bipd"),
-            ("objects\\weapons\\rifle\\smg_silenced\\smg_silenced", "weapon", b"weap"),
+            (
+                "objects\\characters\\odst_recon\\odst_recon",
+                "biped",
+                b"bipd",
+            ),
+            (
+                "objects\\weapons\\rifle\\smg_silenced\\smg_silenced",
+                "weapon",
+                b"weap",
+            ),
             ("objects\\vehicles\\phantom\\phantom", "vehicle", b"vehi"),
-            ("objects\\vehicles\\brute_chopper\\brute_chopper", "vehicle", b"vehi"),
+            (
+                "objects\\vehicles\\brute_chopper\\brute_chopper",
+                "vehicle",
+                b"vehi",
+            ),
         ],
     ),
     (
@@ -168,7 +180,12 @@ fn load_snapshot(data: &ModelPreviewData) -> String {
         regions.sort();
         let mut hidden: Vec<_> = variant.hidden_regions.iter().collect();
         hidden.sort();
-        let text = format!("{} {} {}", debug_text(&regions), debug_text(&hidden), debug_text(&variant.muted_nodes));
+        let text = format!(
+            "{} {} {}",
+            debug_text(&regions),
+            debug_text(&hidden),
+            debug_text(&variant.muted_nodes)
+        );
         line(&mut out, &format!("variant {}", variant.name), &text);
     }
     line(
@@ -176,11 +193,7 @@ fn load_snapshot(data: &ModelPreviewData) -> String {
         "default_variant",
         &debug_text(&data.default_variant),
     );
-    line(
-        &mut out,
-        "change_colors",
-        &debug_text(&data.change_colors),
-    );
+    line(&mut out, "change_colors", &debug_text(&data.change_colors));
     line(
         &mut out,
         "ce_object_functions",
@@ -195,11 +208,7 @@ fn load_snapshot(data: &ModelPreviewData) -> String {
     );
     line(&mut out, "weapons", &debug_text(&data.weapons));
     line(&mut out, "attached", &debug_text(&data.attached));
-    line(
-        &mut out,
-        "scenario_bsps",
-        &debug_text(&data.scenario_bsps),
-    );
+    line(&mut out, "scenario_bsps", &debug_text(&data.scenario_bsps));
     line(&mut out, "notes", &debug_text(&data.notes));
     out
 }

@@ -4,7 +4,9 @@
 
 use super::super::super::common::view::ViewFrame;
 use super::super::super::functions::FunctionValues;
-use super::super::super::gen3::effects::light_volumes::{Gen3LightVolumeAt, Gen3VolumeInput, VolumeLayout, percentile};
+use super::super::super::gen3::effects::light_volumes::{
+    Gen3LightVolumeAt, Gen3VolumeInput, VolumeLayout, percentile,
+};
 use super::particles::{f32_to_f16, pack_argb8};
 
 /// `light_volume_state_input_enum`'s order, the order of
@@ -39,7 +41,16 @@ pub(in crate::app::model_preview) struct H4ProfileState {
 pub(in crate::app::model_preview) fn pack_profile_state(state: &H4ProfileState) -> [u32; 8] {
     let [x, y, z] = state.position.map(f32::to_bits);
     let misc = f32_to_f16(state.thickness) | (f32_to_f16(state.intensity) << 16);
-    [x, y, z, state.percentile.to_bits(), misc, pack_argb8(state.color), 0, 0]
+    [
+        x,
+        y,
+        z,
+        state.percentile.to_bits(),
+        misc,
+        pack_argb8(state.color),
+        0,
+        0,
+    ]
 }
 
 /// One Halo 4 volume's frame: `LightVolumeOverallState` and its profiles'
@@ -87,8 +98,16 @@ impl Gen3LightVolumeAt {
         onset: f32,
     ) -> Option<H4VolumeDraw> {
         let volume = &*self.definition;
-        let VolumeLayout { mut state, origin, direction, count, profiles, distance, offset, side_length } =
-            self.layout(values, bones, view, time, onset)?;
+        let VolumeLayout {
+            mut state,
+            origin,
+            direction,
+            count,
+            profiles,
+            distance,
+            offset,
+            side_length,
+        } = self.layout(values, bones, view, time, onset)?;
         if count <= 0 {
             return None;
         }
@@ -102,7 +121,8 @@ impl Gen3LightVolumeAt {
             .map(|index| {
                 state.percentile = percentile(index, profiles);
                 let along = offset + distance * index as f32;
-                let position: [f32; 3] = std::array::from_fn(|axis| origin[axis] + direction[axis] * along);
+                let position: [f32; 3] =
+                    std::array::from_fn(|axis| origin[axis] + direction[axis] * along);
                 let [red, green, blue] = volume.color.color(&state);
                 pack_profile_state(&H4ProfileState {
                     position,
@@ -151,8 +171,14 @@ mod tests {
         // Red saturates to 255, blue to 0; green truncates 127.5 to 127.
         assert_eq!(words[5], (255 << 24) | (255 << 16) | (127 << 8));
         assert_eq!(words[6..], [0, 0]);
-        let dimmer = pack_profile_state(&H4ProfileState { intensity: 1.0, ..state });
-        assert_ne!(dimmer[4], words[4], "intensity rides in the halves, not the colour");
+        let dimmer = pack_profile_state(&H4ProfileState {
+            intensity: 1.0,
+            ..state
+        });
+        assert_ne!(
+            dimmer[4], words[4],
+            "intensity rides in the halves, not the colour"
+        );
         assert_eq!(dimmer[5], words[5]);
     }
 }

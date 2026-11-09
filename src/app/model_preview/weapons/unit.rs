@@ -35,11 +35,15 @@ impl UnitWeapons {
 
     /// Whether the graph has anything for two weapons.
     fn has_dual(&self) -> bool {
-        self.graph.iter().any(|entry| entry.class == DUAL && entry.has_idle)
+        self.graph
+            .iter()
+            .any(|entry| entry.class == DUAL && entry.has_idle)
     }
 
     fn find(&self, path: Option<&str>) -> Option<&Equippable> {
-        self.equippable.iter().find(|weapon| Some(weapon.option.path.as_str()) == path)
+        self.equippable
+            .iter()
+            .find(|weapon| Some(weapon.option.path.as_str()) == path)
     }
 
     /// `animation_weapon_ik_iterator_next`: each mode's entries for `class`,
@@ -47,7 +51,11 @@ impl UnitWeapons {
     pub(super) fn ik_of(&self, mode: &str, class: &str) -> Vec<&GraphIk> {
         let mut walked = Vec::new();
         for (mode, class) in [(mode, class), (mode, ANY), (ANY, class), (ANY, ANY)] {
-            walked.extend(self.ik.iter().filter(|ik| ik.mode == mode && ik.class == class));
+            walked.extend(
+                self.ik
+                    .iter()
+                    .filter(|ik| ik.mode == mode && ik.class == class),
+            );
         }
         walked
     }
@@ -75,7 +83,14 @@ impl UnitWeapons {
     /// both, then the same under the `any` mode, and skipping a step that asks
     /// for `any` again. Its clip, if the preview has it: one in another graph
     /// still ends the search.
-    pub(super) fn find_clip(&self, clips: &[&str], mode: &str, class: &str, kind: &str, last: &str) -> Option<String> {
+    pub(super) fn find_clip(
+        &self,
+        clips: &[&str],
+        mode: &str,
+        class: &str,
+        kind: &str,
+        last: &str,
+    ) -> Option<String> {
         for step in 0..8u8 {
             let anything = |bit: u8, value: &str| step & bit != 0 && value == ANY;
             if anything(4, mode) || anything(2, class) || anything(1, kind) {
@@ -84,9 +99,17 @@ impl UnitWeapons {
             let mode = if step & 4 != 0 { ANY } else { mode };
             let class = if step & 2 != 0 { ANY } else { class };
             let kind = if step & 1 != 0 { ANY } else { kind };
-            let entry = self.graph.iter().find(|entry| entry.mode == mode && entry.class == class && entry.kind == kind);
-            if let Some((_, clip)) = entry.and_then(|entry| entry.slots.iter().find(|(label, _)| label == last)) {
-                return clip.as_deref().filter(|clip| clips.contains(clip)).map(str::to_owned);
+            let entry = self
+                .graph
+                .iter()
+                .find(|entry| entry.mode == mode && entry.class == class && entry.kind == kind);
+            if let Some((_, clip)) =
+                entry.and_then(|entry| entry.slots.iter().find(|(label, _)| label == last))
+            {
+                return clip
+                    .as_deref()
+                    .filter(|clip| clips.contains(clip))
+                    .map(str::to_owned);
             }
         }
         None
@@ -113,26 +136,38 @@ impl UnitWeapons {
             (Some(first), Some(second)) => {
                 let right = (first.kind.as_str(), Arm::NotLeft);
                 let left = (second.kind.as_str(), Arm::Left);
-                [(ARM_OFFSETS, right), (ARM_OFFSETS, left), (GRIP, right), (GRIP, left)]
-                    .into_iter()
-                    .filter_map(|(last, (kind, arm))| layer(DUAL, kind, last, Some(arm)))
-                    .collect()
+                [
+                    (ARM_OFFSETS, right),
+                    (ARM_OFFSETS, left),
+                    (GRIP, right),
+                    (GRIP, left),
+                ]
+                .into_iter()
+                .filter_map(|(last, (kind, arm))| layer(DUAL, kind, last, Some(arm)))
+                .collect()
             }
             (Some(held), None) => {
                 let arm = (!self.ik_runs_through(clip, mode)).then_some(Arm::NotLeft);
-                layer(&held.option.class, &held.kind, GRIP, arm).into_iter().collect()
+                layer(&held.option.class, &held.kind, GRIP, arm)
+                    .into_iter()
+                    .collect()
             }
             _ => Vec::new(),
         }
     }
 
     /// The class and types `unit_animation_set_weapon` puts the unit in.
-    pub(crate) fn held(&self, primary: Option<&str>, secondary: Option<&str>) -> (String, Vec<String>) {
+    pub(crate) fn held(
+        &self,
+        primary: Option<&str>,
+        secondary: Option<&str>,
+    ) -> (String, Vec<String>) {
         let (first, second) = (self.find(primary), self.find(secondary));
         match (first, second) {
-            (Some(first), Some(second)) => {
-                (DUAL.to_owned(), vec![first.kind.clone(), second.kind.clone()])
-            }
+            (Some(first), Some(second)) => (
+                DUAL.to_owned(),
+                vec![first.kind.clone(), second.kind.clone()],
+            ),
             (Some(first), None) => (first.option.class.clone(), vec![first.kind.clone()]),
             _ => (UNARMED.to_owned(), Vec::new()),
         }
@@ -148,12 +183,14 @@ impl UnitWeapons {
             return BTreeSet::new();
         }
         let in_graph = |mode: &str, class: &str| {
-            self.graph.iter().any(|entry| entry.mode == mode && entry.class == class)
+            self.graph
+                .iter()
+                .any(|entry| entry.mode == mode && entry.class == class)
         };
         let is_kind = |mode: &str, class: &str, kind: &str| {
-            self.graph.iter().any(|entry| {
-                entry.mode == mode && entry.class == class && entry.kind == kind
-            })
+            self.graph
+                .iter()
+                .any(|entry| entry.mode == mode && entry.class == class && entry.kind == kind)
         };
         let has_clips = |mode: &str| {
             let prefix = format!("{mode}:{class}:");
@@ -182,7 +219,8 @@ impl UnitWeapons {
                 [kind, _, ..] if is_kind(mode, clip_class, kind) => Some(*kind),
                 _ => None,
             };
-            let held = of_kind.is_none_or(|kind| kind == ANY || kinds.iter().any(|held| held == kind));
+            let held =
+                of_kind.is_none_or(|kind| kind == ANY || kinds.iter().any(|held| held == kind));
             if (*clip_class != class && *clip_class != ANY) || !held {
                 hidden.insert(index);
             }
@@ -209,14 +247,15 @@ pub(in crate::app::model_preview) fn unit_weapons(
             let mut found: Vec<_> = loose_weapon_paths(root)
                 .into_iter()
                 .filter_map(|path| {
-                    let weapon =
-                        reader.load(&path, "weapon", b"weap").ok()?;
+                    let weapon = reader.load(&path, "weapon", b"weap").ok()?;
                     let class = string_id_in(&weapon, "weapon class");
                     let kind = string_id_in(&weapon, "weapon name");
                     accepts(&graph, &class, &kind).then(|| {
                         // The weapon's own `flags` sit beside its `magazines`.
                         let holder = holder_of(weapon.root(), "magazines");
-                        let has = |flag: &str| holder.is_some_and(|holder| has_flag(holder, "flags", flag));
+                        let has = |flag: &str| {
+                            holder.is_some_and(|holder| has_flag(holder, "flags", flag))
+                        };
                         Equippable {
                             option: WeaponOption {
                                 name: tag_path::name(&path).to_owned(),

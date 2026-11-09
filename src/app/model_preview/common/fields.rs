@@ -7,7 +7,10 @@ use blam_tags::{TagFieldData, TagFile, TagStruct};
 use crate::app::editor::{clean_field_name, clean_field_name_basic};
 
 /// Every element of `holder`'s block `name`, none where it has no such block.
-pub(in crate::app::model_preview) fn elements<'a>(holder: TagStruct<'a>, name: &str) -> Vec<TagStruct<'a>> {
+pub(in crate::app::model_preview) fn elements<'a>(
+    holder: TagStruct<'a>,
+    name: &str,
+) -> Vec<TagStruct<'a>> {
     let block = holder.field(name).and_then(|field| field.as_block());
     (0..block.as_ref().map_or(0, |block| block.len()))
         .filter_map(|index| block.as_ref()?.element(index))
@@ -16,13 +19,24 @@ pub(in crate::app::model_preview) fn elements<'a>(holder: TagStruct<'a>, name: &
 
 /// Whether the flags field `name` has its option `option` set, the option
 /// named as the editors show it (its `#help` left out).
-pub(in crate::app::model_preview) fn has_flag(holder: TagStruct<'_>, name: &str, option: &str) -> bool {
-    holder.field(name).and_then(|field| field.flag(option)).is_some_and(|flag| flag.is_set())
+pub(in crate::app::model_preview) fn has_flag(
+    holder: TagStruct<'_>,
+    name: &str,
+    option: &str,
+) -> bool {
+    holder
+        .field(name)
+        .and_then(|field| field.flag(option))
+        .is_some_and(|flag| flag.is_set())
 }
 
 /// [`has_flag`] for an option older layouts label otherwise: the first of
 /// `labels` the field's layout names.
-pub(in crate::app::model_preview) fn has_flag_labelled(holder: TagStruct<'_>, name: &str, labels: &[&str]) -> bool {
+pub(in crate::app::model_preview) fn has_flag_labelled(
+    holder: TagStruct<'_>,
+    name: &str,
+    labels: &[&str],
+) -> bool {
     let field = holder.field(name);
     let flag = field.and_then(|field| labels.iter().find_map(|label| field.flag(label)));
     flag.is_some_and(|flag| flag.is_set())
@@ -31,7 +45,9 @@ pub(in crate::app::model_preview) fn has_flag_labelled(holder: TagStruct<'_>, na
 /// The function slot an `A out` to `D out` option names (a Halo CE change
 /// color's `A` to `D`, a Halo 2 one's `primary` to `quaternary`), 0 to 3:
 /// none for `none`, for a number its list does not name, and for no field.
-pub(in crate::app::model_preview) fn function_slot(field: Option<blam_tags::TagField<'_>>) -> Option<usize> {
+pub(in crate::app::model_preview) fn function_slot(
+    field: Option<blam_tags::TagField<'_>>,
+) -> Option<usize> {
     let Some(blam_tags::TagOptions::Enum { names, current }) = field?.options() else {
         return None;
     };
@@ -46,14 +62,21 @@ pub(in crate::app::model_preview) fn function_slot(field: Option<blam_tags::TagF
 }
 
 /// [`function_slot`] of `holder`'s field `name`.
-pub(in crate::app::model_preview) fn function_slot_of(holder: TagStruct<'_>, name: &str) -> Option<usize> {
+pub(in crate::app::model_preview) fn function_slot_of(
+    holder: TagStruct<'_>,
+    name: &str,
+) -> Option<usize> {
     function_slot(holder.field(name))
 }
 
 /// Whether `option` is set in any of `holder`'s fields named `name`: a
 /// struct can hold more than one (a shader's own `flags` beside its
 /// kind's), whose options don't repeat.
-pub(in crate::app::model_preview) fn has_flag_in_any(holder: TagStruct<'_>, name: &str, option: &str) -> bool {
+pub(in crate::app::model_preview) fn has_flag_in_any(
+    holder: TagStruct<'_>,
+    name: &str,
+    option: &str,
+) -> bool {
     holder
         .fields()
         .filter(|field| field.clean_name() == name)
@@ -62,7 +85,11 @@ pub(in crate::app::model_preview) fn has_flag_in_any(holder: TagStruct<'_>, name
 
 /// Whether the option after `option` in `holder`'s `name` flags is set: for
 /// an option whose own name another shares, found by the one before it.
-pub(in crate::app::model_preview) fn has_flag_after(holder: TagStruct<'_>, name: &str, option: &str) -> bool {
+pub(in crate::app::model_preview) fn has_flag_after(
+    holder: TagStruct<'_>,
+    name: &str,
+    option: &str,
+) -> bool {
     let Some(field) = holder.field(name) else {
         return false;
     };
@@ -70,13 +97,18 @@ pub(in crate::app::model_preview) fn has_flag_after(holder: TagStruct<'_>, name:
         return false;
     };
     match field.options() {
-        Some(blam_tags::TagOptions::Flags(options)) => options.get(bit).is_some_and(|flag| flag.is_set),
+        Some(blam_tags::TagOptions::Flags(options)) => {
+            options.get(bit).is_some_and(|flag| flag.is_set)
+        }
         _ => false,
     }
 }
 
 /// The struct of an object tag holding a block, down its inherited structs.
-pub(in crate::app::model_preview) fn object_block<'a>(object: &'a TagFile, block: &str) -> Option<TagStruct<'a>> {
+pub(in crate::app::model_preview) fn object_block<'a>(
+    object: &'a TagFile,
+    block: &str,
+) -> Option<TagStruct<'a>> {
     let mut holder = object.root();
     loop {
         if holder.field(block).is_some() {
@@ -90,17 +122,24 @@ pub(in crate::app::model_preview) fn object_block<'a>(object: &'a TagFile, block
 /// alpha first.
 pub(in crate::app::model_preview) fn argb(root: TagStruct<'_>, name: &str) -> [f32; 4] {
     match root.field(name).and_then(|field| field.value()) {
-        Some(TagFieldData::RealArgbColor(color)) => [color.red, color.green, color.blue, color.alpha],
+        Some(TagFieldData::RealArgbColor(color)) => {
+            [color.red, color.green, color.blue, color.alpha]
+        }
         _ => [0.0; 4],
     }
 }
 
 /// The struct holding a field, wherever in the tag it sits.
-pub(in crate::app::model_preview) fn holder_of<'a>(from: TagStruct<'a>, field: &str) -> Option<TagStruct<'a>> {
+pub(in crate::app::model_preview) fn holder_of<'a>(
+    from: TagStruct<'a>,
+    field: &str,
+) -> Option<TagStruct<'a>> {
     if from.field(field).is_some() {
         return Some(from);
     }
-    from.fields_all().filter_map(|field| field.as_struct()).find_map(|inner| holder_of(inner, field))
+    from.fields_all()
+        .filter_map(|field| field.as_struct())
+        .find_map(|inner| holder_of(inner, field))
 }
 
 pub(in crate::app::model_preview) fn read_named_string_exact(
@@ -111,10 +150,14 @@ pub(in crate::app::model_preview) fn read_named_string_exact(
         let name = field.name();
         if field_name_matches(name, expected) {
             match field.value()? {
-                TagFieldData::StringId(id) | TagFieldData::OldStringId(id) if !id.string.is_empty() => {
+                TagFieldData::StringId(id) | TagFieldData::OldStringId(id)
+                    if !id.string.is_empty() =>
+                {
                     return Some(id.string);
                 }
-                TagFieldData::String(value) | TagFieldData::LongString(value) if !value.is_empty() => {
+                TagFieldData::String(value) | TagFieldData::LongString(value)
+                    if !value.is_empty() =>
+                {
                     return Some(value);
                 }
                 _ => {}

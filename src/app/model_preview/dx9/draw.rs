@@ -1,21 +1,20 @@
 //! The DX9 pass machinery on the shared core: preparing the programs, binding a pass's
 //! uniforms, drawing each material's passes in order, the texaccum fill, the frame copy and bloom.
 
-use super::super::*;
-use super::shadow::*;
+use super::super::dx9::passes::H2Clock;
+use super::super::dx9::passes::{
+    Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9DrawPass, Dx9Layer, H2_GLSL_VERSION,
+    H2_REFLECTION_SCALE, H2DefaultLight, normalization_face,
+};
+use super::super::dx9::stage::Dx9VertexStage;
 use super::super::gl::buffer::model_draw_range;
-use super::super::gl::target::H2Target;
+use super::super::gl::pass_state::PassState;
 use super::super::gl::program::Linked;
 use super::super::gl::scope::PostScope;
-use super::super::gl::pass_state::PassState;
-use super::super::dx9::passes::{
-    Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, H2DefaultLight, Dx9DrawPass, Dx9Layer,
-    H2_GLSL_VERSION, H2_REFLECTION_SCALE,
-    normalization_face,
-};
+use super::super::gl::target::H2Target;
 use super::super::h2::bloom::H2Bloom;
-use super::super::dx9::passes::H2Clock;
-use super::super::dx9::stage::Dx9VertexStage;
+use super::super::*;
+use super::shadow::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use eframe::glow::{self, HasContext as _};
 
@@ -25,7 +24,8 @@ use eframe::glow::{self, HasContext as _};
 pub(in crate::app::model_preview) struct Dx9Gl {
     /// Linked pass programs. `None` records a failure, so it is not retried
     /// every frame and the material keeps drawing as it did.
-    pub(in crate::app::model_preview) h2_programs: HashMap<(Dx9VertexStage, String), Option<Rc<Linked>>>,
+    pub(in crate::app::model_preview) h2_programs:
+        HashMap<(Dx9VertexStage, String), Option<Rc<Linked>>>,
     pub(in crate::app::model_preview) h2_normalization_cube: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) h2_target: Option<H2Target>,
     pub(in crate::app::model_preview) h2_frame_copy: Option<H2Target>,
@@ -35,13 +35,15 @@ pub(in crate::app::model_preview) struct Dx9Gl {
     /// that cannot is not asked again (and nothing leaks) every frame.
     pub(in crate::app::model_preview) h2_bloom: Option<Option<H2Bloom>>,
     /// As `h2_bloom`.
-    pub(in crate::app::model_preview) h2_shadow_map: Option<Option<(glow::NativeFramebuffer, glow::NativeTexture)>>,
+    pub(in crate::app::model_preview) h2_shadow_map:
+        Option<Option<(glow::NativeFramebuffer, glow::NativeTexture)>>,
     /// The frame's CE point lights with those its effects have made, which
     /// only the drawing knows; none while effects make no lights.
     /// The style of the self shadow drawn last, which its passes and a later
     /// apply bind the light from.
     pub(in crate::app::model_preview) shadow: Option<ShadowStyle>,
-    pub(in crate::app::model_preview) ce_points_now: Option<Vec<[[f32; 4]; super::stage::CE_POINT_LIGHT_ROWS]>>,
+    pub(in crate::app::model_preview) ce_points_now:
+        Option<Vec<[[f32; 4]; super::stage::CE_POINT_LIGHT_ROWS]>>,
 }
 
 impl Dx9Gl {
@@ -114,18 +116,25 @@ pub(in crate::app::model_preview) fn dx9_pass_state(pass: &Dx9DrawPass) -> PassS
             PassState::new()
                 .enable(glow::BLEND)
                 .blend_equation(gl_blend_equation(blend.equation))
-                .blend_func(gl_blend_factor(blend.source), gl_blend_factor(blend.destination))
+                .blend_func(
+                    gl_blend_factor(blend.source),
+                    gl_blend_factor(blend.destination),
+                )
                 .blend_color([red, green, blue, alpha])
         }
         None => PassState::new().disable(glow::BLEND),
     };
     let state = match pass.depth.compare {
-        Some(compare) => state.enable(glow::DEPTH_TEST).depth_func(gl_compare(compare)),
+        Some(compare) => state
+            .enable(glow::DEPTH_TEST)
+            .depth_func(gl_compare(compare)),
         None => state.disable(glow::DEPTH_TEST),
     };
     let state = state.depth_mask(pass.depth.write);
     let state = if pass.depth_bias != 0.0 {
-        state.enable(glow::POLYGON_OFFSET_FILL).polygon_offset(0.0, pass.depth_bias * DEPTH_UNITS)
+        state
+            .enable(glow::POLYGON_OFFSET_FILL)
+            .polygon_offset(0.0, pass.depth_bias * DEPTH_UNITS)
     } else {
         state.disable(glow::POLYGON_OFFSET_FILL)
     };
@@ -140,16 +149,23 @@ pub(in crate::app::model_preview) fn dx9_pass_state(pass: &Dx9DrawPass) -> PassS
 
 /// After a pass that culled its own way: the back face named again, and
 /// culling as the frame shows the model.
-pub(in crate::app::model_preview) fn dx9_after_pass_state(pass: &Dx9DrawPass, show_backfaces: bool) -> PassState {
+pub(in crate::app::model_preview) fn dx9_after_pass_state(
+    pass: &Dx9DrawPass,
+    show_backfaces: bool,
+) -> PassState {
     if pass.cull == Dx9Cull::Frame {
         return PassState::new();
     }
-    PassState::new().cull_face(glow::BACK).culling_unless(show_backfaces)
+    PassState::new()
+        .cull_face(glow::BACK)
+        .culling_unless(show_backfaces)
 }
 
 /// After the passes drew: the shared program, and the state the wireframe
 /// pass and the UI expect.
-pub(in crate::app::model_preview) fn dx9_passes_done_state(program: glow::NativeProgram) -> PassState {
+pub(in crate::app::model_preview) fn dx9_passes_done_state(
+    program: glow::NativeProgram,
+) -> PassState {
     PassState::new()
         .use_program(program)
         .disable(glow::BLEND)
@@ -188,16 +204,22 @@ pub(in crate::app::model_preview) fn sort_points(preview: &RenderModelPreview) -
             if !rigid || indices.is_empty() {
                 return center;
             }
-            let sum = indices.iter().filter_map(vertex).fold([0.0f32; 3], |sum, vertex| {
-                std::array::from_fn(|axis| sum[axis] + vertex.position[axis])
-            });
+            let sum = indices
+                .iter()
+                .filter_map(vertex)
+                .fold([0.0f32; 3], |sum, vertex| {
+                    std::array::from_fn(|axis| sum[axis] + vertex.position[axis])
+                });
             sum.map(|sum| sum / indices.len() as f32)
         })
         .collect()
 }
 
 /// Visible batches farthest first; the eye looks along +Y in view space.
-pub(in crate::app::model_preview) fn draw_order(frame: &ModelGpuFrame, points: &[[f32; 3]]) -> Vec<usize> {
+pub(in crate::app::model_preview) fn draw_order(
+    frame: &ModelGpuFrame,
+    points: &[[f32; 3]],
+) -> Vec<usize> {
     let camera = &frame.camera;
     let depth = |index: usize| {
         let point = points.get(index).copied().unwrap_or(camera.center);
@@ -211,7 +233,9 @@ pub(in crate::app::model_preview) fn draw_order(frame: &ModelGpuFrame, points: &
 
 /// The cube `GLOBAL vector-normalization` names. Bilinear, as a direction
 /// lookup wants, and small: only its directions matter.
-pub(in crate::app::model_preview) unsafe fn upload_normalization_cube(gl: &glow::Context) -> Option<glow::NativeTexture> {
+pub(in crate::app::model_preview) unsafe fn upload_normalization_cube(
+    gl: &glow::Context,
+) -> Option<glow::NativeTexture> {
     const SIZE: usize = 64;
     unsafe {
         let texture = gl.create_texture().ok()?;
@@ -245,13 +269,21 @@ pub(in crate::app::model_preview) unsafe fn upload_normalization_cube(gl: &glow:
 
 impl RenderCore {
     /// Halo 2's bloom over `bloom_order`, after the wireframe and the sprites.
-    pub(in crate::app::model_preview) unsafe fn draw_dx9_bloom(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize, bloom_order: Option<Vec<usize>>) {
+    pub(in crate::app::model_preview) unsafe fn draw_dx9_bloom(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        bloom_order: Option<Vec<usize>>,
+    ) {
         unsafe {
             if let Some(order) = bloom_order {
-                PassState::new().use_program(self.program).bind_vertex_array(self.slots[slot].vertex_array).apply(gl);
+                PassState::new()
+                    .use_program(self.program)
+                    .bind_vertex_array(self.slots[slot].vertex_array)
+                    .apply(gl);
                 self.draw_h2_bloom(gl, frame, slot, &order);
             }
-
         }
     }
 
@@ -260,7 +292,9 @@ impl RenderCore {
             .textures
             .as_ref()
             .and_then(|textures| textures.get(material))
-            .map_or(&[], |material| material.h2_layers[layer as usize].as_slice())
+            .map_or(&[], |material| {
+                material.h2_layers[layer as usize].as_slice()
+            })
     }
 
     /// Whether the model is camouflaged: camo needs the model's shader for it.
@@ -273,7 +307,11 @@ impl RenderCore {
     /// Whether a material's passes stand in for the slots. Transparent ones
     /// always do. Opaque ones need game shaders on, and a template with a
     /// lightmap layer needs that layer to have prepared.
-    pub(in crate::app::model_preview) fn h2_replaces_slots(&self, frame: &ModelGpuFrame, material: usize) -> bool {
+    pub(in crate::app::model_preview) fn h2_replaces_slots(
+        &self,
+        frame: &ModelGpuFrame,
+        material: usize,
+    ) -> bool {
         // Halo 3's and ODST's materials draw their shadow passes through here
         // too, and those stand in wherever the translated passes do.
         if frame.game_shaders && self.gen3_material(frame, material).is_some() {
@@ -309,7 +347,8 @@ impl RenderCore {
             && !passes.is_empty()
             && (layer != Dx9Layer::Prt || (frame.prt && frame.preview.h2.prt.is_some()))
             && passes.iter().all(|pass| {
-                self.dx9.h2_programs
+                self.dx9
+                    .h2_programs
                     .get(&(pass.stage, pass.fragment.clone()))
                     .is_some_and(Option::is_some)
             })
@@ -317,14 +356,20 @@ impl RenderCore {
 
     /// Link the dx9 pass programs the frame's materials name: Halo 2's and
     /// Halo CE's passes, and the shadow passes Halo 3 and ODST borrow.
-    pub(in crate::app::model_preview) unsafe fn prepare_h2_programs(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+    pub(in crate::app::model_preview) unsafe fn prepare_h2_programs(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+    ) {
         if !self.shaders_supported {
             return;
         }
         let Some(textures) = frame.textures.as_ref() else {
             return;
         };
-        let passes = textures.iter().flat_map(|material| material.h2_layers.iter().flatten());
+        let passes = textures
+            .iter()
+            .flat_map(|material| material.h2_layers.iter().flatten());
         for pass in passes {
             let key = (pass.stage, pass.fragment.clone());
             if self.dx9.h2_programs.contains_key(&key) {
@@ -365,7 +410,12 @@ impl RenderCore {
         unsafe {
             let state = PostScope::capture(gl);
             let size = state.size();
-            if self.dx9.h2_target.as_ref().is_none_or(|target| target.size != size) {
+            if self
+                .dx9
+                .h2_target
+                .as_ref()
+                .is_none_or(|target| target.size != size)
+            {
                 if let Some(old) = self.dx9.h2_target.take() {
                     old.delete(gl);
                 }
@@ -407,25 +457,42 @@ impl RenderCore {
         slot: usize,
         order: &[usize],
     ) {
-        let Some((framebuffer, color, size)) =
-            self.scene.as_ref().map(|scene| (scene.framebuffer, scene.color, scene.size))
+        let Some((framebuffer, color, size)) = self
+            .scene
+            .as_ref()
+            .map(|scene| (scene.framebuffer, scene.color, scene.size))
         else {
             return;
         };
         unsafe {
-            PassState::new().color_mask([false, false, false, true]).apply(gl);
+            PassState::new()
+                .color_mask([false, false, false, true])
+                .apply(gl);
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear(glow::COLOR_BUFFER_BIT);
             PassState::new().color_mask([true; 4]).apply(gl);
             self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::Bloom, None);
             // `sub_6C18F0`: the hologram shader draws while its control is up.
-            let hologram = frame.preview.h2.hologram_control.as_deref().is_some_and(|name| {
-                frame.function_values.as_ref().and_then(|values| values.get(name)).is_some_and(|value| *value > 0.0)
-            });
+            let hologram = frame
+                .preview
+                .h2
+                .hologram_control
+                .as_deref()
+                .is_some_and(|name| {
+                    frame
+                        .function_values
+                        .as_ref()
+                        .and_then(|values| values.get(name))
+                        .is_some_and(|value| *value > 0.0)
+                });
             if hologram {
                 self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::HologramBloom, None);
             }
-            if let Some(bloom) = self.dx9.h2_bloom.get_or_insert_with(|| H2Bloom::new(gl, H2_GLSL_VERSION)) {
+            if let Some(bloom) = self
+                .dx9
+                .h2_bloom
+                .get_or_insert_with(|| H2Bloom::new(gl, H2_GLSL_VERSION))
+            {
                 bloom.apply(gl, framebuffer, color, size, frame.show_backfaces);
             }
         }
@@ -433,7 +500,12 @@ impl RenderCore {
 
     /// Keep what lies behind the model, for what shows through it: as
     /// `sub_6BD480` does, before anything of the model has drawn.
-    pub(in crate::app::model_preview) unsafe fn copy_h2_frame(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, order: &[usize]) {
+    pub(in crate::app::model_preview) unsafe fn copy_h2_frame(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        order: &[usize],
+    ) {
         let needed = order.iter().any(|&index| {
             frame.preview.batches.get(index).is_some_and(|batch| {
                 let material = batch.material_index as usize;
@@ -449,7 +521,12 @@ impl RenderCore {
         };
         let (framebuffer, [width, height]) = (scene.framebuffer, scene.size);
         unsafe {
-            if self.dx9.h2_frame_copy.as_ref().is_none_or(|copy| copy.size != [width, height]) {
+            if self
+                .dx9
+                .h2_frame_copy
+                .as_ref()
+                .is_none_or(|copy| copy.size != [width, height])
+            {
                 if let Some(old) = self.dx9.h2_frame_copy.take() {
                     old.delete(gl);
                 }
@@ -511,7 +588,11 @@ impl RenderCore {
                 if camouflaged && pass.hidden_by_camo {
                     continue;
                 }
-                if pass.numeric.as_ref().is_some_and(|numeric| !numeric.shows(&frame.outputs_of(material))) {
+                if pass
+                    .numeric
+                    .as_ref()
+                    .is_some_and(|numeric| !numeric.shows(&frame.outputs_of(material)))
+                {
                     continue;
                 }
                 let key = (pass.stage, pass.fragment.clone());
@@ -561,11 +642,15 @@ impl RenderCore {
                                 (glow::TEXTURE_3D, uploaded.or(fallback))
                             }
                         };
-                        let state = PassState::new().active_texture(glow::TEXTURE0 + texture.slot).bind_texture(target, bound);
+                        let state = PassState::new()
+                            .active_texture(glow::TEXTURE0 + texture.slot)
+                            .bind_texture(target, bound);
                         // A sampler the program compiled away keeps its unit unset.
                         let location = program.location(gl, &format!("s{}", texture.slot));
                         match location {
-                            Some(location) => state.uniform_1_i32(Some(location), texture.slot as i32),
+                            Some(location) => {
+                                state.uniform_1_i32(Some(location), texture.slot as i32)
+                            }
                             None => state,
                         }
                         .apply(gl);
@@ -597,14 +682,24 @@ impl RenderCore {
         light: Option<&H2DefaultLight>,
     ) {
         unsafe {
-            if matches!(pass.stage, Dx9VertexStage::CeModel | Dx9VertexStage::CeGlassLit) {
-                let object = frame.preview.materials.get(material).map_or(0, |material| material.object);
+            if matches!(
+                pass.stage,
+                Dx9VertexStage::CeModel | Dx9VertexStage::CeGlassLit
+            ) {
+                let object = frame
+                    .preview
+                    .materials
+                    .get(material)
+                    .map_or(0, |material| material.object);
                 let location = program.location(gl, "u_ce_point");
                 let points = self.dx9.ce_points_now.as_ref().unwrap_or(&frame.ce_points);
                 let rows = points.get(usize::from(object)).copied().unwrap_or_default();
                 gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             }
-            if matches!(pass.stage, Dx9VertexStage::ShadowCaster | Dx9VertexStage::ShadowMask) {
+            if matches!(
+                pass.stage,
+                Dx9VertexStage::ShadowCaster | Dx9VertexStage::ShadowMask
+            ) {
                 let location = program.location(gl, "u_shadow_matrix");
                 // Set by the shadow pass these stages draw within or after.
                 let style = self.dx9.shadow.unwrap_or_else(|| ShadowStyle::h2(frame));
@@ -617,11 +712,20 @@ impl RenderCore {
                     && let Some(Some((_, map))) = self.dx9.h2_shadow_map
                 {
                     let location = program.location(gl, "u_shadow_map");
-                    PassState::new().sampler(H2_SHADOW_MAP_UNIT, glow::TEXTURE_2D, Some(map), location).apply(gl);
+                    PassState::new()
+                        .sampler(H2_SHADOW_MAP_UNIT, glow::TEXTURE_2D, Some(map), location)
+                        .apply(gl);
                 }
                 if let Some(normal) = style.normal {
                     let location = program.location(gl, "u_normal_target");
-                    PassState::new().sampler(normal.unit, glow::TEXTURE_2D, Some(normal.texture), location).apply(gl);
+                    PassState::new()
+                        .sampler(
+                            normal.unit,
+                            glow::TEXTURE_2D,
+                            Some(normal.texture),
+                            location,
+                        )
+                        .apply(gl);
                     let location = program.location(gl, "u_shadow_toward");
                     gl.uniform_3_f32_slice(location.as_ref(), &toward);
                     let location = program.location(gl, "u_shadow_size");
@@ -646,7 +750,11 @@ impl RenderCore {
                 if location.is_some() {
                     let clusters = match &frame.h2_prt_clusters {
                         Some([lit, shadowed]) => {
-                            if light.is_some() { shadowed } else { lit }
+                            if light.is_some() {
+                                shadowed
+                            } else {
+                                lit
+                            }
                         }
                         None => &prt.clusters,
                     };
@@ -669,10 +777,17 @@ impl RenderCore {
             set_1(gl, program, "u_depth_scale", camera.depth_scale);
             set_1(gl, program, "u_perspective", camera.perspective);
             set_1(gl, program, "u_reflection_scale", H2_REFLECTION_SCALE);
-            set_1(gl, program, "u_animated", if frame.bones.is_some() { 1.0 } else { 0.0 });
+            set_1(
+                gl,
+                program,
+                "u_animated",
+                if frame.bones.is_some() { 1.0 } else { 0.0 },
+            );
             let location = program.location(gl, "u_light_direct");
-            let follows = matches!(pass.stage, Dx9VertexStage::CeModel | Dx9VertexStage::CeGlassLit)
-                && frame.light_follows_camera;
+            let follows = matches!(
+                pass.stage,
+                Dx9VertexStage::CeModel | Dx9VertexStage::CeGlassLit
+            ) && frame.light_follows_camera;
             let direct = if !follows && (frame.default_lights || !pass.stage.is_lightmap()) {
                 pass.light_direct
             } else {
@@ -700,8 +815,12 @@ impl RenderCore {
                 gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             }
             let location = program.location(gl, "u_texture_rows");
-            let (outputs, change_colors) = (frame.outputs_of(material), frame.change_colors_of(material));
-            let clock = H2Clock { time: frame.time, values: frame.function_values_of(material) };
+            let (outputs, change_colors) =
+                (frame.outputs_of(material), frame.change_colors_of(material));
+            let clock = H2Clock {
+                time: frame.time,
+                values: frame.function_values_of(material),
+            };
             let rows = pass.texture_rows_at(clock, &outputs);
             gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             let (tint_facing, tint_glancing) = pass.tints_at(clock);
@@ -713,16 +832,13 @@ impl RenderCore {
                 let mut value = *value;
                 pass.animate_constant(*register, &mut value, clock);
                 if let Some(animation) = &pass.ce_animation {
-                    animation.constant(
-                        *register,
-                        &mut value,
-                        frame.time,
-                        &change_colors,
-                        &outputs,
-                    );
+                    animation.constant(*register, &mut value, frame.time, &change_colors, &outputs);
                     if animation.eye_register() == Some(*register) {
-                        let [x, y, z] =
-                            unrotate_view_vector(frame.camera.yaw, frame.camera.pitch, [0.0, -1.0, 0.0]);
+                        let [x, y, z] = unrotate_view_vector(
+                            frame.camera.yaw,
+                            frame.camera.pitch,
+                            [0.0, -1.0, 0.0],
+                        );
                         value = [x, y, z, 1.0];
                     }
                 }
@@ -744,7 +860,8 @@ impl RenderCore {
                     }
                 }
                 let location = program.location(gl, &format!("c{register}"));
-                let location = location.or_else(|| program.location(gl, &format!("ce_registers[{register}]")));
+                let location =
+                    location.or_else(|| program.location(gl, &format!("ce_registers[{register}]")));
                 gl.uniform_4_f32_slice(location.as_ref(), &value);
             }
             if let Some(light) = light {
@@ -757,10 +874,19 @@ impl RenderCore {
                 let location = program.location(gl, "u_gel_rows");
                 gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             }
-            if let (Dx9VertexStage::LightGel, Some(location), Some((gel, _))) =
-                (pass.stage, program.location(gl, "u_gel_map"), &self.dx9.h2_gel)
-            {
-                PassState::new().sampler(H2_GEL_MASK_UNIT, glow::TEXTURE_2D, gel.or(self.placeholder), Some(location)).apply(gl);
+            if let (Dx9VertexStage::LightGel, Some(location), Some((gel, _))) = (
+                pass.stage,
+                program.location(gl, "u_gel_map"),
+                &self.dx9.h2_gel,
+            ) {
+                PassState::new()
+                    .sampler(
+                        H2_GEL_MASK_UNIT,
+                        glow::TEXTURE_2D,
+                        gel.or(self.placeholder),
+                        Some(location),
+                    )
+                    .apply(gl);
             }
             let location = program.location(gl, "zwriteout");
             gl.uniform_4_f32(location.as_ref(), 1.0, 1.0, 1.0, 1.0);
@@ -770,16 +896,19 @@ impl RenderCore {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::super::dx9::passes::{Dx9Blend, Dx9Depth};
     use super::super::super::gl::pass_state::StateCall;
+    use super::*;
 
     /// A blended, biased, front-culled pass sets its state in the order the
     /// game's does, with the blend constant's ARGB read as RGBA; a pass that
     /// culls by the frame names no face and has nothing to put back.
     #[test]
     fn a_pass_sets_its_blend_depth_bias_channels_and_culling_in_order() {
-        let depth = Dx9Depth { compare: Some(Dx9Compare::LessOrEqual), write: false };
+        let depth = Dx9Depth {
+            compare: Some(Dx9Compare::LessOrEqual),
+            write: false,
+        };
         let mut pass = Dx9DrawPass::new(Dx9VertexStage::CeMeter, String::new(), depth);
         pass.blend = Some(Dx9Blend {
             equation: Dx9BlendEquation::Add,
@@ -809,10 +938,18 @@ mod tests {
         );
         assert_eq!(
             dx9_after_pass_state(&pass, false).calls(),
-            [StateCall::CullFace(glow::BACK), StateCall::Enable(glow::CULL_FACE)]
+            [
+                StateCall::CullFace(glow::BACK),
+                StateCall::Enable(glow::CULL_FACE)
+            ]
         );
         pass.cull = Dx9Cull::Frame;
         assert!(dx9_after_pass_state(&pass, false).calls().is_empty());
-        assert!(!dx9_pass_state(&pass).calls().iter().any(|call| matches!(call, StateCall::CullFace(_))));
+        assert!(
+            !dx9_pass_state(&pass)
+                .calls()
+                .iter()
+                .any(|call| matches!(call, StateCall::CullFace(_)))
+        );
     }
 }

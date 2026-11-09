@@ -76,7 +76,10 @@ mod gl_tests {
             let (mut viewport, mut scissor) = ([0; 4], [0; 4]);
             gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
             gl.get_parameter_i32_slice(glow::SCISSOR_BOX, &mut scissor);
-            assert_eq!(gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING), Some(found.framebuffer));
+            assert_eq!(
+                gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING),
+                Some(found.framebuffer)
+            );
             assert_eq!((viewport, scissor), ([1, 2, 3, 4], [2, 3, 4, 5]));
             assert!(gl.is_enabled(glow::SCISSOR_TEST));
             gl.bind_framebuffer(glow::FRAMEBUFFER, None);

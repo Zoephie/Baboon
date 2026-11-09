@@ -65,11 +65,20 @@ impl H4BloomSettings {
     /// A camera fx tag's bloom fields, to check the constants against.
     #[cfg(test)]
     pub(in crate::app::model_preview) fn read(root: blam_tags::TagStruct<'_>) -> Self {
-        let real = |holder: &str, name: &str| root.descend(holder).and_then(|holder| holder.read_real(name)).unwrap_or(0.0);
+        let real = |holder: &str, name: &str| {
+            root.descend(holder)
+                .and_then(|holder| holder.read_real(name))
+                .unwrap_or(0.0)
+        };
         let color = |holder: &str, name: &str| {
-            let color = root.descend(holder).and_then(|holder| holder.field(name)).and_then(|field| field.value());
+            let color = root
+                .descend(holder)
+                .and_then(|holder| holder.field(name))
+                .and_then(|field| field.value());
             match color {
-                Some(blam_tags::TagFieldData::RealRgbColor(color)) => [color.red, color.green, color.blue],
+                Some(blam_tags::TagFieldData::RealRgbColor(color)) => {
+                    [color.red, color.green, color.blue]
+                }
                 _ => [0.0; 3],
             }
         };
@@ -129,7 +138,11 @@ fn divided(frame: [i32; 2], divisor: f32) -> [i32; 2] {
 /// frame is wider than 1280 or taller than 720 (`use_hdr_bloom_scaling`, off
 /// by default, would replace it).
 fn resolution_scale([width, height]: [i32; 2]) -> f32 {
-    if width > 1280 || height > 720 { (921_600.0 / (width as f32 * height as f32)).min(1.0) } else { 1.0 }
+    if width > 1280 || height > 720 {
+        (921_600.0 / (width as f32 * height as f32)).min(1.0)
+    } else {
+        1.0
+    }
 }
 
 /// A colour scaled by the intensity and the resolution, as the chain hands
@@ -153,7 +166,13 @@ impl Surfaces {
     unsafe fn new(gl: &glow::Context, frame: [i32; 2]) -> Option<Self> {
         // DXGI 10, RGBA16F, as the aux surfaces (MCC table 0x1424A6000).
         let mut made = Made::new(gl);
-        let mut surface = |divisor| unsafe { made.color(divided(frame, divisor), Texels::RGBA16F, Sampling::LINEAR_CLAMPED) };
+        let mut surface = |divisor| unsafe {
+            made.color(
+                divided(frame, divisor),
+                Texels::RGBA16F,
+                Sampling::LINEAR_CLAMPED,
+            )
+        };
         let surfaces = Self {
             temp: surface(2.0)?,
             small: [surface(4.0)?, surface(4.0)?],
@@ -166,7 +185,10 @@ impl Surfaces {
     }
 
     unsafe fn delete(&self, gl: &glow::Context) {
-        let all = std::iter::once(&self.temp).chain(&self.small).chain(&self.tiny).chain(&self.mini);
+        let all = std::iter::once(&self.temp)
+            .chain(&self.small)
+            .chain(&self.tiny)
+            .chain(&self.mini);
         for surface in all {
             unsafe { surface.delete(gl) };
         }
@@ -195,7 +217,16 @@ impl H4Bloom {
         nothing: Option<glow::NativeTexture>,
         no_volume: Option<glow::NativeTexture>,
     ) -> Option<Self> {
-        unsafe { Some(Self { chain: ScreenChain { program: screen_program(gl, FRAGMENT)?, nothing }, surfaces: None, no_volume }) }
+        unsafe {
+            Some(Self {
+                chain: ScreenChain {
+                    program: screen_program(gl, FRAGMENT)?,
+                    nothing,
+                },
+                surfaces: None,
+                no_volume,
+            })
+        }
     }
 
     unsafe fn step(
@@ -211,7 +242,11 @@ impl H4Bloom {
             self.chain.pass(gl, target, source.0, added, |uniform| {
                 gl.uniform_1_i32(uniform("pass").as_ref(), pass as i32);
                 gl.uniform_4_f32_slice(uniform("scale").as_ref(), &scale);
-                gl.uniform_2_f32(uniform("target_size").as_ref(), target.size[0] as f32, target.size[1] as f32);
+                gl.uniform_2_f32(
+                    uniform("target_size").as_ref(),
+                    target.size[0] as f32,
+                    target.size[1] as f32,
+                );
                 let [width, height] = source.1.map(|side| 1.0 / side as f32);
                 gl.uniform_2_f32(uniform("source_texel").as_ref(), width, height);
             });
@@ -219,10 +254,30 @@ impl H4Bloom {
     }
 
     /// `gaussian_blur_fixed`: across into `scratch`, then back down scaled.
-    unsafe fn blur(&self, gl: &glow::Context, surface: &ColorTarget, scratch: &ColorTarget, scale: [f32; 4]) {
+    unsafe fn blur(
+        &self,
+        gl: &glow::Context,
+        surface: &ColorTarget,
+        scratch: &ColorTarget,
+        scale: [f32; 4],
+    ) {
         unsafe {
-            self.step(gl, scratch, Pass::BlurHorizontal, (surface.texture, surface.size), None, [1.0; 4]);
-            self.step(gl, surface, Pass::Kernel5, (scratch.texture, scratch.size), None, scale);
+            self.step(
+                gl,
+                scratch,
+                Pass::BlurHorizontal,
+                (surface.texture, surface.size),
+                None,
+                [1.0; 4],
+            );
+            self.step(
+                gl,
+                surface,
+                Pass::Kernel5,
+                (scratch.texture, scratch.size),
+                None,
+                scale,
+            );
         }
     }
 
@@ -242,7 +297,11 @@ impl H4Bloom {
     ) -> Option<glow::NativeTexture> {
         let grading = grading.filter(|_| !settings.hologram);
         unsafe {
-            if self.surfaces.as_ref().is_none_or(|surfaces| surfaces.frame != frame) {
+            if self
+                .surfaces
+                .as_ref()
+                .is_none_or(|surfaces| surfaces.frame != frame)
+            {
                 if let Some(old) = self.surfaces.take() {
                     old.delete(gl);
                 }
@@ -253,10 +312,17 @@ impl H4Bloom {
             let uniform = |name: &str| self.chain.uniform(gl, name);
             gl.uniform_1_i32(uniform("grading").as_ref(), 2);
             PassState::new()
-                .texture_on(glow::TEXTURE2, glow::TEXTURE_3D, grading.map(|grading| grading.texture).or(self.no_volume))
+                .texture_on(
+                    glow::TEXTURE2,
+                    glow::TEXTURE_3D,
+                    grading.map(|grading| grading.texture).or(self.no_volume),
+                )
                 .apply(gl);
             gl.uniform_1_i32(uniform("graded").as_ref(), i32::from(grading.is_some()));
-            gl.uniform_1_i32(uniform("keeps_alpha").as_ref(), i32::from(settings.hologram));
+            gl.uniform_1_i32(
+                uniform("keeps_alpha").as_ref(),
+                i32::from(settings.hologram),
+            );
             if let Some(grading) = grading {
                 gl.uniform_3_f32_slice(uniform("grading_scale").as_ref(), &grading.scale);
                 gl.uniform_3_f32_slice(uniform("grading_offset").as_ref(), &grading.offset);
@@ -266,25 +332,71 @@ impl H4Bloom {
             let [small, small2] = &surfaces.small;
             let [tiny, tiny2] = &surfaces.tiny;
             let [mini, mini2] = &surfaces.mini;
-            self.step(gl, &surfaces.temp, Pass::Downsample2x2, (accumulation, frame), None, [1.0, 1.0, 0.0, 0.0]);
+            self.step(
+                gl,
+                &surfaces.temp,
+                Pass::Downsample2x2,
+                (accumulation, frame),
+                None,
+                [1.0, 1.0, 0.0, 0.0],
+            );
             let temp = (surfaces.temp.texture, surfaces.temp.size);
-            let curve = [settings.highlight, settings.inherent, settings.self_illum, 1.0];
+            let curve = [
+                settings.highlight,
+                settings.inherent,
+                settings.self_illum,
+                1.0,
+            ];
             self.step(gl, small, Pass::BloomCurve, temp, None, curve);
-            self.step(gl, tiny, Pass::Gaussian4x4, (small.texture, small.size), None, ones);
-            self.step(gl, mini, Pass::Gaussian4x4, (tiny.texture, tiny.size), None, ones);
+            self.step(
+                gl,
+                tiny,
+                Pass::Gaussian4x4,
+                (small.texture, small.size),
+                None,
+                ones,
+            );
+            self.step(
+                gl,
+                mini,
+                Pass::Gaussian4x4,
+                (tiny.texture, tiny.size),
+                None,
+                ones,
+            );
             let intensity = settings.intensity;
             self.blur(gl, mini, mini2, scaled(settings.large, intensity, frame));
             let medium = scaled(settings.medium, intensity, frame);
-            self.step(gl, tiny2, Pass::AddAlpha1, (tiny.texture, tiny.size), Some(mini.texture), medium);
+            self.step(
+                gl,
+                tiny2,
+                Pass::AddAlpha1,
+                (tiny.texture, tiny.size),
+                Some(mini.texture),
+                medium,
+            );
             self.blur(gl, tiny2, tiny, ones);
             let small_color = scaled(settings.small, intensity, frame);
-            self.step(gl, small2, Pass::Add, (small.texture, small.size), Some(tiny2.texture), small_color);
+            self.step(
+                gl,
+                small2,
+                Pass::Add,
+                (small.texture, small.size),
+                Some(tiny2.texture),
+                small_color,
+            );
             self.blur(gl, small2, small, ones);
 
-            PassState::new().texture_on(glow::TEXTURE2, glow::TEXTURE_3D, None).apply(gl);
+            PassState::new()
+                .texture_on(glow::TEXTURE2, glow::TEXTURE_3D, None)
+                .apply(gl);
             self.chain.end(gl, run, scene);
             // `small` holds `blur_11_horizontal` of the result.
-            Some(if settings.hologram { small.texture } else { small2.texture })
+            Some(if settings.hologram {
+                small.texture
+            } else {
+                small2.texture
+            })
         }
     }
 }
@@ -299,7 +411,11 @@ mod tests {
     fn large_frames_scale_the_bloom_down_by_their_area() {
         assert_eq!(resolution_scale([1280, 720]), 1.0);
         assert!((resolution_scale([1920, 1080]) - 0.444_444).abs() < 1e-5);
-        assert_eq!(resolution_scale([1300, 400]), 1.0, "past 1280 wide but under 921,600 texels");
+        assert_eq!(
+            resolution_scale([1300, 400]),
+            1.0,
+            "past 1280 wide but under 921,600 texels"
+        );
         assert_eq!(scaled([0.0; 3], 3.0, [1000, 700]), [0.0, 0.0, 0.0, 1.0]);
         assert!((scaled([0.25; 3], 0.3, [1000, 700])[0] - 0.075).abs() < 1e-7);
         assert!((scaled([1.0; 3], 0.3, [1920, 1080])[0] - 0.133_333).abs() < 1e-5);
@@ -327,11 +443,20 @@ mod tests {
     /// hologram's is the hologram camera fx's.
     #[test]
     fn the_bloom_settings_are_their_tags() {
-        let Some(root) = kit_root(GameId::Halo4) else { return };
-        let read = |path: &str| blam_tags::TagFile::read(std::path::Path::new(&root).join(path)).unwrap();
+        let Some(root) = kit_root(GameId::Halo4) else {
+            return;
+        };
+        let read =
+            |path: &str| blam_tags::TagFile::read(std::path::Path::new(&root).join(path)).unwrap();
         let m80 = read("environments/solo/m80_delta/m80_cam_fx_global.camera_fx_settings");
         assert_eq!(H4BloomSettings::read(m80.root()), VIEW_BLOOM);
         let hologram = read("globals/defaults/hologram.camera_fx_settings");
-        assert_eq!(H4BloomSettings { hologram: true, ..H4BloomSettings::read(hologram.root()) }, HOLOGRAM_BLOOM);
+        assert_eq!(
+            H4BloomSettings {
+                hologram: true,
+                ..H4BloomSettings::read(hologram.root())
+            },
+            HOLOGRAM_BLOOM
+        );
     }
 }

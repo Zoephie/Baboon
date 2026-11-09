@@ -224,7 +224,8 @@ pub(in crate::app::model_preview) fn draw_variant_header_actions(
         ui.label("New Variant Name");
         ui.add_enabled(
             edit.editable,
-            crate::app::ui_kit::singleline_text_edit(&mut state.new_variant_name).desired_width(220.0),
+            crate::app::ui_kit::singleline_text_edit(&mut state.new_variant_name)
+                .desired_width(220.0),
         );
         let chosen_regions = selected_variant_regions(data, state);
         let create_name = normalized_new_variant_name(data, state);
@@ -235,7 +236,10 @@ pub(in crate::app::model_preview) fn draw_variant_header_actions(
         {
             let name = create_name.expect("button enabled only when name is valid");
             state.variant_after_load = Some(name.clone());
-            edit.model_variant_ops.push(ModelVariantOp::Create { name, regions: chosen_regions.clone() });
+            edit.model_variant_ops.push(ModelVariantOp::Create {
+                name,
+                regions: chosen_regions.clone(),
+            });
             state.new_variant_name.clear();
             mutation_requested = true;
             close_menu(ui);
@@ -302,7 +306,8 @@ mod tests {
         let frame = |events| {
             let mut result = None;
             let mut popup_id = None;
-            let output = crate::app::run_ui_test(&ctx, 
+            let output = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,

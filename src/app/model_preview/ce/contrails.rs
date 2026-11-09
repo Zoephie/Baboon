@@ -9,16 +9,16 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
-use super::super::common::view::{ViewFrame, posed_on};
-use crate::app::model_preview::common::point_physics::CePointPhysics;
-use crate::app::model_preview::common::fields::argb;
 use super::super::common::image::Image;
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::materials::decode_image;
 use super::super::*;
-use crate::core::h2_pixel_shader::SamplerKind;
-use crate::app::model_preview::common::math::{cross, dot, unit_or_up};
 use super::random::CeRandom;
 use crate::app::model_preview::ce::blend::FramebufferBlend;
+use crate::app::model_preview::common::fields::argb;
+use crate::app::model_preview::common::math::{cross, dot, unit_or_up};
+use crate::app::model_preview::common::point_physics::CePointPhysics;
+use crate::core::h2_pixel_shader::SamplerKind;
 
 const PRE_ROLL: f32 = 4.0;
 /// A generous bound; the game's is a shared pool.
@@ -194,28 +194,39 @@ pub(crate) struct CeContrailAt {
 fn read_contrail(reader: &TagReader, path: &str) -> Option<CeContrailDef> {
     let tag = reader.load(path, "contrail", b"cont").ok()?;
     let root = tag.root();
-    let states: Vec<PointState> = elements(root, "point states").into_iter().map(|state| read_state(reader, state)).collect();
+    let states: Vec<PointState> = elements(root, "point states")
+        .into_iter()
+        .map(|state| read_state(reader, state))
+        .collect();
     if states.is_empty() {
         return None;
     }
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let velocity = root.read_real_bounds("point velocity");
     let short = |name: &str| root.read_int_any(name).unwrap_or(0) as i32;
-    let bitmap_path = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty());
+    let bitmap_path = root
+        .read_tag_ref_path("bitmap")
+        .filter(|path| !path.is_empty());
     let (sequences, images) = match &bitmap_path {
         Some(path) => match reader.load(path, "bitmap", b"bitm") {
             Ok(bitmap) => {
                 let sequences = elements(bitmap.root(), "sequences")
                     .iter()
                     .map(|sequence| {
-                        let first = sequence.read_int_any("first bitmap index").unwrap_or(0).max(0) as usize;
-                        let count = sequence.read_int_any("bitmap count").unwrap_or(0).max(0) as usize;
+                        let first = sequence
+                            .read_int_any("first bitmap index")
+                            .unwrap_or(0)
+                            .max(0) as usize;
+                        let count =
+                            sequence.read_int_any("bitmap count").unwrap_or(0).max(0) as usize;
                         [first, count]
                     })
                     .collect();
                 let count = elements(bitmap.root(), "bitmaps").len();
                 let images = (0..count)
-                    .map(|index| decode_image(reader, path, SamplerKind::Texture2D, index).map(Arc::new))
+                    .map(|index| {
+                        decode_image(reader, path, SamplerKind::Texture2D, index).map(Arc::new)
+                    })
                     .collect();
                 (sequences, images)
             }
@@ -279,7 +290,13 @@ pub(in crate::app::model_preview) fn read_ce_contrails(
                 .iter()
                 .filter(|marker| marker.name.eq_ignore_ascii_case(&name))
                 .take(MOST_MARKERS)
-                .map(|marker| (marker.node_index.max(0) as usize, marker.position, marker.axes[0]))
+                .map(|marker| {
+                    (
+                        marker.node_index.max(0) as usize,
+                        marker.position,
+                        marker.axes[0],
+                    )
+                })
                 .collect()
         };
         if at.is_empty() {
@@ -330,7 +347,13 @@ fn scaled_range(bounds: [f32; 2], scaled: [bool; 2], scale: f32, random: f32) ->
 }
 
 /// `contrail_update_points` for one point.
-fn step_point(point: &mut Point, states: &[PointState], ground: f32, dt: f32, random: &mut ContrailRandom) {
+fn step_point(
+    point: &mut Point,
+    states: &[PointState],
+    ground: f32,
+    dt: f32,
+    random: &mut ContrailRandom,
+) {
     if point.done {
         return;
     }
@@ -340,14 +363,24 @@ fn step_point(point: &mut Point, states: &[PointState], ground: f32, dt: f32, ra
             point.state += 1;
             point.moving_on = false;
             let state = &states[point.state as usize];
-            scaled_range(state.duration, state.scaled.duration, point.density, random.next())
+            scaled_range(
+                state.duration,
+                state.scaled.duration,
+                point.density,
+                random.next(),
+            )
         } else if point.state as usize + 1 >= states.len() {
             point.done = true;
             return;
         } else {
             point.moving_on = true;
             let state = &states[point.state as usize];
-            scaled_range(state.transition, state.scaled.transition, point.density, random.next())
+            scaled_range(
+                state.transition,
+                state.scaled.transition,
+                point.density,
+                random.next(),
+            )
         };
         point.age = 0.0;
         point.inverse = if seconds != 0.0 { seconds.recip() } else { 0.0 };
@@ -363,10 +396,23 @@ fn step_point(point: &mut Point, states: &[PointState], ground: f32, dt: f32, ra
 /// Width and color (alpha first), blended on the way between two states.
 fn point_look(point: &Point, states: &[PointState]) -> (f32, [f32; 4]) {
     let at = |state: &PointState| {
-        let color_by = if state.scaled.color { point.density } else { 1.0 };
+        let color_by = if state.scaled.color {
+            point.density
+        } else {
+            1.0
+        };
         let [low, high] = state.colors;
-        let color: [f32; 4] = std::array::from_fn(|channel| low[channel] + (high[channel] - low[channel]) * color_by);
-        (state.width * if state.scaled.width { point.density } else { 1.0 }, color)
+        let color: [f32; 4] =
+            std::array::from_fn(|channel| low[channel] + (high[channel] - low[channel]) * color_by);
+        (
+            state.width
+                * if state.scaled.width {
+                    point.density
+                } else {
+                    1.0
+                },
+            color,
+        )
     };
     let (width, color) = at(&states[point.state.max(0) as usize]);
     if !point.moving_on || point.state + 1 >= states.len() as i32 {
@@ -375,7 +421,9 @@ fn point_look(point: &Point, states: &[PointState]) -> (f32, [f32; 4]) {
     let (next_width, next) = at(&states[(point.state + 1) as usize]);
     (
         width + (next_width - width) * point.age,
-        std::array::from_fn(|channel| color[channel] + (next[channel] - color[channel]) * point.age),
+        std::array::from_fn(|channel| {
+            color[channel] + (next[channel] - color[channel]) * point.age
+        }),
     )
 }
 
@@ -428,7 +476,10 @@ pub(crate) struct CeContrailField {
 fn next_frame(running: &mut RunningContrail, def: &CeContrailDef) {
     running.frame_time = 0.0;
     running.frame += 1;
-    let count = usize::try_from(running.sequence).ok().and_then(|at| def.sequences.get(at)).map_or(0, |sequence| sequence[1]);
+    let count = usize::try_from(running.sequence)
+        .ok()
+        .and_then(|at| def.sequences.get(at))
+        .map_or(0, |sequence| sequence[1]);
     if running.sequence < 0 || running.frame < 0 || running.frame as usize >= count {
         let lower = def.first_sequence;
         let upper = lower + def.sequence_count;
@@ -507,7 +558,12 @@ impl CeContrailField {
                 if count > 0 {
                     add_points(contrail, running, count, bones);
                 }
-                let rate = def.animation_rate * if def.scale_flags.animation_rate { density } else { 1.0 };
+                let rate = def.animation_rate
+                    * if def.scale_flags.animation_rate {
+                        density
+                    } else {
+                        1.0
+                    };
                 if rate > 0.0 {
                     let mut left = step;
                     loop {
@@ -561,16 +617,31 @@ impl CeContrailField {
         for (index, (contrail, running)) in contrails.iter().zip(&self.running).enumerate() {
             let def = &contrail.def;
             // Ground mapped and double-marker linked draw nothing.
-            if matches!(def.render_type, RenderType::GroundMapped | RenderType::DoubleMarkerLinked) {
+            if matches!(
+                def.render_type,
+                RenderType::GroundMapped | RenderType::DoubleMarkerLinked
+            ) {
                 continue;
             }
             let image = usize::try_from(running.sequence)
                 .ok()
                 .and_then(|at| def.sequences.get(at))
                 .map_or(0, |[first, _]| first + running.frame.max(0) as usize);
-            let tint = contrail.change_color.map_or([1.0; 3], |channel| change_colors(contrail.object)[channel]);
-            let repeats_u = def.repeats[0] * if def.scale_flags.repeats[0] { running.density } else { 1.0 };
-            let repeats_v = def.repeats[1] * if def.scale_flags.repeats[1] { running.density } else { 1.0 };
+            let tint = contrail
+                .change_color
+                .map_or([1.0; 3], |channel| change_colors(contrail.object)[channel]);
+            let repeats_u = def.repeats[0]
+                * if def.scale_flags.repeats[0] {
+                    running.density
+                } else {
+                    1.0
+                };
+            let repeats_v = def.repeats[1]
+                * if def.scale_flags.repeats[1] {
+                    running.density
+                } else {
+                    1.0
+                };
             for points in &running.points {
                 if points.len() < 2 {
                     continue;
@@ -579,19 +650,26 @@ impl CeContrailField {
                 let vertex = |at: usize| {
                     let point = &points[at];
                     let neighbour = if at == 0 { &points[1] } else { &points[at - 1] };
-                    let (from, to) = if at == 0 { (point.place, neighbour.place) } else { (neighbour.place, point.place) };
+                    let (from, to) = if at == 0 {
+                        (point.place, neighbour.place)
+                    } else {
+                        (neighbour.place, point.place)
+                    };
                     let (width, [alpha, red, green, blue]) = point_look(point, &def.states);
                     let half = width * 0.5;
                     let along: [f32; 3] = std::array::from_fn(|axis| to[axis] - from[axis]);
                     // `render_contrail`: the first vertex of each pair (the far
                     // edge of the texture) lies on the minus side of `across`.
                     let (across, normal) = match def.render_type {
-                        RenderType::Vertical => ([0.0, 0.0, 1.0], unit_or_up([-along[1], along[0], 0.0])),
+                        RenderType::Vertical => {
+                            ([0.0, 0.0, 1.0], unit_or_up([-along[1], along[0], 0.0]))
+                        }
                         RenderType::Horizontal | RenderType::MediaMapped => {
                             (unit_or_up([-along[1], along[0], 0.0]), [0.0, 0.0, 1.0])
                         }
                         _ => {
-                            let to_eye: [f32; 3] = std::array::from_fn(|axis| view.eye[axis] - from[axis]);
+                            let to_eye: [f32; 3] =
+                                std::array::from_fn(|axis| view.eye[axis] - from[axis]);
                             let across = unit_or_up(cross(to_eye, along));
                             (across, unit_or_up(cross(across, along)))
                         }
@@ -599,7 +677,8 @@ impl CeContrailField {
                     // `contrail_fade`.
                     let mut fade = 1.0;
                     if def.fade_mode != FadeMode::None {
-                        let to_eye: [f32; 3] = std::array::from_fn(|axis| view.eye[axis] - point.place[axis]);
+                        let to_eye: [f32; 3] =
+                            std::array::from_fn(|axis| view.eye[axis] - point.place[axis]);
                         let distance = dot(to_eye, to_eye).sqrt().max(0.0001);
                         fade = (dot(normal, to_eye) / distance).abs();
                         if def.edge_fades_slowly {
@@ -609,13 +688,22 @@ impl CeContrailField {
                             fade = 1.0 - fade;
                         }
                     }
-                    let unfaded = if at == 0 { def.first_point_unfaded } else { def.last_point_unfaded };
+                    let unfaded = if at == 0 {
+                        def.first_point_unfaded
+                    } else {
+                        def.last_point_unfaded
+                    };
                     let ends = (at == 0 || at == last) && !unfaded;
-                    let alpha = if ends { 0.0 } else { (alpha * fade).clamp(0.0, 1.0) };
+                    let alpha = if ends {
+                        0.0
+                    } else {
+                        (alpha * fade).clamp(0.0, 1.0)
+                    };
                     let u = running.scroll[0] - at as f32 * repeats_u;
                     let place = point.place;
                     let side = |sign: f32, v: f32| -> [f32; 5] {
-                        let [x, y, z] = std::array::from_fn(|axis| place[axis] + across[axis] * half * sign);
+                        let [x, y, z] =
+                            std::array::from_fn(|axis| place[axis] + across[axis] * half * sign);
                         [x, y, z, u, v]
                     };
                     (
@@ -627,9 +715,15 @@ impl CeContrailField {
                 for at in 0..last {
                     let (top, bottom, near) = vertex(at);
                     let (next_top, next_bottom, far) = vertex(at + 1);
-                    let [near, far] = [near, far].map(|color| color.map(|channel| channel.clamp(0.0, 1.0)));
+                    let [near, far] =
+                        [near, far].map(|color| color.map(|channel| channel.clamp(0.0, 1.0)));
                     let colors = [near, far, near, far];
-                    quads.push(CeContrailQuad { contrail: index, image, corners: [top, next_top, bottom, next_bottom], colors });
+                    quads.push(CeContrailQuad {
+                        contrail: index,
+                        image,
+                        corners: [top, next_top, bottom, next_bottom],
+                        colors,
+                    });
                 }
             }
         }
@@ -648,7 +742,12 @@ impl super::functions::ReadsOutputs for CeContrailAt {
 
 /// `contrail_add_points`: `count` new points at each marker, aimed into the
 /// tag's cone round the marker's forward.
-fn add_points(contrail: &CeContrailAt, running: &mut RunningContrail, count: usize, bones: Option<&[[f32; 4]]>) {
+fn add_points(
+    contrail: &CeContrailAt,
+    running: &mut RunningContrail,
+    count: usize,
+    bones: Option<&[[f32; 4]]>,
+) {
     let def = &contrail.def;
     let density = running.density;
     let cone = def.cone * if def.scale_flags.cone { density } else { 1.0 };
@@ -657,20 +756,32 @@ fn add_points(contrail: &CeContrailAt, running: &mut RunningContrail, count: usi
         let forward = unit_or_up(forward);
         // `contrail_add_points` spreads what one frame adds along the way
         // from the last head point to the marker; the last lands on it.
-        let head = line.first().map(|point| (point.place, point.velocity, point.density));
+        let head = line
+            .first()
+            .map(|point| (point.place, point.velocity, point.density));
         for added in 1..=count {
             if line.len() >= MOST_POINTS {
                 break;
             }
-            let speed = scaled_range(def.velocity, def.scale_flags.velocity, density, running.random.next());
+            let speed = scaled_range(
+                def.velocity,
+                def.scale_flags.velocity,
+                density,
+                running.random.next(),
+            );
             // `seed_random_vector_in_cone3d`.
             let spread = cone * running.random.next();
             let turn = running.random.next() * std::f32::consts::TAU;
             let side = unit_or_up(cross(forward, [0.0, 0.0, 1.0]));
-            let side = if dot(side, side) < 0.5 { [0.0, 1.0, 0.0] } else { side };
+            let side = if dot(side, side) < 0.5 {
+                [0.0, 1.0, 0.0]
+            } else {
+                side
+            };
             let lift = cross(side, forward);
             let direction: [f32; 3] = std::array::from_fn(|axis| {
-                forward[axis] * spread.cos() + (side[axis] * turn.cos() + lift[axis] * turn.sin()) * spread.sin()
+                forward[axis] * spread.cos()
+                    + (side[axis] * turn.cos() + lift[axis] * turn.sin()) * spread.sin()
             });
             let velocity = direction.map(|axis| axis * speed);
             let (place, velocity, point_density) = match head.filter(|_| added < count) {
@@ -679,7 +790,11 @@ fn add_points(contrail: &CeContrailAt, running: &mut RunningContrail, count: usi
                     let lerp = |from: [f32; 3], to: [f32; 3]| -> [f32; 3] {
                         std::array::from_fn(|axis| from[axis] * (1.0 - t) + to[axis] * t)
                     };
-                    (lerp(from, origin), lerp(from_velocity, velocity), from_density * (1.0 - t) + density * t)
+                    (
+                        lerp(from, origin),
+                        lerp(from_velocity, velocity),
+                        from_density * (1.0 - t) + density * t,
+                    )
                 }
                 None => (origin, velocity, density),
             };
@@ -701,9 +816,6 @@ fn add_points(contrail: &CeContrailAt, running: &mut RunningContrail, count: usi
     }
 }
 
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -715,7 +827,10 @@ mod tests {
             physics: None,
             width: 0.1,
             colors: [[0.0; 4], [1.0; 4]],
-            scaled: StateScales { color: true, ..Default::default() },
+            scaled: StateScales {
+                color: true,
+                ..Default::default()
+            },
         }
     }
 

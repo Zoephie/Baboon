@@ -31,7 +31,10 @@ pub(in crate::app::model_preview) fn draw_loading_section_body(ui: &mut Ui, heig
 /// Draw the final preview/setup card geometry before any model parsing begins.
 /// The post-pane worker hook starts the actual build after this frame, so a tab
 /// switch never has to wait for a complex render model or BSP to be walked.
-pub(in crate::app::model_preview) fn draw_model_preview_loading_shells(ui: &mut Ui, model_preview_size: f32) {
+pub(in crate::app::model_preview) fn draw_model_preview_loading_shells(
+    ui: &mut Ui,
+    model_preview_size: f32,
+) {
     let page_width = ui.available_width();
     if page_width >= 780.0 {
         let gap = MODEL_PREVIEW_SECTION_GAP;
@@ -93,7 +96,10 @@ pub(in crate::app::model_preview) fn draw_model_preview_loading_shells(ui: &mut 
     }
 }
 
-pub(in crate::app::model_preview) fn wide_model_preview_section_width(page_width: f32, model_preview_size: f32) -> f32 {
+pub(in crate::app::model_preview) fn wide_model_preview_section_width(
+    page_width: f32,
+    model_preview_size: f32,
+) -> f32 {
     let desired_width =
         470.0 * model_preview_size.clamp(MIN_MODEL_PREVIEW_SIZE, MAX_MODEL_PREVIEW_SIZE);
     desired_width

@@ -235,7 +235,10 @@ impl H4FlareAt {
         );
         let opacity = transition_function_evaluate(flare.falloff_function, 1.0);
         // Past the last, the last.
-        let reflection = flare.reflections.get(flare.occlusion_reflection).or(flare.reflections.last())?;
+        let reflection = flare
+            .reflections
+            .get(flare.occlusion_reflection)
+            .or(flare.reflections.last())?;
         let parameters = self.parameters(
             reflection, scale, tint, position, forward, center, opacity, values, view, time,
         )?;
@@ -265,7 +268,8 @@ impl H4FlareAt {
             (0.0, 1.0)
         };
         let left = view.right.map(|axis| -axis);
-        let toward_viewer = unit_unless_under_micro(std::array::from_fn(|axis| view.eye[axis] - position[axis]));
+        let toward_viewer =
+            unit_unless_under_micro(std::array::from_fn(|axis| view.eye[axis] - position[axis]));
         let offset = match flare.offset_direction {
             OcclusionOffset::TowardViewer => toward_viewer,
             OcclusionOffset::MarkerForward => forward,
@@ -382,10 +386,7 @@ impl H4FlareAt {
                     1.0 - reflection.modulation,
                 ],
                 tint: [r, g, b, 1.0],
-                flip: [
-                    reflection.flags.flip_u,
-                    reflection.flags.flip_v,
-                ],
+                flip: [reflection.flags.flip_u, reflection.flags.flip_v],
             });
         }
         draws

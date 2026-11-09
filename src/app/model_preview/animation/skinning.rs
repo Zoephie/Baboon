@@ -5,10 +5,17 @@ use super::*;
 /// Which nodes a variant's `muted nodes` hold: each named node and its whole
 /// subtree (`model_postprocess_muted_nodes`, X360 0x82D96890, through
 /// `model_set_muted_flag_subtree`). Nodes come parents first.
-pub(in crate::app::model_preview) fn muted_nodes(nodes: &[RenderModelPreviewNode], names: &[String]) -> Vec<bool> {
+pub(in crate::app::model_preview) fn muted_nodes(
+    nodes: &[RenderModelPreviewNode],
+    names: &[String],
+) -> Vec<bool> {
     let mut muted = vec![false; nodes.len()];
     for (index, node) in nodes.iter().enumerate() {
-        let parent_muted = usize::try_from(node.parent).ok().and_then(|parent| muted.get(parent)).copied().unwrap_or(false);
+        let parent_muted = usize::try_from(node.parent)
+            .ok()
+            .and_then(|parent| muted.get(parent))
+            .copied()
+            .unwrap_or(false);
         muted[index] = parent_muted || names.contains(&node.name);
     }
     muted
@@ -20,7 +27,10 @@ fn variant_muted_nodes(data: &ModelPreviewData, state: &ModelPreviewState) -> Ve
     state
         .selected_variant
         .and_then(|index| data.variants.get(index))
-        .map_or_else(|| vec![false; nodes.len()], |variant| muted_nodes(nodes, &variant.muted_nodes))
+        .map_or_else(
+            || vec![false; nodes.len()],
+            |variant| muted_nodes(nodes, &variant.muted_nodes),
+        )
 }
 
 /// Each node's world rotation, translation and scale, from the local
@@ -92,7 +102,13 @@ pub(in crate::app::model_preview) fn animation_skinning_rows(
     apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
     // `biped_postprocess_node_matrices` (X360 0x84B1A738): the IK set, then
     // the chains.
-    super::super::animation::ik::h4::apply_h4_ik_set(&pose.h4_ik_set, &data.preview.gen3.ik_markers, nodes, &inverse_binds, &mut matrices);
+    super::super::animation::ik::h4::apply_h4_ik_set(
+        &pose.h4_ik_set,
+        &data.preview.gen3.ik_markers,
+        nodes,
+        &inverse_binds,
+        &mut matrices,
+    );
     super::super::animation::ik::reach::apply_reach_ik(
         &pose.reach_ik,
         &data.preview.gen3.ik_markers,
@@ -220,8 +236,21 @@ pub(in crate::app::model_preview) fn armature_node_positions(
         if let Some(pose) = state.animation.pose.as_ref() {
             let frames = self::sampled_frames(&state.animation, pose.frames.len());
             let markers = &data.preview.gen3.ik_markers;
-            super::super::animation::ik::h4::apply_h4_ik_set(&pose.h4_ik_set, markers, nodes, &inverse_binds, &mut matrices);
-            super::super::animation::ik::reach::apply_reach_ik(&pose.reach_ik, markers, nodes, &inverse_binds, &mut matrices, frames);
+            super::super::animation::ik::h4::apply_h4_ik_set(
+                &pose.h4_ik_set,
+                markers,
+                nodes,
+                &inverse_binds,
+                &mut matrices,
+            );
+            super::super::animation::ik::reach::apply_reach_ik(
+                &pose.reach_ik,
+                markers,
+                nodes,
+                &inverse_binds,
+                &mut matrices,
+                frames,
+            );
         }
     }
     matrices.iter().map(Matrix4::translation).collect()

@@ -12,7 +12,10 @@ pub(crate) struct CeEffectLightDef {
     pub(super) falloff: i32,
 }
 
-pub(in crate::app::model_preview) fn read_effect_light(reader: &TagReader, path: &str) -> Option<CeEffectLightDef> {
+pub(in crate::app::model_preview) fn read_effect_light(
+    reader: &TagReader,
+    path: &str,
+) -> Option<CeEffectLightDef> {
     let mut light = read_light_tag(reader, path)?;
     let tag = reader.load(path, "light", b"ligh").ok()?;
     let root = tag.root();
@@ -28,13 +31,28 @@ pub(in crate::app::model_preview) fn read_effect_light(reader: &TagReader, path:
 impl CeEffectLightDef {
     /// `lights_preprocess_scene` for an unattached light `age` ticks old:
     /// none once past its duration.
-    pub(crate) fn at(&self, object: u8, node: usize, position: [f32; 3], forward: [f32; 3], age: u32, scale: f32) -> Option<CeLight> {
+    pub(crate) fn at(
+        &self,
+        object: u8,
+        node: usize,
+        position: [f32; 3],
+        forward: [f32; 3],
+        age: u32,
+        scale: f32,
+    ) -> Option<CeLight> {
         let age = age as f32;
         if age > self.duration {
             return None;
         }
         let value = (1.0 - transition_evaluate(self.falloff, age / self.duration)) * scale;
-        Some(CeLight { object, node, position, forward, fixed: Some(value), ..self.light.clone() })
+        Some(CeLight {
+            object,
+            node,
+            position,
+            forward,
+            fixed: Some(value),
+            ..self.light.clone()
+        })
     }
 
     pub(crate) fn alive(&self, age: u32) -> bool {

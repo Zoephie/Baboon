@@ -1,17 +1,14 @@
 //! Halo CE's shaders resolved to the textures and passes the preview draws.
 
-use super::super::super::*;
 use super::super::super::ce::shaders::{
-    ce_camo_pass, ce_model_passes, ce_transparent_passes,
-    read_ce_camo_settings,
+    ce_camo_pass, ce_model_passes, ce_transparent_passes, read_ce_camo_settings,
 };
-use super::super::super::dx9::passes::{CeNumeric, 
-    Dx9DrawPass, Dx9Layer,
-};
-use crate::core::h2_pixel_shader::SamplerKind;
-use std::sync::Arc;
-use std::collections::HashMap;
+use super::super::super::dx9::passes::{CeNumeric, Dx9DrawPass, Dx9Layer};
 use super::super::super::materials::*;
+use super::super::super::*;
+use crate::core::h2_pixel_shader::SamplerKind;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Halo CE model shading, as `ShaderModel()` in the kit's `fx/model_common.h`
 /// does it and `rasterizer_model_draw_{model,environment}_shader_pp` (CE
@@ -67,10 +64,14 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
     let mut textures = MaterialTextures::default();
     match &group {
         b"soso" => {
-            let map = [factor(root.read_real("map u-scale")), factor(root.read_real("map v-scale"))];
+            let map = [
+                factor(root.read_real("map u-scale")),
+                factor(root.read_real("map v-scale")),
+            ];
             let detail = factor(root.read_real("detail map scale"));
             let detail_v = factor(root.read_real("detail map v-scale"));
-            textures.slots[TextureSlot::Base as usize] = bind(root.read_tag_ref_path("base map"), map);
+            textures.slots[TextureSlot::Base as usize] =
+                bind(root.read_tag_ref_path("base map"), map);
             textures.slots[TextureSlot::Multipurpose as usize] =
                 bind(root.read_tag_ref_path("multipurpose map"), map);
             textures.slots[TextureSlot::Detail as usize] = bind(
@@ -91,7 +92,8 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
             }
         }
         b"senv" => {
-            textures.slots[TextureSlot::Base as usize] = bind(root.read_tag_ref_path("base map"), [1.0; 2]);
+            textures.slots[TextureSlot::Base as usize] =
+                bind(root.read_tag_ref_path("base map"), [1.0; 2]);
             textures.slots[TextureSlot::Detail as usize] = bind(
                 root.read_tag_ref_path("primary detail map"),
                 [factor(root.read_real("primary detail map scale")); 2],
@@ -122,7 +124,9 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
         ce_model_passes(reader, root, &group, &flags, &mut common, &mut bitmap);
     let transparent = ce_transparent_passes(reader, root, &group, &mut bitmap);
     if matches!(&group, b"soso" | b"senv") {
-        let settings = caches.ce_camo.get_or_insert_with(|| read_ce_camo_settings(reader));
+        let settings = caches
+            .ce_camo
+            .get_or_insert_with(|| read_ce_camo_settings(reader));
         if let Some(settings) = settings {
             let two_sided = flags.has("two-sided");
             textures.h2_layers[Dx9Layer::ActiveCamo as usize] =
@@ -160,12 +164,21 @@ fn expand_ce_digits(
             continue;
         };
         // `ce_image_index` wraps at the count, so this is the count itself.
-        let count = caches.ce_image_counts.get(&numeric.map).copied().unwrap_or_else(|| {
-            reader.load(&numeric.map, "bitmap", b"bitm")
-                .ok()
-                .and_then(|tag| blam_tags::bitmap::Bitmap::new(&tag).ok().map(|bitmap| bitmap.len()))
-                .unwrap_or(1)
-        });
+        let count = caches
+            .ce_image_counts
+            .get(&numeric.map)
+            .copied()
+            .unwrap_or_else(|| {
+                reader
+                    .load(&numeric.map, "bitmap", b"bitm")
+                    .ok()
+                    .and_then(|tag| {
+                        blam_tags::bitmap::Bitmap::new(&tag)
+                            .ok()
+                            .map(|bitmap| bitmap.len())
+                    })
+                    .unwrap_or(1)
+            });
         for digit in 0..count {
             let key = (numeric.map.clone(), SamplerKind::Texture2D, digit);
             let image = caches
@@ -179,7 +192,12 @@ fn expand_ce_digits(
             if let Some(first) = pass.textures.first_mut() {
                 first.image = image;
             }
-            pass.numeric = Some(CeNumeric { count, digit, place, ..numeric.clone() });
+            pass.numeric = Some(CeNumeric {
+                count,
+                digit,
+                place,
+                ..numeric.clone()
+            });
             expanded.push(pass);
         }
     }
@@ -212,9 +230,14 @@ fn ce_image_index(
         return 0;
     }
     let count = *counts.entry(path.to_owned()).or_insert_with(|| {
-        reader.load(path, "bitmap", b"bitm")
+        reader
+            .load(path, "bitmap", b"bitm")
             .ok()
-            .and_then(|tag| blam_tags::bitmap::Bitmap::new(&tag).ok().map(|bitmap| bitmap.len()))
+            .and_then(|tag| {
+                blam_tags::bitmap::Bitmap::new(&tag)
+                    .ok()
+                    .map(|bitmap| bitmap.len())
+            })
             .unwrap_or(1)
     });
     permutation % count.max(1)

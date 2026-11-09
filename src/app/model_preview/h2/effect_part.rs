@@ -1,10 +1,10 @@
 //! The effect parts Halo 2's lights and light volumes share: their timing and the lights they bring.
 
-use std::sync::Arc;
-use super::super::functions::FunctionValues;
 use super::super::effects::EffectTimes;
-use blam_tags::tag_function::h2::transition_evaluate;
+use super::super::functions::FunctionValues;
 use crate::app::model_preview::h2::lights::{H2Light, attachment_value};
+use blam_tags::tag_function::h2::transition_evaluate;
+use std::sync::Arc;
 
 /// A light an effect's event makes, `sub_8EBD10`: it stands from when its
 /// event begins. One with a `duration` dims by its falloff, `sub_8ED2A0`, and
@@ -20,7 +20,11 @@ pub(crate) struct H2EffectLight {
 
 impl H2EffectLight {
     pub(crate) fn new(times: Arc<EffectTimes>, event: usize, scaled: bool) -> Self {
-        Self { times, event, scaled }
+        Self {
+            times,
+            event,
+            scaled,
+        }
     }
 
     /// The scale `sub_8ED2A0` reads, or none while the light does not exist.
@@ -100,8 +104,16 @@ impl H2EffectPart {
         let secondary = attachment_value(&self.secondary_by, values);
         let [a, b] = self.scaled;
         let brightness = if a { on } else { 1.0 } * if b { secondary } else { 1.0 };
-        let fade = if duration > SHORTEST_FADING_EVENT { (1.0 - age).clamp(0.0, 1.0) } else { 1.0 };
-        Some(H2PartLight { brightness, fade, lasts: duration != 0.0 })
+        let fade = if duration > SHORTEST_FADING_EVENT {
+            (1.0 - age).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        Some(H2PartLight {
+            brightness,
+            fade,
+            lasts: duration != 0.0,
+        })
     }
 }
 
@@ -119,12 +131,28 @@ mod tests {
             scaled,
             secondary_by: "power".to_owned(),
         };
-        let values: FunctionValues = [("power".to_owned(), 0.5), ("on".to_owned(), 0.8)].into_iter().collect();
+        let values: FunctionValues = [("power".to_owned(), 0.5), ("on".to_owned(), 0.8)]
+            .into_iter()
+            .collect();
         let lit = |scaled, time| part(scaled).light("on", Some(&values), time, 0.0);
-        assert_eq!(lit([false; 2], 0.0), Some(H2PartLight { brightness: 1.0, fade: 1.0, lasts: true }));
-        assert_eq!(lit([true, false], 50.0).map(|lit| (lit.brightness, lit.fade)), Some((0.8, 0.5)));
+        assert_eq!(
+            lit([false; 2], 0.0),
+            Some(H2PartLight {
+                brightness: 1.0,
+                fade: 1.0,
+                lasts: true
+            })
+        );
+        assert_eq!(
+            lit([true, false], 50.0).map(|lit| (lit.brightness, lit.fade)),
+            Some((0.8, 0.5))
+        );
         assert_eq!(lit([true, true], 0.0).map(|lit| lit.brightness), Some(0.4));
         let off: FunctionValues = [("on".to_owned(), 0.0)].into_iter().collect();
-        assert_eq!(part([false; 2]).light("on", Some(&off), 0.0, 0.0), None, "its effect is off");
+        assert_eq!(
+            part([false; 2]).light("on", Some(&off), 0.0, 0.0),
+            None,
+            "its effect is off"
+        );
     }
 }

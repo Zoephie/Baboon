@@ -22,7 +22,9 @@ pub(super) fn resolve_ce_model_meshes(
 ) -> Result<CevModelMeshes, String> {
     // 1. Resolve the skeleton_model (node skeleton + markers + regions) through
     //    the container tag index — the same read the browser tree performs.
-    let skel = reader.source.read_container_tag_by_ref(u32::from_be_bytes(*b"skel"), skel_ref)
+    let skel = reader
+        .source
+        .read_container_tag_by_ref(u32::from_be_bytes(*b"skel"), skel_ref)
         .map_err(|e| e.to_string())?;
 
     // 2. This model's package key, as DA_MeshSynchronization imports it
@@ -165,7 +167,10 @@ pub(super) fn cev_mesh_parts(
 }
 
 /// Read + decode a `USkeletalMesh` by package path (`None` on any failure).
-pub(super) fn cev_read_skeletal_mesh(containers: &[MountedContainer], pkg: &str) -> Option<Arc<SkeletalMesh>> {
+pub(super) fn cev_read_skeletal_mesh(
+    containers: &[MountedContainer],
+    pkg: &str,
+) -> Option<Arc<SkeletalMesh>> {
     let (_, bytes) = cev_read_uasset_by_package(containers, pkg)?;
     let hdr =
         FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None)
@@ -200,7 +205,10 @@ pub(super) fn cev_read_static_mesh(
 }
 
 /// The default per-slot materials of a mesh package (its `MI_`/`M_` imports).
-pub(super) fn cev_read_default_materials(containers: &[MountedContainer], pkg: &str) -> Vec<String> {
+pub(super) fn cev_read_default_materials(
+    containers: &[MountedContainer],
+    pkg: &str,
+) -> Vec<String> {
     let Some((_, bytes)) = cev_read_uasset_by_package(containers, pkg) else {
         return Vec::new();
     };
@@ -250,9 +258,13 @@ fn cev_load_meshsync_regions(
         let Ok(bytes) = c.archive.read(&r.path) else {
             continue;
         };
-        let Ok(hdr) =
-            FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None)
-        else {
+        let Ok(hdr) = FZenPackageHeader::deserialize(
+            &mut Cursor::new(&bytes[..]),
+            None,
+            CEV_CV,
+            CEV_HV,
+            None,
+        ) else {
             continue;
         };
         // The mesh-sync component export, by class.

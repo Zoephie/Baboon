@@ -6,16 +6,16 @@ use super::lighting::h4_frame_values;
 use eframe::glow::{self, HasContext};
 
 use super::super::common::slots::GameSlots;
-use super::effects::gl::H4EffectCx;
+use super::super::frame::ModelGpuFrame;
+use super::super::gen3::effects::screen::Gen3ScreenSettings;
+use super::super::gen3::pipeline::gen3_set_cull;
+use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
-use super::super::gen3::effects::screen::Gen3ScreenSettings;
-use super::super::frame::ModelGpuFrame;
-use super::super::gen3::render::Gen3Cx;
-use super::super::gen3::pipeline::gen3_set_cull;
-use crate::app::model_preview::common::sprites::layered_distance;
-use super::holograms::{HologramPicture, draws_as_hologram};
 use super::camo::H4CamoDraw;
+use super::effects::gl::H4EffectCx;
+use super::holograms::{HologramPicture, draws_as_hologram};
+use crate::app::model_preview::common::sprites::layered_distance;
 
 /// Halo 4's hooks, and what it carries through a frame: the holograms and
 /// their picture, the camo and what it draws over, and the shadow mask.
@@ -32,7 +32,10 @@ pub(in crate::app::model_preview) struct H4Game {
     /// The colour grading lookup and the image it was uploaded from. Holding
     /// the image keeps its address from going to a later preview's, so a new
     /// load always uploads its own.
-    pub(super) grading: Option<(std::sync::Arc<super::super::common::image::Image>, glow::NativeTexture)>,
+    pub(super) grading: Option<(
+        std::sync::Arc<super::super::common::image::Image>,
+        glow::NativeTexture,
+    )>,
     /// The final composite's program.
     pub(super) composite_program: Option<glow::NativeProgram>,
     /// The corners the flare reflections draw from.
@@ -56,13 +59,22 @@ impl Gen3Game for H4Game {
     /// shadow and as camo, so nothing of it lands in the light; below full
     /// transparency its lit base does.
     fn split(&mut self, frame: &ModelGpuFrame, batches: &mut Vec<Gen3Batch>) {
-        let (holograms, rest): (Vec<_>, Vec<_>) =
-            batches.drain(..).partition(|(_, material)| draws_as_hologram(material));
+        let (holograms, rest): (Vec<_>, Vec<_>) = batches
+            .drain(..)
+            .partition(|(_, material)| draws_as_hologram(material));
         *batches = rest;
         self.holograms = holograms;
-        self.camo = frame.preview.h4.camo.as_ref().filter(|_| frame.active_camo).map(|camo| camo.draw(1.0, frame.time));
+        self.camo = frame
+            .preview
+            .h4
+            .camo
+            .as_ref()
+            .filter(|_| frame.active_camo)
+            .map(|camo| camo.draw(1.0, frame.time));
         self.camo_batches = match self.camo {
-            Some(draw) if !draw.has_base => batches.drain(..).chain(self.holograms.drain(..)).collect(),
+            Some(draw) if !draw.has_base => {
+                batches.drain(..).chain(self.holograms.drain(..)).collect()
+            }
             Some(_) => batches.clone(),
             None => Vec::new(),
         };
@@ -70,13 +82,20 @@ impl Gen3Game for H4Game {
 
     /// `RenderHolograms`' generate pass: after the albedo and its decals,
     /// before the lights.
-    unsafe fn after_albedo(&mut self, cx: &mut Gen3Cx<'_>, albedo: glow::NativeFramebuffer, size: [i32; 2]) {
+    unsafe fn after_albedo(
+        &mut self,
+        cx: &mut Gen3Cx<'_>,
+        albedo: glow::NativeFramebuffer,
+        size: [i32; 2],
+    ) {
         self.hologram = if self.holograms.is_empty() {
             None
         } else {
             unsafe {
                 let holograms = std::mem::take(&mut self.holograms);
-                let picture = self.generate_holograms(cx.core, cx.state, cx.gl, cx.frame, cx.slot, &holograms, albedo, size);
+                let picture = self.generate_holograms(
+                    cx.core, cx.state, cx.gl, cx.frame, cx.slot, &holograms, albedo, size,
+                );
                 self.holograms = holograms;
                 picture
             }
@@ -108,7 +127,11 @@ impl Gen3Game for H4Game {
         if let Some(mask) = self.mask.take() {
             state.shadow_mask = Some(mask);
             let floor = [0.0, super::shadow::DIRECT_FLOOR, 0.0, 0.0];
-            state.pass_values = Some([("ps_bsp_lightmap_scale_constants", floor)].into_iter().collect());
+            state.pass_values = Some(
+                [("ps_bsp_lightmap_scale_constants", floor)]
+                    .into_iter()
+                    .collect(),
+            );
         }
     }
 
@@ -128,8 +151,15 @@ impl Gen3Game for H4Game {
     /// `QueueHologramApply`: the holograms' composite is one more
     /// transparent, at their sphere.
     unsafe fn blended(&mut self, cx: &mut Gen3Cx<'_>, nearer_than: f32, size: [i32; 2]) {
-        if let Some(picture) = self.hologram.take_if(|picture| layered_distance(2, picture.distance) > nearer_than) {
-            unsafe { self.composite_holograms(cx.core, cx.state, cx.gl, cx.frame, cx.slot, &picture, size) }
+        if let Some(picture) = self
+            .hologram
+            .take_if(|picture| layered_distance(2, picture.distance) > nearer_than)
+        {
+            unsafe {
+                self.composite_holograms(
+                    cx.core, cx.state, cx.gl, cx.frame, cx.slot, &picture, size,
+                )
+            }
         }
     }
 
@@ -162,7 +192,15 @@ impl Gen3Game for H4Game {
                 self.bloom = super::bloom::H4Bloom::new(gl, core.black_flat, core.white_volume);
             }
             let settings = &super::bloom::VIEW_BLOOM;
-            self.bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size, grading.as_ref(), settings)
+            self.bloom.as_mut()?.build(
+                gl,
+                vertices,
+                framebuffer,
+                accumulation,
+                size,
+                grading.as_ref(),
+                settings,
+            )
         }
     }
 
@@ -192,10 +230,23 @@ impl Gen3Game for H4Game {
         let frame = cx.frame;
         let h4 = self.slots.of(cx.slot, cx.uploads);
         unsafe { h4.sync_effects(cx.gl, frame) };
-        if frame.preview.h4.tracers.iter().any(|tracer| tracer.trails()) {
+        if frame
+            .preview
+            .h4
+            .tracers
+            .iter()
+            .any(|tracer| tracer.trails())
+        {
             let values = |object: u8| frame.function_values_of_object(object).cloned();
             let tracers = &frame.preview.h4.tracers;
-            h4.trails.advance(tracers, values, cx.onsets, cx.bones, cx.view.eye, frame.time);
+            h4.trails.advance(
+                tracers,
+                values,
+                cx.onsets,
+                cx.bones,
+                cx.view.eye,
+                frame.time,
+            );
         }
     }
 
@@ -212,14 +263,23 @@ impl Gen3Game for H4Game {
                     let values = frame.function_values_of_object(at.object);
                     let onset = cx.onsets.of(at.object, at.scale_name(), values, frame.time);
                     let draw = if at.trails() {
-                        h4.trails.draw(index, at, values, bones, view.eye, frame.time, onset)
+                        h4.trails
+                            .draw(index, at, values, bones, view.eye, frame.time, onset)
                     } else {
                         at.draw(values, bones, view.eye, frame.time, onset)
                     };
                     if let Some(draw) = draw {
                         let material = &at.definition.material;
                         let effects = &mut h4.effects;
-                        let mut fx = H4EffectCx { gl, state: effects, frame, depth, size, placeholder, object: at.object };
+                        let mut fx = H4EffectCx {
+                            gl,
+                            state: effects,
+                            frame,
+                            depth,
+                            size,
+                            placeholder,
+                            object: at.object,
+                        };
                         super::effects::tracer_pass::draw_h4_tracer(&mut fx, material, &draw);
                         Some(true)
                     } else {
@@ -237,8 +297,18 @@ impl Gen3Game for H4Game {
                     match at.h4_draw(values, bones, view, frame.time, onset) {
                         Some(draw) => {
                             let effects = &mut h4.effects;
-                            let mut fx = H4EffectCx { gl, state: effects, frame, depth, size, placeholder, object: at.object };
-                            super::effects::light_volume_pass::draw_h4_light_volume(&mut fx, material, &draw);
+                            let mut fx = H4EffectCx {
+                                gl,
+                                state: effects,
+                                frame,
+                                depth,
+                                size,
+                                placeholder,
+                                object: at.object,
+                            };
+                            super::effects::light_volume_pass::draw_h4_light_volume(
+                                &mut fx, material, &draw,
+                            );
                             Some(true)
                         }
                         None => Some(false),
@@ -246,17 +316,33 @@ impl Gen3Game for H4Game {
                 }
                 Gen3Sprite::System(index) => {
                     let system = &frame.preview.particles[index];
-                    let Some(render) = system.look.h4.as_ref().and_then(|render| render.as_any().downcast_ref::<super::effects::particles::H4ParticleRender>()) else {
+                    let Some(render) = system.look.h4.as_ref().and_then(|render| {
+                        render
+                            .as_any()
+                            .downcast_ref::<super::effects::particles::H4ParticleRender>()
+                    }) else {
                         return false;
                     };
                     let values = frame.function_values_of_object(system.object);
-                    let onset = cx.onsets.of(system.object, system.scale_name(), values, frame.time);
-                    let draws = cx.particles.h4_draws(index, system, values, bones, view, frame.time, onset);
+                    let onset =
+                        cx.onsets
+                            .of(system.object, system.scale_name(), values, frame.time);
+                    let draws = cx
+                        .particles
+                        .h4_draws(index, system, values, bones, view, frame.time, onset);
                     if draws.is_empty() {
                         Some(false)
                     } else {
                         let effects = &mut h4.effects;
-                        let mut fx = H4EffectCx { gl, state: effects, frame, depth, size, placeholder, object: system.object };
+                        let mut fx = H4EffectCx {
+                            gl,
+                            state: effects,
+                            frame,
+                            depth,
+                            size,
+                            placeholder,
+                            object: system.object,
+                        };
                         super::effects::particle_pass::draw_h4_particles(&mut fx, render, &draws);
                         Some(true)
                     }
@@ -276,7 +362,12 @@ impl Gen3Game for H4Game {
     }
 
     #[cfg(test)]
-    fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
+    fn each_simulation(
+        &self,
+        slot: usize,
+        uploads: u64,
+        visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug),
+    ) {
         if let Some(h4) = self.slots.current(slot, uploads) {
             visit("h4_trails", &h4.trails);
         }

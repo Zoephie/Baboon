@@ -17,15 +17,17 @@ fn draw_event_effects(ui: &mut Ui, events: &[&str], key: u64, set: &mut Function
         return;
     }
     ui.add_space(6.0);
-    egui::CollapsingHeader::new("Effects").id_salt("object_event_effects").show(ui, |ui| {
-        for name in events {
-            if ui.small_button(format!("Play {name}")).clicked() {
-                set.insert((key, (*name).to_owned()), STARTING);
-                // It has to be seen off for a frame before it can come on.
-                ui.ctx().request_repaint();
+    egui::CollapsingHeader::new("Effects")
+        .id_salt("object_event_effects")
+        .show(ui, |ui| {
+            for name in events {
+                if ui.small_button(format!("Play {name}")).clicked() {
+                    set.insert((key, (*name).to_owned()), STARTING);
+                    // It has to be seen off for a frame before it can come on.
+                    ui.ctx().request_repaint();
+                }
             }
-        }
-    });
+        });
 }
 
 /// Sliders for what an object imports, and what its functions come to.
@@ -43,8 +45,9 @@ pub(in crate::app::model_preview) fn draw_function_controls(
             names.push(name);
         }
     }
-    let (events, names): (Vec<&str>, Vec<&str>) =
-        names.into_iter().partition(|name| super::super::effects::is_event_function(name));
+    let (events, names): (Vec<&str>, Vec<&str>) = names
+        .into_iter()
+        .partition(|name| super::super::effects::is_event_function(name));
     draw_event_effects(ui, &events, key, set);
     if names.is_empty() {
         return;
@@ -53,7 +56,10 @@ pub(in crate::app::model_preview) fn draw_function_controls(
     ui.horizontal(|ui| {
         ui.strong("Object Functions");
         let changed = set.keys().any(|(geometry, _)| *geometry == key);
-        if ui.add_enabled(changed, egui::Button::new("Reset")).clicked() {
+        if ui
+            .add_enabled(changed, egui::Button::new("Reset"))
+            .clicked()
+        {
             set.retain(|(geometry, _), _| *geometry != key);
         }
     });
@@ -67,7 +73,11 @@ pub(in crate::app::model_preview) fn draw_function_controls(
         let at_rest = functions.idle(name);
         let mut value = set.get(&(key, name.to_owned())).copied().unwrap_or(at_rest);
         let slider = egui::Slider::new(&mut value, 0.0..=1.0).text(name);
-        if ui.add_enabled(drawn(name), slider).on_disabled_hover_text(UNREAD).changed() {
+        if ui
+            .add_enabled(drawn(name), slider)
+            .on_disabled_hover_text(UNREAD)
+            .changed()
+        {
             set.insert((key, name.to_owned()), value);
         }
     }
@@ -85,7 +95,9 @@ pub(in crate::app::model_preview) fn draw_function_controls(
         ui.add_enabled_ui(drawn(export), |ui| {
             ui.horizontal(|ui| {
                 let mut scripted = set.contains_key(&held);
-                let toggle = ui.add(ThemedCheckbox::without_text(&mut scripted)).on_hover_text(SCRIPTED);
+                let toggle = ui
+                    .add(ThemedCheckbox::without_text(&mut scripted))
+                    .on_hover_text(SCRIPTED);
                 if toggle.changed() {
                     if scripted {
                         set.insert(held.clone(), computed);

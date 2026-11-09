@@ -8,12 +8,12 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::app::model_preview::load::{PreviewLoadSettings, load_model_preview};
+use crate::app::export::load_referenced_tag_from_source;
 use crate::app::model_preview::ModelPreviewData;
+use crate::app::model_preview::load::{PreviewLoadSettings, load_model_preview};
 use crate::core::format::TagNameIndex;
 use crate::core::game::GameId;
 use crate::core::source::{TagEntry, TagEntryLocation, TagSource};
-use crate::app::export::load_referenced_tag_from_source;
 
 /// The variable that names `game`'s editing kit's `tags` folder.
 fn kit_variable(game: GameId) -> &'static str {
@@ -32,7 +32,9 @@ fn kit_variable(game: GameId) -> &'static str {
 /// set) when its variable is unset, empty or not a folder, so the test skips.
 pub(in crate::app::model_preview) fn kit_root(game: GameId) -> Option<PathBuf> {
     let variable = kit_variable(game);
-    let root = std::env::var_os(variable).filter(|value| !value.is_empty()).map(PathBuf::from);
+    let root = std::env::var_os(variable)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
     match root {
         Some(root) if root.is_dir() => Some(root),
         _ => {
@@ -60,7 +62,14 @@ pub(in crate::app::model_preview) fn kit_preview(
     extension: &str,
     group: &[u8; 4],
 ) -> ModelPreviewData {
-    kit_preview_with(root, game, path, extension, group, &PreviewLoadSettings::default())
+    kit_preview_with(
+        root,
+        game,
+        path,
+        extension,
+        group,
+        &PreviewLoadSettings::default(),
+    )
 }
 
 /// [`kit_preview`] with the panel's load settings given.
@@ -78,7 +87,12 @@ pub(in crate::app::model_preview) fn kit_preview_with(
         game: Some(game),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
-    let TagSource::LooseFolder { definitions_root, .. } = &source else { unreachable!() };
+    let TagSource::LooseFolder {
+        definitions_root, ..
+    } = &source
+    else {
+        unreachable!()
+    };
     let names = TagNameIndex::load_game(definitions_root, game).unwrap();
     let tag = load_referenced_tag_from_source(&source, path, extension, group).unwrap();
     let key = format!("{path}.{extension}");

@@ -31,15 +31,24 @@ pub(super) fn read_collider(
     flagged: impl Fn(&str) -> bool,
     seeds: &mut SeedAllocator,
 ) -> Option<ParticleCollider> {
-    let movement = emitter.descend("particle movement").filter(|_| flagged("collide with structure"))?;
+    let movement = emitter
+        .descend("particle movement")
+        .filter(|_| flagged("collide with structure"))?;
     let friction = movement_parameter(reader, movement, "collider", 0, seeds)?;
-    Some(ParticleCollider { elasticity: movement_parameter(reader, movement, "collider", 1, seeds)?, friction })
+    Some(ParticleCollider {
+        elasticity: movement_parameter(reader, movement, "collider", 1, seeds)?,
+        friction,
+    })
 }
 
 /// A Halo 2 `particle_physics`' `collider` movement, its own or its
 /// template's, if it collides with structure: friction is parameter 0 and
 /// elasticity 1, as `sub_53DF20` reads them.
-pub(in crate::app::model_preview) fn read_collider_of(reader: &TagReader, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<ParticleCollider> {
+pub(in crate::app::model_preview) fn read_collider_of(
+    reader: &TagReader,
+    movement: TagStruct<'_>,
+    seeds: &mut SeedAllocator,
+) -> Option<ParticleCollider> {
     let template = movement
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
@@ -52,15 +61,26 @@ pub(in crate::app::model_preview) fn read_collider_of(reader: &TagReader, moveme
     if !collides(Some(movement)) && !collides(held) {
         return None;
     }
-    let movements = if own.is_empty() { held.map_or(Vec::new(), |root| elements(root, "movements")) } else { own };
-    let entry = movements.into_iter().find(|entry| entry.read_enum_option("type").as_deref() == Some("collider"))?;
+    let movements = if own.is_empty() {
+        held.map_or(Vec::new(), |root| elements(root, "movements"))
+    } else {
+        own
+    };
+    let entry = movements
+        .into_iter()
+        .find(|entry| entry.read_enum_option("type").as_deref() == Some("collider"))?;
     let mut by_id = |id: i128| {
         let parameters = elements(entry, "parameters");
-        let found = parameters.into_iter().find(|parameter| parameter.read_int_any("parameter id") == Some(id))?;
+        let found = parameters
+            .into_iter()
+            .find(|parameter| parameter.read_int_any("parameter id") == Some(id))?;
         ParticleProperty::named(found, "property", seeds)
     };
     let friction = by_id(0)?;
-    Some(ParticleCollider { elasticity: by_id(1)?, friction })
+    Some(ParticleCollider {
+        elasticity: by_id(1)?,
+        friction,
+    })
 }
 
 /// What a particle does to itself where its step crosses the ground, which
@@ -82,9 +102,13 @@ pub(super) fn bounce(
     let share = before / (before - after) * dt;
     let keep = 1.0 - friction;
     let into = dot(velocity, up);
-    let place = std::array::from_fn(|axis| position[axis] + velocity[axis] * share + up[axis] * PUSH_OUT);
+    let place =
+        std::array::from_fn(|axis| position[axis] + velocity[axis] * share + up[axis] * PUSH_OUT);
     let along: [f32; 3] = std::array::from_fn(|axis| velocity[axis] - up[axis] * into);
-    Some((place, std::array::from_fn(|axis| keep * along[axis] - elasticity * up[axis] * into)))
+    Some((
+        place,
+        std::array::from_fn(|axis| keep * along[axis] - elasticity * up[axis] * into),
+    ))
 }
 
 /// `update_particles_collider`'s `push_out_distance`.
@@ -97,7 +121,9 @@ pub(super) fn read_flock(
     flagged: impl Fn(&str) -> bool,
     seeds: &mut SeedAllocator,
 ) -> Option<ParticleFlock> {
-    let movement = emitter.descend("particle movement").filter(|_| flagged("swarm"))?;
+    let movement = emitter
+        .descend("particle movement")
+        .filter(|_| flagged("swarm"))?;
     let mut by_id = |id: i128| movement_parameter(reader, movement, "swarm", id, seeds);
     Some(ParticleFlock {
         separation_distance: by_id(0)?,
@@ -123,9 +149,22 @@ impl ParticleCollider {
         dt: f32,
     ) {
         for particle in particles.iter_mut().filter(|particle| !particle.resting) {
-            let state = ParticleState { age: particle.age, seeds: particle.seeds, rotation: particle.rotation, ..state };
-            let (elasticity, friction) = (self.elasticity.scalar(&state), self.friction.scalar(&state));
-            match bounce(particle.position, particle.velocity, plane, dt, elasticity, friction) {
+            let state = ParticleState {
+                age: particle.age,
+                seeds: particle.seeds,
+                rotation: particle.rotation,
+                ..state
+            };
+            let (elasticity, friction) =
+                (self.elasticity.scalar(&state), self.friction.scalar(&state));
+            match bounce(
+                particle.position,
+                particle.velocity,
+                plane,
+                dt,
+                elasticity,
+                friction,
+            ) {
                 Some((place, velocity)) => {
                     particle.position = place;
                     particle.velocity = velocity;
@@ -150,7 +189,9 @@ impl ParticlePhysics {
     /// friction and rotational friction, once for the emitter at its system's
     /// states.
     pub(super) fn on_card(&self, state: &ParticleState) -> [f32; 3] {
-        let read = |property: &Option<ParticleProperty>| property.as_ref().map(|property| property.scalar(state));
+        let read = |property: &Option<ParticleProperty>| {
+            property.as_ref().map(|property| property.scalar(state))
+        };
         [
             read(&self.gravity).unwrap_or(1.0) * GRAVITY,
             read(&self.air_friction).unwrap_or(1.0),
@@ -169,7 +210,9 @@ impl ParticlePhysics {
                 rotation: particle.rotation,
                 ..state
             };
-            let read = |property: &Option<ParticleProperty>| property.as_ref().map(|property| property.scalar(&state));
+            let read = |property: &Option<ParticleProperty>| {
+                property.as_ref().map(|property| property.scalar(&state))
+            };
             particle.velocity[2] -= read(&self.gravity).unwrap_or(1.0) * GRAVITY * dt;
             let air = (read(&self.air_friction).unwrap_or(1.0) * dt).clamp(0.0, 1.0);
             particle.velocity = particle.velocity.map(|axis| axis - air * axis);
@@ -183,11 +226,29 @@ impl ParticleFlock {
     /// `update_particles_flocking`, over the processor's particles: those
     /// moved to the card are off its list. Avoidance is of a world the
     /// preview lacks.
-    pub(super) fn update(&self, particles: &mut [Particle], base: ParticleState, home: [f32; 3], dt: f32) {
-        let on_processor = |particle: &Particle| (!particle.on_card).then_some((particle.position, particle.velocity));
-        let places: Vec<Option<([f32; 3], [f32; 3])>> = particles.iter().map(on_processor).collect();
-        for (at, particle) in particles.iter_mut().enumerate().filter(|(_, particle)| !particle.on_card) {
-            let state = ParticleState { age: particle.age, seeds: particle.seeds, rotation: particle.rotation, ..base };
+    pub(super) fn update(
+        &self,
+        particles: &mut [Particle],
+        base: ParticleState,
+        home: [f32; 3],
+        dt: f32,
+    ) {
+        let on_processor = |particle: &Particle| {
+            (!particle.on_card).then_some((particle.position, particle.velocity))
+        };
+        let places: Vec<Option<([f32; 3], [f32; 3])>> =
+            particles.iter().map(on_processor).collect();
+        for (at, particle) in particles
+            .iter_mut()
+            .enumerate()
+            .filter(|(_, particle)| !particle.on_card)
+        {
+            let state = ParticleState {
+                age: particle.age,
+                seeds: particle.seeds,
+                rotation: particle.rotation,
+                ..base
+            };
             let distance_to = |other: &([f32; 3], [f32; 3])| {
                 let delta = minus(other.0, particle.position);
                 dot(delta, delta)
@@ -196,12 +257,14 @@ impl ParticleFlock {
             let neighbors = others.filter_map(|(_, neighbor)| neighbor.as_ref());
             let neighbor = neighbors.min_by(|a, b| distance_to(a).total_cmp(&distance_to(b)));
             let mut force = [0.0; 3];
-            let mut add = |amount: [f32; 3]| force = std::array::from_fn(|axis| force[axis] + amount[axis]);
+            let mut add =
+                |amount: [f32; 3]| force = std::array::from_fn(|axis| force[axis] + amount[axis]);
             if let Some((place, velocity)) = neighbor {
                 let weight = self.separation_weight.scalar(&state);
                 if weight != 0.0 {
                     let toward = minus(*place, particle.position);
-                    let ratio = dot(toward, toward).sqrt() / self.separation_distance.scalar(&state).max(0.1);
+                    let ratio = dot(toward, toward).sqrt()
+                        / self.separation_distance.scalar(&state).max(0.1);
                     let scale = if ratio < 1.0 { -ratio * weight } else { weight };
                     add(clamped_unit(toward).map(|axis| axis * scale));
                 }
@@ -212,7 +275,8 @@ impl ParticleFlock {
             let reach = self.cohesion_distance.scalar(&state);
             if reach > 0.0 {
                 let toward = minus(home, particle.position);
-                let weight = self.cohesion_weight.scalar(&state) * dot(toward, toward).sqrt() / reach;
+                let weight =
+                    self.cohesion_weight.scalar(&state) * dot(toward, toward).sqrt() / reach;
                 add(clamped_unit(toward).map(|axis| axis * weight));
             }
             let mut change = force.map(|axis| axis * dt);
@@ -223,7 +287,10 @@ impl ParticleFlock {
             let eased: [f32; 3] = std::array::from_fn(|axis| {
                 (particle.velocity[axis] + change[axis]) * 0.25 + particle.velocity[axis] * 0.75
             });
-            let (low, high) = (self.minimum_velocity.scalar(&state), self.maximum_velocity.scalar(&state));
+            let (low, high) = (
+                self.minimum_velocity.scalar(&state),
+                self.maximum_velocity.scalar(&state),
+            );
             let speed = dot(eased, eased).sqrt();
             particle.velocity = if speed > high {
                 clamped_unit(eased).map(|axis| axis * high)
@@ -274,12 +341,21 @@ pub(super) fn read_turbulence(
     flagged: impl Fn(&str) -> bool,
     seeds: &mut SeedAllocator,
 ) -> Option<ParticleTurbulence> {
-    let movement = emitter.descend("particle movement").filter(|_| flagged("turbulence"))?;
-    let mut parameter = |id: i128, default: f32| movement_parameter_or(reader, movement, "turbulence", id, default, seeds);
+    let movement = emitter
+        .descend("particle movement")
+        .filter(|_| flagged("turbulence"))?;
+    let mut parameter = |id: i128, default: f32| {
+        movement_parameter_or(reader, movement, "turbulence", id, default, seeds)
+    };
     let strength = parameter(0, 1.0)?;
     let defaults = [(1, 0.0), (2, 0.0), (3, 1.0), (4, 0.3)];
-    let [u_offset, v_offset, u_scale, v_scale] = defaults.map(|(id, default)| parameter(id, default));
-    let named = |holder: TagStruct<'_>| holder.read_tag_ref_path("turbulence texture").filter(|path| !path.is_empty());
+    let [u_offset, v_offset, u_scale, v_scale] =
+        defaults.map(|(id, default)| parameter(id, default));
+    let named = |holder: TagStruct<'_>| {
+        holder
+            .read_tag_ref_path("turbulence texture")
+            .filter(|path| !path.is_empty())
+    };
     let template = movement
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
@@ -291,7 +367,11 @@ pub(super) fn read_turbulence(
         Image::Flat(image) if image.whole() && image.width > 0 && image.height > 0 => image,
         _ => return None,
     };
-    Some(ParticleTurbulence { strength, xform: [u_scale?, v_scale?, u_offset?, v_offset?], image })
+    Some(ParticleTurbulence {
+        strength,
+        xform: [u_scale?, v_scale?, u_offset?, v_offset?],
+        image,
+    })
 }
 
 impl ParticleTurbulence {
@@ -302,7 +382,12 @@ impl ParticleTurbulence {
 
 /// `particle_update.hlsl`'s push: the texel at `(birth time, seed 5) · xform.xy
 /// + xform.zw`, less a half, times `scale` (the strength over the frame).
-pub(super) fn turbulence_push(image: &TextureImage, xform: [f32; 4], [birth, seed]: [f32; 2], scale: f32) -> [f32; 3] {
+pub(super) fn turbulence_push(
+    image: &TextureImage,
+    xform: [f32; 4],
+    [birth, seed]: [f32; 2],
+    scale: f32,
+) -> [f32; 3] {
     let uv = [birth * xform[0] + xform[2], seed * xform[1] + xform[3]];
     sample_wrapped(image, uv).map(|channel| (channel - 0.5) * scale)
 }
@@ -320,7 +405,12 @@ pub(super) fn sample_wrapped(image: &TextureImage, [u, v]: [f32; 2]) -> [f32; 3]
         std::array::from_fn(|channel| image.rgba[at + channel] as f32 / 255.0)
     };
     let (left, top) = (left as i64, top as i64);
-    let [a, b, c, d] = [texel(left, top), texel(left + 1, top), texel(left, top + 1), texel(left + 1, top + 1)];
+    let [a, b, c, d] = [
+        texel(left, top),
+        texel(left + 1, top),
+        texel(left, top + 1),
+        texel(left + 1, top + 1),
+    ];
     std::array::from_fn(|channel| {
         let upper = a[channel] + (b[channel] - a[channel]) * across;
         let lower = c[channel] + (d[channel] - c[channel]) * across;

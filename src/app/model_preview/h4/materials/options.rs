@@ -65,21 +65,34 @@ pub(super) fn h4_address(address: u8) -> BitmapAddressMode {
 }
 
 /// Whether a bitmap tag exists, and whether its first image is a cube.
-pub(super) fn bitmap_kind(reader: &TagReader, path: &str, caches: &mut ResolveCaches) -> Option<bool> {
+pub(super) fn bitmap_kind(
+    reader: &TagReader,
+    path: &str,
+    caches: &mut ResolveCaches,
+) -> Option<bool> {
     if let Some(known) = caches.h4_bitmap_kinds.get(path) {
         return *known;
     }
     let found = reader.load(path, "bitmap", b"bitm").ok().map(|tag| {
-        elements(tag.root(), "bitmaps*").first().and_then(|image| image.field("type")).is_some_and(|kind| kind.enum_is("cube map"))
+        elements(tag.root(), "bitmaps*")
+            .first()
+            .and_then(|image| image.field("type"))
+            .is_some_and(|kind| kind.enum_is("cube map"))
     });
     caches.h4_bitmap_kinds.insert(path.to_owned(), found);
     found
 }
 
 pub(super) fn read_shader(reader: &TagReader, path: &str) -> Result<H4Shader, String> {
-    let tag = reader.load(path, "material_shader", b"mats").map_err(|error| error.to_string())?;
+    let tag = reader
+        .load(path, "material_shader", b"mats")
+        .map_err(|error| error.to_string())?;
     let program = H4ShaderSource::read(reader, path)?.program(&H4_DEFINES)?;
-    Ok(H4Shader { shader: MaterialShader::from_tag(&tag), program, passes: HashMap::new() })
+    Ok(H4Shader {
+        shader: MaterialShader::from_tag(&tag),
+        program,
+        passes: HashMap::new(),
+    })
 }
 
 impl H4Shader {
@@ -89,7 +102,11 @@ impl H4Shader {
         self.passes
             .entry(technique)
             .or_insert_with(|| {
-                if !program.techniques.iter().any(|candidate| &*candidate.name == technique) {
+                if !program
+                    .techniques
+                    .iter()
+                    .any(|candidate| &*candidate.name == technique)
+                {
                     return None;
                 }
                 let vertex = translate_pass(program, technique, "skinned", Stage::Vertex).ok()?;
@@ -97,15 +114,19 @@ impl H4Shader {
                 // depth alone; the textured override clips in its own.
                 let pixel = match translate_pass(program, technique, "_default", Stage::Pixel) {
                     Ok(pixel) => pixel,
-                    Err(_) if technique == "shadow_generate" => crate::core::hlsl::emit::Translated {
-                        source: "#version 410 core\nvoid main() {}\n".to_owned(),
-                        uniforms: Vec::new(),
-                        textures: Vec::new(),
-                        attributes: Vec::new(),
-                    },
+                    Err(_) if technique == "shadow_generate" => {
+                        crate::core::hlsl::emit::Translated {
+                            source: "#version 410 core\nvoid main() {}\n".to_owned(),
+                            uniforms: Vec::new(),
+                            textures: Vec::new(),
+                            attributes: Vec::new(),
+                        }
+                    }
                     Err(_) => return None,
                 };
-                Some(Arc::new(super::super::super::gen3::shaders::pass_of(vertex, pixel)))
+                Some(Arc::new(super::super::super::gen3::shaders::pass_of(
+                    vertex, pixel,
+                )))
             })
             .clone()
     }

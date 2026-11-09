@@ -8,7 +8,9 @@ use super::*;
 /// the line-list vertices and the index where the axis vertices begin —
 /// minor lines first, then two vertices of the X axis, then two of the Y
 /// axis — so the axes can draw in their own colors.
-pub(super) fn grid_line_vertices(preview: &RenderModelPreview) -> (Vec<RenderModelPreviewVertex>, usize) {
+pub(super) fn grid_line_vertices(
+    preview: &RenderModelPreview,
+) -> (Vec<RenderModelPreviewVertex>, usize) {
     let (bounds_center, radius) = preview_center_radius(preview);
     // One Halo world unit is ten feet; a biped is a third of one. Fine
     // spacing for hand-held things, world units for vehicles, and coarser
@@ -67,7 +69,11 @@ pub(super) fn background_is_dark(background: [f32; 3]) -> bool {
 /// Minor grid lines: a step off the background, toward the contrast.
 pub(super) fn grid_line_color(background: [f32; 3]) -> [f32; 3] {
     const STEP: f32 = 0.11;
-    let step = if background_is_dark(background) { STEP } else { -STEP };
+    let step = if background_is_dark(background) {
+        STEP
+    } else {
+        -STEP
+    };
     background.map(|channel| (channel + step).clamp(0.0, 1.0))
 }
 

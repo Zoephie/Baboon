@@ -1,8 +1,8 @@
 //! The picture finished: distortion, the suck and vision effects, and the composite.
 
-use crate::app::model_preview::gl::blit::empty_vertex_array;
-use crate::app::model_preview::gl::blit::blit_depth;
 use super::*;
+use crate::app::model_preview::gl::blit::blit_depth;
+use crate::app::model_preview::gl::blit::empty_vertex_array;
 
 const DISTORTION_FRAGMENT: &str = include_str!("shaders/distortion.frag");
 
@@ -28,14 +28,29 @@ pub(in crate::app::model_preview) struct PictureCopies {
 impl PictureCopies {
     /// The picture into `behind`. A shader reads the picture through
     /// texcoords that run top down, so it is turned over unless `upright`.
-    pub(in crate::app::model_preview) unsafe fn screen_copy(&self, gl: &glow::Context, upright: bool) {
+    pub(in crate::app::model_preview) unsafe fn screen_copy(
+        &self,
+        gl: &glow::Context,
+        upright: bool,
+    ) {
         let size = self.size;
         unsafe {
             gl.disable(glow::FRAMEBUFFER_SRGB);
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(self.picture_framebuffer));
             gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(self.behind_framebuffer));
             let (top, bottom) = if upright { (0, size[1]) } else { (size[1], 0) };
-            gl.blit_framebuffer(0, 0, size[0], size[1], 0, top, size[0], bottom, glow::COLOR_BUFFER_BIT, glow::NEAREST);
+            gl.blit_framebuffer(
+                0,
+                0,
+                size[0],
+                size[1],
+                0,
+                top,
+                size[0],
+                bottom,
+                glow::COLOR_BUFFER_BIT,
+                glow::NEAREST,
+            );
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.picture_framebuffer));
             gl.enable(glow::FRAMEBUFFER_SRGB);
         }
@@ -44,7 +59,12 @@ impl PictureCopies {
     /// The scene's depth and stencil into `depth_copy`.
     pub(in crate::app::model_preview) unsafe fn copy_depth(&self, gl: &glow::Context) {
         unsafe {
-            blit_depth(gl, self.accumulation_framebuffer, self.depth_copy_framebuffer, self.size);
+            blit_depth(
+                gl,
+                self.accumulation_framebuffer,
+                self.depth_copy_framebuffer,
+                self.size,
+            );
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.picture_framebuffer));
         }
     }
@@ -63,13 +83,25 @@ impl Gen3State {
             if self.distortion_program.is_none() {
                 self.distortion_program = screen_program(gl, DISTORTION_FRAGMENT);
             }
-            let (Some(program), Some(targets)) = (self.distortion_program, self.targets.as_ref()) else {
+            let (Some(program), Some(targets)) = (self.distortion_program, self.targets.as_ref())
+            else {
                 return;
             };
             let [width, height] = size;
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(accumulation_target));
             gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.scene_copy_framebuffer));
-            gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, glow::COLOR_BUFFER_BIT, glow::NEAREST);
+            gl.blit_framebuffer(
+                0,
+                0,
+                width,
+                height,
+                0,
+                0,
+                width,
+                height,
+                glow::COLOR_BUFFER_BIT,
+                glow::NEAREST,
+            );
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_target));
             gl.use_program(Some(program));
             gl.active_texture(glow::TEXTURE0);
@@ -104,7 +136,9 @@ impl Gen3State {
         shaders: &[gen3::effects::screen::Gen3ScreenShader],
     ) {
         let blur = screen.blur();
-        if !shaders.iter().any(gen3::effects::screen::Gen3ScreenShader::at_frame_end)
+        if !shaders
+            .iter()
+            .any(gen3::effects::screen::Gen3ScreenShader::at_frame_end)
             && blur.is_none()
             && !game.picture_effects(frame, screen)
         {
@@ -113,16 +147,33 @@ impl Gen3State {
         let Some(targets) = self.targets.as_ref() else {
             return;
         };
-        let (behind, picture_framebuffer, behind_framebuffer) =
-            (targets.behind, targets.picture_framebuffer, targets.behind_framebuffer);
-        let (accumulation_framebuffer, depth_copy, depth_copy_framebuffer) =
-            (targets.accumulation_framebuffer, targets.depth_copy, targets.depth_copy_framebuffer);
+        let (behind, picture_framebuffer, behind_framebuffer) = (
+            targets.behind,
+            targets.picture_framebuffer,
+            targets.behind_framebuffer,
+        );
+        let (accumulation_framebuffer, depth_copy, depth_copy_framebuffer) = (
+            targets.accumulation_framebuffer,
+            targets.depth_copy,
+            targets.depth_copy_framebuffer,
+        );
         unsafe {
             // Raw bytes across, so what was encoded reads back as light.
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(framebuffer));
             gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(picture_framebuffer));
             gl.disable(glow::FRAMEBUFFER_SRGB);
-            gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], glow::COLOR_BUFFER_BIT, glow::NEAREST);
+            gl.blit_framebuffer(
+                0,
+                0,
+                size[0],
+                size[1],
+                0,
+                0,
+                size[0],
+                size[1],
+                glow::COLOR_BUFFER_BIT,
+                glow::NEAREST,
+            );
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(picture_framebuffer));
             gl.enable(glow::FRAMEBUFFER_SRGB);
             gl.disable(glow::DEPTH_TEST);
@@ -139,23 +190,40 @@ impl Gen3State {
                 depth_copy,
                 depth_copy_framebuffer,
             };
-            game.before_screen_shaders(&mut Gen3Cx { gl, frame, core, slot, state: self }, screen, &copies);
+            game.before_screen_shaders(
+                &mut Gen3Cx {
+                    gl,
+                    frame,
+                    core,
+                    slot,
+                    state: self,
+                },
+                screen,
+                &copies,
+            );
             for shader in shaders.iter().filter(|shader| shader.at_frame_end()) {
                 let screen = u32::from_be_bytes(*b"rmss");
-                let found = frame
-                    .preview
-                    .materials
-                    .iter()
-                    .position(|material| material.shader_group == screen && material.shader_path == shader.path);
+                let found = frame.preview.materials.iter().position(|material| {
+                    material.shader_group == screen && material.shader_path == shader.path
+                });
                 let textures = frame.textures.as_ref();
-                let material = found.and_then(|at| textures?.get(at)?.h3.as_ref().map(|material| (at, material)));
+                let material = found.and_then(|at| {
+                    textures?
+                        .get(at)?
+                        .h3
+                        .as_ref()
+                        .map(|material| (at, material))
+                });
                 let Some((at, material)) = material else {
                     continue;
                 };
                 copies.screen_copy(gl, false);
                 gen3_set_blend(gl, material.blend);
                 self.screen_alpha = Some(shader.alpha);
-                let batch = RenderModelPreviewBatch { material_index: at as u16, ..Default::default() };
+                let batch = RenderModelPreviewBatch {
+                    material_index: at as u16,
+                    ..Default::default()
+                };
                 self.draw_pass(core, gl, frame, slot, &batch, material, &material.lit, None);
                 self.screen_alpha = None;
             }
@@ -169,7 +237,10 @@ impl Gen3State {
                     gl.active_texture(glow::TEXTURE0);
                     gl.bind_texture(glow::TEXTURE_2D, Some(behind));
                     gl.uniform_1_i32(gl.get_uniform_location(program, "picture").as_ref(), 0);
-                    gl.uniform_2_f32_slice(gl.get_uniform_location(program, "spread").as_ref(), &spread);
+                    gl.uniform_2_f32_slice(
+                        gl.get_uniform_location(program, "spread").as_ref(),
+                        &spread,
+                    );
                     gl.uniform_1_f32(gl.get_uniform_location(program, "cover").as_ref(), cover);
                     gl.enable(glow::BLEND);
                     gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
@@ -178,19 +249,41 @@ impl Gen3State {
                 }
             }
             gl.disable(glow::FRAMEBUFFER_SRGB);
-            game.after_blur(&mut Gen3Cx { gl, frame, core, slot, state: self }, screen, &copies);
+            game.after_blur(
+                &mut Gen3Cx {
+                    gl,
+                    frame,
+                    core,
+                    slot,
+                    state: self,
+                },
+                screen,
+                &copies,
+            );
             gl.color_mask(true, true, true, true);
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(picture_framebuffer));
             gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(framebuffer));
-            gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], glow::COLOR_BUFFER_BIT, glow::NEAREST);
+            gl.blit_framebuffer(
+                0,
+                0,
+                size[0],
+                size[1],
+                0,
+                0,
+                size[0],
+                size[1],
+                glow::COLOR_BUFFER_BIT,
+                glow::NEAREST,
+            );
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             gl.enable(glow::DEPTH_TEST);
         }
     }
 
-    pub(in crate::app::model_preview) unsafe fn empty_array(&mut self, gl: &glow::Context) -> glow::NativeVertexArray {
-        unsafe {
-            empty_vertex_array(gl, &mut self.empty_vertex_array)
-        }
+    pub(in crate::app::model_preview) unsafe fn empty_array(
+        &mut self,
+        gl: &glow::Context,
+    ) -> glow::NativeVertexArray {
+        unsafe { empty_vertex_array(gl, &mut self.empty_vertex_array) }
     }
 }

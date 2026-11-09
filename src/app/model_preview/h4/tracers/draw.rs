@@ -20,7 +20,6 @@ impl H4TracerAt {
         &self.scale_by
     }
 
-
     pub(crate) fn sort_layer(&self) -> i32 {
         self.definition.sort_layer
     }

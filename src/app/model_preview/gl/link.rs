@@ -90,20 +90,64 @@ mod gl_tests {
             (1..=32u32)
                 .filter(|name| unsafe {
                     let name = std::num::NonZeroU32::new(*name).unwrap();
-                    gl.is_shader(glow::NativeShader(name)) || gl.is_program(glow::NativeProgram(name))
+                    gl.is_shader(glow::NativeShader(name))
+                        || gl.is_program(glow::NativeProgram(name))
                 })
                 .collect()
         };
         unsafe {
-            let program = link(&gl, &[(glow::VERTEX_SHADER, VERTEX), (glow::FRAGMENT_SHADER, FRAGMENT)], &[(0, "a")]).unwrap();
+            let program = link(
+                &gl,
+                &[
+                    (glow::VERTEX_SHADER, VERTEX),
+                    (glow::FRAGMENT_SHADER, FRAGMENT),
+                ],
+                &[(0, "a")],
+            )
+            .unwrap();
             assert_eq!(gl.get_attrib_location(program, "a"), Some(0));
-            assert_eq!(held(&gl), [program.0.get()], "the stages are gone once linked");
+            assert_eq!(
+                held(&gl),
+                [program.0.get()],
+                "the stages are gone once linked"
+            );
             gl.delete_program(program);
-            let broken = link(&gl, &[(glow::VERTEX_SHADER, VERTEX), (glow::FRAGMENT_SHADER, "#version 410\nvoid main() { nonsense }\n")], &[]);
-            assert!(broken.as_ref().is_err_and(|error| error.starts_with("fragment shader failed to compile")), "{broken:?}");
-            let unlinked = link(&gl, &[(glow::VERTEX_SHADER, VERTEX), (glow::FRAGMENT_SHADER, UNMATCHED)], &[]);
-            assert!(unlinked.as_ref().is_err_and(|error| error.starts_with("failed to link")), "{unlinked:?}");
-            assert_eq!(held(&gl), Vec::<u32>::new(), "nothing made on the way is still held");
+            let broken = link(
+                &gl,
+                &[
+                    (glow::VERTEX_SHADER, VERTEX),
+                    (
+                        glow::FRAGMENT_SHADER,
+                        "#version 410\nvoid main() { nonsense }\n",
+                    ),
+                ],
+                &[],
+            );
+            assert!(
+                broken
+                    .as_ref()
+                    .is_err_and(|error| error.starts_with("fragment shader failed to compile")),
+                "{broken:?}"
+            );
+            let unlinked = link(
+                &gl,
+                &[
+                    (glow::VERTEX_SHADER, VERTEX),
+                    (glow::FRAGMENT_SHADER, UNMATCHED),
+                ],
+                &[],
+            );
+            assert!(
+                unlinked
+                    .as_ref()
+                    .is_err_and(|error| error.starts_with("failed to link")),
+                "{unlinked:?}"
+            );
+            assert_eq!(
+                held(&gl),
+                Vec::<u32>::new(),
+                "nothing made on the way is still held"
+            );
         }
     }
 }

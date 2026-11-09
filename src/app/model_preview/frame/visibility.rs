@@ -3,13 +3,22 @@
 use super::*;
 
 /// Leave out what only a shield draws, once the materials are known.
-pub(in crate::app::model_preview) fn without_shield_parts(visible: &mut Vec<usize>, preview: &RenderModelPreview, textures: Option<&[MaterialTextures]>) {
+pub(in crate::app::model_preview) fn without_shield_parts(
+    visible: &mut Vec<usize>,
+    preview: &RenderModelPreview,
+    textures: Option<&[MaterialTextures]>,
+) {
     let Some(textures) = textures else {
         return;
     };
     visible.retain(|&batch| {
-        let material = preview.batches.get(batch).map_or(0, |batch| batch.material_index as usize);
-        !textures.get(material).is_some_and(|texture| texture.shield_only)
+        let material = preview
+            .batches
+            .get(batch)
+            .map_or(0, |batch| batch.material_index as usize);
+        !textures
+            .get(material)
+            .is_some_and(|texture| texture.shield_only)
     });
 }
 
@@ -42,7 +51,9 @@ pub(in crate::app::model_preview) fn visible_batch_indices(
             }
             if let Some(instance) = preview.instances.batches.get(&index) {
                 // A mask holds 128 placements; one past them is never chosen.
-                let chosen = u32::try_from(*instance).ok().and_then(|shift| instances.checked_shr(shift));
+                let chosen = u32::try_from(*instance)
+                    .ok()
+                    .and_then(|shift| instances.checked_shr(shift));
                 return (chosen.unwrap_or(0) & 1 != 0).then_some(index);
             }
             let selection = state.region_selections.get(&batch.region_name)?;
@@ -66,20 +77,33 @@ pub(in crate::app::model_preview) fn visible_batch_indices(
 /// allow of what the variant's instance group chose.
 fn visible_instances(preview: &RenderModelPreview, state: &ModelPreviewState) -> u128 {
     let instances = &preview.instances;
-    let chosen = state.selected_variant.and_then(|variant| instances.variants.get(variant));
-    let allowed = state.region_selections.iter().filter(|(_, selection)| selection.enabled);
+    let chosen = state
+        .selected_variant
+        .and_then(|variant| instances.variants.get(variant));
+    let allowed = state
+        .region_selections
+        .iter()
+        .filter(|(_, selection)| selection.enabled);
     let allowed = allowed.filter_map(|(region, selection)| {
-        instances.masks.get(&(region.clone(), selection.permutation.clone()))
+        instances
+            .masks
+            .get(&(region.clone(), selection.permutation.clone()))
     });
     chosen.copied().unwrap_or(0) & allowed.fold(0, |mask, permutation| mask | permutation)
 }
 
-pub(in crate::app::model_preview) fn marker_active(only: &(String, String), selections: &HashMap<String, ModelRegionSelection>) -> bool {
+pub(in crate::app::model_preview) fn marker_active(
+    only: &(String, String),
+    selections: &HashMap<String, ModelRegionSelection>,
+) -> bool {
     let selection = selections.get(&only.0);
     selection.is_some_and(|selection| selection.enabled && selection.permutation == only.1)
 }
 
-pub(in crate::app::model_preview) fn model_layer_visible(state: &ModelPreviewState, layer: ModelPreviewLayer) -> bool {
+pub(in crate::app::model_preview) fn model_layer_visible(
+    state: &ModelPreviewState,
+    layer: ModelPreviewLayer,
+) -> bool {
     if !state.overlays_loaded {
         // A bare render/collision/physics tag is the primary preview, not an
         // optional overlay. `show_render` remains true for that path.
@@ -98,9 +122,21 @@ mod tests {
 
     #[test]
     fn a_shields_parts_leave_the_ordinary_passes_once_materials_are_known() {
-        let batch = |material_index| RenderModelPreviewBatch { material_index, ..Default::default() };
-        let preview = RenderModelPreview { batches: vec![batch(0), batch(1), batch(0)], ..Default::default() };
-        let textures = [MaterialTextures::default(), MaterialTextures { shield_only: true, ..Default::default() }];
+        let batch = |material_index| RenderModelPreviewBatch {
+            material_index,
+            ..Default::default()
+        };
+        let preview = RenderModelPreview {
+            batches: vec![batch(0), batch(1), batch(0)],
+            ..Default::default()
+        };
+        let textures = [
+            MaterialTextures::default(),
+            MaterialTextures {
+                shield_only: true,
+                ..Default::default()
+            },
+        ];
         let mut visible = vec![0, 1, 2];
         without_shield_parts(&mut visible, &preview, None);
         assert_eq!(visible, [0, 1, 2], "nothing is known yet");
@@ -112,7 +148,10 @@ mod tests {
     fn a_marker_of_one_permutation_goes_with_that_permutation() {
         let selections = HashMap::from([(
             "f_hull".to_owned(),
-            ModelRegionSelection { enabled: true, permutation: "base".to_owned() },
+            ModelRegionSelection {
+                enabled: true,
+                permutation: "base".to_owned(),
+            },
         )]);
         let of = |region: &str, permutation: &str| (region.to_owned(), permutation.to_owned());
         assert!(marker_active(&of("f_hull", "base"), &selections));

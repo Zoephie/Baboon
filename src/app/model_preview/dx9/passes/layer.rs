@@ -1,6 +1,5 @@
 //! The dx9 shader layers a pass draws in, and Halo 2's template layer names and implementations.
 
-
 /// A layer the preview draws, in the order the game's `render_scene` does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Dx9Layer {
@@ -105,7 +104,13 @@ impl Dx9Layer {
             Self::Hologram => "hologram",
             Self::ActiveCamo => "active camo",
             Self::Bloom => "bloom",
-            Self::GelMask | Self::ShadowCaster | Self::ShadowMask | Self::ShadowApply | Self::ShieldDamaged | Self::Overshield | Self::HologramBloom => "",
+            Self::GelMask
+            | Self::ShadowCaster
+            | Self::ShadowMask
+            | Self::ShadowApply
+            | Self::ShieldDamaged
+            | Self::Overshield
+            | Self::HologramBloom => "",
             Self::Transparent => TRANSPARENT_LAYER,
         }
     }

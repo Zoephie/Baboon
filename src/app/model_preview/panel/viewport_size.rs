@@ -27,7 +27,10 @@ pub(in crate::app::model_preview) fn model_preview_size_from_percent(percent: f3
     (percent / 100.0).clamp(MIN_MODEL_PREVIEW_SIZE, MAX_MODEL_PREVIEW_SIZE)
 }
 
-pub(in crate::app::model_preview) fn model_viewport_size(available_width: f32, model_preview_size: f32) -> Vec2 {
+pub(in crate::app::model_preview) fn model_viewport_size(
+    available_width: f32,
+    model_preview_size: f32,
+) -> Vec2 {
     let scale = model_preview_size.clamp(MIN_MODEL_PREVIEW_SIZE, MAX_MODEL_PREVIEW_SIZE);
     let desired = Vec2::new(470.0 * scale, 300.0 * scale);
     // Never force a minimum wider than the actual section. Doing so made the
@@ -51,13 +54,12 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
         && data.textures.is_none();
     if waiting_for_textures {
         let (rect, _) = ui.allocate_exact_size(desired_size, Sense::hover());
-        ui.painter()
-            .rect_stroke(
-                rect,
-                0.0,
-                Stroke::new(1.0_f32, foundation_input_edge()),
-                egui::StrokeKind::Middle,
-            );
+        ui.painter().rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0_f32, foundation_input_edge()),
+            egui::StrokeKind::Middle,
+        );
         crate::app::shell::loading::paint_loading_rings(ui, rect);
     } else {
         draw_model_viewport(ui, data, state, desired_size);
@@ -86,17 +88,15 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
             1 => "1 part of this preview left out".to_owned(),
             count => format!("{count} parts of this preview left out"),
         };
-        ui.label(RichText::new(summary).small().color(subtle_dark())).on_hover_text(data.notes.join("\n"));
+        ui.label(RichText::new(summary).small().color(subtle_dark()))
+            .on_hover_text(data.notes.join("\n"));
     }
     // Why a material drew untextured, which the resolve records and nothing
     // showed: the model just looked flat.
     if state.render_mode.uses_textures()
         && let Some(textures) = data.textures.as_deref()
-        && let Some((summary, detail)) = texture_resolve_note(
-            textures,
-            &data.preview.materials,
-            state.game_shaders,
-        )
+        && let Some((summary, detail)) =
+            texture_resolve_note(textures, &data.preview.materials, state.game_shaders)
     {
         ui.label(RichText::new(summary).small().color(subtle_dark()))
             .on_hover_text(detail);
@@ -122,7 +122,10 @@ pub(in crate::app::model_preview) fn texture_resolve_note(
         .iter()
         .enumerate()
         .filter_map(|(index, texture)| {
-            let bare = texture.bare_without_passes.as_ref().filter(|_| !game_shaders);
+            let bare = texture
+                .bare_without_passes
+                .as_ref()
+                .filter(|_| !game_shaders);
             let error = texture.error.as_ref().or(bare);
             error.map(|error| format!("{}: {error}", name(index)))
         })

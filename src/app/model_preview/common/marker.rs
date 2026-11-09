@@ -34,29 +34,51 @@ impl MarkerFrame {
     /// A direction in this frame's axes, in the space the frame sits in.
     fn rotate(&self, value: [f32; 3]) -> [f32; 3] {
         std::array::from_fn(|axis| {
-            (0..3).map(|index| self.axes[index][axis] * value[index]).sum()
+            (0..3)
+                .map(|index| self.axes[index][axis] * value[index])
+                .sum()
         })
     }
 
     /// `rotate`'s inverse: axes are unit and square to each other.
     fn unrotate(&self, value: [f32; 3]) -> [f32; 3] {
-        std::array::from_fn(|index| (0..3).map(|axis| self.axes[index][axis] * value[axis]).sum())
+        std::array::from_fn(|index| {
+            (0..3)
+                .map(|axis| self.axes[index][axis] * value[axis])
+                .sum()
+        })
     }
 }
 
 /// Where a point of the child goes when its `child` marker meets `parent`.
-pub(in crate::app::model_preview) fn attach_point(parent: &MarkerFrame, child: &MarkerFrame, point: [f32; 3]) -> [f32; 3] {
-    let local = child.unrotate(std::array::from_fn(|axis| point[axis] - child.position[axis]));
+pub(in crate::app::model_preview) fn attach_point(
+    parent: &MarkerFrame,
+    child: &MarkerFrame,
+    point: [f32; 3],
+) -> [f32; 3] {
+    let local = child.unrotate(std::array::from_fn(|axis| {
+        point[axis] - child.position[axis]
+    }));
     let turned = parent.rotate(local);
     std::array::from_fn(|axis| turned[axis] + parent.position[axis])
 }
 
-pub(in crate::app::model_preview) fn attach_vector(parent: &MarkerFrame, child: &MarkerFrame, vector: [f32; 3]) -> [f32; 3] {
+pub(in crate::app::model_preview) fn attach_vector(
+    parent: &MarkerFrame,
+    child: &MarkerFrame,
+    vector: [f32; 3],
+) -> [f32; 3] {
     parent.rotate(child.unrotate(vector))
 }
 
 /// Where a marker of the opened object puts what is attached to it.
-pub(in crate::app::model_preview) fn own_marker_frame(marker: &RenderModelPreviewMarker) -> (MarkerFrame, usize) {
-    let place = MarkerFrame { axes: marker.axes, position: marker.position, node: marker.node_index };
+pub(in crate::app::model_preview) fn own_marker_frame(
+    marker: &RenderModelPreviewMarker,
+) -> (MarkerFrame, usize) {
+    let place = MarkerFrame {
+        axes: marker.axes,
+        position: marker.position,
+        node: marker.node_index,
+    };
     (place, marker.node_index.max(0) as usize)
 }

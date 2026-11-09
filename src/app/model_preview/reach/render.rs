@@ -6,10 +6,10 @@ use super::super::gen3::pipeline::FrameValues;
 use super::lighting::reach_frame_values;
 use eframe::glow::{self, HasContext};
 
-use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::super::gen3::effects::screen::Gen3ScreenSettings;
-use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::gen3_set_cull;
+use super::super::gen3::render::Gen3Cx;
+use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::lights::{ReachLitLight, inline_rows};
 
 /// Reach's hooks, and the self shadow mask from its making to the lit pass.
@@ -91,14 +91,25 @@ impl Gen3Game for ReachGame {
     /// Full camo, through `globals`' curves: only where the object has it.
     fn camo(&mut self, cx: &mut Gen3Cx<'_>) -> Option<bool> {
         let (frame, state) = (cx.frame, &mut *cx.state);
-        let draw = frame.preview.reach.camo.as_ref().map(|camo| camo.draw(1.0))?;
-        let values = [("k_vs_active_camo_factor", draw.factor), ("p_lighting_constant_9", draw.factor)];
+        let draw = frame
+            .preview
+            .reach
+            .camo
+            .as_ref()
+            .map(|camo| camo.draw(1.0))?;
+        let values = [
+            ("k_vs_active_camo_factor", draw.factor),
+            ("p_lighting_constant_9", draw.factor),
+        ];
         state.pass_values = Some(values.into_iter().collect());
         frame.active_camo.then_some(draw.opaque)
     }
 
     unsafe fn shield(&mut self, cx: &mut Gen3Cx<'_>) {
-        unsafe { cx.state.draw_reach_shield(cx.core, cx.gl, cx.frame, cx.slot) }
+        unsafe {
+            cx.state
+                .draw_reach_shield(cx.core, cx.gl, cx.frame, cx.slot)
+        }
     }
 
     unsafe fn bloom(
@@ -113,7 +124,9 @@ impl Gen3Game for ReachGame {
             if self.bloom.is_none() {
                 self.bloom = super::bloom::ReachBloom::new(cx.gl, cx.core.black_flat);
             }
-            self.bloom.as_mut()?.build(cx.gl, vertices, framebuffer, accumulation, size)
+            self.bloom
+                .as_mut()?
+                .build(cx.gl, vertices, framebuffer, accumulation, size)
         }
     }
 

@@ -29,7 +29,10 @@ pub(in crate::app::model_preview) fn point_light_rows(
             continue;
         }
         let brightness = (rows[2][0] + rows[2][1] + rows[2][2]) / 3.0;
-        found.push((rows, brightness * (1.0 - distance * distance / (radius * radius))));
+        found.push((
+            rows,
+            brightness * (1.0 - distance * distance / (radius * radius)),
+        ));
     }
     found.sort_by(|a, b| b.1.total_cmp(&a.1));
     let mut out = [[0.0; 4]; CE_POINT_LIGHT_ROWS];
@@ -43,8 +46,11 @@ pub(in crate::app::model_preview) fn point_light_rows(
 /// angles: their cosines, or none for a light that shines all ways.
 pub(super) fn baked_cone(falloff: f32, cutoff: f32) -> Option<[f32; 2]> {
     use std::f32::consts::PI;
-    let (falloff, cutoff) =
-        if cutoff < UNSET { (PI, PI) } else { (falloff.min(PI), cutoff.min(PI)) };
+    let (falloff, cutoff) = if cutoff < UNSET {
+        (PI, PI)
+    } else {
+        (falloff.min(PI), cutoff.min(PI))
+    };
     let falloff = if falloff > cutoff { 0.0 } else { falloff };
     (falloff < PI).then(|| [falloff.cos(), cutoff.cos()])
 }
@@ -52,7 +58,11 @@ pub(super) fn baked_cone(falloff: f32, cutoff: f32) -> Option<[f32; 2]> {
 /// The same for color bounds with nothing in them, which turn white. Only the
 /// color channels count; alpha stays.
 pub(super) fn baked_colors(mut lower: [f32; 4], mut upper: [f32; 4]) -> ([f32; 4], [f32; 4]) {
-    if lower[..3].iter().chain(&upper[..3]).all(|channel| *channel < UNSET) {
+    if lower[..3]
+        .iter()
+        .chain(&upper[..3])
+        .all(|channel| *channel < UNSET)
+    {
         lower[..3].fill(1.0);
         upper[..3].fill(1.0);
     }
@@ -63,8 +73,12 @@ pub(super) fn baked_colors(mut lower: [f32; 4], mut upper: [f32; 4]) -> ([f32; 4
 pub(super) fn read_light_tag(reader: &TagReader, path: &str) -> Option<CeLight> {
     let light = reader.load(path, "light", b"ligh").ok()?;
     let root = light.root();
-    let flare_path = root.read_tag_ref_path("lens flare").filter(|flare| !flare.is_empty());
-    let flare = flare_path.and_then(|flare| read_flare(reader, &flare)).map(Arc::new);
+    let flare_path = root
+        .read_tag_ref_path("lens flare")
+        .filter(|flare| !flare.is_empty());
+    let flare = flare_path
+        .and_then(|flare| read_flare(reader, &flare))
+        .map(Arc::new);
     // Tags on disk lack what tool's postprocess gives them for the game.
     let modifier = root.read_real_bounds("radius modifier");
     let radius_bounds = if modifier.lower < UNSET && modifier.upper < UNSET {
@@ -72,9 +86,15 @@ pub(super) fn read_light_tag(reader: &TagReader, path: &str) -> Option<CeLight> 
     } else {
         [modifier.lower, modifier.upper]
     };
-    let radius = root.read_real("radius").filter(|radius| *radius != 0.0).unwrap_or(1.0);
+    let radius = root
+        .read_real("radius")
+        .filter(|radius| *radius != 0.0)
+        .unwrap_or(1.0);
     let angle = |name: &str| root.read_real(name).unwrap_or(0.0);
-    let (lower, upper) = baked_colors(argb(root, "color lower bound"), argb(root, "color upper bound"));
+    let (lower, upper) = baked_colors(
+        argb(root, "color lower bound"),
+        argb(root, "color upper bound"),
+    );
     Some(CeLight {
         object: 0,
         node: 0,

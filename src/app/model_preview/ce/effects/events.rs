@@ -65,7 +65,12 @@ pub(super) fn integral(function: Distribution, fraction: f32) -> f32 {
 }
 
 /// `effect_set_event`.
-pub(super) fn set_event(running: &mut RunningEffect, def: &CeEffectDef, event: usize, random: &mut CeRandom) {
+pub(super) fn set_event(
+    running: &mut RunningEffect,
+    def: &CeEffectDef,
+    event: usize,
+    random: &mut CeRandom,
+) {
     if let Some(found) = def.events.get(event) {
         running.event = event;
         running.time = 0.0;
@@ -99,7 +104,12 @@ pub(super) fn update_effect(
 /// What an attached effect takes of its object each tick: on while its
 /// primary scale is, restarting when it has run out, stopping when it goes
 /// off.
-fn attached_inputs(running: &mut RunningEffect, effect: &CeEffectAt, inputs: &CeObjectInputs, random: &mut CeRandom) {
+fn attached_inputs(
+    running: &mut RunningEffect,
+    effect: &CeEffectAt,
+    inputs: &CeObjectInputs,
+    random: &mut CeRandom,
+) {
     let def = &effect.def;
     // `object_get_function_value`: none is on at one.
     let (scale_a, on) = match effect.primary {
@@ -128,7 +138,11 @@ fn attached_inputs(running: &mut RunningEffect, effect: &CeEffectAt, inputs: &Ce
         }
     } else if !running.finished && !running.stopping {
         // `effect_stop`: on to what follows the loop, or done.
-        match def.loop_stop.map(|stop| stop + 1).filter(|next| *next < def.events.len()) {
+        match def
+            .loop_stop
+            .map(|stop| stop + 1)
+            .filter(|next| *next < def.events.len())
+        {
             Some(next) => {
                 set_event(running, def, next, random);
                 running.stopping = true;
@@ -136,8 +150,12 @@ fn attached_inputs(running: &mut RunningEffect, effect: &CeEffectAt, inputs: &Ce
             None => running.finished = true,
         }
     }
-    running.scale_b = effect.secondary.map_or(1.0, |output| inputs.outputs[output]);
-    running.color = effect.change_color.map_or([1.0; 3], |channel| inputs.change_colors[channel]);
+    running.scale_b = effect
+        .secondary
+        .map_or(1.0, |output| inputs.outputs[output]);
+    running.color = effect
+        .change_color
+        .map_or([1.0; 3], |channel| inputs.change_colors[channel]);
 }
 
 /// The second half of [`update_effect`]: the effect's events through the tick.
@@ -151,7 +169,15 @@ fn run_events(
     bones: Option<&[[f32; 4]]>,
     dt: f32,
 ) {
-    let Made { particles, lights, systems, system_random, system_room, ground, tick } = made;
+    let Made {
+        particles,
+        lights,
+        systems,
+        system_random,
+        system_room,
+        ground,
+        tick,
+    } = made;
     let def = &effect.def;
     let mut dt = dt;
     for _ in 0..MOST_EVENTS_A_TICK {
@@ -175,7 +201,11 @@ fn run_events(
                 // `effect_new_looping` made (flag 2): an attachment.
                 let looping = effect.spawn.is_none();
                 let mut next = match (def.loop_start, def.loop_stop) {
-                    (Some(start), Some(stop)) if looping && running.event == stop && !running.stopping => start,
+                    (Some(start), Some(stop))
+                        if looping && running.event == stop && !running.stopping =>
+                    {
+                        start
+                    }
                     _ => running.event + 1,
                 };
                 while next < def.events.len() && random.next() < def.events[next].skip {
@@ -197,12 +227,27 @@ fn run_events(
                 .particles
                 .iter()
                 .map(|entry| {
-                    let [lower, delta] = scaled(entry.count, running, entry.scales_a.count, entry.scales_b.count);
+                    let [lower, delta] = scaled(
+                        entry.count,
+                        running,
+                        entry.scales_a.count,
+                        entry.scales_b.count,
+                    );
                     event_particle_count(lower + random.range(0.0, delta))
                 })
                 .collect();
             generate_parts(index, running, effect, lights, tick);
-            generate_systems(index, running, effect, systems, random, system_random, system_room, bones, ground);
+            generate_systems(
+                index,
+                running,
+                effect,
+                systems,
+                random,
+                system_random,
+                system_room,
+                bones,
+                ground,
+            );
         }
     }
 }

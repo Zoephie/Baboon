@@ -6,21 +6,21 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::{elements, has_flag, object_block};
-use crate::app::model_preview::common::sprites::AntennaQuad;
-use super::super::common::view::{ViewFrame, posed_on};
-use super::super::functions::FunctionValues;
-use super::lights::attachment_value;
 use super::super::common::image::Image;
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::effects::marker_name;
+use super::super::functions::FunctionValues;
 use super::super::gen3::shaders::Gen3Blend;
 use super::super::materials::decode_image;
 use super::super::*;
-use crate::core::h2_pixel_shader::SamplerKind;
+use super::lights::attachment_value;
+use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::common::marker::MarkerFrame;
 use crate::app::model_preview::common::math::{checked_unit, cross};
 use crate::app::model_preview::common::random::{high16_over_65536, lcg_step};
-use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::common::sprites::AntennaQuad;
+use crate::core::h2_pixel_shader::SamplerKind;
 
 const PRE_ROLL: f32 = 4.0;
 /// A generous bound; the game's is a shared pool.
@@ -56,7 +56,11 @@ impl PointPhysics {
     /// `point_physics_update` for a point of this radius in still air, which
     /// is all a preview has: no wind, no water, nothing to run into.
     fn step(&self, place: &mut [f32; 3], velocity: &mut [f32; 3], radius: f32, dt: f32) {
-        let buoyancy = if self.no_gravity { 0.0 } else { 1.0 - 2.0 * self.density / (AIR_DENSITY + self.density) };
+        let buoyancy = if self.no_gravity {
+            0.0
+        } else {
+            1.0 - 2.0 * self.density / (AIR_DENSITY + self.density)
+        };
         let bulk = (AIR_DENSITY * MASS_OF_DENSITY + self.mass) * radius * radius * radius;
         let drag = self.air_friction * radius * radius;
         let slowing = if bulk == 0.0 {
@@ -112,14 +116,16 @@ pub(crate) struct H2ContrailAt {
 fn read_state(reader: &TagReader, state: TagStruct<'_>) -> Option<PointState> {
     let duration = state.read_real_bounds("duration");
     let transition = state.read_real_bounds("transition duration");
-    let color = |name: &str| {
-        match state.field(name).and_then(|field| field.value()) {
-            Some(TagFieldData::RealArgbColor(color)) => [color.alpha, color.red, color.green, color.blue],
-            _ => [0.0; 4],
+    let color = |name: &str| match state.field(name).and_then(|field| field.value()) {
+        Some(TagFieldData::RealArgbColor(color)) => {
+            [color.alpha, color.red, color.green, color.blue]
         }
+        _ => [0.0; 4],
     };
     let flagged = |wanted: &str| has_flag(state, "scale flags", wanted);
-    let physics = state.read_tag_ref_path("physics").filter(|path| !path.is_empty());
+    let physics = state
+        .read_tag_ref_path("physics")
+        .filter(|path| !path.is_empty());
     let physics = physics.and_then(|path| reader.load(&path, "point_physics", b"pphy").ok());
     Some(PointState {
         duration: [duration.lower, duration.upper],
@@ -127,8 +133,15 @@ fn read_state(reader: &TagReader, state: TagStruct<'_>) -> Option<PointState> {
         physics: physics.and_then(|tag| PointPhysics::read(&tag)),
         width: state.read_real("width")?,
         colors: [color("color lower bound"), color("color upper bound")],
-        scaled: ["duration", "duration delta", "transition duration", "transition duration delta", "width", "color"]
-            .map(flagged),
+        scaled: [
+            "duration",
+            "duration delta",
+            "transition duration",
+            "transition duration delta",
+            "width",
+            "color",
+        ]
+        .map(flagged),
     })
 }
 
@@ -167,17 +180,27 @@ pub(in crate::app::model_preview) fn read_h2_contrails(
             continue;
         };
         let root = tag.root();
-        let states: Vec<PointState> = elements(root, "point states").into_iter().filter_map(|state| read_state(reader, state)).collect();
+        let states: Vec<PointState> = elements(root, "point states")
+            .into_iter()
+            .filter_map(|state| read_state(reader, state))
+            .collect();
         if states.len() < 2 {
             continue;
         }
         let flagged = |wanted: &str| has_flag(root, "flags", wanted);
         let speed = root.read_real_bounds("point velocity");
-        let bitmap = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty());
-        let bitmap = bitmap.and_then(|path| decode_image(reader, &path, SamplerKind::Texture2D, 0)).map(Arc::new);
+        let bitmap = root
+            .read_tag_ref_path("bitmap")
+            .filter(|path| !path.is_empty());
+        let bitmap = bitmap
+            .and_then(|path| decode_image(reader, &path, SamplerKind::Texture2D, 0))
+            .map(Arc::new);
         let states = Arc::new(states);
         let name = marker_name(attachment, "marker");
-        for marker in markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name)) {
+        for marker in markers
+            .iter()
+            .filter(|marker| marker.name.eq_ignore_ascii_case(&name))
+        {
             let (place, node) = frame(marker);
             found.push(H2ContrailAt {
                 object: owner,
@@ -185,7 +208,9 @@ pub(in crate::app::model_preview) fn read_h2_contrails(
                 node,
                 position: place.position,
                 forward: place.axes[0],
-                scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
+                scale_by: attachment
+                    .read_string_id("primary scale")
+                    .unwrap_or_default(),
                 rate: root.read_real("point generation rate").unwrap_or(0.0),
                 speed: [speed.lower, speed.upper],
                 cone: root.read_real("point velocity cone angle").unwrap_or(0.0),
@@ -194,7 +219,11 @@ pub(in crate::app::model_preview) fn read_h2_contrails(
                 repeats_v: root.read_real("texture repeats v").unwrap_or(1.0),
                 fade_first: !flagged("first point unfaded"),
                 fade_last: !flagged("last point unfaded"),
-                blend: blend_named(&root.read_enum_option("framebuffer blend function").unwrap_or_default()),
+                blend: blend_named(
+                    &root
+                        .read_enum_option("framebuffer blend function")
+                        .unwrap_or_default(),
+                ),
                 states: Arc::clone(&states),
                 bitmap: bitmap.clone(),
             });
@@ -221,7 +250,17 @@ struct Point {
 
 impl Point {
     fn new(place: [f32; 3], velocity: [f32; 3], scale: f32) -> Self {
-        Self { place, velocity, state: -1, age: 0.0, inverse: 0.0, moving_on: true, done: false, new: true, scale }
+        Self {
+            place,
+            velocity,
+            state: -1,
+            age: 0.0,
+            inverse: 0.0,
+            moving_on: true,
+            done: false,
+            new: true,
+            scale,
+        }
     }
 }
 
@@ -256,14 +295,26 @@ fn step_point(point: &mut Point, states: &[PointState], dt: f32, random: &mut u3
             point.state += 1;
             point.moving_on = false;
             let state = &states[point.state as usize];
-            scaled_range(state.duration, &state.scaled, 0, point.scale, next_random(random))
+            scaled_range(
+                state.duration,
+                &state.scaled,
+                0,
+                point.scale,
+                next_random(random),
+            )
         } else if point.state as usize + 1 >= states.len() {
             point.done = true;
             return;
         } else {
             point.moving_on = true;
             let state = &states[point.state as usize];
-            scaled_range(state.transition, &state.scaled, 2, point.scale, next_random(random))
+            scaled_range(
+                state.transition,
+                &state.scaled,
+                2,
+                point.scale,
+                next_random(random),
+            )
         };
         point.age = 0.0;
         point.inverse = if seconds != 0.0 { seconds.recip() } else { 0.0 };
@@ -283,23 +334,30 @@ fn point_look(point: &Point, states: &[PointState]) -> (f32, [f32; 4]) {
     let at = |state: &PointState| {
         let color_by = if state.scaled[5] { point.scale } else { 1.0 };
         let [low, high] = state.colors;
-        let color: [f32; 4] = std::array::from_fn(|channel| low[channel] + (high[channel] - low[channel]) * color_by);
-        (state.width * if state.scaled[4] { point.scale } else { 1.0 }, color)
+        let color: [f32; 4] =
+            std::array::from_fn(|channel| low[channel] + (high[channel] - low[channel]) * color_by);
+        (
+            state.width * if state.scaled[4] { point.scale } else { 1.0 },
+            color,
+        )
     };
     let (width, color) = at(&states[point.state.max(0) as usize]);
     if !point.moving_on {
         return (width, color);
     }
     let (next_width, next) = at(&states[(point.state + 1) as usize]);
-    (width + (next_width - width) * point.age, std::array::from_fn(|channel| color[channel] + (next[channel] - color[channel]) * point.age))
+    (
+        width + (next_width - width) * point.age,
+        std::array::from_fn(|channel| {
+            color[channel] + (next[channel] - color[channel]) * point.age
+        }),
+    )
 }
 
 impl H2ContrailAt {
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
     }
-
-
 
     pub(crate) fn bitmap(&self) -> Option<&Arc<Image>> {
         self.bitmap.as_ref()
@@ -309,8 +367,6 @@ impl H2ContrailAt {
         self.blend
     }
 }
-
-
 
 /// What a slot keeps of its contrails.
 #[derive(Debug, Clone, Default)]
@@ -329,7 +385,10 @@ impl H2ContrailField {
     ) {
         if self.running.len() != contrails.len() || self.time.is_none_or(|last| time < last) {
             self.running = (0..contrails.len())
-                .map(|at| RunningContrail { random: at as u32 * 977 + 1, ..Default::default() })
+                .map(|at| RunningContrail {
+                    random: at as u32 * 977 + 1,
+                    ..Default::default()
+                })
                 .collect();
             self.time = Some(time - PRE_ROLL);
         }
@@ -346,7 +405,8 @@ impl H2ContrailField {
                 if scale > 0.0 {
                     running.owed += contrail.rate * step;
                 }
-                let (origin, forward) = posed_on(contrail.node, contrail.position, contrail.forward, bones);
+                let (origin, forward) =
+                    posed_on(contrail.node, contrail.position, contrail.forward, bones);
                 while running.owed >= 1.0 {
                     running.owed -= 1.0;
                     if running.points.len() >= MOST_POINTS {
@@ -362,8 +422,13 @@ impl H2ContrailField {
                         forward[axis] * spread.cos()
                             + (side[axis] * turn.cos() + lift[axis] * turn.sin()) * spread.sin()
                     });
-                    let speed = contrail.speed[0] + (contrail.speed[1] - contrail.speed[0]) * next_random(&mut running.random);
-                    running.points.insert(0, Point::new(origin, direction.map(|axis| axis * speed), scale));
+                    let speed = contrail.speed[0]
+                        + (contrail.speed[1] - contrail.speed[0])
+                            * next_random(&mut running.random);
+                    running.points.insert(
+                        0,
+                        Point::new(origin, direction.map(|axis| axis * speed), scale),
+                    );
                 }
                 let RunningContrail { points, random, .. } = running;
                 for point in points {
@@ -378,46 +443,76 @@ impl H2ContrailField {
     }
 
     /// `contrail_vertex_builder`, a quad between each two points.
-    pub(crate) fn quads(&self, index: usize, contrail: &H2ContrailAt, view: &ViewFrame) -> Vec<AntennaQuad> {
-        let Some(running) = self.running.get(index).filter(|running| running.points.len() >= 2) else {
+    pub(crate) fn quads(
+        &self,
+        index: usize,
+        contrail: &H2ContrailAt,
+        view: &ViewFrame,
+    ) -> Vec<AntennaQuad> {
+        let Some(running) = self
+            .running
+            .get(index)
+            .filter(|running| running.points.len() >= 2)
+        else {
             return Vec::new();
         };
         // The game logs the rest as unsupported, and draws nothing.
-        let shapes = ["vertical orientation", "horizontal orientation", "media mapped", "viewer facing"];
+        let shapes = [
+            "vertical orientation",
+            "horizontal orientation",
+            "media mapped",
+            "viewer facing",
+        ];
         if !shapes.contains(&contrail.render_type.as_str()) {
             return Vec::new();
         }
         let points = &running.points;
         let last = points.len() - 1;
         let across_at = |at: usize| -> Option<[f32; 3]> {
-            let (a, b) = if at == 0 { (&points[0], &points[1]) } else { (&points[at - 1], &points[at]) };
+            let (a, b) = if at == 0 {
+                (&points[0], &points[1])
+            } else {
+                (&points[at - 1], &points[at])
+            };
             let along: [f32; 3] = std::array::from_fn(|axis| b.place[axis] - a.place[axis]);
             let to_eye: [f32; 3] = std::array::from_fn(|axis| view.eye[axis] - a.place[axis]);
             match contrail.render_type.as_str() {
                 "vertical orientation" => Some([0.0, 0.0, 1.0]),
-                "horizontal orientation" | "media mapped" => checked_unit([along[1], -along[0], 0.0]),
+                "horizontal orientation" | "media mapped" => {
+                    checked_unit([along[1], -along[0], 0.0])
+                }
                 _ => checked_unit(cross(along, to_eye)),
             }
         };
         let vertex = |at: usize| {
             let (width, [alpha, red, green, blue]) = point_look(&points[at], &contrail.states);
-            let ends = (at == 0 && contrail.fade_first && points.len() > 2) || (at == last && contrail.fade_last);
+            let ends = (at == 0 && contrail.fade_first && points.len() > 2)
+                || (at == last && contrail.fade_last);
             let alpha = if ends { 0.0 } else { alpha.clamp(0.0, 1.0) };
-            let across = across_at(at).unwrap_or([0.0, 0.0, 1.0]).map(|axis| axis * width * 0.5);
+            let across = across_at(at)
+                .unwrap_or([0.0, 0.0, 1.0])
+                .map(|axis| axis * width * 0.5);
             let u = at as f32 * -contrail.repeats;
             let place = points[at].place;
             let side = |sign: f32, v: f32| -> [f32; 5] {
                 let [x, y, z] = std::array::from_fn(|axis| place[axis] + across[axis] * sign);
                 [x, y, z, u, v]
             };
-            (side(1.0, 0.0), side(-1.0, contrail.repeats_v), [red, green, blue, alpha])
+            (
+                side(1.0, 0.0),
+                side(-1.0, contrail.repeats_v),
+                [red, green, blue, alpha],
+            )
         };
         (0..last)
             .map(|at| {
                 let (top, bottom, near) = vertex(at);
                 let (next_top, next_bottom, far) = vertex(at + 1);
                 let color = std::array::from_fn(|channel| (near[channel] + far[channel]) * 0.5);
-                AntennaQuad { corners: [top, next_top, bottom, next_bottom], color }
+                AntennaQuad {
+                    corners: [top, next_top, bottom, next_bottom],
+                    color,
+                }
             })
             .collect()
     }
@@ -429,7 +524,12 @@ attached!(keeps function: H2ContrailAt);
 mod tests {
     use super::*;
 
-    const SMOKE: PointPhysics = PointPhysics { mass: 0.001 * MASS_OF_DENSITY, density: 0.001, air_friction: 10.0, no_gravity: false };
+    const SMOKE: PointPhysics = PointPhysics {
+        mass: 0.001 * MASS_OF_DENSITY,
+        density: 0.001,
+        air_friction: 10.0,
+        no_gravity: false,
+    };
 
     fn state(duration: f32, transition: f32) -> PointState {
         PointState {
@@ -451,7 +551,10 @@ mod tests {
         let states = [state(0.0, 1.0), state(0.0, 0.0)];
         let (mut point, mut random) = (fresh(), 1);
         step_point(&mut point, &states, 0.1, &mut random);
-        assert!(point.moving_on, "a state of no duration goes straight to its way out");
+        assert!(
+            point.moving_on,
+            "a state of no duration goes straight to its way out"
+        );
         assert_eq!(point.state, 0);
         for _ in 0..12 {
             step_point(&mut point, &states, 0.1, &mut random);
@@ -491,8 +594,20 @@ mod tests {
             place[2]
         };
         assert!(rise(SMOKE) > 0.0);
-        assert!(rise(PointPhysics { density: 1.0, mass: MASS_OF_DENSITY, ..SMOKE }) < 0.0);
-        assert_eq!(rise(PointPhysics { no_gravity: true, ..SMOKE }), 0.0);
+        assert!(
+            rise(PointPhysics {
+                density: 1.0,
+                mass: MASS_OF_DENSITY,
+                ..SMOKE
+            }) < 0.0
+        );
+        assert_eq!(
+            rise(PointPhysics {
+                no_gravity: true,
+                ..SMOKE
+            }),
+            0.0
+        );
     }
 
     #[test]
@@ -500,7 +615,10 @@ mod tests {
         let (mut place, mut velocity) = ([0.0; 3], [1.0, 0.0, 0.0]);
         SMOKE.step(&mut place, &mut velocity, 0.05, 1.0 / 30.0);
         assert!(velocity[0] < 1.0 && velocity[0] > 0.0);
-        let free = PointPhysics { air_friction: 0.0, ..SMOKE };
+        let free = PointPhysics {
+            air_friction: 0.0,
+            ..SMOKE
+        };
         let mut velocity = [1.0, 0.0, 0.0];
         free.step(&mut place, &mut velocity, 0.05, 1.0 / 30.0);
         assert_eq!(velocity[0], 1.0);
@@ -514,7 +632,11 @@ mod tests {
         assert_eq!(scaled_range([1.0, 3.0], &lower, 0, 0.5, 0.5), 1.5);
         let delta = [false, true, false, false, false, false];
         assert_eq!(scaled_range([1.0, 3.0], &delta, 0, 0.5, 0.5), 1.5);
-        assert_eq!(scaled_range([1.0, 3.0], &lower, 2, 0.5, 0.5), 2.0, "the transition's flags are its own");
+        assert_eq!(
+            scaled_range([1.0, 3.0], &lower, 2, 0.5, 0.5),
+            2.0,
+            "the transition's flags are its own"
+        );
     }
 
     #[test]
@@ -532,6 +654,10 @@ mod tests {
         assert_eq!(point_look(&point, &states).1, [0.5; 4]);
         let mut plain = state(1.0, 1.0);
         plain.scaled = [false; 6];
-        assert_eq!(point_look(&point, &[plain, plain]).1, [1.0; 4], "the upper bound, without");
+        assert_eq!(
+            point_look(&point, &[plain, plain]).1,
+            [1.0; 4],
+            "the upper bound, without"
+        );
     }
 }

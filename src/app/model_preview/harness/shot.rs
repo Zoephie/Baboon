@@ -15,13 +15,13 @@
 //! `H2_SHOT_FIRE=<trigger>@<seconds>` fires the held weapon's trigger.
 
 use super::super::*;
-use eframe::glow::{self, HasContext as _};
-use std::sync::Arc;
 use super::gl::{headless_gl, headless_gl_recording, take_feedback_loops, take_gl_log};
 use super::gl_state::gl_state;
 use crate::core::format::TagNameIndex;
 use crate::core::game::GameId;
 use crate::core::source::{TagEntry, TagEntryLocation, TagSource};
+use eframe::glow::{self, HasContext as _};
+use std::sync::Arc;
 
 /// The `H2_SHOT_*` game flag.
 fn shot_game() -> GameId {
@@ -126,7 +126,11 @@ impl ShotOptions {
     fn from_env() -> Self {
         let var = |name: &str| std::env::var(name).ok();
         let set = |name: &str| std::env::var_os(name).is_some();
-        let list = |name: &str| var(name).map_or_else(Vec::new, |list| list.split(',').map(str::to_owned).collect());
+        let list = |name: &str| {
+            var(name).map_or_else(Vec::new, |list| {
+                list.split(',').map(str::to_owned).collect()
+            })
+        };
         let pairs = |name: &str| {
             list(name)
                 .iter()
@@ -136,7 +140,11 @@ impl ShotOptions {
                 })
                 .collect()
         };
-        let floats = |text: String| text.split(',').map(|value| value.parse().unwrap()).collect::<Vec<f32>>();
+        let floats = |text: String| {
+            text.split(',')
+                .map(|value| value.parse().unwrap())
+                .collect::<Vec<f32>>()
+        };
         Self {
             game: shot_game(),
             kind: var("H2_SHOT_OBJECT"),
@@ -223,15 +231,18 @@ pub(super) fn render(
     options: &ShotOptions,
 ) -> Rendered {
     let names = match source {
-        TagSource::LooseFolder { definitions_root, .. } => {
-            TagNameIndex::load_game(definitions_root, options.game).unwrap()
-        }
+        TagSource::LooseFolder {
+            definitions_root, ..
+        } => TagNameIndex::load_game(definitions_root, options.game).unwrap(),
         _ => unreachable!(),
     };
-    let TagSource::LooseFolder { root, .. } = source else { unreachable!() };
+    let TagSource::LooseFolder { root, .. } = source else {
+        unreachable!()
+    };
     // A sky has a render_model and nothing above it.
     let file = root.join(format!("{}.model", shot.model.replace('\\', "/")));
-    let (extension, group) = if let Some(kind) = shot.kind.clone().or_else(|| options.kind.clone()) {
+    let (extension, group) = if let Some(kind) = shot.kind.clone().or_else(|| options.kind.clone())
+    {
         object_kind(&kind)
     } else if options.biped {
         ("biped", b"bipd")
@@ -261,10 +272,22 @@ pub(super) fn render(
         Arc::make_mut(&mut data.preview).game = None;
     }
     let textures = materials::resolve_model_textures(source, &data.preview.materials);
-    let with_passes = textures.iter().filter(|t| t.h2_layers.iter().any(|l| !l.is_empty())).count();
-    eprintln!("{}: {} materials, {with_passes} with passes", shot.model, textures.len());
+    let with_passes = textures
+        .iter()
+        .filter(|t| t.h2_layers.iter().any(|l| !l.is_empty()))
+        .count();
+    eprintln!(
+        "{}: {} materials, {with_passes} with passes",
+        shot.model,
+        textures.len()
+    );
     for (material, texture) in data.preview.materials.iter().zip(textures.iter()) {
-        eprintln!("NOTE MAT {} h3 {} {:?}", material.shader_path, texture.h3.is_some(), texture.error);
+        eprintln!(
+            "NOTE MAT {} h3 {} {:?}",
+            material.shader_path,
+            texture.h3.is_some(),
+            texture.error
+        );
         // `H4_TEXTURES=1`: each pass's samplers, and whether one is bound.
         if options.report_textures
             && let Some(h3) = &texture.h3
@@ -272,13 +295,18 @@ pub(super) fn render(
             let passes = h3.albedo.iter().chain(std::iter::once(&h3.lit));
             for (name, kind) in passes.flat_map(|pass| pass.textures.iter()) {
                 let bound = h3.textures.iter().find(|known| &known.uniform == name);
-                let detail = bound.map(|known| format!("{:?} {:?}", known.texels, known.sampler)).unwrap_or_else(|| "UNBOUND".to_owned());
+                let detail = bound
+                    .map(|known| format!("{:?} {:?}", known.texels, known.sampler))
+                    .unwrap_or_else(|| "UNBOUND".to_owned());
                 eprintln!("NOTE   TEX {name} {kind:?} {detail}");
             }
         }
     }
     data.textures = Some(Arc::new(textures));
-    eprintln!("NOTE {} cheap particle emitters", data.preview.gen3.cheap_emitters.len());
+    eprintln!(
+        "NOTE {} cheap particle emitters",
+        data.preview.gen3.cheap_emitters.len()
+    );
     eprintln!(
         "NOTE H4 {} lights, {} cheap lights, {} light passes, {} flares, {} particle systems ({} on materials), {} light volumes ({} on materials), {} tracers",
         data.preview.h4.lights.len(),
@@ -286,9 +314,18 @@ pub(super) fn render(
         data.preview.h4.light_passes.len(),
         data.preview.h4.flares.len(),
         data.preview.particles.len(),
-        data.preview.particles.iter().filter(|system| system.look.h4.is_some()).count(),
+        data.preview
+            .particles
+            .iter()
+            .filter(|system| system.look.h4.is_some())
+            .count(),
         data.preview.gen3.light_volumes.len(),
-        data.preview.gen3.light_volumes.iter().filter(|volume| volume.h4_material().is_some()).count(),
+        data.preview
+            .gen3
+            .light_volumes
+            .iter()
+            .filter(|volume| volume.h4_material().is_some())
+            .count(),
         data.preview.h4.tracers.len()
     );
     // Whole features left out, to see one on its own.
@@ -300,18 +337,30 @@ pub(super) fn render(
                 "gen3.prt" => preview.gen3.prt = None,
                 "reach.shield" => preview.reach.shield = None,
                 path => {
-                    assert!(preview.clear_feature(path), "H2_SHOT_DROP: no feature {path}");
+                    assert!(
+                        preview.clear_feature(path),
+                        "H2_SHOT_DROP: no feature {path}"
+                    );
                     // The sheet's own batches go with it; its vertices stay, unused.
                     if path == "cloth" {
-                        preview.batches.retain(|batch| batch.permutation_name != "cloth");
+                        preview
+                            .batches
+                            .retain(|batch| batch.permutation_name != "cloth");
                     }
                 }
             }
         }
     }
-    let mut state = ModelPreviewState { light_follows_camera: !options.fixed_light, ..Default::default() };
+    let mut state = ModelPreviewState {
+        light_follows_camera: !options.fixed_light,
+        ..Default::default()
+    };
     let variant = options.variant.as_ref();
-    let variant = variant.and_then(|name| data.variants.iter().position(|variant| &variant.name == name));
+    let variant = variant.and_then(|name| {
+        data.variants
+            .iter()
+            .position(|variant| &variant.name == name)
+    });
     reset_model_preview_selection(&mut state, &data, variant.or(default_variant_index(&data)));
     state.game_shaders = shot.shaders;
     state.default_lights = shot.lights;
@@ -351,17 +400,36 @@ pub(super) fn render(
     state.self_shadow = options.shadow;
     state.prt = !options.no_prt;
     if let Some(values) = options.inputs {
-        state.ce_function_inputs.insert((data.geometry_id, 0), values);
+        state
+            .ce_function_inputs
+            .insert((data.geometry_id, 0), values);
     }
     for (name, value) in &options.functions {
-        state.function_inputs.insert((data.geometry_id, name.clone()), *value);
+        state
+            .function_inputs
+            .insert((data.geometry_id, name.clone()), *value);
     }
-    let background = preview_background(&if options.light_theme { egui::Visuals::light() } else { egui::Visuals::dark() });
-    let mut frame = super::super::frame::build_frame(&data, &state, rect, options.time, background, &options.forced);
+    let background = preview_background(&if options.light_theme {
+        egui::Visuals::light()
+    } else {
+        egui::Visuals::dark()
+    });
+    let mut frame = super::super::frame::build_frame(
+        &data,
+        &state,
+        rect,
+        options.time,
+        background,
+        &options.forced,
+    );
     let preview = Arc::clone(&frame.preview);
     frame.visible_batches.retain(|&batch| {
         let material = preview.batches[batch].material_index as usize;
-        !options.hidden.iter().any(|name| preview.materials[material].shader_path.ends_with(name.as_str()))
+        !options.hidden.iter().any(|name| {
+            preview.materials[material]
+                .shader_path
+                .ends_with(name.as_str())
+        })
     });
     eprintln!("NOTE moves {}", frame.moves());
     unsafe {
@@ -373,9 +441,22 @@ pub(super) fn render(
         gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH_COMPONENT24, width, height);
         let framebuffer = gl.create_framebuffer().unwrap();
         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-        gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::RENDERBUFFER, Some(color));
-        gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::RENDERBUFFER, Some(depth));
-        assert_eq!(gl.check_framebuffer_status(glow::FRAMEBUFFER), glow::FRAMEBUFFER_COMPLETE);
+        gl.framebuffer_renderbuffer(
+            glow::FRAMEBUFFER,
+            glow::COLOR_ATTACHMENT0,
+            glow::RENDERBUFFER,
+            Some(color),
+        );
+        gl.framebuffer_renderbuffer(
+            glow::FRAMEBUFFER,
+            glow::DEPTH_ATTACHMENT,
+            glow::RENDERBUFFER,
+            Some(depth),
+        );
+        assert_eq!(
+            gl.check_framebuffer_status(glow::FRAMEBUFFER),
+            glow::FRAMEBUFFER_COMPLETE
+        );
         // As the renderer's own targets leave it, so no shot's state says
         // whether the renderer made its targets in it.
         gl.bind_renderbuffer(glow::RENDERBUFFER, None);
@@ -395,22 +476,40 @@ pub(super) fn render(
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         }
         let play = options.play.as_ref().map(|play| (play, false));
-        if let Some((play, fire)) = play.or_else(|| options.fire.as_ref().map(|fire| (fire, true))) {
-            let (text, before) = play.split_once('@').expect("a play or fire is <what>@<seconds>");
+        if let Some((play, fire)) = play.or_else(|| options.fire.as_ref().map(|fire| (fire, true)))
+        {
+            let (text, before) = play
+                .split_once('@')
+                .expect("a play or fire is <what>@<seconds>");
             let end = frame.time;
             frame.time = end - before.parse::<f32>().unwrap();
             renderer.paint(gl, &frame);
             if fire {
                 let weapon = data.preview.ce.firing.last().expect("a weapon to fire");
-                let fired = state.ce_shots.entry((data.geometry_id, weapon.object)).or_default();
-                let effect = fired.fire(weapon, text.parse().unwrap(), state.ce_event_scales[0], frame.time);
-                eprintln!("NOTE fired, playing {:?}", effect.and_then(|at| data.preview.ce.effects[at].event.as_ref()));
+                let fired = state
+                    .ce_shots
+                    .entry((data.geometry_id, weapon.object))
+                    .or_default();
+                let effect = fired.fire(
+                    weapon,
+                    text.parse().unwrap(),
+                    state.ce_event_scales[0],
+                    frame.time,
+                );
+                eprintln!(
+                    "NOTE fired, playing {:?}",
+                    effect.and_then(|at| data.preview.ce.effects[at].event.as_ref())
+                );
                 if let Some(effect) = effect {
                     frame.ce_plays.counts[effect] += 1;
                 }
             }
             for (index, effect) in data.preview.ce.effects.iter().enumerate() {
-                if let Some(event) = effect.event.as_ref().filter(|event| !fire && event.name.contains(text)) {
+                if let Some(event) = effect
+                    .event
+                    .as_ref()
+                    .filter(|event| !fire && event.name.contains(text))
+                {
                     eprintln!("NOTE playing {}", event.name);
                     frame.ce_plays.counts[index] += 1;
                 }
@@ -420,12 +519,20 @@ pub(super) fn render(
             while at < end {
                 at = (at + 1.0 / 60.0).min(end);
                 frame.time = at;
-                frame.object_states = object_states(&data, &state.ce_function_inputs, &state.ce_shots, at);
+                frame.object_states =
+                    object_states(&data, &state.ce_function_inputs, &state.ce_shots, at);
                 frame.ce_points = frame.ce_point_lights();
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
                 renderer.paint(gl, &frame);
             }
-            eprintln!("NOTE states {:?}", frame.object_states.iter().map(|state| state.outputs).collect::<Vec<_>>());
+            eprintln!(
+                "NOTE states {:?}",
+                frame
+                    .object_states
+                    .iter()
+                    .map(|state| state.outputs)
+                    .collect::<Vec<_>>()
+            );
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         }
@@ -443,7 +550,11 @@ pub(super) fn render(
             glow::UNSIGNED_BYTE,
             glow::PixelPackData::Slice(Some(&mut pixels)),
         );
-        Rendered { pixels, geometry_id: data.geometry_id, gl_state }
+        Rendered {
+            pixels,
+            geometry_id: data.geometry_id,
+            gl_state,
+        }
     }
 }
 
@@ -462,7 +573,10 @@ pub(in crate::app::model_preview) struct Shown {
 }
 
 /// Takes each shot in one headless context, from the kit `source` reads.
-pub(in crate::app::model_preview) fn shoot(source: &TagSource, shots: &[(Shot, ShotOptions)]) -> Vec<Shown> {
+pub(in crate::app::model_preview) fn shoot(
+    source: &TagSource,
+    shots: &[(Shot, ShotOptions)],
+) -> Vec<Shown> {
     let gl = Arc::new(headless_gl_recording());
     let mut renderer = ModelGlRenderer::new(&gl).unwrap();
     take_gl_log();
@@ -474,14 +588,24 @@ pub(in crate::app::model_preview) fn shoot(source: &TagSource, shots: &[(Shot, S
             unsafe { reset_bindings(&gl) };
             take_gl_log();
             take_feedback_loops();
-            let Rendered { pixels, geometry_id, gl_state } = render(&gl, &mut renderer, source, shot, options);
+            let Rendered {
+                pixels,
+                geometry_id,
+                gl_state,
+            } = render(&gl, &mut renderer, source, shot, options);
             let gl_calls = take_gl_log();
             let mut simulation = String::new();
             renderer.for_each_simulation(geometry_id, |name, state| {
                 super::super::gates::field_lines(&mut simulation, name, &state);
             });
             let feedback_loops = take_feedback_loops();
-            Shown { pixels, simulation, gl_state, gl_calls, feedback_loops }
+            Shown {
+                pixels,
+                simulation,
+                gl_state,
+                gl_calls,
+                feedback_loops,
+            }
         })
         .collect()
 }
@@ -535,7 +659,11 @@ fn shot() {
             pitch: f[5].parse().unwrap(),
             kind: None,
         };
-        std::fs::write(f[1], render(&gl, &mut renderer, &source, &shot, &options).pixels).unwrap();
+        std::fs::write(
+            f[1],
+            render(&gl, &mut renderer, &source, &shot, &options).pixels,
+        )
+        .unwrap();
     }
 }
 
@@ -544,9 +672,10 @@ fn shot() {
 /// Halo 3's leaves Halo 3's next shadow as it was.
 #[test]
 fn halo_3s_self_shadow_reads_its_own_normals_after_another_gen3_preview() {
-    let (Some(halo3), Some(reach)) =
-        (super::kit::kit_source(GameId::Halo3), super::kit::kit_source(GameId::HaloReach))
-    else {
+    let (Some(halo3), Some(reach)) = (
+        super::kit::kit_source(GameId::Halo3),
+        super::kit::kit_source(GameId::HaloReach),
+    ) else {
         return;
     };
     let shot = |model: &str, kind: &str| Shot {
@@ -559,15 +688,27 @@ fn halo_3s_self_shadow_reads_its_own_normals_after_another_gen3_preview() {
     };
     let chief = shot("objects\\characters\\masterchief\\masterchief", "biped");
     let warthog = shot("objects\\vehicles\\human\\warthog\\warthog", "vehicle");
-    let h3 = ShotOptions { shadow: true, ..ShotOptions::new(GameId::Halo3) };
-    let on_reach = ShotOptions { shadow: true, ..ShotOptions::new(GameId::HaloReach) };
+    let h3 = ShotOptions {
+        shadow: true,
+        ..ShotOptions::new(GameId::Halo3)
+    };
+    let on_reach = ShotOptions {
+        shadow: true,
+        ..ShotOptions::new(GameId::HaloReach)
+    };
     let gl = Arc::new(headless_gl());
     let mut renderer = ModelGlRenderer::new(&gl).unwrap();
     let before = render(&gl, &mut renderer, &halo3, &chief, &h3).pixels;
     let reach_drawn = render(&gl, &mut renderer, &reach, &warthog, &on_reach).pixels;
     let after = render(&gl, &mut renderer, &halo3, &chief, &h3).pixels;
-    assert!(reach_drawn.iter().any(|byte| *byte != 0), "the Reach warthog drew");
-    assert!(before == after, "Halo 3's shadow read another pipeline's normals");
+    assert!(
+        reach_drawn.iter().any(|byte| *byte != 0),
+        "the Reach warthog drew"
+    );
+    assert!(
+        before == after,
+        "Halo 3's shadow read another pipeline's normals"
+    );
 }
 
 /// The gen3 pipelines share one set of targets: a Reach frame after a Halo 3
@@ -575,9 +716,10 @@ fn halo_3s_self_shadow_reads_its_own_normals_after_another_gen3_preview() {
 /// second, and hands it back.
 #[test]
 fn gen3_games_share_one_set_of_targets() {
-    let (Some(halo3), Some(reach)) =
-        (super::kit::kit_source(GameId::Halo3), super::kit::kit_source(GameId::HaloReach))
-    else {
+    let (Some(halo3), Some(reach)) = (
+        super::kit::kit_source(GameId::Halo3),
+        super::kit::kit_source(GameId::HaloReach),
+    ) else {
         return;
     };
     let shot = |model: &str, kind: &str| Shot {
@@ -591,10 +733,26 @@ fn gen3_games_share_one_set_of_targets() {
     let gl = Arc::new(headless_gl());
     let mut renderer = ModelGlRenderer::new(&gl).unwrap();
     let chief = shot("objects\\characters\\masterchief\\masterchief", "biped");
-    render(&gl, &mut renderer, &halo3, &chief, &ShotOptions::new(GameId::Halo3));
+    render(
+        &gl,
+        &mut renderer,
+        &halo3,
+        &chief,
+        &ShotOptions::new(GameId::Halo3),
+    );
     let made = renderer.gen3_targets_normal();
     assert!(made.is_some(), "Halo 3's frame handed its targets back");
     let warthog = shot("objects\\vehicles\\human\\warthog\\warthog", "vehicle");
-    render(&gl, &mut renderer, &reach, &warthog, &ShotOptions::new(GameId::HaloReach));
-    assert_eq!(renderer.gen3_targets_normal(), made, "Reach drew through Halo 3's set");
+    render(
+        &gl,
+        &mut renderer,
+        &reach,
+        &warthog,
+        &ShotOptions::new(GameId::HaloReach),
+    );
+    assert_eq!(
+        renderer.gen3_targets_normal(),
+        made,
+        "Reach drew through Halo 3's set"
+    );
 }

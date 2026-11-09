@@ -1,13 +1,13 @@
 //! Halo 4's full camo, drawn after the composite.
 
-use super::super::gen3::render::Gen3Cx;
-use super::super::gen3::shaders::Gen3Material;
 use super::super::RenderModelPreviewBatch;
 use super::super::gen3::pipeline::gen3_set_cull;
+use super::super::gen3::render::Gen3Cx;
+use super::super::gen3::shaders::Gen3Material;
+use super::super::renderer::RenderCore;
+use super::render::H4Game;
 use eframe::glow::{self, HasContext};
 use std::sync::Arc;
-use super::render::H4Game;
-use super::super::renderer::RenderCore;
 
 impl H4Game {
     /// `c_render_active_camo::render_object_callback` for a Halo 4 object,
@@ -37,7 +37,10 @@ impl H4Game {
             [
                 ("ps_activeCamoFactor", draw.factor),
                 ("ps_distortionTextureTransform", draw.transform),
-                ("distortionTextureEnabled", [f32::from(u8::from(draw.textured)); 4]),
+                (
+                    "distortionTextureEnabled",
+                    [f32::from(u8::from(draw.textured)); 4],
+                ),
                 ("ps_textureSize", [width, height, 1.0 / width, 1.0 / height]),
             ]
             .into_iter()

@@ -67,14 +67,21 @@ impl Default for PreviewAnimationPlayback {
 /// Where playback stands within `frame_count` frames: past the end of a
 /// looping clip it continues from the loop frame, and a clip that doesn't
 /// loop holds its last frame. On a whole frame when not interpolating.
-pub(in crate::app::model_preview) fn playback_frame_position(playback: &PreviewAnimationPlayback, frame_count: usize) -> f32 {
+pub(in crate::app::model_preview) fn playback_frame_position(
+    playback: &PreviewAnimationPlayback,
+    frame_count: usize,
+) -> f32 {
     let mut position = (playback.time * ANIMATION_FRAME_RATE).max(0.0);
     if playback.looped && frame_count > 1 {
         position = looped_frame_position(playback, position, frame_count);
     } else {
         position = position.min(frame_count.saturating_sub(1) as f32);
     }
-    if playback.interpolate { position } else { position.floor() }
+    if playback.interpolate {
+        position
+    } else {
+        position.floor()
+    }
 }
 
 /// `position` frames into a looping clip of `frame_count` frames. The game
@@ -101,7 +108,10 @@ pub(in crate::app::model_preview) fn looped_frame_position(
 /// The two frames playback lies between and how far it is from the first to
 /// the second. The last frame is held rather than blended into the next
 /// loop. `frame_count` must not be 0.
-pub(super) fn sampled_frames(playback: &PreviewAnimationPlayback, frame_count: usize) -> (usize, usize, f32) {
+pub(super) fn sampled_frames(
+    playback: &PreviewAnimationPlayback,
+    frame_count: usize,
+) -> (usize, usize, f32) {
     let position = playback_frame_position(playback, frame_count);
     let a = (position.floor() as usize).min(frame_count - 1);
     let b = (a + 1).min(frame_count - 1);

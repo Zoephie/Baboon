@@ -99,7 +99,11 @@ pub(crate) trait ParticleMaterial: std::fmt::Debug + Send + Sync {
 /// A game's reader of a particle's own material, from its tag's root and
 /// its model's strip.
 pub(in crate::app::model_preview) type ParticleMaterialReader =
-    fn(&TagReader, TagStruct<'_>, Option<&blam_tags::ParticleModelStrip>) -> Result<Arc<dyn ParticleMaterial>, String>;
+    fn(
+        &TagReader,
+        TagStruct<'_>,
+        Option<&blam_tags::ParticleModelStrip>,
+    ) -> Result<Arc<dyn ParticleMaterial>, String>;
 
 /// A `.particle`.
 #[derive(Debug)]
@@ -184,7 +188,11 @@ pub(in crate::app::model_preview) enum ParticleLighting {
 
 /// `ravi_order_0` and `ravi_order_3`, of `calculate_and_set_ravi_constants`'
 /// ten: the ambient, or what comes from `normal`.
-pub(super) fn ravi(lighting: ParticleLighting, normal: [f32; 3], constants: &[[f32; 4]; 10]) -> [f32; 3] {
+pub(super) fn ravi(
+    lighting: ParticleLighting,
+    normal: [f32; 3],
+    constants: &[[f32; 4]; 10],
+) -> [f32; 3] {
     const C1: f32 = 0.429_043;
     const C2: f32 = 0.511_664;
     const C4: f32 = 0.886_227;
@@ -207,7 +215,12 @@ pub(super) fn ravi(lighting: ParticleLighting, normal: [f32; 3], constants: &[[f
 
 /// `postprocess_frame_animation`'s `m_sprite`, from a sprite's left, right, top
 /// and bottom, its registration point, and the particle's `center offset`.
-pub(in crate::app::model_preview) fn sprite_corner(rect: [f32; 4], center: [f32; 2], offset: [f32; 2], plate_aspect: f32) -> [f32; 4] {
+pub(in crate::app::model_preview) fn sprite_corner(
+    rect: [f32; 4],
+    center: [f32; 2],
+    offset: [f32; 2],
+    plate_aspect: f32,
+) -> [f32; 4] {
     let [left, right, top, bottom] = rect;
     let (width, height) = (right - left, bottom - top);
     let (mut scale_x, mut scale_y) = (1.0, 1.0);
@@ -220,7 +233,12 @@ pub(in crate::app::model_preview) fn sprite_corner(rect: [f32; 4], center: [f32;
     let shift_x = 2.0 * (center[0] + offset[0]) / width - 1.0;
     let shift_y = 2.0 * (center[1] - offset[1]) / height - 1.0;
     let (x, y) = ((-1.0 - shift_x) * scale_x, (-1.0 - shift_y) * scale_y);
-    [x, y, (1.0 - shift_x) * scale_x - x, (1.0 - shift_y) * scale_y - y]
+    [
+        x,
+        y,
+        (1.0 - shift_x) * scale_x - x,
+        (1.0 - shift_y) * scale_y - y,
+    ]
 }
 
 /// `postprocess_frame_animation`: the quad from the first sequence's sprite at
@@ -238,18 +256,27 @@ fn read_frames(
         .and_then(|base| base.read_tag_ref_path("bitmap"))
         .and_then(|path| reader.load(&path, "bitmap", b"bitm").ok());
     let Some(tag) = tag else {
-        return (whole, sprite_corner([0.0, 1.0, 0.0, 1.0], [0.5, 0.5], offset, 1.0));
+        return (
+            whole,
+            sprite_corner([0.0, 1.0, 0.0, 1.0], [0.5, 0.5], offset, 1.0),
+        );
     };
-    let plate_aspect = elements(tag.root(), "bitmaps").first().map_or(1.0, |image| {
-        let size = |name: &str| image.read_int_any(name).unwrap_or(1) as f32;
-        size("width") / size("height")
-    });
+    let plate_aspect = elements(tag.root(), "bitmaps")
+        .first()
+        .map_or(1.0, |image| {
+            let size = |name: &str| image.read_int_any(name).unwrap_or(1) as f32;
+            size("width") / size("height")
+        });
     let read = |sprite: &TagStruct<'_>, name: &str| sprite.read_real(name).unwrap_or(0.0);
     let sequences = elements(tag.root(), "sequences");
     let (mut rect, mut center) = ([0.0, 1.0, 0.0, 1.0], [0.5, 0.5]);
     if let Some(sequence) = sequences.get(first % sequences.len().max(1)) {
         let sprites = elements(*sequence, "sprites");
-        let count = if one_shot { sprites.len().saturating_sub(1) } else { sprites.len() };
+        let count = if one_shot {
+            sprites.len().saturating_sub(1)
+        } else {
+            sprites.len()
+        };
         if count > 0 {
             let sprite = sprites[(count as f32 * start).floor() as i32 as usize % sprites.len()];
             rect = ["left", "right", "top", "bottom"].map(|name| read(&sprite, name));
@@ -266,7 +293,8 @@ fn read_frames(
         .iter()
         .take(MOST_FRAMES)
         .map(|sprite| {
-            let [left, right, top, bottom] = ["left", "right", "top", "bottom"].map(|name| read(sprite, name));
+            let [left, right, top, bottom] =
+                ["left", "right", "top", "bottom"].map(|name| read(sprite, name));
             [left, top, right - left, bottom - top]
         })
         .collect();
@@ -279,20 +307,33 @@ fn read_frames(
 }
 
 /// A `particle_model`'s meshes, each a triangle list.
-fn read_particle_mesh(reader: &TagReader, path: &str) -> Option<Vec<Vec<blam_tags::ParticleVertex>>> {
+fn read_particle_mesh(
+    reader: &TagReader,
+    path: &str,
+) -> Option<Vec<Vec<blam_tags::ParticleVertex>>> {
     let tag = reader.load(path, "particle_model", b"pmdf").ok()?;
     let meshes = blam_tags::particle_model_meshes(&tag, "particle_model").ok()?;
     let triangles = |mesh: &blam_tags::ParticleObjectMesh| {
-        mesh.indices.iter().filter_map(|index| mesh.vertices.get(*index as usize).copied()).collect::<Vec<_>>()
+        mesh.indices
+            .iter()
+            .filter_map(|index| mesh.vertices.get(*index as usize).copied())
+            .collect::<Vec<_>>()
     };
-    let meshes: Vec<_> = meshes.iter().map(triangles).filter(|mesh: &Vec<_>| !mesh.is_empty()).collect();
+    let meshes: Vec<_> = meshes
+        .iter()
+        .map(triangles)
+        .filter(|mesh: &Vec<_>| !mesh.is_empty())
+        .collect();
     (!meshes.is_empty()).then_some(meshes)
 }
 
 pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> {
     let tag = reader.load(path, "particle", b"prt3").ok()?;
     let root = tag.root();
-    let model = match root.read_tag_ref_path("Model").filter(|model| !model.is_empty()) {
+    let model = match root
+        .read_tag_ref_path("Model")
+        .filter(|model| !model.is_empty())
+    {
         Some(model) => Some(read_particle_mesh(reader, &model)?),
         None => None,
     };
@@ -300,7 +341,10 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
     let h4 = match rules.read_material {
         Some(read_material) => {
             // The GPU draws a model's strip whole, variant by variant.
-            let strip = match root.read_tag_ref_path("Model").filter(|model| !model.is_empty()) {
+            let strip = match root
+                .read_tag_ref_path("Model")
+                .filter(|model| !model.is_empty())
+            {
                 Some(path) => {
                     let tag = reader.load(&path, "particle_model", b"pmdf").ok()?;
                     Some(blam_tags::particle_model_strip(&tag).ok()?)
@@ -314,18 +358,33 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
     let shader = root.descend("actual shader?");
     let flagged = |wanted: &str| has_flag(root, "appearance flags", wanted);
     let animated = |wanted: &str| has_flag(root, "animation flags", wanted);
-    let first = root.read_int_any("first sequence index").unwrap_or(0).max(0) as usize;
+    let first = root
+        .read_int_any("first sequence index")
+        .unwrap_or(0)
+        .max(0) as usize;
     let offset = root.read_point2d("center offset");
-    let start = tag_function_at(&root.descend("frame index")?, "Mapping").map_or(0.0, |function| function.evaluate(0.0, 0.0));
+    let start = tag_function_at(&root.descend("frame index")?, "Mapping")
+        .map_or(0.0, |function| function.evaluate(0.0, 0.0));
     let one_shot = animated("frame animation one shot");
     let (frames, corner) = match shader.filter(|_| rules.read_material.is_none()) {
         Some(shader) => read_frames(reader, shader, first, [offset.x, offset.y], start, one_shot),
         None => (vec![[0.0, 0.0, 1.0, 1.0]], [0.0, 0.0, 1.0, 1.0]),
     };
-    let billboard = Billboard::named(&root.read_enum_option("particle billboard style").unwrap_or_default());
+    let billboard = Billboard::named(
+        &root
+            .read_enum_option("particle billboard style")
+            .unwrap_or_default(),
+    );
     let cheap = rules.cheap_shader && has_flag(root, "main flags", "uses cheap shader");
-    const PROPERTIES: [&str; 7] =
-        ["aspect ratio", "color", "intensity", "alpha", "frame index", "animation rate", "palette animation"];
+    const PROPERTIES: [&str; 7] = [
+        "aspect ratio",
+        "color",
+        "intensity",
+        "alpha",
+        "frame index",
+        "animation rate",
+        "palette animation",
+    ];
     let mut properties = unallocated_properties(root, PROPERTIES)?;
     // Reach's `c_particle_definition::postprocess` (tool 0x140DD6FA0) takes
     // the mask of all seven before allocating them in this order. Its
@@ -335,7 +394,9 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
     } else {
         SeedAllocator::halo3()
     };
-    properties.iter_mut().for_each(|property| property.allocate(&mut seeds));
+    properties
+        .iter_mut()
+        .for_each(|property| property.allocate(&mut seeds));
     let [aspect, color, intensity, alpha, frame, rate, palette] = properties;
     let mut sprite_shader = match shader.filter(|_| rules.read_material.is_none()) {
         Some(shader) => read_sprite_shader(reader, shader)?,
@@ -373,7 +434,8 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
                     _ => return None,
                 };
                 let (group, path) = attachment.read_tag_ref_with_group("type")?;
-                (group == u32::from_be_bytes(*b"effe") && !path.is_empty()).then_some((trigger, path))
+                (group == u32::from_be_bytes(*b"effe") && !path.is_empty())
+                    .then_some((trigger, path))
             })
             .collect(),
         any_attachments: !elements(root, "attachments").is_empty(),
@@ -384,9 +446,13 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
             let range = real("angle fade range");
             let range = if range < 0.0001 { 30.0 } else { range };
             let radians = std::f32::consts::PI / 180.0;
-            [(range * radians).recip(), real("angle fade cutoff") * radians]
+            [
+                (range * radians).recip(),
+                real("angle fade cutoff") * radians,
+            ]
         }),
-        blur_aspect: flagged("motion blur").then(|| root.read_real("motion blur aspect scale").unwrap_or(0.0)),
+        blur_aspect: flagged("motion blur")
+            .then(|| root.read_real("motion blur aspect scale").unwrap_or(0.0)),
         curvature: root.read_real("curvature").unwrap_or(0.0).clamp(0.0, 1.0) * 0.9999,
         one_shot,
         backwards: animated("can animate backwards"),
@@ -410,12 +476,20 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
 }
 
 /// `holder`'s properties of these names, none yet seeded; none if any is missing.
-pub(super) fn unallocated_properties<const N: usize>(holder: TagStruct<'_>, names: [&str; N]) -> Option<[ParticleProperty; N]> {
+pub(super) fn unallocated_properties<const N: usize>(
+    holder: TagStruct<'_>,
+    names: [&str; N],
+) -> Option<[ParticleProperty; N]> {
     let read = names.map(|name| ParticleProperty::unallocated(holder.descend(name)?));
-    read.into_iter().collect::<Option<Vec<_>>>()?.try_into().ok()
+    read.into_iter()
+        .collect::<Option<Vec<_>>>()?
+        .try_into()
+        .ok()
 }
 
 /// What a definition's properties read, by Reach's state bits.
 pub(super) fn used_states_of(properties: &[ParticleProperty]) -> u32 {
-    properties.iter().fold(0, |used, property| used | property.used_states())
+    properties
+        .iter()
+        .fold(0, |used, property| used | property.used_states())
 }

@@ -1,11 +1,11 @@
 //! The particle program H2 and the gen3 games draw their particles with: its GLSL, vertex floats and sprite maps.
 
-use super::*;
-use super::super::gl::buffer::slice_bytes;
-use super::super::gl::glsl::{fill, VIEW_DEPTH};
 use super::super::gen3::shaders::Gen3Blend;
-use eframe::glow::{self, HasContext as _};
+use super::super::gl::buffer::slice_bytes;
+use super::super::gl::glsl::{VIEW_DEPTH, fill};
 use super::super::reach::lighting::reach_particle_light;
+use super::*;
+use eframe::glow::{self, HasContext as _};
 
 const PARTICLE_VERTEX: &str = include_str!("shaders/particle.vert");
 
@@ -16,18 +16,45 @@ fn particle_fragment() -> String {
         include_str!("shaders/particle.frag"),
         &[
             ("view_depth", &VIEW_DEPTH),
-            ("albedo_diffuse_billboard_alpha", &(ParticleAlbedo::DiffuseBillboardAlpha as i32)),
-            ("albedo_diffuse_sprite_alpha", &(ParticleAlbedo::DiffuseSpriteAlpha as i32)),
+            (
+                "albedo_diffuse_billboard_alpha",
+                &(ParticleAlbedo::DiffuseBillboardAlpha as i32),
+            ),
+            (
+                "albedo_diffuse_sprite_alpha",
+                &(ParticleAlbedo::DiffuseSpriteAlpha as i32),
+            ),
             ("albedo_palette", &(ParticleAlbedo::Palette as i32)),
-            ("albedo_palette_billboard_alpha", &(ParticleAlbedo::PaletteBillboardAlpha as i32)),
-            ("albedo_palette_sprite_alpha", &(ParticleAlbedo::PaletteSpriteAlpha as i32)),
-            ("albedo_diffuse_modulated", &(ParticleAlbedo::DiffuseModulated as i32)),
+            (
+                "albedo_palette_billboard_alpha",
+                &(ParticleAlbedo::PaletteBillboardAlpha as i32),
+            ),
+            (
+                "albedo_palette_sprite_alpha",
+                &(ParticleAlbedo::PaletteSpriteAlpha as i32),
+            ),
+            (
+                "albedo_diffuse_modulated",
+                &(ParticleAlbedo::DiffuseModulated as i32),
+            ),
             ("albedo_palette_glow", &(ParticleAlbedo::PaletteGlow as i32)),
-            ("albedo_palette_plasma", &(ParticleAlbedo::PalettePlasma as i32)),
+            (
+                "albedo_palette_plasma",
+                &(ParticleAlbedo::PalettePlasma as i32),
+            ),
             ("albedo_h2_tint", &(ParticleAlbedo::H2Tint as i32)),
-            ("albedo_h2_multiply_add", &(ParticleAlbedo::H2MultiplyAdd as i32)),
-            ("albedo_h2_distortion", &(ParticleAlbedo::H2Distortion as i32)),
-            ("albedo_palette_2d_plasma", &(ParticleAlbedo::Palette2dPlasma as i32)),
+            (
+                "albedo_h2_multiply_add",
+                &(ParticleAlbedo::H2MultiplyAdd as i32),
+            ),
+            (
+                "albedo_h2_distortion",
+                &(ParticleAlbedo::H2Distortion as i32),
+            ),
+            (
+                "albedo_palette_2d_plasma",
+                &(ParticleAlbedo::Palette2dPlasma as i32),
+            ),
         ],
     )
 }
@@ -42,16 +69,25 @@ pub(in crate::app::model_preview) unsafe fn sprite_maps(
     look: &particles::SpriteShader,
 ) -> [Option<glow::NativeTexture>; 4] {
     let [base, alpha, palette, second] = look.samplers;
-    [(&look.base_map, base), (&look.alpha_map, alpha), (&look.palette_map, palette), (&look.second_map, second)].map(
-        |(map, sampler)| {
-            map.as_ref().and_then(|(image, texels, mips)| unsafe {
-                crate::app::model_preview::gl::texture::upload_image_linear(gl, image, *texels, mips, sampler)
-            })
-        },
-    )
+    [
+        (&look.base_map, base),
+        (&look.alpha_map, alpha),
+        (&look.palette_map, palette),
+        (&look.second_map, second),
+    ]
+    .map(|(map, sampler)| {
+        map.as_ref().and_then(|(image, texels, mips)| unsafe {
+            crate::app::model_preview::gl::texture::upload_image_linear(
+                gl, image, *texels, mips, sampler,
+            )
+        })
+    })
 }
 
-pub(in crate::app::model_preview) fn particle_floats(camera: &ModelGpuCamera, drawn: &[particles::ParticleCorner]) -> Vec<[f32; PARTICLE_FLOATS]> {
+pub(in crate::app::model_preview) fn particle_floats(
+    camera: &ModelGpuCamera,
+    drawn: &[particles::ParticleCorner],
+) -> Vec<[f32; PARTICLE_FLOATS]> {
     drawn
         .iter()
         .map(|vertex| {
@@ -66,7 +102,9 @@ pub(in crate::app::model_preview) fn particle_floats(camera: &ModelGpuCamera, dr
             });
             let [[r, s], [t, u]] = lean;
             let [v, w, x] = vertex.normal;
-            [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x]
+            [
+                a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x,
+            ]
         })
         .collect()
 }
@@ -129,7 +167,11 @@ impl ParticleGl {
             // still makes Apple's driver complain.
             gl.bind_texture(glow::TEXTURE_2D, depth.or(no_map));
             gl.active_texture(glow::TEXTURE0);
-            let range = if depth.is_some() { look.depth_fade.unwrap_or(0.0) } else { 0.0 };
+            let range = if depth.is_some() {
+                look.depth_fade.unwrap_or(0.0)
+            } else {
+                0.0
+            };
             gl.uniform_1_f32(self.fade.as_ref(), range);
             gl.uniform_4_f32_slice(self.depth.as_ref(), &scene_depth_terms(camera));
             gl.uniform_1_i32(self.albedo.as_ref(), look.albedo as i32);
@@ -141,7 +183,11 @@ impl ParticleGl {
             }
             let constants = look.constants;
             gl.uniform_3_f32_slice(self.tint.as_ref(), &constants.tint);
-            gl.uniform_2_f32(self.modulation.as_ref(), constants.modulation, constants.alpha_modulation);
+            gl.uniform_2_f32(
+                self.modulation.as_ref(),
+                constants.modulation,
+                constants.alpha_modulation,
+            );
             gl.uniform_4_f32_slice(self.base_xform.as_ref(), &constants.base_xform);
             gl.uniform_4_f32_slice(self.second_xform.as_ref(), &constants.second_xform);
             gl.uniform_1_i32(self.black_point.as_ref(), i32::from(look.black_point));
@@ -159,15 +205,26 @@ impl ParticleGl {
                 gl.uniform_2_f32(self.contrast.as_ref(), scale, offset);
             }
             gl.uniform_1_f32(self.sphere_warp.as_ref(), look.sphere_warp.unwrap_or(0.0));
-            gl.uniform_1_f32(self.palette_shift.as_ref(), look.palette_shift.unwrap_or(0.0));
-            gl.uniform_1_i32(self.plasma_second_sprite.as_ref(), i32::from(look.plasma_second_sprite));
-            gl.uniform_1_i32(self.unit_particle_alpha.as_ref(), i32::from(look.unit_particle_alpha));
+            gl.uniform_1_f32(
+                self.palette_shift.as_ref(),
+                look.palette_shift.unwrap_or(0.0),
+            );
+            gl.uniform_1_i32(
+                self.plasma_second_sprite.as_ref(),
+                i32::from(look.plasma_second_sprite),
+            );
+            gl.uniform_1_i32(
+                self.unit_particle_alpha.as_ref(),
+                i32::from(look.unit_particle_alpha),
+            );
             let premultiplied = look.blend == Gen3Blend::PreMultiplied;
             gl.uniform_1_i32(self.premultiplied.as_ref(), i32::from(premultiplied));
             gl.uniform_1_i32(self.alpha_test.as_ref(), i32::from(look.alpha_test));
             gl.depth_mask(look.alpha_test);
             gl.uniform_4_f32_slice(self.lighting.as_ref(), lighting.as_flattened());
-            let unsigned = look.base_map.as_ref().is_some_and(|(_, texels, _)| *texels != crate::app::model_preview::common::image::ImageTexels::Signed);
+            let unsigned = look.base_map.as_ref().is_some_and(|(_, texels, _)| {
+                *texels != crate::app::model_preview::common::image::ImageTexels::Signed
+            });
             gl.uniform_1_i32(self.unsigned.as_ref(), i32::from(unsigned));
             if look.distortion.is_some() {
                 gl.blend_equation(glow::FUNC_ADD);
@@ -185,7 +242,10 @@ impl ParticleGl {
     }
 }
 
-pub(in crate::app::model_preview) unsafe fn gen3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<ParticleGl> {
+pub(in crate::app::model_preview) unsafe fn gen3_particle_gl(
+    gl: &glow::Context,
+    main: glow::NativeProgram,
+) -> Option<ParticleGl> {
     unsafe {
         let program = link_h2_program(gl, main, PARTICLE_VERTEX, &particle_fragment())
             .map_err(|error| eprintln!("model preview: {error}"))
@@ -198,11 +258,21 @@ pub(in crate::app::model_preview) unsafe fn gen3_particle_gl(gl: &glow::Context,
         let mut offset = 0;
         for (attribute, size) in [4, 2, 2, 2, 4, 3, 4, 3].into_iter().enumerate() {
             gl.enable_vertex_attrib_array(attribute as u32);
-            gl.vertex_attrib_pointer_f32(attribute as u32, size, glow::FLOAT, false, stride, offset);
+            gl.vertex_attrib_pointer_f32(
+                attribute as u32,
+                size,
+                glow::FLOAT,
+                false,
+                stride,
+                offset,
+            );
             offset += size * size_of::<f32>() as i32;
         }
         gl.use_program(Some(program));
-        for (unit, name) in ["u_base", "u_alpha", "u_palette", "u_scene_depth", "u_base2"].into_iter().enumerate() {
+        for (unit, name) in ["u_base", "u_alpha", "u_palette", "u_scene_depth", "u_base2"]
+            .into_iter()
+            .enumerate()
+        {
             gl.uniform_1_i32(gl.get_uniform_location(program, name).as_ref(), unit as i32);
         }
         Some(ParticleGl {
@@ -247,6 +317,9 @@ mod tests {
     /// skip by name.
     #[test]
     fn the_particle_program_compiles_under_glslang() {
-        assert_compiles_under_glslang("particle", &[("vert", PARTICLE_VERTEX), ("frag", &particle_fragment())]);
+        assert_compiles_under_glslang(
+            "particle",
+            &[("vert", PARTICLE_VERTEX), ("frag", &particle_fragment())],
+        );
     }
 }

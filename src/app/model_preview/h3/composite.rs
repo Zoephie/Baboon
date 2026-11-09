@@ -4,17 +4,22 @@
 use eframe::glow::{self, HasContext};
 
 use super::super::gen3::effects::screen::Gen3ScreenSettings;
-use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::HALF_LENS;
+use super::super::gen3::render::Gen3Cx;
+use super::render::H3Game;
 use crate::app::model_preview::gl::pass_state::PassState;
 use crate::app::model_preview::gl::screen::{premultiplied_over, screen_program};
-use super::render::H3Game;
 
 /// `final_composite`'s `tone_curve_constants` at a white point of one: the
 /// numbers in its comment are the curve before this scale.
 const TONE_CURVE: [f32; 4] = {
     let scale = 1.493_801_6;
-    [1.493_801_6 / scale, 1.004_149_4 * scale, 0.0, -0.15 * scale * scale * scale]
+    [
+        1.493_801_6 / scale,
+        1.004_149_4 * scale,
+        0.0,
+        -0.15 * scale * scale * scale,
+    ]
 };
 
 const COMPOSITE_FRAGMENT: &str = include_str!("shaders/composite.frag");
@@ -51,9 +56,18 @@ impl H3Game {
             let columns: [f32; 16] = std::array::from_fn(|at| matrix[at % 4][at / 4]);
             let location = gl.get_uniform_location(program, "hue_saturation");
             gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &columns);
-            gl.uniform_1_f32(gl.get_uniform_location(program, "contrast").as_ref(), screen.gamma());
-            gl.uniform_1_f32(gl.get_uniform_location(program, "exposure").as_ref(), screen.exposure());
-            gl.uniform_1_f32(gl.get_uniform_location(program, "view_scale").as_ref(), screen.view_scale(HALF_LENS));
+            gl.uniform_1_f32(
+                gl.get_uniform_location(program, "contrast").as_ref(),
+                screen.gamma(),
+            );
+            gl.uniform_1_f32(
+                gl.get_uniform_location(program, "exposure").as_ref(),
+                screen.exposure(),
+            );
+            gl.uniform_1_f32(
+                gl.get_uniform_location(program, "view_scale").as_ref(),
+                screen.view_scale(HALF_LENS),
+            );
             premultiplied_over(state.empty_array(gl)).apply(gl);
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             PassState::new().enable(glow::DEPTH_TEST).apply(gl);

@@ -9,8 +9,8 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, object_block};
 use super::super::common::view::posed_on;
-use crate::app::model_preview::common::point_physics::CePointPhysics;
 use super::super::*;
+use crate::app::model_preview::common::point_physics::CePointPhysics;
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 
 /// The time `flag_render` gives the update that settles a flag first.
@@ -53,7 +53,9 @@ fn read_flag(
     let width = root.read_int_any("width").unwrap_or(0);
     let height = root.read_int_any("height").unwrap_or(0);
     // `flag_new`: one too big, or with no blue shader, does nothing.
-    let blue = root.read_tag_ref_with_group("blue flag shader").filter(|(_, path)| !path.is_empty());
+    let blue = root
+        .read_tag_ref_with_group("blue flag shader")
+        .filter(|(_, path)| !path.is_empty());
     // Fewer than two points a side would have no cells; the game divides by zero.
     if width * height >= 225 || !(2..40).contains(&width) || height < 2 {
         return None;
@@ -61,9 +63,13 @@ fn read_flag(
     let blue = blue?;
     // `flag_render_proper`: the red shader for an object of team 0, else
     // blue; the preview's object has no team.
-    let (shader_group, shader_path) =
-        root.read_tag_ref_with_group("red flag shader").filter(|(_, path)| !path.is_empty()).unwrap_or(blue);
-    let physics_path = root.read_tag_ref_path("physics").filter(|path| !path.is_empty())?;
+    let (shader_group, shader_path) = root
+        .read_tag_ref_with_group("red flag shader")
+        .filter(|(_, path)| !path.is_empty())
+        .unwrap_or(blue);
+    let physics_path = root
+        .read_tag_ref_path("physics")
+        .filter(|path| !path.is_empty())?;
     let physics = reader.load(&physics_path, "point_physics", b"pphy").ok()?;
     let attachments: Vec<FlagAttachment> = elements(root, "attachment points")
         .iter()
@@ -73,7 +79,9 @@ fn read_flag(
             let (node, position) = markers
                 .iter()
                 .find(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(&name))
-                .map_or((0, [0.0; 3]), |marker| (marker.node_index.max(0) as usize, marker.position));
+                .map_or((0, [0.0; 3]), |marker| {
+                    (marker.node_index.max(0) as usize, marker.position)
+                });
             FlagAttachment {
                 height_to_next: point.read_int_any("height_to_next_attachment").unwrap_or(0) as i32,
                 node,
@@ -91,7 +99,10 @@ fn read_flag(
     // `flag_render_proper`: u across the width, v down the height.
     preview.vertices.extend((0..width).flat_map(|x| {
         (0..height).map(move |y| RenderModelPreviewVertex {
-            texcoord: [x as f32 / (width - 1) as f32, y as f32 / (height - 1) as f32],
+            texcoord: [
+                x as f32 / (width - 1) as f32,
+                y as f32 / (height - 1) as f32,
+            ],
             ..Default::default()
         })
     }));
@@ -99,7 +110,10 @@ fn read_flag(
     for x in 0..width - 1 {
         for y in 0..height - 1 {
             let triangles: &[[(usize, usize); 3]] = match cells[x * (height - 1) + y] {
-                0 => &[[(x, y), (x + 1, y), (x, y + 1)], [(x, y + 1), (x + 1, y), (x + 1, y + 1)]],
+                0 => &[
+                    [(x, y), (x + 1, y), (x, y + 1)],
+                    [(x, y + 1), (x + 1, y), (x + 1, y + 1)],
+                ],
                 2 => &[[(x, y), (x, y + 1), (x + 1, y)]],
                 3 => &[[(x, y), (x, y + 1), (x + 1, y + 1)]],
                 4 => &[[(x, y), (x + 1, y + 1), (x + 1, y)]],
@@ -107,14 +121,24 @@ fn read_flag(
                 _ => &[],
             };
             for triangle in triangles {
-                preview.indices.extend(triangle.iter().map(|&(x, y)| at(x, y)));
+                preview
+                    .indices
+                    .extend(triangle.iter().map(|&(x, y)| at(x, y)));
             }
         }
     }
-    preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group, object: owner, ..Default::default() });
+    preview.materials.push(RenderModelPreviewMaterial {
+        shader_path,
+        shader_group,
+        object: owner,
+        ..Default::default()
+    });
     let name = path.rsplit('\\').next().unwrap_or(path).to_owned();
     let permutation = "flag".to_owned();
-    preview.regions.push(RenderModelPreviewRegion { name: name.clone(), permutations: vec![permutation.clone()] });
+    preview.regions.push(RenderModelPreviewRegion {
+        name: name.clone(),
+        permutations: vec![permutation.clone()],
+    });
     preview.batches.push(RenderModelPreviewBatch {
         region_name: name,
         permutation_name: permutation,
@@ -139,22 +163,47 @@ fn read_flag(
 
 /// `flag_tesselate_region`: across a square of cells, the diagonal takes
 /// `shape`, the cells past it none, and the rest stay whole.
-fn tesselate_region(cells: &mut [i32], width: usize, height: usize, x: i32, y: i32, size: i32, shape: i32) {
+fn tesselate_region(
+    cells: &mut [i32],
+    width: usize,
+    height: usize,
+    x: i32,
+    y: i32,
+    size: i32,
+    shape: i32,
+) {
     for at_x in x..x + size {
         for at_y in y..y + size {
             if at_x < 0 || at_y < 0 || at_x >= width as i32 - 1 || at_y >= height as i32 - 1 {
                 continue;
             }
-            let across = if shape == 4 || shape == 5 { at_x - x } else { size - at_x + x - 1 };
-            let down = if shape == 4 || shape == 2 { at_y - y } else { y - at_y + size - 1 };
-            cells[at_x as usize * (height - 1) + at_y as usize] = if across == down { shape } else { i32::from(down > across) };
+            let across = if shape == 4 || shape == 5 {
+                at_x - x
+            } else {
+                size - at_x + x - 1
+            };
+            let down = if shape == 4 || shape == 2 {
+                at_y - y
+            } else {
+                y - at_y + size - 1
+            };
+            cells[at_x as usize * (height - 1) + at_y as usize] = if across == down {
+                shape
+            } else {
+                i32::from(down > across)
+            };
         }
     }
 }
 
 /// Each cell's shape: 0 two triangles, 1 none, 2 to 5 one triangle, as
 /// `flag_set_attachment_shape` and `flag_set_trailing_shape` cut them.
-fn cell_shapes(root: TagStruct<'_>, width: usize, height: usize, attachments: &[FlagAttachment]) -> Vec<i32> {
+fn cell_shapes(
+    root: TagStruct<'_>,
+    width: usize,
+    height: usize,
+    attachments: &[FlagAttachment],
+) -> Vec<i32> {
     let mut cells = vec![0; (width - 1) * (height - 1)];
     let (w, h) = (width as i32, height as i32);
     if root.read_int_any("attached edge shape").unwrap_or(0) != 0 {
@@ -169,7 +218,8 @@ fn cell_shapes(root: TagStruct<'_>, width: usize, height: usize, attachments: &[
                 for y in row..row + size {
                     if x < w - 1 && y < h - 1 {
                         let down = y - row;
-                        cells[x as usize * (height - 1) + y as usize] = if x == down { 4 } else { i32::from(down > x) };
+                        cells[x as usize * (height - 1) + y as usize] =
+                            if x == down { 4 } else { i32::from(down > x) };
                     }
                 }
             }
@@ -179,7 +229,11 @@ fn cell_shapes(root: TagStruct<'_>, width: usize, height: usize, attachments: &[
     }
     let trailing = root.read_int_any("trailing edge shape").unwrap_or(0) as i32;
     if trailing != 0 {
-        let size = if trailing == 3 || trailing == 4 { h - 1 } else { h >> 1 };
+        let size = if trailing == 3 || trailing == 4 {
+            h - 1
+        } else {
+            h >> 1
+        };
         let offset = root.read_int_any("trailing edge shape offset").unwrap_or(0) as i32;
         let x = (w + offset - size - 1).max(0);
         match trailing {
@@ -219,7 +273,10 @@ pub(in crate::app::model_preview) fn read_ce_flags(
         .filter(|(kind, path)| *kind == group && !path.is_empty())
         .map(|(_, path)| path)
         .collect();
-    paths.iter().filter_map(|path| read_flag(reader, path, owner, markers, preview)).collect()
+    paths
+        .iter()
+        .filter_map(|path| read_flag(reader, path, owner, markers, preview))
+        .collect()
 }
 
 /// Each flag's first vertex and its vertices' places and normals.
@@ -257,7 +314,10 @@ impl RunningFlag {
         };
         loop {
             let direction = [next(), next(), next()];
-            let length = (direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]).sqrt();
+            let length = (direction[0] * direction[0]
+                + direction[1] * direction[1]
+                + direction[2] * direction[2])
+                .sqrt();
             if length > 0.0001 && length <= 1.0 {
                 return direction.map(|axis| axis / length);
             }
@@ -283,28 +343,42 @@ impl RunningFlag {
             let next = attached[(index + 1).min(attached.len() - 1)];
             for at in row..end {
                 let t = (at - row) as f32 / (end - row) as f32;
-                force_points[at as usize] = Some(std::array::from_fn(|axis| next[axis] * t + attached[index][axis] * (1.0 - t)));
+                force_points[at as usize] = Some(std::array::from_fn(|axis| {
+                    next[axis] * t + attached[index][axis] * (1.0 - t)
+                }));
             }
             row = end;
         }
         // A jump of the first marker carries the sheet with it.
-        let jump: [f32; 3] = std::array::from_fn(|axis| attached[0][axis] - self.first_attachment[axis]);
+        let jump: [f32; 3] =
+            std::array::from_fn(|axis| attached[0][axis] - self.first_attachment[axis]);
         if jump.iter().any(|axis| (*axis as i32).abs() > 1) {
             for point in &mut self.points {
                 point.place = std::array::from_fn(|axis| point.place[axis] + jump[axis]);
             }
         }
         self.first_attachment = attached[0];
-        let rest: [f32; 3] =
-            NEIGHBOURS.map(|(dx, dy)| ((dx as f32 * flag.cell[0]).powi(2) + (dy as f32 * flag.cell[1]).powi(2)).sqrt());
+        let rest: [f32; 3] = NEIGHBOURS.map(|(dx, dy)| {
+            ((dx as f32 * flag.cell[0]).powi(2) + (dy as f32 * flag.cell[1]).powi(2)).sqrt()
+        });
         let noise = flag.physics.air_friction() * flag.wind_noise * 0.0004;
         for x in 0..width {
             for y in 0..height {
                 let index = x * height + y;
                 let force = self.direction().map(|axis| axis * noise);
-                let FlagPoint { place: old, mut velocity } = self.points[index];
+                let FlagPoint {
+                    place: old,
+                    mut velocity,
+                } = self.points[index];
                 let mut place = old;
-                flag.physics.step_with_force(&mut place, &mut velocity, force, POINT_RADIUS, ground, dt);
+                flag.physics.step_with_force(
+                    &mut place,
+                    &mut velocity,
+                    force,
+                    POINT_RADIUS,
+                    ground,
+                    dt,
+                );
                 if x != 0 || pinned[y].is_none() {
                     let mut total = 0.0;
                     let mut sum = [0.0f32; 3];
@@ -315,8 +389,10 @@ impl RunningFlag {
                             continue;
                         }
                         let neighbour = self.points[nx as usize * height + ny as usize].place;
-                        let mut away: [f32; 3] = std::array::from_fn(|axis| place[axis] - neighbour[axis]);
-                        let distance = (away[0] * away[0] + away[1] * away[1] + away[2] * away[2]).sqrt();
+                        let mut away: [f32; 3] =
+                            std::array::from_fn(|axis| place[axis] - neighbour[axis]);
+                        let distance =
+                            (away[0] * away[0] + away[1] * away[1] + away[2] * away[2]).sqrt();
                         if distance.abs() >= 0.0001 {
                             away = away.map(|axis| axis / distance);
                         }
@@ -343,7 +419,10 @@ impl RunningFlag {
                 } else if let Some(pin) = pinned[y] {
                     place = attached[pin];
                 }
-                self.points[index] = FlagPoint { place, velocity: std::array::from_fn(|axis| (place[axis] - old[axis]) / dt) };
+                self.points[index] = FlagPoint {
+                    place,
+                    velocity: std::array::from_fn(|axis| (place[axis] - old[axis]) / dt),
+                };
             }
         }
     }
@@ -362,7 +441,10 @@ impl CeFlagField {
         time: f32,
     ) -> FlagMeshes {
         let attached_of = |flag: &CeFlagAt| -> Vec<[f32; 3]> {
-            flag.attachments.iter().map(|attachment| posed_on(attachment.node, attachment.position, [0.0; 3], bones).0).collect()
+            flag.attachments
+                .iter()
+                .map(|attachment| posed_on(attachment.node, attachment.position, [0.0; 3], bones).0)
+                .collect()
         };
         if self.running.len() != flags.len() || self.time.is_none_or(|last| time < last) {
             self.running = flags
@@ -395,7 +477,11 @@ impl CeFlagField {
             }
         }
         self.time = Some(time);
-        flags.iter().zip(&self.running).map(|(flag, running)| (flag.first_vertex, mesh(flag, running))).collect()
+        flags
+            .iter()
+            .zip(&self.running)
+            .map(|(flag, running)| (flag.first_vertex, mesh(flag, running)))
+            .collect()
     }
 }
 
@@ -410,13 +496,15 @@ fn mesh(flag: &CeFlagAt, running: &RunningFlag) -> Vec<([f32; 3], [f32; 3])> {
             let (cx, cy) = (x.min(width - 2), y.min(height - 2));
             let origin = place(cx, cy);
             let down: [f32; 3] = std::array::from_fn(|axis| place(cx, cy + 1)[axis] - origin[axis]);
-            let across: [f32; 3] = std::array::from_fn(|axis| place(cx + 1, cy)[axis] - origin[axis]);
+            let across: [f32; 3] =
+                std::array::from_fn(|axis| place(cx + 1, cy)[axis] - origin[axis]);
             let mut normal = [
                 across[1] * down[2] - across[2] * down[1],
                 across[2] * down[0] - across[0] * down[2],
                 across[0] * down[1] - across[1] * down[0],
             ];
-            let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+            let length =
+                (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
             if length.abs() >= 0.0001 {
                 normal = normal.map(|axis| axis / length);
             }

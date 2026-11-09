@@ -40,7 +40,9 @@ pub(crate) fn h4_shadow_caster(object: &TagFile) -> Option<H4ShadowCaster> {
     if has_flag(holder, "flags", "does not cast shadow") {
         return None;
     }
-    let mode = holder.read_enum_option("lightmap shadow mode").unwrap_or_default();
+    let mode = holder
+        .read_enum_option("lightmap shadow mode")
+        .unwrap_or_default();
     shadow_type(&mode, &object.group().tag.to_be_bytes())
         .filter(|kind| matches!(kind, 2..=4))
         .map(|kind| H4ShadowCaster { hires: kind == 4 })
@@ -61,9 +63,6 @@ fn shadow_type(mode: &str, group: &[u8; 4]) -> Option<u8> {
 }
 
 type Vector = [f32; 3];
-
-
-
 
 /// `object_shadow_visible`'s camera (X360 0x83A98470) over one object's
 /// bounding sphere, and the map it draws into.
@@ -219,7 +218,9 @@ mod tests {
     #[test]
     fn the_kits_chief_and_rifle_cast() {
         use crate::app::export::geometry::load_referenced_tag_from_source;
-        let Some(source) = kit_source(GameId::Halo4) else { return };
+        let Some(source) = kit_source(GameId::Halo4) else {
+            return;
+        };
         let load = |path: &str, extension: &str, group: &[u8; 4]| {
             load_referenced_tag_from_source(&source, path, extension, group).unwrap()
         };

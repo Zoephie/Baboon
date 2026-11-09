@@ -10,8 +10,16 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 pub(crate) enum Image {
     Flat(TextureImage),
     /// Six RGBA faces of `size` texels a side, in +X -X +Y -Y +Z -Z order.
-    Cube { size: usize, faces: [Vec<u8>; 6] },
-    Volume { width: usize, height: usize, depth: usize, rgba: Vec<u8> },
+    Cube {
+        size: usize,
+        faces: [Vec<u8>; 6],
+    },
+    Volume {
+        width: usize,
+        height: usize,
+        depth: usize,
+        rgba: Vec<u8>,
+    },
 }
 
 impl Image {
@@ -20,8 +28,15 @@ impl Image {
         use super::super::materials::rgba_fills;
         match self {
             Self::Flat(image) => image.whole(),
-            Self::Cube { size, faces } => faces.iter().all(|face| rgba_fills(face, &[*size, *size])),
-            Self::Volume { width, height, depth, rgba } => rgba_fills(rgba, &[*width, *height, *depth]),
+            Self::Cube { size, faces } => {
+                faces.iter().all(|face| rgba_fills(face, &[*size, *size]))
+            }
+            Self::Volume {
+                width,
+                height,
+                depth,
+                rgba,
+            } => rgba_fills(rgba, &[*width, *height, *depth]),
         }
     }
 }
@@ -109,13 +124,29 @@ mod tests {
     #[test]
     fn an_image_short_of_its_size_is_not_whole() {
         let face = |side: usize| vec![0u8; side * side * 4];
-        let cube = |last: Vec<u8>| Image::Cube { size: 4, faces: [face(4), face(4), face(4), face(4), face(4), last] };
+        let cube = |last: Vec<u8>| Image::Cube {
+            size: 4,
+            faces: [face(4), face(4), face(4), face(4), face(4), last],
+        };
         assert!(cube(face(4)).whole());
         assert!(!cube(vec![0; 4 * 2 * 4]).whole());
-        let volume = |bytes: usize| Image::Volume { width: 2, height: 2, depth: 3, rgba: vec![0; bytes] };
+        let volume = |bytes: usize| Image::Volume {
+            width: 2,
+            height: 2,
+            depth: 3,
+            rgba: vec![0; bytes],
+        };
         assert!(volume(48).whole());
         assert!(!volume(47).whole());
-        let huge = Image::Volume { width: usize::MAX, height: 2, depth: 1, rgba: Vec::new() };
-        assert!(!huge.whole(), "a size past the address space is never whole");
+        let huge = Image::Volume {
+            width: usize::MAX,
+            height: 2,
+            depth: 1,
+            rgba: Vec::new(),
+        };
+        assert!(
+            !huge.whole(),
+            "a size past the address space is never whole"
+        );
     }
 }

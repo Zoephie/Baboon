@@ -12,7 +12,8 @@ pub(in crate::app::model_preview) fn gen3_xform(values: &Values<'_>, parameter: 
         return xform;
     };
     for animated in &found.animated_parameters {
-        let (Some(kind), Some(function)) = (animated.parameter_type, animated.function.as_ref()) else {
+        let (Some(kind), Some(function)) = (animated.parameter_type, animated.function.as_ref())
+        else {
             continue;
         };
         let value = function.evaluate(0.0, 0.0);
@@ -61,9 +62,14 @@ pub(super) fn gen3_extern_bitmap(name: &str) -> Option<&'static str> {
 }
 
 /// `render_method_submit`'s `get_extern_constant`, for an extern with no
-/// frame in it. 
+/// frame in it.
 pub(super) fn gen3_extern_change_color(name: &str) -> Option<usize> {
-    ["change color primary", "change color secondary", "change color tertiary", "change color quaternary"]
-        .iter()
-        .position(|known| *known == name)
+    [
+        "change color primary",
+        "change color secondary",
+        "change color tertiary",
+        "change color quaternary",
+    ]
+    .iter()
+    .position(|known| *known == name)
 }

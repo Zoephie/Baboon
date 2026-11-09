@@ -61,7 +61,14 @@ fn light(reflections: Vec<CeReflection>) -> CeLight {
 }
 
 fn sprites(light: &CeLight, value: f32) -> Vec<FlareSprite> {
-    light.sprites(&[value, 0.0, 0.0, 0.0], &[[1.0; 3]; 4], None, &VIEW, 0.0, 1.0)
+    light.sprites(
+        &[value, 0.0, 0.0, 0.0],
+        &[[1.0; 3]; 4],
+        None,
+        &VIEW,
+        0.0,
+        1.0,
+    )
 }
 
 #[test]
@@ -106,7 +113,10 @@ fn a_light_with_no_cone_shines_all_ways() {
 #[test]
 fn dark_flare_only_and_out_of_reach_lights_add_nothing() {
     let lit = light(Vec::new());
-    assert_eq!(rows(std::slice::from_ref(&lit), 0, 0.0), [[0.0; 4]; CE_POINT_LIGHT_ROWS]);
+    assert_eq!(
+        rows(std::slice::from_ref(&lit), 0, 0.0),
+        [[0.0; 4]; CE_POINT_LIGHT_ROWS]
+    );
     let mut flare_only = lit.clone();
     flare_only.dynamic = false;
     assert_eq!(rows(&[flare_only], 0, 1.0), [[0.0; 4]; CE_POINT_LIGHT_ROWS]);
@@ -119,32 +129,47 @@ fn dark_flare_only_and_out_of_reach_lights_add_nothing() {
 fn a_light_can_spare_only_its_own_object() {
     let mut lit = light(Vec::new());
     lit.spares_owner = true;
-    assert_eq!(rows(std::slice::from_ref(&lit), 0, 1.0), [[0.0; 4]; CE_POINT_LIGHT_ROWS]);
+    assert_eq!(
+        rows(std::slice::from_ref(&lit), 0, 1.0),
+        [[0.0; 4]; CE_POINT_LIGHT_ROWS]
+    );
     assert_ne!(rows(&[lit], 1, 1.0), [[0.0; 4]; CE_POINT_LIGHT_ROWS]);
 }
 
 #[test]
 fn the_two_strongest_lights_win() {
-    let dim = |x: f32| CeLight { position: [x, 0.0, 0.0], ..light(Vec::new()) };
+    let dim = |x: f32| CeLight {
+        position: [x, 0.0, 0.0],
+        ..light(Vec::new())
+    };
     let rows = rows(&[dim(1.5), dim(0.0), dim(1.0)], 0, 1.0);
     assert_eq!((rows[0][0], rows[3][0]), (0.0, 1.0));
 }
 
 #[test]
 fn tool_bakes_a_lights_cone() {
-    use std::f32::consts::{FRAC_PI_3, FRAC_PI_2, PI};
+    use std::f32::consts::{FRAC_PI_2, FRAC_PI_3, PI};
     assert_eq!(baked_cone(0.0, 0.0), None);
     assert_eq!(baked_cone(FRAC_PI_2, 0.0), None);
     assert_eq!(baked_cone(PI, PI), None);
-    assert_eq!(baked_cone(FRAC_PI_3, FRAC_PI_2), Some([FRAC_PI_3.cos(), FRAC_PI_2.cos()]));
+    assert_eq!(
+        baked_cone(FRAC_PI_3, FRAC_PI_2),
+        Some([FRAC_PI_3.cos(), FRAC_PI_2.cos()])
+    );
     // A falloff past the cutoff starts from straight ahead.
-    assert_eq!(baked_cone(FRAC_PI_2, FRAC_PI_3), Some([1.0, FRAC_PI_3.cos()]));
+    assert_eq!(
+        baked_cone(FRAC_PI_2, FRAC_PI_3),
+        Some([1.0, FRAC_PI_3.cos()])
+    );
 }
 
 #[test]
 fn tool_whitens_a_light_with_no_color() {
     let black = [0.0, 0.0, 0.0, 0.5];
-    assert_eq!(baked_colors(black, black), ([1.0, 1.0, 1.0, 0.5], [1.0, 1.0, 1.0, 0.5]));
+    assert_eq!(
+        baked_colors(black, black),
+        ([1.0, 1.0, 1.0, 0.5], [1.0, 1.0, 1.0, 0.5])
+    );
     let upper = [1.0, 0.5, 0.0, 1.0];
     assert_eq!(baked_colors(black, upper), (black, upper));
 }
@@ -166,13 +191,20 @@ fn the_occlusion_patch_sits_where_the_flare_says() {
         let mut flare = (**light.flare.as_ref().unwrap()).clone();
         flare.occlusion_offset = offset;
         light.flare = Some(Arc::new(flare));
-        light.occlusion_patch(&[1.0; 4], &[[1.0; 3]; 4], None, &VIEW).unwrap().center
+        light
+            .occlusion_patch(&[1.0; 4], &[[1.0; 3]; 4], None, &VIEW)
+            .unwrap()
+            .center
     };
     assert_eq!(patch(OcclusionOffset::TowardViewer), [1.0, -0.1, 0.0]);
     assert!((patch(OcclusionOffset::MarkerForward)[1] + 0.141_421_4).abs() < 1e-6);
     assert_eq!(patch(OcclusionOffset::None), [1.0, 0.0, 0.0]);
     // A dark light tests nothing.
-    assert!(light(Vec::new()).occlusion_patch(&[0.0; 4], &[[1.0; 3]; 4], None, &VIEW).is_none());
+    assert!(
+        light(Vec::new())
+            .occlusion_patch(&[0.0; 4], &[[1.0; 3]; 4], None, &VIEW)
+            .is_none()
+    );
 }
 
 #[test]
@@ -248,7 +280,11 @@ fn transitions_read_their_tables_and_linear_reads_none() {
 
 #[test]
 fn an_effects_light_fades_by_its_age_and_then_is_gone() {
-    let def = CeEffectLightDef { light: light(Vec::new()), duration: 30.0, falloff: 0 };
+    let def = CeEffectLightDef {
+        light: light(Vec::new()),
+        duration: 30.0,
+        falloff: 0,
+    };
     let made = |age| def.at(0, 0, [0.0; 3], [1.0, 0.0, 0.0], age, 0.5);
     assert_eq!(made(0).and_then(|light| light.fixed), Some(0.5));
     let half = made(15).and_then(|light| light.fixed).unwrap();

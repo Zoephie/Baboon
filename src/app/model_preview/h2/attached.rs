@@ -1,24 +1,34 @@
 //! What hangs on a Halo 2 object, its own or one attached to another.
 
-use std::sync::Arc;
-use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::cloth::ClothGame;
-use super::super::*;
 use super::super::load::LoadCx;
-use blam_tags::TagFile;
+use super::super::*;
 use crate::app::model_preview::common::attached::named;
+use crate::app::model_preview::common::marker::MarkerFrame;
+use blam_tags::TagFile;
+use std::sync::Arc;
 
 /// What hangs on a Halo 2 object, its own or one attached to another: its
 /// flares and lights, antennas (its own only), particle systems, light
 /// volumes, contrails, liquids, cloth and extension weapons, at `cx`'s markers
 /// as its frame places them. An attached object's carry its name, which its
 /// owner's panel plays its event effects by.
-pub(in crate::app::model_preview) fn read_h2_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+pub(in crate::app::model_preview) fn read_h2_features<
+    F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
+>(
     cx: &LoadCx<'_, F>,
     preview: &mut RenderModelPreview,
 ) {
-    let LoadCx { reader, object, owner, markers, frame, name } = *cx;
-    let (flares, lights, gels) = super::lights::read_h2_flares(reader, object, owner, markers, frame);
+    let LoadCx {
+        reader,
+        object,
+        owner,
+        markers,
+        frame,
+        name,
+    } = *cx;
+    let (flares, lights, gels) =
+        super::lights::read_h2_flares(reader, object, owner, markers, frame);
     preview.h2.flares.extend(named(flares, name));
     preview.h2.point_lights.extend(named(lights, name));
     preview.h2.gel_lights.extend(named(gels, name));
@@ -29,9 +39,13 @@ pub(in crate::app::model_preview) fn read_h2_features<F: Fn(&RenderModelPreviewM
     }
     // Particle systems carry the held object's event effects (`firing
     // effect` and the rest), which its owner's panel plays by name.
-    let particles = super::super::particles::read_h3_particles(reader, object, owner, markers, frame);
-    preview.particles.extend(named(particles, name).map(Arc::new));
-    let volumes = super::light_volumes::read_h2_light_volumes(reader, object, owner, markers, frame);
+    let particles =
+        super::super::particles::read_h3_particles(reader, object, owner, markers, frame);
+    preview
+        .particles
+        .extend(named(particles, name).map(Arc::new));
+    let volumes =
+        super::light_volumes::read_h2_light_volumes(reader, object, owner, markers, frame);
     preview.h2.light_volumes.extend(named(volumes, name));
     let contrails = super::contrails::read_h2_contrails(reader, object, owner, markers, frame);
     preview.h2.contrails.extend(named(contrails, name));
@@ -43,10 +57,21 @@ pub(in crate::app::model_preview) fn read_h2_features<F: Fn(&RenderModelPreviewM
 
 /// A Halo 2 object's own flares, lights, antennas, particles, light volumes,
 /// contrails, liquids, cloth and extension weapons.
-pub(in crate::app::model_preview) fn read_h2_object_features(reader: &TagReader, model_tag: &TagFile, preview: &mut RenderModelPreview) {
+pub(in crate::app::model_preview) fn read_h2_object_features(
+    reader: &TagReader,
+    model_tag: &TagFile,
+    preview: &mut RenderModelPreview,
+) {
     let markers = std::mem::take(&mut preview.markers);
     let frame = crate::app::model_preview::common::marker::own_marker_frame;
-    let cx = super::super::load::LoadCx { reader, object: model_tag, owner: 0, markers: &markers, frame: &frame, name: None };
+    let cx = super::super::load::LoadCx {
+        reader,
+        object: model_tag,
+        owner: 0,
+        markers: &markers,
+        frame: &frame,
+        name: None,
+    };
     read_h2_features(&cx, preview);
     preview.markers = markers;
 }

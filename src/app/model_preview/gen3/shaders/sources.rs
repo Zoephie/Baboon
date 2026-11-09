@@ -14,7 +14,9 @@ fn include_tag(dialect: RenderMethodDialect, name: &str) -> String {
         }
         RenderMethodDialect::Reach => {
             let path = name.replace('/', "\\");
-            let stem = path.rsplit_once('.').map_or(path.as_str(), |(stem, _)| stem);
+            let stem = path
+                .rsplit_once('.')
+                .map_or(path.as_str(), |(stem, _)| stem);
             format!("shaders\\{stem}")
         }
     }
@@ -34,7 +36,13 @@ impl Gen3Sources {
     pub(crate) fn new(source: &TagSource) -> Self {
         let dialect = RenderMethodDialect::of(source);
         let reader = TagReader::new(source);
-        Self { reader, dialect, definitions: HashMap::new(), files: HashMap::new(), passes: HashMap::new() }
+        Self {
+            reader,
+            dialect,
+            definitions: HashMap::new(),
+            files: HashMap::new(),
+            passes: HashMap::new(),
+        }
     }
 
     pub(crate) fn dialect(&self) -> RenderMethodDialect {
@@ -54,9 +62,13 @@ impl Gen3Sources {
         self.files
             .entry(name.to_owned())
             .or_insert_with(|| {
-                let tag = reader.load(&include_tag(dialect, name), "hlsl_include", b"hlsl").ok()?;
+                let tag = reader
+                    .load(&include_tag(dialect, name), "hlsl_include", b"hlsl")
+                    .ok()?;
                 let data = tag.root().field("include file")?.as_data()?.to_vec();
-                Some(Arc::from(String::from_utf8_lossy(&data).trim_end_matches('\0')))
+                Some(Arc::from(
+                    String::from_utf8_lossy(&data).trim_end_matches('\0'),
+                ))
             })
             .clone()
     }
@@ -78,10 +90,22 @@ impl Gen3Sources {
         if own_albedo && self.dialect == RenderMethodDialect::Halo3 {
             defines.push(("maybe_calc_albedo".to_owned(), "1".to_owned()));
         }
-        defines.extend(option_defines(definition, &definition.stage_options(options, entry, stage)));
+        defines.extend(option_defines(
+            definition,
+            &definition.stage_options(options, entry, stage),
+        ));
         let main = format!("#include \"{}\"\n", definition.source_file);
         let (vertex, pixel) = entry_functions(self.dialect, entry);
-        self.compile(&defines, &main, if stage == Stage::Vertex { &vertex } else { &pixel }, stage)
+        self.compile(
+            &defines,
+            &main,
+            if stage == Stage::Vertex {
+                &vertex
+            } else {
+                &pixel
+            },
+            stage,
+        )
     }
 
     pub(in crate::app::model_preview) fn compile(
@@ -91,7 +115,10 @@ impl Gen3Sources {
         entry: &str,
         stage: Stage,
     ) -> Result<Translated, String> {
-        let borrowed: Vec<_> = defines.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
+        let borrowed: Vec<_> = defines
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
         let mut include = |name: &str, _: &str| self.file(name).map(|text| (Arc::from(name), text));
         let tokens = Preprocessor::new(&borrowed, &mut include).run(main)?;
         translate(&parse(&tokens)?, entry, stage)
@@ -113,7 +140,11 @@ impl Gen3Sources {
 
     /// A `shader_screen`'s pixel shader, fed by a triangle over the picture
     /// rather than the world vertices its family's `default_vs` reads.
-    pub(crate) fn screen_pass(&mut self, definition: &Gen3Definition, options: &[usize]) -> Result<Arc<Gen3Pass>, String> {
+    pub(crate) fn screen_pass(
+        &mut self,
+        definition: &Gen3Definition,
+        options: &[usize],
+    ) -> Result<Arc<Gen3Pass>, String> {
         let (vertex, pixel) = self.stages(definition, options, "default", VERTEX_SKINNED, false)?;
         let mut pass = pass_of(vertex, pixel);
         pass.vertex = SCREEN_VERTEX.to_owned();
@@ -142,9 +173,23 @@ impl Gen3Sources {
         vertex_type: usize,
         own_albedo: bool,
     ) -> Result<(Translated, Translated), String> {
-        let vertex = self.stage(definition, options, entry, vertex_type, Stage::Vertex, own_albedo)?;
+        let vertex = self.stage(
+            definition,
+            options,
+            entry,
+            vertex_type,
+            Stage::Vertex,
+            own_albedo,
+        )?;
         let pixel_type = definition.pixel_vertex_type;
-        let pixel = self.stage(definition, options, entry, pixel_type, Stage::Pixel, own_albedo)?;
+        let pixel = self.stage(
+            definition,
+            options,
+            entry,
+            pixel_type,
+            Stage::Pixel,
+            own_albedo,
+        )?;
         Ok((vertex, pixel))
     }
 }
@@ -161,7 +206,12 @@ impl Gen3Sources {
         // Reach materials that differ only where a shared stage looks away
         // compile the same pass.
         let options_of = |stage| definition.stage_options(options, entry, stage);
-        let key = (definition.name.clone(), [options_of(Stage::Vertex), options_of(Stage::Pixel)], entry.to_owned(), own_albedo);
+        let key = (
+            definition.name.clone(),
+            [options_of(Stage::Vertex), options_of(Stage::Pixel)],
+            entry.to_owned(),
+            own_albedo,
+        );
         if let Some(pass) = self.passes.get(&key) {
             return Ok(Arc::clone(pass));
         }

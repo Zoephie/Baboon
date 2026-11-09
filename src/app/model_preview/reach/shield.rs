@@ -9,8 +9,10 @@ use std::sync::Arc;
 use blam_tags::TagFile;
 
 use super::super::gen3::shaders::{Gen3Pass, Gen3Sources};
+use super::super::gen3::shield::{
+    DEPTH_DECODE, OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path,
+};
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
-use super::super::gen3::shield::{DEPTH_DECODE, OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
 
 /// The two explicit shaders and the settings that pick between them.
 #[derive(Debug)]
@@ -24,7 +26,10 @@ pub(crate) struct ReachShield {
 
 impl ReachShield {
     pub(crate) fn pass(&self) -> &Arc<Gen3Pass> {
-        self.procedural.as_ref().filter(|_| self.settings.procedural).unwrap_or(&self.pass)
+        self.procedural
+            .as_ref()
+            .filter(|_| self.settings.procedural)
+            .unwrap_or(&self.pass)
     }
 
     /// 61, then 119 if it translated.
@@ -40,8 +45,15 @@ pub(crate) fn read_reach_shield(reader: &TagReader, model: &TagFile) -> Option<A
     let settings = ReachShieldSettings::read(reader, &path)?;
     let mut sources = Gen3Sources::new(&reader.source);
     let pass = Arc::new(shield_pass(&*sources.explicit_pass("shield_impact").ok()?));
-    let procedural = sources.explicit_pass("shield_impact_procedural_uv").ok().map(|pass| Arc::new(shield_pass(&pass)));
-    Some(Arc::new(ReachShield { settings, pass, procedural }))
+    let procedural = sources
+        .explicit_pass("shield_impact_procedural_uv")
+        .ok()
+        .map(|pass| Arc::new(shield_pass(&pass)));
+    Some(Arc::new(ReachShield {
+        settings,
+        pass,
+        procedural,
+    }))
 }
 
 /// The translated pass, made to read the preview's depth and to give its
@@ -68,8 +80,21 @@ float l_scene_depth = ((l_window_ndc - {DEPTH_DECODE}.y) / ({DEPTH_DECODE}.x - l
     );
     let mut uniforms = pass.uniforms.clone();
     uniforms.push((DEPTH_DECODE.to_owned(), Type::Vector(Scalar::Float, 4)));
-    uniforms.push(("reach_shield_world_scale".to_owned(), Type::Scalar(Scalar::Float)));
+    uniforms.push((
+        "reach_shield_world_scale".to_owned(),
+        Type::Scalar(Scalar::Float),
+    ));
     let mut textures = pass.textures.clone();
-    textures.extend(OSCILLATION.iter().map(|name| ((*name).to_owned(), TextureKind::Flat)));
-    Gen3Pass { fullscreen: false, vertex, pixel, uniforms, textures }
+    textures.extend(
+        OSCILLATION
+            .iter()
+            .map(|name| ((*name).to_owned(), TextureKind::Flat)),
+    );
+    Gen3Pass {
+        fullscreen: false,
+        vertex,
+        pixel,
+        uniforms,
+        textures,
+    }
 }

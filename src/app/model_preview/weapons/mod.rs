@@ -9,14 +9,14 @@ use std::collections::BTreeSet;
 
 use blam_tags::{TagFile, TagStruct};
 
-use crate::app::model_preview::common::marker::MarkerFrame;
-use crate::app::model_preview::load::loose_weapon_paths;
-use crate::app::model_preview::animation::ik::weapon::weapon_ik;
 use super::common::fields::{elements, has_flag, holder_of};
-use crate::app::model_preview::common::marker::{attach_point, attach_vector};
 use super::load::build_render_preview;
-use crate::app::model_preview::animation::ik::weapon::CeWeaponIk;
 use super::*;
+use crate::app::model_preview::animation::ik::weapon::CeWeaponIk;
+use crate::app::model_preview::animation::ik::weapon::weapon_ik;
+use crate::app::model_preview::common::marker::MarkerFrame;
+use crate::app::model_preview::common::marker::{attach_point, attach_vector};
+use crate::app::model_preview::load::loose_weapon_paths;
 use crate::core::source::TagSource;
 
 pub(in crate::app::model_preview) mod attached;

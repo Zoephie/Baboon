@@ -26,7 +26,10 @@ const PRE_ROLL_FRAME: f32 = 1.0 / 60.0;
 /// by that frame's time (`game_frame`, `effects_frame_advance`): a preview
 /// frame is one step of its own length, and a longer gap runs as
 /// [`PRE_ROLL_FRAME`]s.
-pub(in crate::app::model_preview) fn frame_steps(last: f32, time: f32) -> impl Iterator<Item = f32> {
+pub(in crate::app::model_preview) fn frame_steps(
+    last: f32,
+    time: f32,
+) -> impl Iterator<Item = f32> {
     let gap = time - last;
     let count = if gap <= 0.0 {
         0
@@ -49,7 +52,10 @@ mod tests {
         assert_eq!(resume_point(10.0, 10.02, 0.0), 10.0, "an ordinary frame");
         assert_eq!(resume_point(4.0, 10.0, 6.0), 4.0, "a reset's own rollback");
         let resumed = resume_point(10.0, 610.0, 6.0);
-        assert!((603.0..610.0).contains(&resumed), "ten minutes behind: {resumed}");
+        assert!(
+            (603.0..610.0).contains(&resumed),
+            "ten minutes behind: {resumed}"
+        );
     }
 
     /// A frame is one step of its own length, up to Halo 3's cap of two ticks; a

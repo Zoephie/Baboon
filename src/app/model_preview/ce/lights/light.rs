@@ -11,9 +11,15 @@ pub(in crate::app::model_preview) fn marker_or_origin(
     name: &str,
     owner: u8,
 ) -> Option<(usize, [f32; 3], [f32; 3])> {
-    let found = markers.iter().find(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(name));
+    let found = markers
+        .iter()
+        .find(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(name));
     match found {
-        Some(marker) => Some((marker.node_index.max(0) as usize, marker.position, marker.axes[0])),
+        Some(marker) => Some((
+            marker.node_index.max(0) as usize,
+            marker.position,
+            marker.axes[0],
+        )),
         None => (owner == 0).then_some((0, [0.0; 3], [1.0, 0.0, 0.0])),
     }
 }
@@ -81,7 +87,12 @@ fn rgb_of(color: [f32; 4]) -> [f32; 3] {
 
 /// `lens_flare_evaluate_corona_rotation_function`: how far round a corona
 /// turns as a share of a whole turn, or none for `none`.
-pub(super) fn corona_rotation(function: i128, forward: [f32; 3], to_light: [f32; 3], view: &ViewFrame) -> f32 {
+pub(super) fn corona_rotation(
+    function: i128,
+    forward: [f32; 3],
+    to_light: [f32; 3],
+    view: &ViewFrame,
+) -> f32 {
     let back = view.forward.map(|axis| -axis);
     let along = cross(cross(forward, view.right), forward);
     let (sine, cosine) = match function {
@@ -91,12 +102,22 @@ pub(super) fn corona_rotation(function: i128, forward: [f32; 3], to_light: [f32;
         4 => (dot(view.right, to_light), -dot(back, to_light)),
         _ => return 0.0,
     };
-    if sine == 0.0 { 0.0 } else { sine.atan2(cosine) / std::f32::consts::TAU }
+    if sine == 0.0 {
+        0.0
+    } else {
+        sine.atan2(cosine) / std::f32::consts::TAU
+    }
 }
 
 /// `rgb_colors_interpolate_and_scale`: the bounds' alphas say how much of the
 /// color the change color tints.
-pub(super) fn light_color(flags: i128, lower: [f32; 4], upper: [f32; 4], change: [f32; 3], value: f32) -> [f32; 3] {
+pub(super) fn light_color(
+    flags: i128,
+    lower: [f32; 4],
+    upper: [f32; 4],
+    change: [f32; 3],
+    value: f32,
+) -> [f32; 3] {
     let color = ce_color_interpolate(flags, rgb_of(lower), rgb_of(upper), value);
     if lower[3] <= 0.0001 && upper[3] <= 0.0001 {
         return std::array::from_fn(|channel| color[channel] * change[channel]);
@@ -108,7 +129,8 @@ pub(super) fn light_color(flags: i128, lower: [f32; 4], upper: [f32; 4], change:
 impl CeLight {
     /// What `object_get_function_value` gives it.
     fn value(&self, outputs: &[f32; 4]) -> f32 {
-        self.fixed.unwrap_or_else(|| self.primary.map_or(1.0, |index| outputs[index]))
+        self.fixed
+            .unwrap_or_else(|| self.primary.map_or(1.0, |index| outputs[index]))
     }
 
     /// The patch tested for how much of the flare the model hides, if it
@@ -128,7 +150,9 @@ impl CeLight {
         let radius = flare.occlusion_radius;
         let offset = match flare.occlusion_offset {
             OcclusionOffset::TowardViewer => view.forward.map(|axis| -axis * radius),
-            OcclusionOffset::MarkerForward => forward.map(|axis| axis * radius * std::f32::consts::SQRT_2),
+            OcclusionOffset::MarkerForward => {
+                forward.map(|axis| axis * radius * std::f32::consts::SQRT_2)
+            }
             OcclusionOffset::None => [0.0; 3],
         };
         Some(FlareSprite {
@@ -147,15 +171,27 @@ impl CeLight {
     pub(super) fn color(&self, value: f32, change_colors: &[[f32; 3]; 4]) -> [f32; 3] {
         // `rgb_colors_interpolate`, for a light `light_new_unattached` made.
         if self.fixed.is_some() {
-            return ce_color_interpolate(self.interpolation, rgb_of(self.lower), rgb_of(self.upper), value);
+            return ce_color_interpolate(
+                self.interpolation,
+                rgb_of(self.lower),
+                rgb_of(self.upper),
+                value,
+            );
         }
-        let change = self.change_color.map_or([1.0; 3], |index| change_colors[index]);
+        let change = self
+            .change_color
+            .map_or([1.0; 3], |index| change_colors[index]);
         light_color(self.interpolation, self.lower, self.upper, change, value)
     }
 
     /// `rasterizer_set_model_lighting_point_light`, in the form
     /// [`CE_POINT_LIGHT_ROWS`] takes.
-    pub(super) fn point_rows(&self, outputs: &[f32; 4], change_colors: &[[f32; 3]; 4], bones: Option<&[[f32; 4]]>) -> Option<([[f32; 4]; 3], f32)> {
+    pub(super) fn point_rows(
+        &self,
+        outputs: &[f32; 4],
+        change_colors: &[[f32; 3]; 4],
+        bones: Option<&[[f32; 4]]>,
+    ) -> Option<([[f32; 4]; 3], f32)> {
         if !self.dynamic {
             return None;
         }
@@ -176,7 +212,14 @@ impl CeLight {
         let [x, y, z] = position;
         let [i, j, k] = forward;
         let [red, green, blue] = color;
-        Some(([[x, y, z, 1.0 / (radius * radius)], [i, j, k, a], [red, green, blue, b]], radius))
+        Some((
+            [
+                [x, y, z, 1.0 / (radius * radius)],
+                [i, j, k, a],
+                [red, green, blue, b],
+            ],
+            radius,
+        ))
     }
 
     /// `rasterizer_lens_flares_draw`, for one light of `lights_preprocess_scene`.
@@ -211,7 +254,11 @@ impl CeLight {
             1.0
         };
         let [falloff, cutoff] = flare.cones;
-        let slope = if falloff == cutoff { 0.0 } else { 1.0 / (falloff - cutoff) };
+        let slope = if falloff == cutoff {
+            0.0
+        } else {
+            1.0 / (falloff - cutoff)
+        };
         let offset = -cutoff * slope;
         let scales = [
             1.0,
@@ -224,8 +271,13 @@ impl CeLight {
         let mut brightness = fade * occlusion;
         let mut sprites = Vec::new();
         for (index, reflection) in flare.reflections.iter().enumerate() {
-            let scale = scales.get(reflection.brightness_scaled_by).copied().unwrap_or(1.0);
-            let alpha = lerp(reflection.brightness[0], reflection.brightness[1], value) * scale * brightness;
+            let scale = scales
+                .get(reflection.brightness_scaled_by)
+                .copied()
+                .unwrap_or(1.0);
+            let alpha = lerp(reflection.brightness[0], reflection.brightness[1], value)
+                * scale
+                * brightness;
             // The first reflection dims the rest.
             if index == 0 {
                 brightness = alpha;
@@ -247,9 +299,15 @@ impl CeLight {
             if reflection.align_with_screen_center {
                 rotation += screen_angle;
             }
-            let stretch = if index == 0 { flare.corona_scale } else { [1.0; 2] };
+            let stretch = if index == 0 {
+                flare.corona_scale
+            } else {
+                [1.0; 2]
+            };
             sprites.push(FlareSprite {
-                center: std::array::from_fn(|axis| position[axis] + mirror[axis] * reflection.position),
+                center: std::array::from_fn(|axis| {
+                    position[axis] + mirror[axis] * reflection.position
+                }),
                 extent: [radius * stretch[0], radius * stretch[1]],
                 rotation,
                 color: reflection.tinted(color, time),
@@ -277,10 +335,19 @@ impl CeReflection {
         }
         let tint: [f32; 3] = std::array::from_fn(|channel| self.tint[channel]);
         let own = if self.animation_function > 1 {
-            let period = if self.animation_period == 0.0 { 1.0 } else { self.animation_period };
+            let period = if self.animation_period == 0.0 {
+                1.0
+            } else {
+                self.animation_period
+            };
             let phase = (self.animation_phase + time) / period;
             let u = periodic_evaluate(self.animation_function, phase);
-            ce_color_interpolate(self.interpolation, rgb_of(self.lower), rgb_of(self.upper), u)
+            ce_color_interpolate(
+                self.interpolation,
+                rgb_of(self.lower),
+                rgb_of(self.upper),
+                u,
+            )
         } else {
             tint
         };
@@ -289,7 +356,11 @@ impl CeReflection {
 }
 
 /// Mark the outputs an object's lights take their value from.
-pub(in crate::app::model_preview) fn mark_outputs_read(lights: &[CeLight], object: u8, read: &mut [bool; 4]) {
+pub(in crate::app::model_preview) fn mark_outputs_read(
+    lights: &[CeLight],
+    object: u8,
+    read: &mut [bool; 4],
+) {
     let owned = lights.iter().filter(|light| light.object == object);
     for output in owned.filter_map(|light| light.primary) {
         read[output] = true;
@@ -325,7 +396,10 @@ pub(in crate::app::model_preview) fn read_ce_lights(
             continue;
         }
         let name = attachment.read_string("marker").unwrap_or_default();
-        for marker in markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name)) {
+        for marker in markers
+            .iter()
+            .filter(|marker| marker.name.eq_ignore_ascii_case(&name))
+        {
             let (place, node) = frame(marker);
             lights.push(CeLight {
                 object: owner,
@@ -351,6 +425,9 @@ pub(in crate::app::model_preview) fn read_attached_lights(
     child: MarkerFrame,
 ) -> Vec<CeLight> {
     read_ce_lights(reader, object, owner, &weapon.markers, |marker| {
-        (attached_marker_frame(marker, &parent, &child), parent.node.max(0) as usize)
+        (
+            attached_marker_frame(marker, &parent, &child),
+            parent.node.max(0) as usize,
+        )
     })
 }

@@ -198,8 +198,13 @@ impl ModelPreviewState {
             return;
         };
         let animations = data.animations.as_deref().map_or(&[][..], Vec::as_slice);
-        let clip = self.animation.selected.and_then(|index| Some(animations.get(index)?.name.clone()));
-        let variant = self.selected_variant.and_then(|index| Some(data.variants.get(index)?.name.clone()));
+        let clip = self
+            .animation
+            .selected
+            .and_then(|index| Some(animations.get(index)?.name.clone()));
+        let variant = self
+            .selected_variant
+            .and_then(|index| Some(data.variants.get(index)?.name.clone()));
         if self.clip_after_load.is_none() {
             self.clip_after_load = clip;
         }
@@ -337,4 +342,3 @@ pub(in crate::app) struct ModelRegionSelection {
     pub(in crate::app) enabled: bool,
     pub(in crate::app) permutation: String,
 }
-

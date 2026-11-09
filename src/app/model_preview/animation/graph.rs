@@ -7,7 +7,8 @@ pub(super) fn list_model_animations(
     source: &TagSource,
     entry: &TagEntry,
 ) -> Result<Vec<PreviewAnimationEntry>, String> {
-    let model = crate::core::source::read_entry(source, entry).map_err(|error| error.to_string())?;
+    let model =
+        crate::core::source::read_entry(source, entry).map_err(|error| error.to_string())?;
     // A Halo CE object names its `model_animations`; Halo 2 and the Halo 3
     // family name a `model_animation_graph` from the `.model`.
     match blam_tags::game::Game::of(&model) {
@@ -84,19 +85,28 @@ pub(super) fn inherited_animation_order(animations: &[Animation<'_>]) -> Vec<(us
     for (graph, animation) in animations.iter().enumerate() {
         let start = order.len();
         for group in animation.iter() {
-            if group.name.as_ref().is_none_or(|name| !names.contains(name.as_str())) {
+            if group
+                .name
+                .as_ref()
+                .is_none_or(|name| !names.contains(name.as_str()))
+            {
                 order.push((graph, group.index));
             }
         }
-        names.extend(order[start..].iter().filter_map(|&(graph, index)| {
-            animations[graph].get(index)?.name.as_deref()
-        }));
+        names.extend(
+            order[start..]
+                .iter()
+                .filter_map(|&(graph, index)| animations[graph].get(index)?.name.as_deref()),
+        );
     }
     order
 }
 
 /// A Halo CE object's `model_animations`.
-pub(super) fn load_object_animations(source: &TagSource, object: &TagFile) -> Result<TagFile, String> {
+pub(super) fn load_object_animations(
+    source: &TagSource,
+    object: &TagFile,
+) -> Result<TagFile, String> {
     let reference = object_reference(object, "animation graph")
         .ok_or("This object references no model_animations.")?;
     load_referenced_tag_from_source(source, &reference, "model_animations", b"antr")

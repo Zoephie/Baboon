@@ -5,23 +5,26 @@
 use super::lighting::h4_frame_values;
 use eframe::glow::{self, HasContext};
 
-use super::super::gen3::shaders::Gen3Value;
-use super::super::gen3::screen_lights::screen_to_relative_world;
-use super::super::gen3::pipeline::{set_value, view_projection};
-use super::pass_hooks::h4_matrix;
+use super::super::common::fields::elements;
 use super::super::frame::ModelGpuFrame;
-use crate::app::model_preview::common::camera::eye_position;
+use super::super::gen3::pipeline::{set_value, view_projection};
 use super::super::gen3::render::Gen3Cx;
+use super::super::gen3::screen_lights::screen_to_relative_world;
+use super::super::gen3::shaders::Gen3Pass;
+use super::super::gen3::shaders::Gen3Value;
 use super::super::gen3::state::Gen3State;
+use super::super::*;
 use super::lights::{H4LightBlend, H4LitLight};
+use super::pass_hooks::h4_matrix;
 use super::render::H4Game;
+use crate::app::model_preview::common::camera::eye_position;
+use crate::app::model_preview::h4::lights::{
+    GOBO_SPECULAR, H4LightKind, POINT_PHYSICALLY_CORRECT, SMALLEST, TECHNIQUE_SPECULAR,
+    TECHNIQUE_SPOT,
+};
+use crate::core::hlsl::emit::Stage;
 use std::collections::HashMap;
 use std::sync::Arc;
-use super::super::common::fields::elements;
-use super::super::gen3::shaders::Gen3Pass;
-use super::super::*;
-use crate::core::hlsl::emit::Stage;
-use crate::app::model_preview::h4::lights::{GOBO_SPECULAR, H4LightKind, POINT_PHYSICALLY_CORRECT, SMALLEST, TECHNIQUE_SPECULAR, TECHNIQUE_SPOT};
 
 impl H4Game {
     /// Every Halo 4 light of the frame, on the preview's clock as game time.
@@ -30,7 +33,10 @@ impl H4Game {
         let eye = eye_position(&frame.camera);
         let mut lit = Vec::new();
         for (index, light) in frame.preview.h4.lights.iter().enumerate() {
-            if !frame.shown.is(super::super::common::features::paths::H4_LIGHTS, index) {
+            if !frame
+                .shown
+                .is(super::super::common::features::paths::H4_LIGHTS, index)
+            {
                 continue;
             }
             let values = frame.function_values_of_object(light.object);
@@ -38,7 +44,10 @@ impl H4Game {
             lit.extend(light.lit(values, &colors, bones, frame.time, eye));
         }
         for (index, light) in frame.preview.h4.cheap_lights.iter().enumerate() {
-            if !frame.shown.is(super::super::common::features::paths::H4_CHEAP_LIGHTS, index) {
+            if !frame.shown.is(
+                super::super::common::features::paths::H4_CHEAP_LIGHTS,
+                index,
+            ) {
                 continue;
             }
             let values = frame.function_values_of_object(light.object);
@@ -56,7 +65,11 @@ impl H4Game {
     /// the falloff reaches zero within it, so the picture's whole is the same
     /// \[inferred\], save a physically correct light whose radius from its
     /// colour outreaches its end, which the volume would cut.
-    pub(super) unsafe fn draw_lights(&mut self, cx: &mut Gen3Cx<'_>, accumulation_target: glow::NativeFramebuffer) {
+    pub(super) unsafe fn draw_lights(
+        &mut self,
+        cx: &mut Gen3Cx<'_>,
+        accumulation_target: glow::NativeFramebuffer,
+    ) {
         let (gl, frame, core) = (cx.gl, cx.frame, &mut *cx.core);
         let state = &mut *cx.state;
         let mut lit = Self::frame_lights_of(frame);
@@ -86,17 +99,15 @@ impl H4Game {
             for light in &lit {
                 let Some(pass) = frame
                     .preview
-                    .h4.light_passes
+                    .h4
+                    .light_passes
                     .get(&(light.physical, light.technique()))
                     .cloned()
                 else {
                     continue;
                 };
-                let Some(matrix) = screen_to_relative_world(
-                    &view_projection,
-                    size,
-                    light.position,
-                ) else {
+                let Some(matrix) = screen_to_relative_world(&view_projection, size, light.position)
+                else {
                     continue;
                 };
                 let linked = state.with_program(core, gl, &pass, |_, this, program| {
@@ -117,16 +128,20 @@ impl H4Game {
                         }
                         if let Some(matrix) = h4_matrix(frame, name) {
                             match matrix.len() {
-                                9 => gl.uniform_matrix_3_f32_slice(location.as_ref(), false, &matrix),
-                                _ => gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix),
+                                9 => {
+                                    gl.uniform_matrix_3_f32_slice(location.as_ref(), false, &matrix)
+                                }
+                                _ => {
+                                    gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix)
+                                }
                             }
                             continue;
                         }
                         // Its blend state is additive (1).
                         let value = if name == "ps_material_blend_constant" {
-                            Some(Gen3Value::Floats(
-                                super::materials::submit::blend_constant(1),
-                            ))
+                            Some(Gen3Value::Floats(super::materials::submit::blend_constant(
+                                1,
+                            )))
                         } else {
                             h4_frame_values(frame, name, size, 0.0)
                         };
@@ -196,11 +211,9 @@ pub(crate) fn h4_light_program(
     reader: &TagReader,
     physical: bool,
 ) -> Option<crate::core::hlsl::parse::Program> {
-    let globals = reader.load("globals\\rasterizer_globals",
-        "rasterizer_globals",
-        b"rasg",
-    )
-    .ok()?;
+    let globals = reader
+        .load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg")
+        .ok()?;
     let index = if physical {
         POINT_PHYSICALLY_CORRECT
     } else {
@@ -220,8 +233,12 @@ pub(crate) fn h4_light_pass(
     program: &crate::core::hlsl::parse::Program,
     technique: usize,
 ) -> Result<Gen3Pass, String> {
-    let pixel =
-        super::materials::shaders::translate_technique(program, technique, "tiny_position", Stage::Pixel)?;
+    let pixel = super::materials::shaders::translate_technique(
+        program,
+        technique,
+        "tiny_position",
+        Stage::Pixel,
+    )?;
     Ok(Gen3Pass {
         fullscreen: true,
         vertex: super::super::h4::materials::h4_screen_vertex().to_owned(),

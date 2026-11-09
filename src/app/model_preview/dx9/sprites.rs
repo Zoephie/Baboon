@@ -4,18 +4,18 @@
 
 use eframe::glow::{self, HasContext as _};
 
+use super::super::common::sprite_gl::SpriteGl;
 use super::super::common::sprites::{
     ParticleTargets, advance_sprite_simulations, begin_flares, draw_antennas, draw_particle_system,
 };
-use super::super::effects::EffectOnsets;
-use crate::app::model_preview::common::sprites::layered_distance;
 use super::super::common::view::ViewFrame;
+use super::super::common::view::ce_flare_view;
+use super::super::effects::EffectOnsets;
+use super::super::frame::ModelGpuFrame;
 use super::super::gl::pass_state::PassState;
 use super::super::renderer::RenderCore;
-use super::super::frame::ModelGpuFrame;
-use super::super::common::sprite_gl::SpriteGl;
-use super::super::common::view::ce_flare_view;
 use super::pipeline::Dx9Game;
+use crate::app::model_preview::common::sprites::layered_distance;
 
 impl RenderCore {
     /// The frame's dx9 sprites, after the model and its wireframe, with
@@ -60,7 +60,16 @@ impl RenderCore {
                 onsets: &mut uploaded.simulations.effect_onsets,
             };
             game.draw_before_antennas(&mut sprites);
-            draw_antennas(gl, flares, &mut uploaded.simulations.antennas, &uploaded.antenna_textures, frame, bones, &view, h3);
+            draw_antennas(
+                gl,
+                flares,
+                &mut uploaded.simulations.antennas,
+                &uploaded.antenna_textures,
+                frame,
+                bones,
+                &view,
+                h3,
+            );
             game.draw_own_sprites(&mut sprites);
             gl.color_mask(true, true, true, false);
             begin_flares(gl, flares, self.placeholder);
@@ -72,7 +81,12 @@ impl RenderCore {
     /// `render_effects`, before the other sprites: Halo 2's particle systems,
     /// far to near, each from its simulation. What bends the scene draws
     /// only into gen3's distortion target, so none of it here.
-    unsafe fn draw_dx9_particles(&mut self, frame: &ModelGpuFrame, gl: &glow::Context, slot: usize) {
+    unsafe fn draw_dx9_particles(
+        &mut self,
+        frame: &ModelGpuFrame,
+        gl: &glow::Context,
+        slot: usize,
+    ) {
         unsafe {
             let particle_gl = self.particle_gl.as_ref().and_then(Option::as_ref);
             let uploaded = &mut self.slots[slot];
@@ -84,13 +98,22 @@ impl RenderCore {
             let mut sorted: Vec<_> = systems
                 .filter(|(_, system)| system.look.shader.distortion.is_none())
                 .map(|(at, system)| {
-                    let distance = uploaded.simulations.particles.distance(at, system, bones, &view);
-                    (layered_distance(system.look.shader.sort_layer, distance), at)
+                    let distance = uploaded
+                        .simulations
+                        .particles
+                        .distance(at, system, bones, &view);
+                    (
+                        layered_distance(system.look.shader.sort_layer, distance),
+                        at,
+                    )
                 })
                 .collect();
             sorted.sort_by(|(a, _), (b, _)| b.total_cmp(a));
             for (_, index) in sorted {
-                if !frame.shown.is(super::super::common::features::paths::PARTICLES, index) {
+                if !frame
+                    .shown
+                    .is(super::super::common::features::paths::PARTICLES, index)
+                {
                     continue;
                 }
                 let Some(particles) = particle_gl else {
@@ -110,7 +133,10 @@ impl RenderCore {
 
 /// The widgets' state: depth tested, less or equal, not written.
 fn widget_state() -> PassState {
-    PassState::new().enable(glow::DEPTH_TEST).depth_func(glow::LEQUAL).depth_mask(false)
+    PassState::new()
+        .enable(glow::DEPTH_TEST)
+        .depth_func(glow::LEQUAL)
+        .depth_mask(false)
 }
 
 /// What a game's own sprites draw with, inside the dx9 sprite pass: the

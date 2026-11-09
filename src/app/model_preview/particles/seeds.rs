@@ -33,13 +33,31 @@ pub(super) struct ReachSeeds {
 /// `particle random`'s seeds, highest state first: 25 to 22, then 7 to 4.
 const REACH_PARTICLE_SEEDS: [ParticleInput; 8] = {
     use ParticleInput::Seed;
-    [Seed(7), Seed(6), Seed(5), Seed(4), Seed(3), Seed(2), Seed(1), Seed(0)]
+    [
+        Seed(7),
+        Seed(6),
+        Seed(5),
+        Seed(4),
+        Seed(3),
+        Seed(2),
+        Seed(1),
+        Seed(0),
+    ]
 };
 
 /// The particle reuse table (tool 0x141FFF3C0): states 22, 7, 23, 6, 24, 5, 25, 4.
 const REACH_PARTICLE_REUSE: [ParticleInput; 8] = {
     use ParticleInput::Seed;
-    [Seed(4), Seed(3), Seed(5), Seed(2), Seed(6), Seed(1), Seed(7), Seed(0)]
+    [
+        Seed(4),
+        Seed(3),
+        Seed(5),
+        Seed(2),
+        Seed(6),
+        Seed(1),
+        Seed(7),
+        Seed(0),
+    ]
 };
 
 /// `system random`'s seeds, highest state first, which is also the system
@@ -56,7 +74,10 @@ pub(super) const REACH_ALLOCATED_STATES: u32 = 0x0FFF_FFF3;
 
 impl ReachSeeds {
     fn take(&mut self, seeds: &[ParticleInput], reuse: &[ParticleInput]) -> ParticleInput {
-        let free = seeds.iter().copied().find(|seed| self.used & seed.state_bit() == 0);
+        let free = seeds
+            .iter()
+            .copied()
+            .find(|seed| self.used & seed.state_bit() == 0);
         let seed = free.unwrap_or_else(|| {
             let seed = reuse[self.reuse % reuse.len()];
             self.reuse += 1;
@@ -70,20 +91,34 @@ impl ReachSeeds {
 impl SeedAllocator {
     /// For a Halo 3 or ODST tag's properties.
     pub(super) fn halo3() -> Self {
-        Self { rotation_unread: true, ..Self::default() }
+        Self {
+            rotation_unread: true,
+            ..Self::default()
+        }
     }
 
     /// For a Reach tag's properties, with `used` the states its definition
     /// reads already. Reach writes 0 for `particle rotation`, as Halo 3 does.
     pub(super) fn reach(used: u32) -> Self {
-        let seeds = ReachSeeds { used, reuse: 4, marks_each: false };
-        Self { rotation_unread: true, reach: Some(seeds), ..Self::default() }
+        let seeds = ReachSeeds {
+            used,
+            reuse: 4,
+            marks_each: false,
+        };
+        Self {
+            rotation_unread: true,
+            reach: Some(seeds),
+            ..Self::default()
+        }
     }
 
     /// For one of a Reach movement's controllers: a mask of its own.
     pub(super) fn reach_controller() -> Self {
         let mut seeds = Self::reach(0);
-        seeds.reach.iter_mut().for_each(|reach| reach.marks_each = true);
+        seeds
+            .reach
+            .iter_mut()
+            .for_each(|reach| reach.marks_each = true);
         seeds
     }
 
@@ -95,8 +130,12 @@ impl SeedAllocator {
     pub(super) fn allocate(&mut self, input: &mut ParticleInput) {
         match (*input, self.reach.as_mut()) {
             (ParticleInput::Rotation, _) if self.rotation_unread => *input = ParticleInput::Other,
-            (ParticleInput::Random, Some(reach)) => *input = reach.take(&REACH_PARTICLE_SEEDS, &REACH_PARTICLE_REUSE),
-            (ParticleInput::SystemRandom, Some(reach)) => *input = reach.take(&REACH_SYSTEM_SEEDS, &REACH_SYSTEM_SEEDS),
+            (ParticleInput::Random, Some(reach)) => {
+                *input = reach.take(&REACH_PARTICLE_SEEDS, &REACH_PARTICLE_REUSE)
+            }
+            (ParticleInput::SystemRandom, Some(reach)) => {
+                *input = reach.take(&REACH_SYSTEM_SEEDS, &REACH_SYSTEM_SEEDS)
+            }
             (ParticleInput::Random, None) => {
                 *input = ParticleInput::Seed(self.particle % SEEDS);
                 self.particle += 1;

@@ -51,7 +51,12 @@ impl Gen3State {
 
     /// `pass`'s program, linked the first time it is asked for. It stays in
     /// the cache while lent, so a pass drawn inside another's draw finds it.
-    unsafe fn program(&mut self, core: &mut RenderCore, gl: &glow::Context, pass: &Arc<Gen3Pass>) -> Option<Rc<Gen3Program>> {
+    unsafe fn program(
+        &mut self,
+        core: &mut RenderCore,
+        gl: &glow::Context,
+        pass: &Arc<Gen3Pass>,
+    ) -> Option<Rc<Gen3Program>> {
         let key = Arc::as_ptr(pass) as usize;
         match self.programs.get(&key) {
             Some(Ok(program)) => return Some(Rc::clone(program)),
@@ -59,7 +64,10 @@ impl Gen3State {
             None => {}
         }
         unsafe {
-            let stages = [(glow::VERTEX_SHADER, pass.vertex.as_str()), (glow::FRAGMENT_SHADER, pass.pixel.as_str())];
+            let stages = [
+                (glow::VERTEX_SHADER, pass.vertex.as_str()),
+                (glow::FRAGMENT_SHADER, pass.pixel.as_str()),
+            ];
             let mut attributes = Vec::new();
             for (name, preview) in ATTRIBUTES {
                 if let Some(location) = gl.get_attrib_location(core.program, preview) {
@@ -69,7 +77,10 @@ impl Gen3State {
             attributes.extend(PRT_ATTRIBUTES.into_iter().zip(PRT_NAMES));
             match super::super::super::gl::link::link(gl, &stages, &attributes) {
                 Ok(program) => {
-                    let program = Rc::new(Gen3Program { _pass: Arc::clone(pass), linked: Linked::new(program) });
+                    let program = Rc::new(Gen3Program {
+                        _pass: Arc::clone(pass),
+                        linked: Linked::new(program),
+                    });
                     self.programs.insert(key, Ok(Rc::clone(&program)));
                     Some(program)
                 }

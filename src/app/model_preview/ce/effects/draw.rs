@@ -24,7 +24,12 @@ pub(crate) struct CeParticleQuad {
 /// across it, square to world up, or to world left (which the game calls
 /// `viewer_space_world_forward`) where it is near vertical, turned a quarter
 /// about it.
-pub(super) fn sprite_basis(orientation: i32, direction: [f32; 3], to_particle: [f32; 3], view: &ViewFrame) -> ([f32; 3], [f32; 3]) {
+pub(super) fn sprite_basis(
+    orientation: i32,
+    direction: [f32; 3],
+    to_particle: [f32; 3],
+    view: &ViewFrame,
+) -> ([f32; 3], [f32; 3]) {
     match orientation {
         1 => {
             let along = unit_or_unchanged(direction);
@@ -33,7 +38,11 @@ pub(super) fn sprite_basis(orientation: i32, direction: [f32; 3], to_particle: [
         2 => {
             let along = unit_or_unchanged(direction);
             let world_up = [0.0, 0.0, 1.0];
-            let reference = if dot(along, world_up).powi(2) > 0.99 { [0.0, 1.0, 0.0] } else { world_up };
+            let reference = if dot(along, world_up).powi(2) > 0.99 {
+                [0.0, 1.0, 0.0]
+            } else {
+                world_up
+            };
             let side = unit_or_unchanged(cross(along, reference));
             (side, rotate_about(side, along, -1.0, 0.0))
         }

@@ -7,17 +7,15 @@
 use super::super::common::named_function::tag_function_at;
 use std::sync::Arc;
 
-use blam_tags::{TagFile, TagFunction, TagStruct};
 use blam_tags::tag_function::FunctionType;
+use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::functions::FunctionValues;
 
-use super::super::h2::prt::H2PrtLight;
-use super::stage::{H2_TEXTURE_ROWS, Dx9VertexStage};
 use super::super::common::image::Image;
-use crate::core::h2_pixel_shader::{
-    AlphaTest, SamplerKind,
-};
+use super::super::h2::prt::H2PrtLight;
+use super::stage::{Dx9VertexStage, H2_TEXTURE_ROWS};
+use crate::core::h2_pixel_shader::{AlphaTest, SamplerKind};
 
 mod layer;
 pub(in crate::app::model_preview) use layer::*;

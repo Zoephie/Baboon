@@ -6,20 +6,20 @@
 use eframe::glow::{self, HasContext};
 
 use super::super::common::slots::GameSlots;
+use super::super::dx9::passes::Dx9Layer;
+use super::super::frame::ModelGpuFrame;
+use super::super::gen3::effects::screen::Gen3ScreenSettings;
+use super::super::gen3::pipeline::PictureCopies;
 use super::super::gen3::pipeline::gen3_lighting_constants;
+use super::super::gen3::pipeline::gen3_set_cull;
+use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
+use super::super::gen3::shadow::h3_shadow_style;
 use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
 use super::super::particles::particle_floats;
-use super::slot::H3Slot;
-use super::super::gen3::effects::screen::Gen3ScreenSettings;
-use super::super::gen3::render::Gen3Cx;
-use super::super::gen3::pipeline::PictureCopies;
-use super::super::frame::ModelGpuFrame;
 use super::bloom::H3Bloom;
-use super::super::gen3::shadow::h3_shadow_style;
-use super::super::gen3::pipeline::gen3_set_cull;
-use super::super::dx9::passes::Dx9Layer;
 use super::light_pass::draw_dynamic_lights;
+use super::slot::H3Slot;
 
 /// Halo 3's and ODST's hooks: the pipeline's defaults, the self shadow, and
 /// their bloom and composite.
@@ -43,7 +43,8 @@ impl Gen3Game for H3Game {
     unsafe fn advance_own_sprites(&mut self, cx: &mut Gen3Sprites<'_>) {
         let h3 = self.slots.of(cx.slot, cx.uploads);
         unsafe { h3.sync_textures(cx.gl, cx.frame) };
-        h3.leaves.advance(&cx.frame.preview.h3.leaves, cx.frame.time);
+        h3.leaves
+            .advance(&cx.frame.preview.h3.leaves, cx.frame.time);
     }
 
     /// The leaves, through the particle program.
@@ -66,7 +67,19 @@ impl Gen3Game for H3Game {
         let vertices = particle_floats(camera, &drawn);
         let textures = h3.leaf_textures.get(index).copied().unwrap_or_default();
         let (no_map, depth, stops) = (cx.no_map, cx.depth_copy, cx.stops);
-        unsafe { particles.draw(cx.gl, leaves.shader(), &vertices, textures, no_map, depth, camera, &lighting, stops) };
+        unsafe {
+            particles.draw(
+                cx.gl,
+                leaves.shader(),
+                &vertices,
+                textures,
+                no_map,
+                depth,
+                camera,
+                &lighting,
+                stops,
+            )
+        };
         true
     }
 
@@ -74,16 +87,31 @@ impl Gen3Game for H3Game {
         Self::draws_picture_effects(frame, screen)
     }
 
-    unsafe fn before_screen_shaders(&mut self, cx: &mut Gen3Cx<'_>, screen: &Gen3ScreenSettings, copies: &PictureCopies) {
+    unsafe fn before_screen_shaders(
+        &mut self,
+        cx: &mut Gen3Cx<'_>,
+        screen: &Gen3ScreenSettings,
+        copies: &PictureCopies,
+    ) {
         unsafe { self.draw_picture_suck(cx, screen, copies) }
     }
 
-    unsafe fn after_blur(&mut self, cx: &mut Gen3Cx<'_>, screen: &Gen3ScreenSettings, copies: &PictureCopies) {
+    unsafe fn after_blur(
+        &mut self,
+        cx: &mut Gen3Cx<'_>,
+        screen: &Gen3ScreenSettings,
+        copies: &PictureCopies,
+    ) {
         unsafe { self.draw_picture_vision(cx, screen, copies) }
     }
 
     #[cfg(test)]
-    fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
+    fn each_simulation(
+        &self,
+        slot: usize,
+        uploads: u64,
+        visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug),
+    ) {
         if let Some(h3) = self.slots.current(slot, uploads) {
             visit("h3_leaves", &h3.leaves);
             visit("h3_vision_clock", &h3.vision_clock);
@@ -97,13 +125,20 @@ impl Gen3Game for H3Game {
         order: &[usize],
         scene: glow::NativeFramebuffer,
     ) {
-        self.shadowed = cx.frame.self_shadow && unsafe {
-            // Generated from the light, for the apply pass after the opaque one.
-            cx.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
-            let drawn = cx.core.draw_h2_shadow(cx.gl, cx.frame, cx.slot, order, h3_shadow_style(cx.frame, cx.state.targets.as_ref()));
-            cx.core.bind_slot_vertices(cx.gl, cx.slot);
-            drawn
-        };
+        self.shadowed = cx.frame.self_shadow
+            && unsafe {
+                // Generated from the light, for the apply pass after the opaque one.
+                cx.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
+                let drawn = cx.core.draw_h2_shadow(
+                    cx.gl,
+                    cx.frame,
+                    cx.slot,
+                    order,
+                    h3_shadow_style(cx.frame, cx.state.targets.as_ref()),
+                );
+                cx.core.bind_slot_vertices(cx.gl, cx.slot);
+                drawn
+            };
     }
 
     /// The self shadow's apply, through the dx9 shadow passes, if its map
@@ -114,7 +149,8 @@ impl Gen3Game for H3Game {
         }
         let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
         unsafe {
-            cx.core.draw_h2_passes(gl, frame, slot, order, Dx9Layer::ShadowApply, None);
+            cx.core
+                .draw_h2_passes(gl, frame, slot, order, Dx9Layer::ShadowApply, None);
             gl.bind_vertex_array(Some(cx.core.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
@@ -138,7 +174,9 @@ impl Gen3Game for H3Game {
             if self.bloom.is_none() {
                 self.bloom = H3Bloom::new(cx.gl, cx.core.black_flat);
             }
-            self.bloom.as_mut()?.build(cx.gl, vertices, framebuffer, accumulation, size)
+            self.bloom
+                .as_mut()?
+                .build(cx.gl, vertices, framebuffer, accumulation, size)
         }
     }
 

@@ -28,14 +28,22 @@ const H3_NODES: usize = MAX_PREVIEW_BONES + 1;
 fn widen_varyings(vertex: &str, pixel: &str) -> String {
     let mut source = vertex.to_owned();
     for line in vertex.lines() {
-        let Some((width, name)) = line.strip_prefix("out vec").and_then(|rest| rest.split_once(' ')) else {
+        let Some((width, name)) = line
+            .strip_prefix("out vec")
+            .and_then(|rest| rest.split_once(' '))
+        else {
             continue;
         };
         let name = name.trim_end_matches(';');
         let Ok(width) = width.parse::<usize>() else {
             continue;
         };
-        let wanted = (2..=4).find(|wider| *wider > width && pixel.lines().any(|line| line == format!("in vec{wider} {name};")));
+        let wanted = (2..=4).find(|wider| {
+            *wider > width
+                && pixel
+                    .lines()
+                    .any(|line| line == format!("in vec{wider} {name};"))
+        });
         let Some(wider) = wanted else {
             continue;
         };
@@ -44,9 +52,15 @@ fn widen_varyings(vertex: &str, pixel: &str) -> String {
         let prefix = format!("{name} = ");
         let widened: Vec<String> = source
             .lines()
-            .map(|line| match line.trim_start().strip_prefix(&prefix).and_then(|value| value.strip_suffix(';')) {
-                Some(value) => format!("    {name} = vec{wider}({value}{zeros});"),
-                None => line.to_owned(),
+            .map(|line| {
+                match line
+                    .trim_start()
+                    .strip_prefix(&prefix)
+                    .and_then(|value| value.strip_suffix(';'))
+                {
+                    Some(value) => format!("    {name} = vec{wider}({value}{zeros});"),
+                    None => line.to_owned(),
+                }
             })
             .collect();
         source = widened.join("\n");
@@ -58,7 +72,9 @@ pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> Gen3Pass {
     let mut uniforms = vertex.uniforms;
     // Halo 4 calls them `vs_model_skinning_matrices`, the same shape.
     let nodes = uniforms.iter_mut().find_map(|(name, ty)| match ty {
-        Type::Array(_, Some(nodes)) if name == "Nodes" || name == "vs_model_skinning_matrices" => Some(nodes),
+        Type::Array(_, Some(nodes)) if name == "Nodes" || name == "vs_model_skinning_matrices" => {
+            Some(nodes)
+        }
         _ => None,
     });
     let spare = nodes.map(|nodes| {
@@ -79,10 +95,15 @@ pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> Gen3Pass {
     // Flat in the source, three rows to a node.
     // The albedo pass lays depth that later passes test equal against, from
     // other shaders' arithmetic: Direct3D's `precise` positions, in GLSL terms.
-    let invariant = vertex.source.replacen('\n', "\ninvariant gl_Position;\n", 1);
+    let invariant = vertex
+        .source
+        .replacen('\n', "\ninvariant gl_Position;\n", 1);
     let source = widen_varyings(&invariant, &pixel.source)
         .replace("Nodes[210]", &format!("Nodes[{}]", H3_NODES * 3))
-        .replace("vs_model_skinning_matrices[210]", &format!("vs_model_skinning_matrices[{}]", H3_NODES * 3));
+        .replace(
+            "vs_model_skinning_matrices[210]",
+            &format!("vs_model_skinning_matrices[{}]", H3_NODES * 3),
+        );
     let source = source.replace(
         "hlsl_p0.node_weights = a_BLENDWEIGHT;",
         "hlsl_p0.node_weights = a_BLENDWEIGHT;
@@ -104,7 +125,8 @@ pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> Gen3Pass {
     // preview's three-component positions leave at 1: every mirrored half
     // lit with the wrong binormal. The preview carries the authored
     // binormal, so its side of the normal and tangent gives the sign.
-    const REACH_BINORMAL_SCALE: &str = "float l_binormal_scale = ((l_vertex.position.w * 2.) - 1.);";
+    const REACH_BINORMAL_SCALE: &str =
+        "float l_binormal_scale = ((l_vertex.position.w * 2.) - 1.);";
     let source = if source.contains(REACH_BINORMAL_SCALE) {
         // Functions come before the inputs they would read, so `main` works
         // the sign out into a global first.
@@ -114,7 +136,11 @@ pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> Gen3Pass {
         let source = if source.contains("in vec3 a_BINORMAL;") {
             source
         } else {
-            source.replacen("in vec3 a_NORMAL;", "in vec3 a_NORMAL;\nin vec3 a_BINORMAL;", 1)
+            source.replacen(
+                "in vec3 a_NORMAL;",
+                "in vec3 a_NORMAL;\nin vec3 a_BINORMAL;",
+                1,
+            )
         };
         let (version, rest) = source.split_once('\n').unwrap_or((&source, ""));
         format!("{version}\nfloat g_reach_binormal_sign = 1.0;\n{rest}")
@@ -134,7 +160,11 @@ pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> Gen3Pass {
         if source.contains("in vec3 a_BINORMAL;") {
             source
         } else {
-            source.replacen("in vec4 a_NORMAL;", "in vec4 a_NORMAL;\nin vec3 a_BINORMAL;", 1)
+            source.replacen(
+                "in vec4 a_NORMAL;",
+                "in vec4 a_NORMAL;\nin vec3 a_BINORMAL;",
+                1,
+            )
         }
     } else {
         source
@@ -153,7 +183,13 @@ pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> Gen3Pass {
         "vec3 l_true_scene_color = l_ldr_color.xyz;",
         "vec3 l_true_scene_color = 2.0 * sin(asin(clamp(l_ldr_color.xyz, 0.0, 1.0)) / 3.0);",
     );
-    Gen3Pass { fullscreen: false, vertex: source, pixel: pixel_source, uniforms, textures }
+    Gen3Pass {
+        fullscreen: false,
+        vertex: source,
+        pixel: pixel_source,
+        uniforms,
+        textures,
+    }
 }
 
 /// `global_render_method`'s `blend_mode`, in its option order.
@@ -205,9 +241,15 @@ mod varying_tests {
         let pixel = "in vec4 v_COLOR1;\nin vec2 v_TEXCOORD0;";
         let widened = widen_varyings(vertex, pixel);
         assert!(widened.contains("out vec4 v_COLOR1;"), "{widened}");
-        assert!(widened.contains("v_COLOR1 = vec4(a.xyz, 0.0);"), "{widened}");
+        assert!(
+            widened.contains("v_COLOR1 = vec4(a.xyz, 0.0);"),
+            "{widened}"
+        );
         assert!(widened.contains("out vec2 v_TEXCOORD0;"));
         assert!(widened.contains("v_TEXCOORD0 = b;"));
-        assert_eq!(widen_varyings(vertex, "in vec3 v_COLOR1;\nin vec2 v_TEXCOORD0;"), vertex);
+        assert_eq!(
+            widen_varyings(vertex, "in vec3 v_COLOR1;\nin vec2 v_TEXCOORD0;"),
+            vertex
+        );
     }
 }

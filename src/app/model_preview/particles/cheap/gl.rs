@@ -1,19 +1,21 @@
 //! The cheap particle program Reach and Halo 4 draw their cheap particles with.
 
-use super::super::*;
-use super::super::super::gl::buffer::slice_bytes;
 use super::super::super::gen3::shaders::Gen3Blend;
+use super::super::super::gl::buffer::slice_bytes;
+use super::super::*;
 use eframe::glow::{self, HasContext as _};
 
 /// The cheap particle program: the quads as built, the render texture's
 /// layer sampled a half level sharp, by the vertex colour, at `g_exposure.x`.
-pub(in crate::app::model_preview) const CHEAP_PARTICLE_VERTEX: &str = include_str!("shaders/cheap.vert");
+pub(in crate::app::model_preview) const CHEAP_PARTICLE_VERTEX: &str =
+    include_str!("shaders/cheap.vert");
 
 /// `cheap_particles_render.hlsl`'s pixel shader with no fog to add. Its
 /// alpha goes out whole, where the game's is a 32nd: the target's bias is
 /// taken to undo that, as the tool's \"alpha of zero gives you additive\"
 /// needs [inferred: not traced to the target's exponent bias].
-pub(in crate::app::model_preview) const CHEAP_PARTICLE_FRAGMENT: &str = include_str!("shaders/cheap.frag");
+pub(in crate::app::model_preview) const CHEAP_PARTICLE_FRAGMENT: &str =
+    include_str!("shaders/cheap.frag");
 
 /// A cheap particle vertex: clip position, texcoord and layer, colour.
 pub(in crate::app::model_preview) const CHEAP_FLOATS: usize = 11;
@@ -36,7 +38,13 @@ impl CheapGl {
     /// premultiplied sprites write it.
     /// `exposures` are the exposure and the self-illumination exposure the
     /// colour runs between by alpha: Halo 4's two, or Reach's one twice.
-    pub(in crate::app::model_preview) unsafe fn draw(&self, gl: &glow::Context, vertices: &[[f32; CHEAP_FLOATS]], texture: glow::NativeTexture, [exposure, self_illum]: [f32; 2]) {
+    pub(in crate::app::model_preview) unsafe fn draw(
+        &self,
+        gl: &glow::Context,
+        vertices: &[[f32; CHEAP_FLOATS]],
+        texture: glow::NativeTexture,
+        [exposure, self_illum]: [f32; 2],
+    ) {
         unsafe {
             gl.use_program(Some(self.program));
             gl.bind_vertex_array(Some(self.vertex_array));
@@ -57,7 +65,10 @@ impl CheapGl {
     }
 }
 
-pub(in crate::app::model_preview) unsafe fn reach_cheap_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<CheapGl> {
+pub(in crate::app::model_preview) unsafe fn reach_cheap_gl(
+    gl: &glow::Context,
+    main: glow::NativeProgram,
+) -> Option<CheapGl> {
     use particles::cheap::{CHEAP_PARTICLE_FRAGMENT, CHEAP_PARTICLE_VERTEX};
     unsafe {
         let program = link_h2_program(gl, main, CHEAP_PARTICLE_VERTEX, CHEAP_PARTICLE_FRAGMENT)
@@ -71,12 +82,25 @@ pub(in crate::app::model_preview) unsafe fn reach_cheap_gl(gl: &glow::Context, m
         let mut offset = 0;
         for (attribute, size) in [4, 3, 4].into_iter().enumerate() {
             gl.enable_vertex_attrib_array(attribute as u32);
-            gl.vertex_attrib_pointer_f32(attribute as u32, size, glow::FLOAT, false, stride, offset);
+            gl.vertex_attrib_pointer_f32(
+                attribute as u32,
+                size,
+                glow::FLOAT,
+                false,
+                stride,
+                offset,
+            );
             offset += size * size_of::<f32>() as i32;
         }
         gl.use_program(Some(program));
         gl.uniform_1_i32(gl.get_uniform_location(program, "u_render").as_ref(), 0);
-        Some(CheapGl { program, vertex_array, buffer, exposure: gl.get_uniform_location(program, "u_exposure"), self_illum: gl.get_uniform_location(program, "u_self_illum") })
+        Some(CheapGl {
+            program,
+            vertex_array,
+            buffer,
+            exposure: gl.get_uniform_location(program, "u_exposure"),
+            self_illum: gl.get_uniform_location(program, "u_self_illum"),
+        })
     }
 }
 
@@ -92,14 +116,28 @@ pub(in crate::app::model_preview) unsafe fn upload_cheap_render_texture(
         let texture = gl.create_texture().ok()?;
         gl.bind_texture(glow::TEXTURE_2D_ARRAY, Some(texture));
         for (level, rgba) in render.levels.iter().enumerate() {
-            let (width, height) = ((render.width >> level).max(1), (render.height >> level).max(1));
+            let (width, height) = (
+                (render.width >> level).max(1),
+                (render.height >> level).max(1),
+            );
             if rgba.len() != width * height * render.layers * 4 {
                 gl.delete_texture(texture);
                 return None;
             }
             let data = glow::PixelUnpackData::Slice(Some(rgba));
             let [width, height, layers] = [width, height, render.layers].map(|size| size as i32);
-            gl.tex_image_3d(glow::TEXTURE_2D_ARRAY, level as i32, glow::RGBA8 as i32, width, height, layers, 0, glow::RGBA, glow::UNSIGNED_BYTE, data);
+            gl.tex_image_3d(
+                glow::TEXTURE_2D_ARRAY,
+                level as i32,
+                glow::RGBA8 as i32,
+                width,
+                height,
+                layers,
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                data,
+            );
         }
         let last = render.levels.len().saturating_sub(1) as i32;
         for (name, value) in [
@@ -125,6 +163,12 @@ mod tests {
     #[test]
     fn the_cheap_particle_program_compiles_under_glslang() {
         use super::particles::cheap::{CHEAP_PARTICLE_FRAGMENT, CHEAP_PARTICLE_VERTEX};
-        assert_compiles_under_glslang("cheap_particle", &[("vert", CHEAP_PARTICLE_VERTEX), ("frag", CHEAP_PARTICLE_FRAGMENT)]);
+        assert_compiles_under_glslang(
+            "cheap_particle",
+            &[
+                ("vert", CHEAP_PARTICLE_VERTEX),
+                ("frag", CHEAP_PARTICLE_FRAGMENT),
+            ],
+        );
     }
 }

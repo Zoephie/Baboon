@@ -91,7 +91,11 @@ pub(super) type Parameters = HashMap<String, ParameterLevel>;
 /// The game's lookup: the first level holding the name, except that a bitmap
 /// with no tag falls through to the next level. A level only answers for its
 /// own kind of parameter.
-pub(super) fn resolve_parameter(levels: [&Parameters; 3], name: &str, kind: &str) -> Dx9ParameterValue {
+pub(super) fn resolve_parameter(
+    levels: [&Parameters; 3],
+    name: &str,
+    kind: &str,
+) -> Dx9ParameterValue {
     for level in levels {
         let Some(found) = level.get(name).filter(|found| found.kind == kind) else {
             continue;
@@ -130,25 +134,35 @@ pub(super) fn shader_parameters(shader: TagStruct<'_>) -> Parameters {
     let mut parameters = Parameters::new();
     let mut hidden = false;
     for parameter in elements(shader, "parameters") {
-        insert_level(&mut parameters, parameter, "bitmap", "const value", "const color");
+        insert_level(
+            &mut parameters,
+            parameter,
+            "bitmap",
+            "const value",
+            "const color",
+        );
         // Only a player has an emblem, which a preview's object is not.
-        if elements(parameter, "animation properties")
-            .any(|animation| animation.read_string_id("input name").as_deref() == Some(EMBLEM_INPUT))
-            && let Some(level) =
-                parameter.read_string_id("name").and_then(|name| parameters.get_mut(&name))
+        if elements(parameter, "animation properties").any(|animation| {
+            animation.read_string_id("input name").as_deref() == Some(EMBLEM_INPUT)
+        }) && let Some(level) = parameter
+            .read_string_id("name")
+            .and_then(|name| parameters.get_mut(&name))
         {
             level.value = 0.0;
             hidden = true;
         }
-        if let Some(level) =
-            parameter.read_string_id("name").and_then(|name| parameters.get_mut(&name))
+        if let Some(level) = parameter
+            .read_string_id("name")
+            .and_then(|name| parameters.get_mut(&name))
             && level.animations.is_empty()
         {
             level.animations = read_animations(parameter);
         }
     }
     if hidden {
-        parameters.values_mut().for_each(|level| level.animations.clear());
+        parameters
+            .values_mut()
+            .for_each(|level| level.animations.clear());
     }
     parameters
 }
@@ -275,8 +289,14 @@ fn compare(name: &str) -> Option<Dx9Compare> {
 }
 
 fn read_depth(implementation: TagStruct<'_>) -> Dx9Depth {
-    const OFF: Dx9Depth = Dx9Depth { compare: None, write: false };
-    let test = |compare, write| Dx9Depth { compare: Some(compare), write };
+    const OFF: Dx9Depth = Dx9Depth {
+        compare: None,
+        write: false,
+    };
+    let test = |compare, write| Dx9Depth {
+        compare: Some(compare),
+        write,
+    };
     match implementation.read_enum_option("depth").as_deref() {
         Some("default opaque") => test(Dx9Compare::Equal, false),
         Some("default opaque write") => test(Dx9Compare::LessOrEqual, true),
@@ -314,9 +334,10 @@ pub(super) fn read_pass(
             "default const value",
             "default const color",
         );
-        if let (Some(name), Some(source)) =
-            (parameter.read_string_id("name"), parameter.read_enum_option("source extern"))
-            && source != NO_EXTERN
+        if let (Some(name), Some(source)) = (
+            parameter.read_string_id("name"),
+            parameter.read_enum_option("source extern"),
+        ) && source != NO_EXTERN
         {
             externs.insert(name, source);
         }
@@ -338,15 +359,21 @@ pub(super) fn read_pass(
         .keys()
         .filter(|name| !externs.contains_key(*name))
         .filter_map(|name| {
-            let level = shader.get(name).filter(|level| !level.animations.is_empty())?;
+            let level = shader
+                .get(name)
+                .filter(|level| !level.animations.is_empty())?;
             Some((name.clone(), level.animations.clone()))
         })
         .collect();
 
     let textures = elements(implementation, "textures")
         .map(|texture| {
-            let parameter = texture.read_string_id("source parameter").unwrap_or_default();
-            let source = texture.read_enum_option("source extern").unwrap_or_default();
+            let parameter = texture
+                .read_string_id("source parameter")
+                .unwrap_or_default();
+            let source = texture
+                .read_enum_option("source extern")
+                .unwrap_or_default();
             let value = if !source.is_empty() && source != NO_EXTERN {
                 Dx9ParameterValue::Extern(source)
             } else {
@@ -363,10 +390,14 @@ pub(super) fn read_pass(
     Ok(Dx9Pass {
         path: path.to_owned(),
         implementation: index,
-        vertex_shader: implementation.read_tag_ref_path("vertex shader").unwrap_or_default(),
+        vertex_shader: implementation
+            .read_tag_ref_path("vertex shader")
+            .unwrap_or_default(),
         blend: read_blend(implementation),
         depth: read_depth(implementation),
-        channels: implementation.read_enum_option("channels").unwrap_or_default(),
+        channels: implementation
+            .read_enum_option("channels")
+            .unwrap_or_default(),
         custom_channels: read_custom_channels(implementation),
         alpha_test: read_alpha_test(implementation),
         textures,
@@ -374,10 +405,16 @@ pub(super) fn read_pass(
         animations,
         vertex_constants: elements(implementation, "vs constants")
             .map(|constant| Dx9VertexConstant {
-                parameter: constant.read_string_id("source parameter").unwrap_or_default(),
-                bank: constant.read_enum_option("register bank").unwrap_or_default(),
+                parameter: constant
+                    .read_string_id("source parameter")
+                    .unwrap_or_default(),
+                bank: constant
+                    .read_enum_option("register bank")
+                    .unwrap_or_default(),
                 register: constant.read_int_any("register index").unwrap_or(0) as i32,
-                components: constant.read_enum_option("component mask").unwrap_or_default(),
+                components: constant
+                    .read_enum_option("component mask")
+                    .unwrap_or_default(),
             })
             .collect(),
     })
@@ -421,8 +458,9 @@ pub(in crate::app) fn resolve_h2_layer_passes<T: std::borrow::Borrow<TagFile>>(
     implementation: usize,
 ) -> Result<Vec<Dx9Pass>, String> {
     let root = shader.root();
-    let Some(template_path) =
-        root.read_tag_ref_path("template").filter(|path| !path.is_empty())
+    let Some(template_path) = root
+        .read_tag_ref_path("template")
+        .filter(|path| !path.is_empty())
     else {
         return Ok(Vec::new());
     };
@@ -438,8 +476,8 @@ pub(in crate::app) fn resolve_h2_layer_passes<T: std::borrow::Borrow<TagFile>>(
             continue;
         }
         let path = entry.read_tag_ref_path("pass").unwrap_or_default();
-        let pass = load(&path, "shader_pass", b"spas")
-            .ok_or_else(|| format!("Cannot read {path}"))?;
+        let pass =
+            load(&path, "shader_pass", b"spas").ok_or_else(|| format!("Cannot read {path}"))?;
         passes.push(read_pass(
             &path,
             pass.borrow().root(),

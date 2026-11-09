@@ -1,7 +1,7 @@
 //! Halo CE's `seed_random`: one linear congruential seed, and the draws its
 //! effects, particle systems, contrails and widgets make from it.
 
-use crate::app::model_preview::common::random::{high24_over_2_24, high_bits, lcg_step};
+use crate::app::model_preview::common::random::{high_bits, high24_over_2_24, lcg_step};
 
 /// `seed_random` and the draws made from it.
 #[derive(Debug, Clone, Copy, Default)]

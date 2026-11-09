@@ -15,7 +15,11 @@ fn billboard(
         Billboard::ScreenFacing => [view.right, view.up],
         Billboard::CameraFacing => {
             let eye = clamped_unit(eye);
-            let other = if eye[2].abs() < 0.99 { [0.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0] };
+            let other = if eye[2].abs() < 0.99 {
+                [0.0, 0.0, 1.0]
+            } else {
+                [1.0, 0.0, 0.0]
+            };
             let across = clamped_unit(cross(eye, other));
             [across, clamped_unit(cross(across, eye))]
         }
@@ -25,7 +29,11 @@ fn billboard(
         }
         Billboard::ScreenPerpendicular => {
             let motion = clamped_unit(velocity);
-            let other = if motion[2].abs() < 0.99 { [0.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0] };
+            let other = if motion[2].abs() < 0.99 {
+                [0.0, 0.0, 1.0]
+            } else {
+                [1.0, 0.0, 0.0]
+            };
             let across = clamped_unit(cross(motion, other));
             [across, cross(motion, across)]
         }
@@ -38,7 +46,11 @@ fn billboard(
         Billboard::ScreenHorizontal | Billboard::World => [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
         Billboard::VelocityHorizontal => {
             let along = clamped_unit(velocity);
-            let other = if along[0].abs() < 0.99 { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
+            let other = if along[0].abs() < 0.99 {
+                [1.0, 0.0, 0.0]
+            } else {
+                [0.0, 0.0, 1.0]
+            };
             [along, clamped_unit(cross(other, along))]
         }
     }
@@ -56,8 +68,17 @@ pub(super) fn cheap_billboard(style: Billboard) -> Billboard {
 /// The frame of the second sprite texcoord (`particle_render.hlsl`'s
 /// `DOUBLE_SPRITE_TEXCOORD`): the next when frames blend; for Reach's
 /// plasmas without, `floor(seed 1 · 16)` frames on.
-pub(super) fn second_frame(frame: f32, frame_blend: bool, plasma_second_sprite: bool, seed: f32) -> f32 {
-    if plasma_second_sprite && !frame_blend { frame.floor() + (seed * 16.0).floor() } else { frame + 1.0 }
+pub(super) fn second_frame(
+    frame: f32,
+    frame_blend: bool,
+    plasma_second_sprite: bool,
+    seed: f32,
+) -> f32 {
+    if plasma_second_sprite && !frame_blend {
+        frame.floor() + (seed * 16.0).floor()
+    } else {
+        frame + 1.0
+    }
 }
 
 /// `effect_lightprobe_get_lightmap_tint`, as `initial_color.rgb * exp2(a)`
@@ -71,12 +92,19 @@ pub(in crate::app::model_preview) fn lightmap_tint(lighting: &[[f32; 4]; 10]) ->
 }
 
 /// `surface_basis`, for a distortion: its corners lean away as a dome's would.
-pub(super) fn curved_lean(lean: [[f32; 3]; 2], plane: [[f32; 3]; 2], offset: [f32; 2], curvature: f32) -> [[f32; 3]; 2] {
+pub(super) fn curved_lean(
+    lean: [[f32; 3]; 2],
+    plane: [[f32; 3]; 2],
+    offset: [f32; 2],
+    curvature: f32,
+) -> [[f32; 3]; 2] {
     let norm = (offset[0] * offset[0] + offset[1] * offset[1]).sqrt() + 0.0001;
     let [x, y] = offset.map(|side| side / norm);
     let axis = std::array::from_fn(|axis| -y * plane[0][axis] + x * plane[1][axis]);
     let rotation = axis_rotation(axis, curvature * std::f32::consts::FRAC_PI_2);
-    lean.map(|side| std::array::from_fn(|column| (0..3).map(|row| side[row] * rotation[row][column]).sum()))
+    lean.map(|side| {
+        std::array::from_fn(|column| (0..3).map(|row| side[row] * rotation[row][column]).sum())
+    })
 }
 
 /// `matrix3x3_rotation_from_axis_and_angle`.
@@ -85,9 +113,21 @@ pub(super) fn axis_rotation(axis: [f32; 3], angle: f32) -> [[f32; 3]; 3] {
     let [x, y, z] = axis;
     let rest = axis.map(|value| value * (1.0 - cos));
     [
-        [rest[0] * x + cos, rest[1] * x + sin * z, rest[2] * x - sin * y],
-        [rest[0] * y - sin * z, rest[1] * y + cos, rest[2] * y + sin * x],
-        [rest[0] * z + sin * y, rest[1] * z - sin * x, rest[2] * z + cos],
+        [
+            rest[0] * x + cos,
+            rest[1] * x + sin * z,
+            rest[2] * x - sin * y,
+        ],
+        [
+            rest[0] * y - sin * z,
+            rest[1] * y + cos,
+            rest[2] * y + sin * x,
+        ],
+        [
+            rest[0] * z + sin * y,
+            rest[1] * z - sin * x,
+            rest[2] * z + cos,
+        ],
     ]
 }
 
@@ -129,13 +169,19 @@ impl ParticleSystem {
         };
         let ambient = reach_particle_light().ambient;
         // `particle_render_fast.hlsl`: no aspect, no blur, no quarter turn.
-        let style = if look.cheap { cheap_billboard(look.billboard) } else { look.billboard };
+        let style = if look.cheap {
+            cheap_billboard(look.billboard)
+        } else {
+            look.billboard
+        };
         for (emitter, running) in system.emitters.iter().zip(running) {
             let base = ParticleState {
                 system_age: system.times.age(system.event, time - onset).unwrap_or(1.0),
                 game_time: particle_game_time(look.reach, time),
-                effect_a: system_state(system, values, time, time - onset).map_or(0.0, |state| state.effect_a),
-                effect_b: system_state(system, values, time, time - onset).map_or(1.0, |state| state.effect_b),
+                effect_a: system_state(system, values, time, time - onset)
+                    .map_or(0.0, |state| state.effect_a),
+                effect_b: system_state(system, values, time, time - onset)
+                    .map_or(1.0, |state| state.effect_b),
                 location_seed: system.location_seed,
                 lod: {
                     let away = minus(origin, view.eye);
@@ -145,7 +191,11 @@ impl ParticleSystem {
             };
             // `calc_matrix`, or none for what already lies in the world.
             const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-            let (offset, turned) = if system.world { ([0.0; 3], IDENTITY) } else { emitter_frame(emitter, origin, axes, &base) };
+            let (offset, turned) = if system.world {
+                ([0.0; 3], IDENTITY)
+            } else {
+                emitter_frame(emitter, origin, axes, &base)
+            };
             for particle in &running.particles {
                 let state = particle.state(base);
                 let to_world = |vector: [f32; 3]| -> [f32; 3] {
@@ -157,20 +207,33 @@ impl ParticleSystem {
                 };
                 let velocity = to_world(particle.velocity);
                 let size = emitter.size.scalar(&state) * emitter.scale.scalar(&state);
-                let mut aspect = if look.cheap { 1.0 } else { look.aspect.scalar(&state) };
+                let mut aspect = if look.cheap {
+                    1.0
+                } else {
+                    look.aspect.scalar(&state)
+                };
                 if let Some(stretch) = look.blur_aspect.filter(|_| !look.cheap) {
                     // A baseline of 30, not the frame rate. The preview's observer is still.
                     aspect += dot(velocity, velocity).sqrt() * stretch / (30.0 * size);
                 }
                 let basis = billboard(style, place, velocity, turned, view);
                 let manual = emitter.rotation.scalar(&state).rem_euclid(1.0);
-                let turned_up = if look.vertical && !look.cheap { 0.25 } else { 0.0 };
-                let spun = if emitter.rotation_given { 0.0 } else { particle.rotation };
+                let turned_up = if look.vertical && !look.cheap {
+                    0.25
+                } else {
+                    0.0
+                };
+                let spun = if emitter.rotation_given {
+                    0.0
+                } else {
+                    particle.rotation
+                };
                 let (sin, cos) = (std::f32::consts::TAU * (spun + manual + turned_up)).sin_cos();
                 let tint = emitter.tint.color(&state);
                 let color = look.color.color(&state);
                 let intensity = look.intensity.scalar(&state);
-                let mut alpha = (emitter.alpha.scalar(&state) * look.alpha.scalar(&state)).clamp(0.0, 1.0);
+                let mut alpha =
+                    (emitter.alpha.scalar(&state) * look.alpha.scalar(&state)).clamp(0.0, 1.0);
                 // `default_vs`: wholly transparent is dead, whatever the blend.
                 if alpha == 0.0 {
                     continue;
@@ -180,7 +243,11 @@ impl ParticleSystem {
                 }
                 let eye: [f32; 3] = std::array::from_fn(|axis| place[axis] - view.eye[axis]);
                 let near = system.near_range * (dot(view.forward, eye) - system.near_cutoff);
-                alpha *= if near.is_nan() { 0.0 } else { near.clamp(0.0, 1.0) };
+                alpha *= if near.is_nan() {
+                    0.0
+                } else {
+                    near.clamp(0.0, 1.0)
+                };
                 if alpha == 0.0 && look.model.is_none() {
                     continue;
                 }
@@ -195,7 +262,9 @@ impl ParticleSystem {
                     }
                     let tangent = (look.curvature * std::f32::consts::FRAC_PI_2).tan();
                     let bent: [f32; 3] = if tangent > 0.0 {
-                        let plane: [f32; 3] = std::array::from_fn(|axis| spun[0][axis] * planar[0] + spun[1][axis] * planar[1]);
+                        let plane: [f32; 3] = std::array::from_fn(|axis| {
+                            spun[0][axis] * planar[0] + spun[1][axis] * planar[1]
+                        });
                         let plane = clamped_unit(plane);
                         std::array::from_fn(|axis| normal[axis] + plane[axis])
                     } else {
@@ -217,26 +286,52 @@ impl ParticleSystem {
                 };
                 let count = frames.len();
                 let frame_at = particle.frame + look.frame.scalar(&state).rem_euclid(1.0);
-                let frame = frame_variant(frame_at, count, look.one_shot, look.backwards && particle.flip[2]);
+                let frame = frame_variant(
+                    frame_at,
+                    count,
+                    look.one_shot,
+                    look.backwards && particle.flip[2],
+                );
                 let first = frames[frame.floor().rem_euclid(count as f32) as usize % count];
                 let shader = &look.shader;
-                let next = second_frame(frame, shader.frame_blend, shader.plasma_second_sprite, particle.seeds[0]);
+                let next = second_frame(
+                    frame,
+                    shader.frame_blend,
+                    shader.plasma_second_sprite,
+                    particle.seeds[0],
+                );
                 let second = frames[next.floor().rem_euclid(count as f32) as usize % count];
-                let blend = if shader.frame_blend && !look.cheap { frame.fract() } else { 0.0 };
+                let blend = if shader.frame_blend && !look.cheap {
+                    frame.fract()
+                } else {
+                    0.0
+                };
                 let scroll = emitter.scroll.map(|rate| rate * time);
                 let [from, to] = look.shader.uv_scale;
                 let uv_scale = |at: f32| (from + (to - from) * at / 2.0).recip();
-                let (first_scale, second_scale) =
-                    if look.shader.frame_blend { (uv_scale(1.0 + blend), uv_scale(blend)) } else { (1.0, 1.0) };
+                let (first_scale, second_scale) = if look.shader.frame_blend {
+                    (uv_scale(1.0 + blend), uv_scale(blend))
+                } else {
+                    (1.0, 1.0)
+                };
                 let black = emitter.black_point.scalar(&state).clamp(0.0, 0.9999);
                 // The cheap shader's `palette_v` is a literal half.
-                let palette = if look.cheap { 0.5 } else { look.palette.scalar(&state).clamp(0.0, 0.9999) };
+                let palette = if look.cheap {
+                    0.5
+                } else {
+                    look.palette.scalar(&state).clamp(0.0, 0.9999)
+                };
                 let [x, y, width, height] = corner;
-                let at_spot = |spot: [f32; 3], mut uv: [f32; 2], normal: [f32; 3], lit: [f32; 3], lean: [[f32; 3]; 2]| {
+                let at_spot = |spot: [f32; 3],
+                               mut uv: [f32; 2],
+                               normal: [f32; 3],
+                               lit: [f32; 3],
+                               lean: [[f32; 3]; 2]| {
                     let mut faded = alpha;
                     if let Some([range, cutoff]) = look.edge_fade {
                         let toward = clamped_unit(minus(spot, view.eye));
-                        let angle = std::f32::consts::FRAC_PI_2 - dot(toward, normal).abs().min(1.0).acos();
+                        let angle =
+                            std::f32::consts::FRAC_PI_2 - dot(toward, normal).abs().min(1.0).acos();
                         faded *= (range * (angle - cutoff)).clamp(0.0, 1.0);
                     }
                     if look.flip_u && particle.flip[0] && !look.cheap {
@@ -249,7 +344,10 @@ impl ParticleSystem {
                     let (sprite, next_sprite) = if look.cheap {
                         (uv, uv)
                     } else {
-                        (sprite_uv(first, uv, scroll, first_scale), sprite_uv(second, uv, scroll, second_scale))
+                        (
+                            sprite_uv(first, uv, scroll, first_scale),
+                            sprite_uv(second, uv, scroll, second_scale),
+                        )
                     };
                     ParticleCorner {
                         place: spot,
@@ -264,14 +362,22 @@ impl ParticleSystem {
                 };
                 if let Some(meshes) = &look.model {
                     let angle = std::f32::consts::TAU * (particle.rotation + manual);
-                    let variant = frame_variant(frame_at, meshes.len(), look.one_shot, look.backwards && particle.flip[2]);
-                    let mesh = &meshes[variant.floor().rem_euclid(meshes.len() as f32) as usize % meshes.len()];
+                    let variant = frame_variant(
+                        frame_at,
+                        meshes.len(),
+                        look.one_shot,
+                        look.backwards && particle.flip[2],
+                    );
+                    let mesh = &meshes
+                        [variant.floor().rem_euclid(meshes.len() as f32) as usize % meshes.len()];
                     let plane = [basis[0], basis[1], cross(basis[0], basis[1])];
                     let plane = axis_rotation(particle.axis, angle).map(|row| -> [f32; 3] {
                         std::array::from_fn(|axis| (0..3).map(|at| row[at] * plane[at][axis]).sum())
                     });
                     let along = |vector: [f32; 3]| -> [f32; 3] {
-                        std::array::from_fn(|axis| (0..3).map(|at| vector[at] * plane[at][axis]).sum())
+                        std::array::from_fn(|axis| {
+                            (0..3).map(|at| vector[at] * plane[at][axis]).sum()
+                        })
                     };
                     for triangle in mesh.chunks_exact(3) {
                         // Backfaces cull among the transparents.
@@ -283,13 +389,28 @@ impl ParticleSystem {
                             continue;
                         }
                         for vertex in triangle {
-                        let at = [vertex.position.x * aspect, vertex.position.y, vertex.position.z];
-                        let moved = along(at);
-                        let spot = std::array::from_fn(|axis| place[axis] + moved[axis] * size);
-                        let normal = clamped_unit(along([vertex.normal.i, vertex.normal.j, vertex.normal.k]));
-                        let lit = lit_by(normal);
-                        let lean = [plane[0], plane[1]].map(|side| side.map(|axis| axis * size * width));
-                        vertices.push(at_spot(spot, [vertex.texcoord.x, vertex.texcoord.y], normal, lit, lean));
+                            let at = [
+                                vertex.position.x * aspect,
+                                vertex.position.y,
+                                vertex.position.z,
+                            ];
+                            let moved = along(at);
+                            let spot = std::array::from_fn(|axis| place[axis] + moved[axis] * size);
+                            let normal = clamped_unit(along([
+                                vertex.normal.i,
+                                vertex.normal.j,
+                                vertex.normal.k,
+                            ]));
+                            let lit = lit_by(normal);
+                            let lean = [plane[0], plane[1]]
+                                .map(|side| side.map(|axis| axis * size * width));
+                            vertices.push(at_spot(
+                                spot,
+                                [vertex.texcoord.x, vertex.texcoord.y],
+                                normal,
+                                lit,
+                                lean,
+                            ));
                         }
                     }
                     continue;
@@ -303,12 +424,24 @@ impl ParticleSystem {
                     let spot: [f32; 3] = std::array::from_fn(|axis| {
                         place[axis] + (spun[0][axis] * planar[0] + spun[1][axis] * planar[1]) * size
                     });
-                    let lean = [spun[0].map(|axis| axis * size * width), spun[1].map(|axis| axis * size * height)];
-                    let lean = if look.shader.distortion.is_some() { curved_lean(lean, spun, planar, look.curvature) } else { lean };
+                    let lean = [
+                        spun[0].map(|axis| axis * size * width),
+                        spun[1].map(|axis| axis * size * height),
+                    ];
+                    let lean = if look.shader.distortion.is_some() {
+                        curved_lean(lean, spun, planar, look.curvature)
+                    } else {
+                        lean
+                    };
                     let normal = normal_at(planar, spun);
                     at_spot(spot, shift, normal, lit_by(normal), lean)
                 };
-                let quad = [corner([0.0, 0.0]), corner([1.0, 0.0]), corner([1.0, 1.0]), corner([0.0, 1.0])];
+                let quad = [
+                    corner([0.0, 0.0]),
+                    corner([1.0, 0.0]),
+                    corner([1.0, 1.0]),
+                    corner([0.0, 1.0]),
+                ];
                 vertices.extend([quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]);
             }
         }

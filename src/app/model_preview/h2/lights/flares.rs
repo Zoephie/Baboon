@@ -107,18 +107,23 @@ impl H2FlareAt {
 pub(super) fn read_h2_flare(reader: &TagReader, path: &str) -> Option<H2Flare> {
     let tag = reader.load(path, "lens_flare", b"lens").ok()?;
     let root = tag.root();
-    let bitmap = root.read_tag_ref_path("bitmap").filter(|bitmap| !bitmap.is_empty())?;
+    let bitmap = root
+        .read_tag_ref_path("bitmap")
+        .filter(|bitmap| !bitmap.is_empty())?;
     let mut images = Vec::new();
     let mut indices = Vec::new();
     let mut reflections = Vec::new();
     for reflection in elements(root, "reflections") {
         let index = reflection.read_int_any("bitmap index").unwrap_or(0).max(0) as usize;
-        let image = indices.iter().position(|known| *known == index).or_else(|| {
-            let image = decode_image(reader, &bitmap, SamplerKind::Texture2D, index)?;
-            images.push(Arc::new(image));
-            indices.push(index);
-            Some(images.len() - 1)
-        })?;
+        let image = indices
+            .iter()
+            .position(|known| *known == index)
+            .or_else(|| {
+                let image = decode_image(reader, &bitmap, SamplerKind::Texture2D, index)?;
+                images.push(Arc::new(image));
+                indices.push(index);
+                Some(images.len() - 1)
+            })?;
         let radius = reflection.read_real_bounds("radius");
         let brightness = reflection.read_fraction_bounds("brightness");
         let color = reflection.read_rgb("color");
@@ -136,7 +141,10 @@ pub(super) fn read_h2_flare(reader: &TagReader, path: &str) -> Option<H2Flare> {
             },
             image,
             position: reflection.read_real("position").unwrap_or(0.0),
-            rotation: reflection.read_real("rotation offset").unwrap_or(0.0).to_radians(),
+            rotation: reflection
+                .read_real("rotation offset")
+                .unwrap_or(0.0)
+                .to_radians(),
             radius: [radius.lower, radius.upper],
             brightness: [brightness.lower, brightness.upper],
             modulation: reflection.read_real("modulation factor").unwrap_or(0.0),
@@ -145,7 +153,10 @@ pub(super) fn read_h2_flare(reader: &TagReader, path: &str) -> Option<H2Flare> {
     }
     let angle = |name: &str| root.read_real(name).unwrap_or(0.0).cos();
     let corona = root.read_vec2("corona scale");
-    let inner = root.read_int_any("occlusion inner radius scale").unwrap_or(0).clamp(0, 6) as usize;
+    let inner = root
+        .read_int_any("occlusion inner radius scale")
+        .unwrap_or(0)
+        .clamp(0, 6) as usize;
     let unset_as_one = |scale: f32| if scale == 0.0 { 1.0 } else { scale };
     Some(H2Flare {
         flags: FlareFlags {
@@ -170,7 +181,10 @@ pub(super) fn read_h2_flare(reader: &TagReader, path: &str) -> Option<H2Flare> {
         rotation: scale_function(root, "rotation"),
         // Its second `flags` field holds it.
         synchronized: has_flag_in_any(root, "flags", "synchronized"),
-        falloff: root.read_int_any("falloff function").and_then(|index| u8::try_from(index).ok()).unwrap_or(0),
+        falloff: root
+            .read_int_any("falloff function")
+            .and_then(|index| u8::try_from(index).ok())
+            .unwrap_or(0),
         images,
     })
 }
@@ -234,7 +248,10 @@ impl H2FlareAt {
 
     /// Whether it changes with nothing but time.
     pub(crate) fn animates(&self) -> bool {
-        let light = self.light.as_ref().is_some_and(|light| light.color_animation.is_some());
+        let light = self
+            .light
+            .as_ref()
+            .is_some_and(|light| light.color_animation.is_some());
         light || self.flare.animates()
     }
 
@@ -248,7 +265,12 @@ impl H2FlareAt {
         if by_marker { self.marker_scale } else { 1.0 }
     }
 
-    pub(super) fn value(&self, values: Option<&FunctionValues>, time: f32, onset: f32) -> Option<f32> {
+    pub(super) fn value(
+        &self,
+        values: Option<&FunctionValues>,
+        time: f32,
+        onset: f32,
+    ) -> Option<f32> {
         match (&self.effect, &self.light) {
             (Some(H2FlareEffect::Light(effect)), Some(light)) => {
                 effect.value(light, attachment_value(&self.scale_by, values), time, onset)
@@ -280,7 +302,9 @@ impl H2FlareAt {
         let patch = |radius: f32| {
             let offset = match flare.occlusion_offset {
                 OcclusionOffset::TowardViewer => view.forward.map(|axis| -axis * radius),
-                OcclusionOffset::MarkerForward => forward.map(|axis| axis * radius * std::f32::consts::SQRT_2),
+                OcclusionOffset::MarkerForward => {
+                    forward.map(|axis| axis * radius * std::f32::consts::SQRT_2)
+                }
                 OcclusionOffset::None => [0.0; 3],
             };
             FlareSprite {
@@ -295,7 +319,10 @@ impl H2FlareAt {
                 depth_tested: false,
             }
         };
-        Some((patch(outer), flare.inner_scale.map(|scale| patch(outer * scale))))
+        Some((
+            patch(outer),
+            flare.inner_scale.map(|scale| patch(outer * scale)),
+        ))
     }
 
     /// `lens_flare_draw_callback`. `occlusion` is `rasterizer_occlusion_get_result`
@@ -348,7 +375,11 @@ impl H2FlareAt {
             fade *= (-cutoff * slope - dot(forward, to_light) * slope).clamp(0.0, 1.0);
         }
         let [chained, outer] = occlusion;
-        let time = if flare.synchronized { time } else { time + self.unsynchronized_offset() };
+        let time = if flare.synchronized {
+            time
+        } else {
+            time + self.unsynchronized_offset()
+        };
         let mut brightness = fade * chained;
         let not_inner = fade * outer;
         if let Some(function) = &flare.brightness {
@@ -402,7 +433,11 @@ impl H2FlareAt {
             }
             let tint: [f32; 3] = std::array::from_fn(|channel| {
                 let own = color[channel] * reflection.color[channel];
-                if !reflection.flags.ignore_light_color { own * external[channel] } else { own }
+                if !reflection.flags.ignore_light_color {
+                    own * external[channel]
+                } else {
+                    own
+                }
             });
             sprites.push(FlareSprite {
                 center: std::array::from_fn(|axis| {

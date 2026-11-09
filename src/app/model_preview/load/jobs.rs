@@ -35,7 +35,10 @@ impl Baboon {
             return false;
         };
         if entry.group_tag != u32::from_be_bytes(*b"hlmt")
-            && !is_object_family_group(entry.group_tag, kit.source.as_ref().and_then(|source| source.game))
+            && !is_object_family_group(
+                entry.group_tag,
+                kit.source.as_ref().and_then(|source| source.game),
+            )
         {
             return false;
         }
@@ -48,7 +51,11 @@ impl Baboon {
             kit: kit.id,
             generation: kit.generation,
         };
-        if let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(key) {
+        if let Some(state) = self.views[self.model.kits[kit_index].id]
+            .caches
+            .model_previews
+            .get_mut(key)
+        {
             state.overlays_pending = true;
         }
 
@@ -57,22 +64,24 @@ impl Baboon {
         // overlays never arrive.
         let (key, panic_key) = (key.to_owned(), key.to_owned());
         let build = move || -> Option<(Overlay, Overlay)> {
-                let model = super::super::load::read_opened_tag(&source, &entry, edits).ok()?;
-                // The overlays are a load of their own.
-                let reader = super::super::load::TagReader::new(&source);
-                if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1
-                    && is_object_family_group(model.header.group_tag, source.game())
-                {
-                    return Some((halo1_object_collision_overlay(&model, &reader), Ok(None)));
-                }
-                let model = super::super::load::preview_model_tag(&source, &model).ok()?.unwrap_or(model);
-                // Classic models only: a Campaign Evolved hlmt previews
-                // through Unreal geometry and hides the overlay toggles.
-                model.root().read_tag_ref_with_group("render model")?;
-                Some((
-                    hlmt_collision_overlay(&model, &reader),
-                    hlmt_physics_overlay(&model, &reader),
-                ))
+            let model = super::super::load::read_opened_tag(&source, &entry, edits).ok()?;
+            // The overlays are a load of their own.
+            let reader = super::super::load::TagReader::new(&source);
+            if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1
+                && is_object_family_group(model.header.group_tag, source.game())
+            {
+                return Some((halo1_object_collision_overlay(&model, &reader), Ok(None)));
+            }
+            let model = super::super::load::preview_model_tag(&source, &model)
+                .ok()?
+                .unwrap_or(model);
+            // Classic models only: a Campaign Evolved hlmt previews
+            // through Unreal geometry and hides the overlay toggles.
+            model.root().read_tag_ref_with_group("render model")?;
+            Some((
+                hlmt_collision_overlay(&model, &reader),
+                hlmt_physics_overlay(&model, &reader),
+            ))
         };
         spawn_worker(
             &self.tx,
@@ -87,7 +96,14 @@ impl Baboon {
                     })
                 };
                 let (collision, physics) = (kept(collision), kept(physics));
-                WorkerMessage::ModelOverlaysBuilt { stamp, key, geometry_id, collision, physics, notes }
+                WorkerMessage::ModelOverlaysBuilt {
+                    stamp,
+                    key,
+                    geometry_id,
+                    collision,
+                    physics,
+                    notes,
+                }
             },
             move |_| WorkerMessage::ModelOverlaysBuilt {
                 stamp,
@@ -115,7 +131,11 @@ impl Baboon {
             return true;
         };
         let stale = self.model.resolve_stamp(stamp).is_none();
-        let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(&key) else {
+        let Some(state) = self.views[self.model.kits[kit_index].id]
+            .caches
+            .model_previews
+            .get_mut(&key)
+        else {
             return true;
         };
         // The in-flight marker is cleared before the staleness check, so a
@@ -172,7 +192,8 @@ pub(in crate::app::model_preview) struct PreviewLoadSettings {
     /// Halo CE: the weapon a biped holds, by path.
     pub(in crate::app::model_preview) weapon: Option<String>,
     /// Halo CE: the biped's weapons, when an earlier load found them.
-    pub(in crate::app::model_preview) ce_equippable: Option<Vec<super::super::ce::weapons::CeEquippable>>,
+    pub(in crate::app::model_preview) ce_equippable:
+        Option<Vec<super::super::ce::weapons::CeEquippable>>,
     /// Halo 2 units: what the left hand holds, by path.
     pub(in crate::app::model_preview) secondary_weapon: Option<String>,
     /// Halo 2 units: their weapons, when an earlier load found them.
@@ -187,11 +208,17 @@ impl PreviewLoadSettings {
             weapon: state.weapon.clone(),
             secondary_weapon: state.secondary_weapon.clone(),
             h2_equippable: match &state.data {
-                Some(Ok(data)) => data.weapons.as_ref().map(|weapons| weapons.equippable.clone()),
+                Some(Ok(data)) => data
+                    .weapons
+                    .as_ref()
+                    .map(|weapons| weapons.equippable.clone()),
                 _ => None,
             },
             ce_equippable: match &state.data {
-                Some(Ok(data)) => data.ce_weapons.as_ref().map(|weapons| weapons.equippable.clone()),
+                Some(Ok(data)) => data
+                    .ce_weapons
+                    .as_ref()
+                    .map(|weapons| weapons.equippable.clone()),
                 _ => None,
             },
         }
@@ -246,7 +273,8 @@ impl Baboon {
             NEXT_MODEL_PREVIEW_LOAD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let state = self.views[self.model.kits[kit_index].id]
-            .caches.model_previews
+            .caches
+            .model_previews
             .get_mut(key)
             .expect("preview state checked above");
         state.loaded_key = Some(key.to_owned());
@@ -280,8 +308,8 @@ impl Baboon {
 
         let (worker_key, panic_key) = (key.to_owned(), key.to_owned());
         let load = move || -> Result<_, String> {
-                let model_tag = read_opened_tag(&source, &entry, edits)?;
-                load_model_preview(&model_tag, &entry, &names, Some(&source), &settings)
+            let model_tag = read_opened_tag(&source, &entry, edits)?;
+            load_model_preview(&model_tag, &entry, &names, Some(&source), &settings)
         };
         spawn_worker(
             &self.tx,
@@ -313,7 +341,11 @@ impl Baboon {
             return true;
         };
         let stale = self.model.resolve_stamp(stamp).is_none();
-        let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(&key) else {
+        let Some(state) = self.views[self.model.kits[kit_index].id]
+            .caches
+            .model_previews
+            .get_mut(&key)
+        else {
             return true;
         };
         if state.preview_load_id != Some(request_id) {
@@ -333,7 +365,11 @@ impl Baboon {
             // one (named `default`, else the first), so both cards arrive in
             // one consistent state.
             let remembered = state.variant_after_load.take();
-            let remembered = remembered.and_then(|name| data.variants.iter().position(|variant| variant.name == name));
+            let remembered = remembered.and_then(|name| {
+                data.variants
+                    .iter()
+                    .position(|variant| variant.name == name)
+            });
             let variant = remembered.or_else(|| default_variant_index(data));
             reset_model_preview_selection(state, data, variant);
             // A weapon change only swaps what the unit holds.
@@ -344,7 +380,9 @@ impl Baboon {
                     }
                 }
                 if let Some(inputs) = state.ce_function_inputs.get(&(geometry_id, 0)).copied() {
-                    state.ce_function_inputs.insert((data.geometry_id, 0), inputs);
+                    state
+                        .ce_function_inputs
+                        .insert((data.geometry_id, 0), inputs);
                 }
                 // Halo 2's, by name. A name only the old weapon had is
                 // carried too, and reads nothing.
@@ -366,9 +404,16 @@ impl Baboon {
 /// worker to read with [`read_opened_tag`]; none for a clean document, which
 /// the worker re-reads from disk, so a large BSP does not serialize on the UI
 /// thread merely to hand the same bytes back to the parser.
-pub(in crate::app::model_preview) fn snapshot_edits(document: Option<&crate::app::TagDocument>) -> Option<Result<Vec<u8>, String>> {
+pub(in crate::app::model_preview) fn snapshot_edits(
+    document: Option<&crate::app::TagDocument>,
+) -> Option<Result<Vec<u8>, String>> {
     let document = document.filter(|document| document.dirty.is_set())?;
-    Some(document.tag.write_to_bytes().map_err(|error| format!("Could not snapshot edited model: {error}")))
+    Some(
+        document
+            .tag
+            .write_to_bytes()
+            .map_err(|error| format!("Could not snapshot edited model: {error}")),
+    )
 }
 
 /// The opened tag as the editor holds it: `edits` from [`snapshot_edits`],
@@ -384,11 +429,20 @@ pub(in crate::app::model_preview) fn read_opened_tag(
         // `TagFile::read_from_bytes` to find.
         Some(Ok(bytes)) => {
             let (game, definitions_root) = match source {
-                TagSource::LooseFolder { game, definitions_root, .. } => (*game, Some(definitions_root.as_path())),
+                TagSource::LooseFolder {
+                    game,
+                    definitions_root,
+                    ..
+                } => (*game, Some(definitions_root.as_path())),
                 _ => (None, None),
             };
-            crate::core::source::read_tag_from_bytes(&bytes, game, definitions_root, entry.group_tag)
-                .map_err(|error| error.to_string())
+            crate::core::source::read_tag_from_bytes(
+                &bytes,
+                game,
+                definitions_root,
+                entry.group_tag,
+            )
+            .map_err(|error| error.to_string())
         }
         Some(Err(error)) => Err(error),
         None => read_entry(source, entry).map_err(|error| error.to_string()),

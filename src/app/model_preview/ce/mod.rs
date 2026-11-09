@@ -1,27 +1,27 @@
 //! Halo CE: what an object brings with it, its functions, and the effects,
 //! lights and shader passes the preview draws for it.
 
-mod features;
-pub(in crate::app::model_preview) mod object;
-pub(super) mod weapons;
+pub(super) mod blend;
 pub(super) mod contrails;
 pub(in crate::app::model_preview) mod draw;
+pub(super) mod effects;
+mod features;
 pub(super) mod firing;
 pub(super) mod flags;
 pub(super) mod functions;
 pub(super) mod lights;
-pub(super) mod particle_systems;
-pub(super) mod effects;
-pub(super) mod shaders;
-pub(in crate::app::model_preview) mod render;
-pub(in crate::app::model_preview) mod slot;
-pub(super) mod widgets;
-pub(super) mod ticks;
-pub(super) mod sprite_sheet;
-pub(super) mod transition;
-pub(super) mod blend;
+pub(in crate::app::model_preview) mod object;
 pub(super) mod panel;
+pub(super) mod particle_systems;
 pub(super) mod random;
+pub(in crate::app::model_preview) mod render;
+pub(super) mod shaders;
+pub(in crate::app::model_preview) mod slot;
+pub(super) mod sprite_sheet;
+pub(super) mod ticks;
+pub(super) mod transition;
+pub(super) mod weapons;
+pub(super) mod widgets;
 
 /// What a Halo CE object brings to its preview beyond its geometry: its
 /// lights' flares, antennas, effects, firing, contrails and widgets.

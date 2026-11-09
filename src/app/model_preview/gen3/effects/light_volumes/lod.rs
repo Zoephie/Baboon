@@ -32,12 +32,20 @@ impl ReachVolumeLod {
     /// `postprocess` (reach-tool `light_volume_definitions.cpp` l.175–195):
     /// an out distance of none is 20, an in distance at least epsilon, and
     /// each inverse over a feather of at least epsilon.
-    pub(super) fn postprocessed([near, feather_in]: [f32; 2], [far, feather_out]: [f32; 2], always_one: bool) -> Self {
+    pub(super) fn postprocessed(
+        [near, feather_in]: [f32; 2],
+        [far, feather_out]: [f32; 2],
+        always_one: bool,
+    ) -> Self {
         Self {
             near: near.max(EPSILON),
             feather_in,
             inverse_in: feather_in.max(EPSILON).recip(),
-            far: if far.abs() < EPSILON { DEFAULT_LOD_OUT } else { far },
+            far: if far.abs() < EPSILON {
+                DEFAULT_LOD_OUT
+            } else {
+                far
+            },
             feather_out,
             inverse_out: feather_out.max(EPSILON).recip(),
             always_one,
@@ -67,16 +75,31 @@ pub(super) fn lod_amount(lod: Option<&ReachVolumeLod>, distance: f32) -> f32 {
 
 /// Reach's `max profile count` (tool 0x140DD0FA0): the most profiles the
 /// two per-volume settings can make, 0 to 128, a NaN none.
-pub(super) fn max_profile_count(density: &Gen3VolumeProperty, length: &Gen3VolumeProperty) -> usize {
+pub(super) fn max_profile_count(
+    density: &Gen3VolumeProperty,
+    length: &Gen3VolumeProperty,
+) -> usize {
     let most = (density.most() * length.most()).max(0.0);
-    if !(MOST_PROFILES as f32 > most) { MOST_PROFILES as usize } else { most as i64 as usize }
+    if !(MOST_PROFILES as f32 > most) {
+        MOST_PROFILES as usize
+    } else {
+        most as i64 as usize
+    }
 }
 
 /// `postprocess_build_precompiled_verts_if_needed` (tool 0x140DD2080, the
 /// 360's 0x82EC6E58)'s test: unless `disable precompiled profiles`, a volume
 /// that `force precompile profiles` or whose eight properties read nothing
 /// but the profile's place bakes its rows, if it can make any.
-pub(super) fn precompiles(flagged: impl Fn(&str) -> bool, properties: &[&Gen3VolumeProperty; 8], most: usize) -> bool {
-    let profile_only = properties.iter().all(|property| !property.reads_more_than_its_place());
-    !flagged("disable precompiled profiles") && (flagged("force precompile profiles") || profile_only) && most != 0
+pub(super) fn precompiles(
+    flagged: impl Fn(&str) -> bool,
+    properties: &[&Gen3VolumeProperty; 8],
+    most: usize,
+) -> bool {
+    let profile_only = properties
+        .iter()
+        .all(|property| !property.reads_more_than_its_place());
+    !flagged("disable precompiled profiles")
+        && (flagged("force precompile profiles") || profile_only)
+        && most != 0
 }

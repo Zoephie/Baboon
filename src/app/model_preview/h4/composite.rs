@@ -6,16 +6,16 @@ use super::super::gen3::state::Gen3State;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use super::super::common::image::Image;
-use crate::app::model_preview::common::image::{Sampler, ImageTexels};
+use super::super::frame::ModelGpuFrame;
 use super::super::gen3::pipeline::{H3_SHIELD_DAMAGE, HALF_LENS};
+use super::super::renderer::RenderCore;
+use super::render::H4Game;
+use crate::app::model_preview::common::image::{ImageTexels, Sampler};
 use crate::app::model_preview::gl::pass_state::PassState;
 use crate::app::model_preview::gl::screen::{premultiplied_over, screen_program};
 use crate::app::model_preview::gl::texture::upload_image_linear;
 use eframe::glow::{self, HasContext};
 use std::sync::Arc;
-use super::render::H4Game;
-use super::super::renderer::RenderCore;
-use super::super::frame::ModelGpuFrame;
 
 impl H4Game {
     /// Halo 4's `c_render_shield::render_object_internal`: every part that
@@ -33,7 +33,12 @@ impl H4Game {
         let Some(shield) = frame.preview.h4.shield.clone() else {
             return;
         };
-        let damage = frame.function_values.as_ref().and_then(|values| values.get(H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
+        let damage = frame
+            .function_values
+            .as_ref()
+            .and_then(|values| values.get(H3_SHIELD_DAMAGE))
+            .copied()
+            .unwrap_or(0.0);
         if !shield.settings.showing(damage) {
             return;
         }
@@ -49,7 +54,11 @@ impl H4Game {
 
     /// Halo 4's colour grading lookup, uploaded once per preview, and how a
     /// pass reads its texel centres (`SetColorGradingParameters`).
-    pub(super) unsafe fn grading_texture(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) -> Option<super::bloom::H4BloomGrading> {
+    pub(super) unsafe fn grading_texture(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+    ) -> Option<super::bloom::H4BloomGrading> {
         unsafe {
             let grading = frame.preview.h4.color_grading.as_ref();
             let image = grading.map(|(image, ..)| image);
@@ -58,16 +67,32 @@ impl H4Game {
                     gl.delete_texture(texture);
                 }
                 // Sampler 8: bilinear, clamped.
-                let sampler = Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Bilinear };
-                let uploaded = image.and_then(|image| upload_image_linear(gl, image, ImageTexels::Linear, &[], Some(sampler)));
+                let sampler = Sampler {
+                    address: [BitmapAddressMode::Clamp; 2],
+                    filter: BitmapFilterMode::Bilinear,
+                };
+                let uploaded = image.and_then(|image| {
+                    upload_image_linear(gl, image, ImageTexels::Linear, &[], Some(sampler))
+                });
                 self.grading = image.cloned().zip(uploaded);
             }
             let size = match grading.map(|(image, ..)| &**image) {
-                Some(Image::Volume { width, height, depth, .. }) => [*width, *height, *depth],
+                Some(Image::Volume {
+                    width,
+                    height,
+                    depth,
+                    ..
+                }) => [*width, *height, *depth],
                 _ => return None,
             };
             let (scale, offset) = super::composite::h4_grading_scale_offset(size);
-            self.grading.as_ref().map(|(_, texture)| super::bloom::H4BloomGrading { texture: *texture, scale, offset })
+            self.grading
+                .as_ref()
+                .map(|(_, texture)| super::bloom::H4BloomGrading {
+                    texture: *texture,
+                    scale,
+                    offset,
+                })
         }
     }
 
@@ -92,7 +117,10 @@ impl H4Game {
                 return;
             };
             let at = |name: &str| gl.get_uniform_location(program, name);
-            let grading_texture = grading.as_ref().map(|grading| grading.texture).or(core.white_volume);
+            let grading_texture = grading
+                .as_ref()
+                .map(|grading| grading.texture)
+                .or(core.white_volume);
             PassState::new()
                 .use_program(program)
                 .sampler(0, glow::TEXTURE_2D, Some(accumulation), at("accumulation"))
@@ -101,13 +129,27 @@ impl H4Game {
                 .sampler(3, glow::TEXTURE_3D, grading_texture, at("grading"))
                 .active_texture(glow::TEXTURE0)
                 .apply(gl);
-            let (scale, offset) = grading.as_ref().map_or(([1.0; 3], [0.0; 3]), |grading| (grading.scale, grading.offset));
-            gl.uniform_3_f32_slice(gl.get_uniform_location(program, "grading_scale").as_ref(), &scale);
-            gl.uniform_3_f32_slice(gl.get_uniform_location(program, "grading_offset").as_ref(), &offset);
-            gl.uniform_1_f32(gl.get_uniform_location(program, "dark_multiplier").as_ref(), H4_DARK_MULTIPLIER);
+            let (scale, offset) = grading.as_ref().map_or(([1.0; 3], [0.0; 3]), |grading| {
+                (grading.scale, grading.offset)
+            });
+            gl.uniform_3_f32_slice(
+                gl.get_uniform_location(program, "grading_scale").as_ref(),
+                &scale,
+            );
+            gl.uniform_3_f32_slice(
+                gl.get_uniform_location(program, "grading_offset").as_ref(),
+                &offset,
+            );
+            gl.uniform_1_f32(
+                gl.get_uniform_location(program, "dark_multiplier").as_ref(),
+                H4_DARK_MULTIPLIER,
+            );
             let filmic = super::lighting::h4_filmic_params(super::lighting::H4_FILMIC_CURVE, false);
             gl.uniform_1_f32_slice(gl.get_uniform_location(program, "filmic").as_ref(), &filmic);
-            gl.uniform_1_f32(gl.get_uniform_location(program, "view_scale").as_ref(), screen.view_scale(HALF_LENS));
+            gl.uniform_1_f32(
+                gl.get_uniform_location(program, "view_scale").as_ref(),
+                screen.view_scale(HALF_LENS),
+            );
             premultiplied_over(state.empty_array(gl)).apply(gl);
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             PassState::new().enable(glow::DEPTH_TEST).apply(gl);
@@ -135,11 +177,14 @@ fn grading_is_current(held: Option<&Arc<Image>>, now: Option<&Arc<Image>>) -> bo
 /// format, O7, decides whether the game's view decodes it, and either way
 /// the default lookup's output displays as sRGB(x²)]. Coverage is Reach's:
 /// what the object drew covers what lies behind it.
-pub(in crate::app::model_preview) const H4_COMPOSITE_FRAGMENT: &str = include_str!("shaders/composite.frag");
+pub(in crate::app::model_preview) const H4_COMPOSITE_FRAGMENT: &str =
+    include_str!("shaders/composite.frag");
 
 /// `SetColorGradingParameters` (X360 0x829B78E0): a lookup of `size` texels
 /// a side is read at `x (size - 1) / size + 0.5 / size`, its texel centres.
-pub(in crate::app::model_preview) fn h4_grading_scale_offset(size: [usize; 3]) -> ([f32; 3], [f32; 3]) {
+pub(in crate::app::model_preview) fn h4_grading_scale_offset(
+    size: [usize; 3],
+) -> ([f32; 3], [f32; 3]) {
     let scale = size.map(|side| (side.max(1) as f32 - 1.0) / side.max(1) as f32);
     let offset = size.map(|side| 0.5 / side.max(1) as f32);
     (scale, offset)
@@ -150,7 +195,12 @@ mod tests {
     use super::*;
 
     fn image() -> Arc<Image> {
-        Arc::new(Image::Volume { width: 1, height: 1, depth: 1, rgba: vec![0; 4] })
+        Arc::new(Image::Volume {
+            width: 1,
+            height: 1,
+            depth: 1,
+            rgba: vec![0; 4],
+        })
     }
 
     #[test]

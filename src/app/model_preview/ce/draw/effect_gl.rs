@@ -29,7 +29,10 @@ pub(in crate::app::model_preview) const CE_EFFECT_FLOATS: usize = 12;
 
 const CE_EFFECT_STRIDE: i32 = CE_EFFECT_FLOATS as i32 * 4;
 
-pub(in crate::app::model_preview) unsafe fn ce_effect_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<CeEffectGl> {
+pub(in crate::app::model_preview) unsafe fn ce_effect_gl(
+    gl: &glow::Context,
+    main: glow::NativeProgram,
+) -> Option<CeEffectGl> {
     unsafe {
         let program = link_h2_program(gl, main, CE_EFFECT_VERTEX, CE_EFFECT_FRAGMENT)
             .map_err(|error| eprintln!("model preview: {error}"))

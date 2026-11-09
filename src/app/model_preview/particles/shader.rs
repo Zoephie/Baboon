@@ -89,7 +89,11 @@ impl SpriteShader {
     /// The constant self-illumination added, at the area screen effects'
     /// exposure `stops` where it is Reach's.
     pub(crate) fn add(&self, stops: f32) -> [f32; 3] {
-        let exposure = if self.add_at_illum { reach_alt_exposure(stops)[1] } else { 1.0 };
+        let exposure = if self.add_at_illum {
+            reach_alt_exposure(stops)[1]
+        } else {
+            1.0
+        };
         self.add.map(|channel| channel * exposure)
     }
 
@@ -130,8 +134,16 @@ impl SpriteShader {
 
     pub(crate) fn alpha_tested(blend: Gen3Blend, base_map: Gen3Bitmap) -> Self {
         // `leaf_system_render_opaque` binds its plate clamped and bilinear.
-        let plate = Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Bilinear };
-        Self { alpha_test: true, base_map: Some(base_map), samplers: [Some(plate), None, None, None], ..Self::plain(blend) }
+        let plate = Sampler {
+            address: [BitmapAddressMode::Clamp; 2],
+            filter: BitmapFilterMode::Bilinear,
+        };
+        Self {
+            alpha_test: true,
+            base_map: Some(base_map),
+            samplers: [Some(plate), None, None, None],
+            ..Self::plain(blend)
+        }
     }
 
     #[cfg(test)]
@@ -143,7 +155,10 @@ impl SpriteShader {
 /// A kit's `tags` folder as the effects tests read it, against the bundled
 /// definitions.
 #[cfg(test)]
-pub(in crate::app::model_preview) fn loose_kit(root: impl AsRef<std::path::Path>, game: GameId) -> TagSource {
+pub(in crate::app::model_preview) fn loose_kit(
+    root: impl AsRef<std::path::Path>,
+    game: GameId,
+) -> TagSource {
     TagSource::LooseFolder {
         root: root.as_ref().into(),
         game: Some(game),
@@ -163,17 +178,28 @@ pub(in crate::app::model_preview) fn gen3_sort_layer(shader: TagStruct<'_>) -> i
 /// A sprite system's `actual shader?`, by its options' names. Reach's options
 /// (`shaders\particle.render_method_definition`) read their parameters
 /// through the resolver, falling to what their option tags default them to.
-pub(in crate::app::model_preview) fn read_sprite_shader(reader: &TagReader, shader: TagStruct<'_>) -> Option<SpriteShader> {
-    let definition = shader.read_tag_ref_path("definition").filter(|path| !path.is_empty())?;
+pub(in crate::app::model_preview) fn read_sprite_shader(
+    reader: &TagReader,
+    shader: TagStruct<'_>,
+) -> Option<SpriteShader> {
+    let definition = shader
+        .read_tag_ref_path("definition")
+        .filter(|path| !path.is_empty())?;
     let definition = read_h3_definition(reader, &definition)?;
     let options: Vec<usize> = elements(shader, "options")
         .iter()
         .map(|option| option.read_int_any("short").unwrap_or(0).max(0) as usize)
         .collect();
-    let chosen = |category: &str| definition.chosen(category, &options).unwrap_or_default().to_owned();
+    let chosen = |category: &str| {
+        definition
+            .chosen(category, &options)
+            .unwrap_or_default()
+            .to_owned()
+    };
     let reach_method = ParticleRules::of(reader.source.game()).reach_render_method;
     let resolved = resolve_embedded_method(reader, shader);
-    let resolved_real = |name: &str, default: f32| inline_real(resolved.as_ref(), name).unwrap_or(default);
+    let resolved_real =
+        |name: &str, default: f32| inline_real(resolved.as_ref(), name).unwrap_or(default);
     let add = parameter(shader, "self_illum_color")
         .filter(|_| chosen("self_illumination") == "constant_color")
         .and_then(|parameter| elements(parameter, "animated parameters").first().copied())
@@ -184,7 +210,11 @@ pub(in crate::app::model_preview) fn read_sprite_shader(reader: &TagReader, shad
     let depth_fade = chosen("depth_fade");
     // `compute_depth_fade`: Reach's `low_res` is `on` on DirectX 11, its
     // four taps being the 360's alone, and `palette_shift` fades as `on` does.
-    let fades = if reach_method { matches!(depth_fade.as_str(), "on" | "low_res" | "palette_shift") } else { depth_fade == "on" };
+    let fades = if reach_method {
+        matches!(depth_fade.as_str(), "on" | "low_res" | "palette_shift")
+    } else {
+        depth_fade == "on"
+    };
     let albedo = ParticleAlbedo::named(&chosen("albedo"));
     Some(SpriteShader {
         albedo,
@@ -196,7 +226,9 @@ pub(in crate::app::model_preview) fn read_sprite_shader(reader: &TagReader, shad
                 resolved_real("depth_fade_range", 0.1)
             } else {
                 parameter(shader, "depth_fade_range")
-                    .and_then(|parameter| elements(parameter, "animated parameters").first().copied())
+                    .and_then(|parameter| {
+                        elements(parameter, "animated parameters").first().copied()
+                    })
                     .and_then(|animated| tag_function_at(&animated, "function"))
                     .map_or(1.0, |function| function.evaluate(0.0, 0.0))
             };
@@ -208,12 +240,16 @@ pub(in crate::app::model_preview) fn read_sprite_shader(reader: &TagReader, shad
         alpha_test: false,
         lit_pixels: chosen("lighting") == "per_pixel_ravi_order_3",
         sort_layer: gen3_sort_layer(shader),
-        distortion: chosen("specialized_rendering").starts_with("distortion").then(|| {
-            parameter(shader, "distortion_scale")
-                .and_then(|parameter| elements(parameter, "animated parameters").first().copied())
-                .and_then(|animated| tag_function_at(&animated, "function"))
-                .map_or(1.0, |function| function.evaluate(0.0, 0.0))
-        }),
+        distortion: chosen("specialized_rendering")
+            .starts_with("distortion")
+            .then(|| {
+                parameter(shader, "distortion_scale")
+                    .and_then(|parameter| {
+                        elements(parameter, "animated parameters").first().copied()
+                    })
+                    .and_then(|animated| tag_function_at(&animated, "function"))
+                    .map_or(1.0, |function| function.evaluate(0.0, 0.0))
+            }),
         lighting: match chosen("lighting").as_str() {
             "per_vertex_ravi_order_0" => ParticleLighting::Ambient,
             "per_pixel_ravi_order_3" => ParticleLighting::Directional,
@@ -237,12 +273,21 @@ pub(in crate::app::model_preview) fn read_sprite_shader(reader: &TagReader, shad
         samplers,
         constants: read_albedo_constants(shader, resolved.as_ref(), reach_method),
         // `smooth_lighting.render_method_option`'s defaults.
-        contrast: [resolved_real("contrast_scale", 0.5), resolved_real("contrast_offset", 0.5)],
+        contrast: [
+            resolved_real("contrast_scale", 0.5),
+            resolved_real("contrast_offset", 0.5),
+        ],
         // `warp_sphere.render_method_option`'s default.
-        sphere_warp: (reach_method && chosen("warp") == "sphere").then(|| resolved_real("sphere_warp_scale", 0.41)),
+        sphere_warp: (reach_method && chosen("warp") == "sphere")
+            .then(|| resolved_real("sphere_warp_scale", 0.41)),
         // `depth_fade_palette_shift.render_method_option`'s default.
-        palette_shift: (reach_method && depth_fade == "palette_shift").then(|| resolved_real("palette_shift_amount", 0.5)),
-        plasma_second_sprite: reach_method && matches!(albedo, ParticleAlbedo::PalettePlasma | ParticleAlbedo::Palette2dPlasma),
+        palette_shift: (reach_method && depth_fade == "palette_shift")
+            .then(|| resolved_real("palette_shift_amount", 0.5)),
+        plasma_second_sprite: reach_method
+            && matches!(
+                albedo,
+                ParticleAlbedo::PalettePlasma | ParticleAlbedo::Palette2dPlasma
+            ),
     })
 }
 
@@ -254,7 +299,10 @@ fn inline_value(resolved: Option<&ResolvedRenderMethod>, name: &str) -> Option<R
     Some(value.clone())
 }
 
-pub(in crate::app::model_preview) fn inline_real(resolved: Option<&ResolvedRenderMethod>, name: &str) -> Option<f32> {
+pub(in crate::app::model_preview) fn inline_real(
+    resolved: Option<&ResolvedRenderMethod>,
+    name: &str,
+) -> Option<f32> {
     match inline_value(resolved, name)? {
         ResolvedValue::Real(real) => Some(real),
         _ => None,
@@ -263,29 +311,46 @@ pub(in crate::app::model_preview) fn inline_real(resolved: Option<&ResolvedRende
 
 pub(super) fn parameter<'a>(shader: TagStruct<'a>, name: &str) -> Option<TagStruct<'a>> {
     let parameters = elements(shader, "parameters");
-    parameters.into_iter().find(|parameter| parameter.read_string_id("parameter name").as_deref() == Some(name))
+    parameters
+        .into_iter()
+        .find(|parameter| parameter.read_string_id("parameter name").as_deref() == Some(name))
 }
 
 fn read_map(reader: &TagReader, shader: TagStruct<'_>, name: &str) -> Option<Gen3Bitmap> {
-    let path = parameter(shader, name)?.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
+    let path = parameter(shader, name)?
+        .read_tag_ref_path("bitmap")
+        .filter(|path| !path.is_empty())?;
     read_h3_bitmap(reader, &path, 0, SamplerKind::Texture2D)
 }
 
 /// A sprite shader's maps, and the sampler each is baked with. Failing to
 /// resolve leaves what it authored, on the preview's default sampler.
-fn read_maps(reader: &TagReader, shader: TagStruct<'_>) -> ([Option<Gen3Bitmap>; 4], [Option<Sampler>; 4]) {
+fn read_maps(
+    reader: &TagReader,
+    shader: TagStruct<'_>,
+) -> ([Option<Gen3Bitmap>; 4], [Option<Sampler>; 4]) {
     const MAPS: [&str; 4] = ["base_map", "alpha_map", "palette", "base_map2"];
     let Some(resolved) = resolve_embedded_method(reader, shader) else {
         return (MAPS.map(|name| read_map(reader, shader, name)), [None; 4]);
     };
-    let mut maps = MAPS.map(|name| read_resolved_map(reader, &resolved, name)).into_iter();
-    let (bitmaps, samplers): (Vec<_>, Vec<_>) = std::array::from_fn::<_, 4, _>(|_| maps.next().flatten())
-        .map(|map| map.map_or((None, None), |(bitmap, sampler)| (Some(bitmap), Some(sampler))))
-        .into_iter()
-        .unzip();
+    let mut maps = MAPS
+        .map(|name| read_resolved_map(reader, &resolved, name))
+        .into_iter();
+    let (bitmaps, samplers): (Vec<_>, Vec<_>) =
+        std::array::from_fn::<_, 4, _>(|_| maps.next().flatten())
+            .map(|map| {
+                map.map_or((None, None), |(bitmap, sampler)| {
+                    (Some(bitmap), Some(sampler))
+                })
+            })
+            .into_iter()
+            .unzip();
     let mut bitmaps = bitmaps.into_iter();
     let mut samplers = samplers.into_iter();
-    (std::array::from_fn(|_| bitmaps.next().flatten()), std::array::from_fn(|_| samplers.next().flatten()))
+    (
+        std::array::from_fn(|_| bitmaps.next().flatten()),
+        std::array::from_fn(|_| samplers.next().flatten()),
+    )
 }
 
 /// A map's `_xform`, its scale then its offset, from its animators at rest.
@@ -311,7 +376,11 @@ fn sprite_xform(shader: TagStruct<'_>, name: &str) -> [f32; 4] {
     xform
 }
 
-fn read_albedo_constants(shader: TagStruct<'_>, resolved: Option<&ResolvedRenderMethod>, reach_render_method: bool) -> AlbedoConstants {
+fn read_albedo_constants(
+    shader: TagStruct<'_>,
+    resolved: Option<&ResolvedRenderMethod>,
+    reach_render_method: bool,
+) -> AlbedoConstants {
     let real = |name: &str| inline_real(resolved, name).unwrap_or(0.0);
     let tint = match inline_value(resolved, "tint_color") {
         Some(ResolvedValue::Color([_, red, green, blue])) => [red, green, blue],
@@ -355,7 +424,12 @@ pub(crate) struct ParticleCorner {
 /// `V_ILLUM_EXPOSURE` (`v_alt_exposure.y`) and the rest at `v_exposure.x`,
 /// at the area screen effects' `stops`. Beams and contrails take the same
 /// (`effects__beam.hlsl` and `effects__contrail_render.hlsl`, l.258–269).
-pub(in crate::app::model_preview) fn particle_exposure(blend: Gen3Blend, exposed: bool, reach_exposure_stops: bool, stops: f32) -> f32 {
+pub(in crate::app::model_preview) fn particle_exposure(
+    blend: Gen3Blend,
+    exposed: bool,
+    reach_exposure_stops: bool,
+    stops: f32,
+) -> f32 {
     if blend == Gen3Blend::Multiply || !exposed {
         1.0
     } else if !reach_exposure_stops {

@@ -39,13 +39,27 @@ impl TagReader {
     }
 
     /// A render method's definition, parsed once per load.
-    pub(in crate::app::model_preview) fn render_method_definition(&self, reference: &str) -> Option<Arc<RenderMethodDefinition>> {
-        crate::app::editor::cached_render_method_definition(&self.source, reference, &mut self.definitions.borrow_mut())
+    pub(in crate::app::model_preview) fn render_method_definition(
+        &self,
+        reference: &str,
+    ) -> Option<Arc<RenderMethodDefinition>> {
+        crate::app::editor::cached_render_method_definition(
+            &self.source,
+            reference,
+            &mut self.definitions.borrow_mut(),
+        )
     }
 
     /// A render method's option, parsed once per load.
-    pub(in crate::app::model_preview) fn render_method_option(&self, reference: &str) -> Option<Arc<RenderMethodOption>> {
-        crate::app::editor::cached_render_method_option(&self.source, reference, &mut self.options.borrow_mut())
+    pub(in crate::app::model_preview) fn render_method_option(
+        &self,
+        reference: &str,
+    ) -> Option<Arc<RenderMethodOption>> {
+        crate::app::editor::cached_render_method_option(
+            &self.source,
+            reference,
+            &mut self.options.borrow_mut(),
+        )
     }
 
     /// `reference`'s tag, read the first time it is asked for. A failure is
@@ -87,16 +101,32 @@ mod tests {
     #[test]
     fn a_failure_is_read_once_and_fails_the_same_again() {
         let reader = reader();
-        let first = reader.load("objects\\missing\\missing", "biped", b"bipd").unwrap_err().to_string();
+        let first = reader
+            .load("objects\\missing\\missing", "biped", b"bipd")
+            .unwrap_err()
+            .to_string();
         assert_eq!(reader.read.borrow().len(), 1, "the failure is kept");
-        let again = reader.load("objects\\missing\\missing", "biped", b"bipd").unwrap_err().to_string();
+        let again = reader
+            .load("objects\\missing\\missing", "biped", b"bipd")
+            .unwrap_err()
+            .to_string();
         assert_eq!(first, again);
-        assert_eq!(format!("{:#}", reader.load("objects\\missing\\missing", "biped", b"bipd").unwrap_err()), first);
+        assert_eq!(
+            format!(
+                "{:#}",
+                reader
+                    .load("objects\\missing\\missing", "biped", b"bipd")
+                    .unwrap_err()
+            ),
+            first
+        );
     }
 
     #[test]
     fn a_tag_read_twice_is_the_same_tag() {
-        let Some(root) = kit_root(GameId::Halo2) else { return };
+        let Some(root) = kit_root(GameId::Halo2) else {
+            return;
+        };
         let reader = TagReader::new(&TagSource::LooseFolder {
             root,
             game: Some(crate::core::game::GameId::Halo2),

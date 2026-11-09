@@ -17,15 +17,30 @@ pub(super) unsafe fn draw_dynamic_lights(cx: &mut Gen3Cx<'_>, batches: &[Gen3Bat
             }
             let values = frame.function_values_of_object(light.object);
             let colors = frame.change_colors_of_object(light.object);
-            let onset = cx.core.slots[slot].simulations.effect_onsets.of(light.object, light.scale_name(), values, frame.time);
+            let onset = cx.core.slots[slot].simulations.effect_onsets.of(
+                light.object,
+                light.scale_name(),
+                values,
+                frame.time,
+            );
             let Some(lit) = light.lit(values, &colors, bones, frame.time, onset) else {
                 continue;
             };
-            let gel = cx.core.slots[slot].h3_textures.gels.get(index).copied().flatten();
-            cx.state.light = Some(PassLight { rows: lit.rows, projection: lit.projection, gel });
+            let gel = cx.core.slots[slot]
+                .h3_textures
+                .gels
+                .get(index)
+                .copied()
+                .flatten();
+            cx.state.light = Some(PassLight {
+                rows: lit.rows,
+                projection: lit.projection,
+                gel,
+            });
             for (batch, material) in batches {
                 if let Some(pass) = material.dynamic_light.as_ref() {
-                    cx.state.draw_pass(cx.core, gl, frame, slot, batch, material, pass, None);
+                    cx.state
+                        .draw_pass(cx.core, gl, frame, slot, batch, material, pass, None);
                 }
             }
             cx.state.light = None;

@@ -24,7 +24,11 @@ impl GameSlot for H4Slot {
 
 impl H4Slot {
     /// The effects' GL state let go when the slot's geometry is another.
-    pub(in crate::app::model_preview) unsafe fn sync_effects(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+    pub(in crate::app::model_preview) unsafe fn sync_effects(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+    ) {
         if self.effects_for != Some(frame.geometry_id) {
             unsafe { self.effects.clear(gl) };
             self.effects_for = Some(frame.geometry_id);

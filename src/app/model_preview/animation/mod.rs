@@ -11,8 +11,8 @@ pub(super) mod blend_screens;
 pub(super) mod ik;
 
 use super::*;
-use blam_tags::math::Matrix4;
 use blam_tags::animation::classic::{CeAnimation, CeAnimations};
+use blam_tags::math::Matrix4;
 use blam_tags::{Animation, AnimationGraph, JmaKind, NodeTransform, Skeleton};
 
 mod pose;
@@ -21,8 +21,8 @@ mod playback;
 pub(crate) use playback::*;
 mod skinning;
 pub(in crate::app::model_preview) use skinning::*;
-mod worker;
 mod graph;
+mod worker;
 use graph::*;
 mod decode;
 use decode::*;

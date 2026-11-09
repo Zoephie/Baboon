@@ -61,7 +61,9 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
                         "Collision Model",
                         source_game,
                     )
-                    .on_disabled_hover_text("This model has no collision model, or it has no drawable geometry.");
+                    .on_disabled_hover_text(
+                        "This model has no collision model, or it has no drawable geometry.",
+                    );
                 });
                 if tag.header.group_tag.to_be_bytes() == *b"hlmt" {
                     model_view_icon_checkbox(
@@ -145,11 +147,14 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
                      fixed lighting plus two sphere lights. Off, they are lit as an \
                      object in a level with lightmaps.",
                 );
-                ui.add_enabled(state.game_shaders, ThemedCheckbox::new(&mut state.prt, "PRT"))
-                    .on_hover_text(
-                        "Use the occlusion Halo 2 and Halo 3 models bake into their vertices. \
+                ui.add_enabled(
+                    state.game_shaders,
+                    ThemedCheckbox::new(&mut state.prt, "PRT"),
+                )
+                .on_hover_text(
+                    "Use the occlusion Halo 2 and Halo 3 models bake into their vertices. \
                          Off, they light as though nothing shades them.",
-                    );
+                );
             }
             ui.add_enabled(
                 state.game_shaders && (halo_ce || !state.default_lights),
@@ -253,7 +258,12 @@ pub(in crate::app::model_preview) fn overlay_layer_available(
     state: &ModelPreviewState,
     layer: ModelPreviewLayer,
 ) -> bool {
-    !state.overlays_loaded || data.preview.batches.iter().any(|batch| batch.layer == layer)
+    !state.overlays_loaded
+        || data
+            .preview
+            .batches
+            .iter()
+            .any(|batch| batch.layer == layer)
 }
 
 pub(in crate::app::model_preview) fn model_view_icon_checkbox(
@@ -315,7 +325,10 @@ pub(in crate::app::model_preview) fn model_view_icon_checkbox(
     row.response
 }
 
-pub(in crate::app::model_preview) fn draw_marker_filter_field(ui: &mut Ui, filter: &mut String) -> egui::Response {
+pub(in crate::app::model_preview) fn draw_marker_filter_field(
+    ui: &mut Ui,
+    filter: &mut String,
+) -> egui::Response {
     const HEIGHT: f32 = 24.0;
     const ICON_SIZE: f32 = 16.0;
     let width = ui.available_width().max(HEIGHT);
@@ -362,7 +375,8 @@ pub(in crate::app::model_preview) fn draw_marker_filter_field(ui: &mut Ui, filte
     } else {
         Stroke::new(1.0_f32, foundation_input_edge())
     };
-    ui.painter().rect_stroke(rect, rounding, stroke, egui::StrokeKind::Middle);
+    ui.painter()
+        .rect_stroke(rect, rounding, stroke, egui::StrokeKind::Middle);
     response
 }
 

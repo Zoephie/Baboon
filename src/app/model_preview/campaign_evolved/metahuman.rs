@@ -51,7 +51,9 @@ static CEV_MH_CACHE: LazyLock<Mutex<HashMap<String, Arc<CevMetaHumanTables>>>> =
 
 fn cev_metahuman_tables(containers: &[MountedContainer]) -> Arc<CevMetaHumanTables> {
     let key = cev_container_set_key(containers);
-    let mut cache = CEV_MH_CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut cache = CEV_MH_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(t) = cache.get(&key) {
         return t.clone();
     }

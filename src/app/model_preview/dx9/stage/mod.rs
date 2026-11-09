@@ -12,8 +12,8 @@ use super::super::renderer::model_vertex_prelude;
 mod kind;
 pub(in crate::app::model_preview) use kind::*;
 mod ce;
-use ce::*;
 pub(crate) use ce::CE_POINT_LIGHT_ROWS;
+use ce::*;
 mod h2;
 mod source;
 #[cfg(test)]

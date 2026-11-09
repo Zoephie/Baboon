@@ -2,7 +2,11 @@
 
 use super::*;
 
-pub(in crate::app::model_preview) fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
+pub(in crate::app::model_preview) fn draw_object_functions(
+    ui: &mut Ui,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+) {
     draw_ce_weapon_picker(ui, data, state);
     let held_name = |object: u8| {
         let held = usize::from(object).checked_sub(1)?;
@@ -55,11 +59,18 @@ pub(in crate::app::model_preview) fn draw_object_functions(ui: &mut Ui, data: &M
             read
         })
     };
-    let attached = data.ce_attached.iter().enumerate().filter_map(|(index, object)| {
-        let functions = object.functions.as_ref()?;
-        Some((index as u8 + 1, Some(object.name.as_str()), functions))
-    });
-    let own = data.ce_object_functions.iter().map(|functions| (0, None, functions));
+    let attached = data
+        .ce_attached
+        .iter()
+        .enumerate()
+        .filter_map(|(index, object)| {
+            let functions = object.functions.as_ref()?;
+            Some((index as u8 + 1, Some(object.name.as_str()), functions))
+        });
+    let own = data
+        .ce_object_functions
+        .iter()
+        .map(|functions| (0, None, functions));
     for (object, name, functions) in own.chain(attached) {
         ce::panel::draw_ce_function_controls(
             ui,
@@ -68,7 +79,13 @@ pub(in crate::app::model_preview) fn draw_object_functions(ui: &mut Ui, data: &M
             (data.geometry_id, object),
             &mut state.ce_function_inputs,
             read(object),
-            ce::firing::fired_input(&data.preview.ce.firing, &state.ce_shots, data.geometry_id, object, time),
+            ce::firing::fired_input(
+                &data.preview.ce.firing,
+                &state.ce_shots,
+                data.geometry_id,
+                object,
+                time,
+            ),
         );
     }
 }

@@ -8,15 +8,17 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use eframe::glow::{self, HasContext as _};
 
+use super::super::common::image::{Image, ImageTexels, Sampler};
 use super::super::*;
-use super::super::common::image::{Image, Sampler, ImageTexels};
 
 /// The texture bound to a slot whose material has none: one opaque white
 /// texel, never sampled for its value (the slot's `have` flag is zero), only
 /// there so the unit holds a complete texture. Complete means a non-mipmap
 /// minification filter. GL's default filter expects mipmaps, and with one
 /// level it would leave this texture as incomplete as texture 0.
-pub(in crate::app::model_preview) unsafe fn upload_placeholder_texture(gl: &glow::Context) -> Option<glow::NativeTexture> {
+pub(in crate::app::model_preview) unsafe fn upload_placeholder_texture(
+    gl: &glow::Context,
+) -> Option<glow::NativeTexture> {
     unsafe {
         let texture = gl.create_texture().ok()?;
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
@@ -31,20 +33,35 @@ pub(in crate::app::model_preview) unsafe fn upload_placeholder_texture(gl: &glow
             glow::UNSIGNED_BYTE,
             glow::PixelUnpackData::Slice(Some(&[255, 255, 255, 255])),
         );
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MIN_FILTER,
+            glow::NEAREST as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MAG_FILTER,
+            glow::NEAREST as i32,
+        );
         gl.bind_texture(glow::TEXTURE_2D, None);
         Some(texture)
     }
 }
 
-pub(in crate::app::model_preview) unsafe fn upload_image(gl: &glow::Context, image: &Image) -> Option<glow::NativeTexture> {
+pub(in crate::app::model_preview) unsafe fn upload_image(
+    gl: &glow::Context,
+    image: &Image,
+) -> Option<glow::NativeTexture> {
     if !image.whole() {
         return None;
     }
     let texture_parameters = |target| unsafe {
         gl.generate_mipmap(target);
-        gl.tex_parameter_i32(target, glow::TEXTURE_MIN_FILTER, glow::LINEAR_MIPMAP_LINEAR as i32);
+        gl.tex_parameter_i32(
+            target,
+            glow::TEXTURE_MIN_FILTER,
+            glow::LINEAR_MIPMAP_LINEAR as i32,
+        );
         gl.tex_parameter_i32(target, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
     };
     unsafe {
@@ -67,13 +84,22 @@ pub(in crate::app::model_preview) unsafe fn upload_image(gl: &glow::Context, ima
                     );
                 }
                 texture_parameters(glow::TEXTURE_CUBE_MAP);
-                for wrap in [glow::TEXTURE_WRAP_S, glow::TEXTURE_WRAP_T, glow::TEXTURE_WRAP_R] {
+                for wrap in [
+                    glow::TEXTURE_WRAP_S,
+                    glow::TEXTURE_WRAP_T,
+                    glow::TEXTURE_WRAP_R,
+                ] {
                     gl.tex_parameter_i32(glow::TEXTURE_CUBE_MAP, wrap, glow::CLAMP_TO_EDGE as i32);
                 }
                 gl.bind_texture(glow::TEXTURE_CUBE_MAP, None);
                 Some(texture)
             }
-            Image::Volume { width, height, depth, rgba } => {
+            Image::Volume {
+                width,
+                height,
+                depth,
+                rgba,
+            } => {
                 let texture = gl.create_texture().ok()?;
                 gl.bind_texture(glow::TEXTURE_3D, Some(texture));
                 gl.tex_image_3d(
@@ -97,14 +123,34 @@ pub(in crate::app::model_preview) unsafe fn upload_image(gl: &glow::Context, ima
 }
 
 /// A 1x1 black 2D texture: the bloom a pass reads when none was drawn.
-pub(in crate::app::model_preview) unsafe fn upload_black_flat(gl: &glow::Context) -> Option<glow::NativeTexture> {
+pub(in crate::app::model_preview) unsafe fn upload_black_flat(
+    gl: &glow::Context,
+) -> Option<glow::NativeTexture> {
     unsafe {
         let texture = gl.create_texture().ok()?;
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
         let black = glow::PixelUnpackData::Slice(Some(&[0, 0, 0, 255]));
-        gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, 1, 1, 0, glow::RGBA, glow::UNSIGNED_BYTE, black);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA8 as i32,
+            1,
+            1,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            black,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MIN_FILTER,
+            glow::NEAREST as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MAG_FILTER,
+            glow::NEAREST as i32,
+        );
         gl.bind_texture(glow::TEXTURE_2D, None);
         Some(texture)
     }
@@ -112,7 +158,9 @@ pub(in crate::app::model_preview) unsafe fn upload_black_flat(gl: &glow::Context
 
 /// A 1x1 black cube, for passes whose cube map is not read: a reflection
 /// that adds nothing.
-pub(in crate::app::model_preview) unsafe fn upload_black_cube(gl: &glow::Context) -> Option<glow::NativeTexture> {
+pub(in crate::app::model_preview) unsafe fn upload_black_cube(
+    gl: &glow::Context,
+) -> Option<glow::NativeTexture> {
     unsafe {
         let texture = gl.create_texture().ok()?;
         gl.bind_texture(glow::TEXTURE_CUBE_MAP, Some(texture));
@@ -142,7 +190,11 @@ pub(in crate::app::model_preview) unsafe fn upload_black_cube(gl: &glow::Context
 
 /// A 1x1x1 texture of one color for `target`, a volume or an array of 2D
 /// layers: a stand-in for a map that is not read.
-pub(in crate::app::model_preview) unsafe fn upload_solid_volume(gl: &glow::Context, target: u32, color: [u8; 4]) -> Option<glow::NativeTexture> {
+pub(in crate::app::model_preview) unsafe fn upload_solid_volume(
+    gl: &glow::Context,
+    target: u32,
+    color: [u8; 4],
+) -> Option<glow::NativeTexture> {
     unsafe {
         let texture = gl.create_texture().ok()?;
         gl.bind_texture(target, Some(texture));
@@ -175,7 +227,10 @@ pub(in crate::app::model_preview) unsafe fn upload_solid_volume(gl: &glow::Conte
 /// Mipmaps matter here beyond quality: a detail map tiling twenty times across
 /// a model aliases into noise without them, which is exactly where a preview
 /// looks worst.
-pub(in crate::app::model_preview) unsafe fn upload_texture(gl: &glow::Context, image: &TextureImage) -> Option<glow::NativeTexture> {
+pub(in crate::app::model_preview) unsafe fn upload_texture(
+    gl: &glow::Context,
+    image: &TextureImage,
+) -> Option<glow::NativeTexture> {
     if image.width == 0 || image.height == 0 || !image.whole() {
         return None;
     }
@@ -220,7 +275,11 @@ pub(in crate::app::model_preview) unsafe fn upload_texture(gl: &glow::Context, i
 
 /// `d3d11_sampler_state_cache::get`: the border is transparent black, and
 /// anisotropic filters are trilinear with a limit.
-pub(in crate::app::model_preview) unsafe fn gen3_apply_sampler(gl: &glow::Context, target: u32, sampler: Sampler) {
+pub(in crate::app::model_preview) unsafe fn gen3_apply_sampler(
+    gl: &glow::Context,
+    target: u32,
+    sampler: Sampler,
+) {
     const TEXTURE_MAX_ANISOTROPY: u32 = 0x84FE;
     let address = |mode| match mode {
         BitmapAddressMode::Clamp => glow::CLAMP_TO_EDGE,
@@ -252,7 +311,10 @@ pub(in crate::app::model_preview) unsafe fn gen3_apply_sampler(gl: &glow::Contex
 }
 
 /// The engine decodes signed texels biased by 128; the card wants them back.
-pub(in crate::app::model_preview) fn signed_bytes(rgba: &[u8], texels: ImageTexels) -> Cow<'_, [u8]> {
+pub(in crate::app::model_preview) fn signed_bytes(
+    rgba: &[u8],
+    texels: ImageTexels,
+) -> Cow<'_, [u8]> {
     match texels {
         ImageTexels::Signed => rgba.iter().map(|byte| byte.wrapping_sub(128)).collect(),
         _ => Cow::Borrowed(rgba),
@@ -271,7 +333,11 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
     if !image.whole() {
         return None;
     }
-    let mips = if mips.iter().all(Image::whole) { mips } else { &[] };
+    let mips = if mips.iter().all(Image::whole) {
+        mips
+    } else {
+        &[]
+    };
     let (format, kind) = match texels {
         ImageTexels::Linear => (glow::RGBA8, glow::UNSIGNED_BYTE),
         ImageTexels::Srgb => (glow::SRGB8_ALPHA8, glow::UNSIGNED_BYTE),
@@ -280,7 +346,11 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
     let format = format as i32;
     let finish = |target| unsafe {
         gl.generate_mipmap(target);
-        gl.tex_parameter_i32(target, glow::TEXTURE_MIN_FILTER, glow::LINEAR_MIPMAP_LINEAR as i32);
+        gl.tex_parameter_i32(
+            target,
+            glow::TEXTURE_MIN_FILTER,
+            glow::LINEAR_MIPMAP_LINEAR as i32,
+        );
         gl.tex_parameter_i32(target, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
     };
     unsafe {
@@ -309,11 +379,25 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
                         let rgba = signed_bytes(&mip.rgba, texels);
                         let (width, height) = (mip.width as i32, mip.height as i32);
                         let pixels = glow::PixelUnpackData::Slice(Some(&rgba));
-                        gl.tex_image_2d(glow::TEXTURE_2D, level as i32 + 1, format, width, height, 0, glow::RGBA, kind, pixels);
+                        gl.tex_image_2d(
+                            glow::TEXTURE_2D,
+                            level as i32 + 1,
+                            format,
+                            width,
+                            height,
+                            0,
+                            glow::RGBA,
+                            kind,
+                            pixels,
+                        );
                     }
                 }
                 if !mips.is_empty() {
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, mips.len() as i32);
+                    gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_MAX_LEVEL,
+                        mips.len() as i32,
+                    );
                 }
                 let wrap = |repeat: bool| if repeat { glow::REPEAT } else { glow::CLAMP_TO_EDGE } as i32;
                 gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, wrap(image.repeat_x));
@@ -345,18 +429,37 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
                             let target = glow::TEXTURE_CUBE_MAP_POSITIVE_X + face as u32;
                             let side = *size as i32;
                             let pixels = glow::PixelUnpackData::Slice(Some(&rgba));
-                            gl.tex_image_2d(target, level as i32 + 1, format, side, side, 0, glow::RGBA, kind, pixels);
+                            gl.tex_image_2d(
+                                target,
+                                level as i32 + 1,
+                                format,
+                                side,
+                                side,
+                                0,
+                                glow::RGBA,
+                                kind,
+                                pixels,
+                            );
                         }
                     }
                 }
                 if !mips.is_empty() {
-                    gl.tex_parameter_i32(glow::TEXTURE_CUBE_MAP, glow::TEXTURE_MAX_LEVEL, mips.len() as i32);
+                    gl.tex_parameter_i32(
+                        glow::TEXTURE_CUBE_MAP,
+                        glow::TEXTURE_MAX_LEVEL,
+                        mips.len() as i32,
+                    );
                 }
                 if let Some(sampler) = sampler {
                     gen3_apply_sampler(gl, glow::TEXTURE_CUBE_MAP, sampler);
                 }
             }
-            Image::Volume { width, height, depth, rgba } => {
+            Image::Volume {
+                width,
+                height,
+                depth,
+                rgba,
+            } => {
                 gl.bind_texture(glow::TEXTURE_3D, Some(texture));
                 gl.tex_image_3d(
                     glow::TEXTURE_3D,

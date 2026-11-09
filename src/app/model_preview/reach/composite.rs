@@ -5,13 +5,13 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use eframe::glow::{self, HasContext};
 
 use super::super::gen3::effects::screen::Gen3ScreenSettings;
-use crate::app::model_preview::common::image::Sampler;
-use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::HALF_LENS;
+use super::super::gen3::render::Gen3Cx;
+use super::render::ReachGame;
+use crate::app::model_preview::common::image::Sampler;
 use crate::app::model_preview::gl::pass_state::PassState;
 use crate::app::model_preview::gl::screen::{premultiplied_over, screen_program};
 use crate::app::model_preview::gl::texture::upload_image_linear;
-use super::render::ReachGame;
 
 impl ReachGame {
     /// Reach's `final_composite`: see [`REACH_COMPOSITE_FRAGMENT`].
@@ -31,7 +31,10 @@ impl ReachGame {
                 && let Some((image, texels, mips)) = noise
             {
                 // Sampler 7: wrapped, point.
-                let sampler = Sampler { address: [BitmapAddressMode::Wrap; 2], filter: BitmapFilterMode::Point };
+                let sampler = Sampler {
+                    address: [BitmapAddressMode::Wrap; 2],
+                    filter: BitmapFilterMode::Point,
+                };
                 self.noise = upload_image_linear(gl, image, *texels, mips, Some(sampler));
             }
             if self.composite_program.is_none() {
@@ -46,26 +49,53 @@ impl ReachGame {
                 .sampler(0, glow::TEXTURE_2D, Some(accumulation), at("accumulation"))
                 .sampler(1, glow::TEXTURE_2D, bloom.or(core.black_flat), at("bloom"))
                 .sampler(2, glow::TEXTURE_2D, depth, at("scene_depth"))
-                .sampler(3, glow::TEXTURE_2D, self.noise.or(core.black_flat), at("noise"))
+                .sampler(
+                    3,
+                    glow::TEXTURE_2D,
+                    self.noise.or(core.black_flat),
+                    at("noise"),
+                )
                 .active_texture(glow::TEXTURE0)
                 .apply(gl);
             let matrix = screen.color_matrix();
             let columns: [f32; 16] = std::array::from_fn(|at| matrix[at % 4][at / 4]);
-            gl.uniform_matrix_4_f32_slice(gl.get_uniform_location(program, "hue_saturation").as_ref(), false, &columns);
+            gl.uniform_matrix_4_f32_slice(
+                gl.get_uniform_location(program, "hue_saturation").as_ref(),
+                false,
+                &columns,
+            );
             let gamma = reach_composite_gamma(screen.gamma());
             gl.uniform_1_f32(gl.get_uniform_location(program, "gamma").as_ref(), gamma);
             // With no map to read, no noise.
-            let [bright, dark] = if self.noise.is_some() { screen.noise() } else { [0.0; 2] };
+            let [bright, dark] = if self.noise.is_some() {
+                screen.noise()
+            } else {
+                [0.0; 2]
+            };
             let params = reach_noise_params(bright, dark);
-            gl.uniform_4_f32_slice(gl.get_uniform_location(program, "noise_params").as_ref(), &params);
+            gl.uniform_4_f32_slice(
+                gl.get_uniform_location(program, "noise_params").as_ref(),
+                &params,
+            );
             // `real_random`'s two draws, new each frame.
             self.noise_frame = self.noise_frame.wrapping_add(1);
             let frame_number = self.noise_frame as f32;
-            let random = [0, 1].map(|salt| super::super::gen3::shield::real_random(frame_number, salt));
+            let random =
+                [0, 1].map(|salt| super::super::gen3::shield::real_random(frame_number, salt));
             let [x, y] = reach_noise_offset(self.noise_frame, random);
-            gl.uniform_2_f32(gl.get_uniform_location(program, "noise_offset").as_ref(), x, y);
-            gl.uniform_1_f32(gl.get_uniform_location(program, "dark_multiplier").as_ref(), REACH_DARK_MULTIPLIER);
-            gl.uniform_1_f32(gl.get_uniform_location(program, "view_scale").as_ref(), screen.view_scale(HALF_LENS));
+            gl.uniform_2_f32(
+                gl.get_uniform_location(program, "noise_offset").as_ref(),
+                x,
+                y,
+            );
+            gl.uniform_1_f32(
+                gl.get_uniform_location(program, "dark_multiplier").as_ref(),
+                REACH_DARK_MULTIPLIER,
+            );
+            gl.uniform_1_f32(
+                gl.get_uniform_location(program, "view_scale").as_ref(),
+                screen.view_scale(HALF_LENS),
+            );
             premultiplied_over(state.empty_array(gl)).apply(gl);
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             PassState::new().enable(glow::DEPTH_TEST).apply(gl);
@@ -99,14 +129,18 @@ pub(in crate::app::model_preview) fn reach_noise_params(bright: f32, dark: f32) 
 /// (`random`, each in [0, 1)), halved.
 pub(in crate::app::model_preview) fn reach_noise_offset(frame: u32, random: [f32; 2]) -> [f32; 2] {
     let step = |frame: u32| (frame & 2) as f32 * 0.5;
-    [(step(frame) + random[0]) * 0.5, (step(frame.wrapping_add(1)) + random[1]) * 0.5]
+    [
+        (step(frame) + random[0]) * 0.5,
+        (step(frame.wrapping_add(1)) + random[1]) * 0.5,
+    ]
 }
 
 /// `final_composite`, as MCC runs it: the lit target and bloom brought back
 /// up, `pow(x, gamma.z)` (0.5 at the default gamma, `convert_output_gamma2`),
 /// the colour matrix, then `apply_noise`. The tone curve's call is commented
 /// out in the source.
-pub(in crate::app::model_preview) const REACH_COMPOSITE_FRAGMENT: &str = include_str!("shaders/composite.frag");
+pub(in crate::app::model_preview) const REACH_COMPOSITE_FRAGMENT: &str =
+    include_str!("shaders/composite.frag");
 
 #[cfg(test)]
 mod tests {

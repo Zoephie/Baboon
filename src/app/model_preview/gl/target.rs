@@ -13,20 +13,39 @@ pub(in crate::app::model_preview) struct Texels {
 }
 
 impl Texels {
-    pub(in crate::app::model_preview) const RGBA8: Self =
-        Self { internal: glow::RGBA8, format: glow::RGBA, kind: glow::UNSIGNED_BYTE };
-    pub(in crate::app::model_preview) const RGBA16F: Self =
-        Self { internal: glow::RGBA16F, format: glow::RGBA, kind: glow::FLOAT };
-    pub(in crate::app::model_preview) const RG32F: Self =
-        Self { internal: glow::RG32F, format: glow::RG, kind: glow::FLOAT };
-    pub(in crate::app::model_preview) const DEPTH24: Self =
-        Self { internal: glow::DEPTH_COMPONENT24, format: glow::DEPTH_COMPONENT, kind: glow::UNSIGNED_INT };
-    pub(in crate::app::model_preview) const DEPTH24_STENCIL8: Self =
-        Self { internal: glow::DEPTH24_STENCIL8, format: glow::DEPTH_STENCIL, kind: glow::UNSIGNED_INT_24_8 };
+    pub(in crate::app::model_preview) const RGBA8: Self = Self {
+        internal: glow::RGBA8,
+        format: glow::RGBA,
+        kind: glow::UNSIGNED_BYTE,
+    };
+    pub(in crate::app::model_preview) const RGBA16F: Self = Self {
+        internal: glow::RGBA16F,
+        format: glow::RGBA,
+        kind: glow::FLOAT,
+    };
+    pub(in crate::app::model_preview) const RG32F: Self = Self {
+        internal: glow::RG32F,
+        format: glow::RG,
+        kind: glow::FLOAT,
+    };
+    pub(in crate::app::model_preview) const DEPTH24: Self = Self {
+        internal: glow::DEPTH_COMPONENT24,
+        format: glow::DEPTH_COMPONENT,
+        kind: glow::UNSIGNED_INT,
+    };
+    pub(in crate::app::model_preview) const DEPTH24_STENCIL8: Self = Self {
+        internal: glow::DEPTH24_STENCIL8,
+        format: glow::DEPTH_STENCIL,
+        kind: glow::UNSIGNED_INT_24_8,
+    };
 
     /// `internal` handed as RGBA floats, as the gen3 targets are made.
     pub(in crate::app::model_preview) const fn float(internal: u32) -> Self {
-        Self { internal, format: glow::RGBA, kind: glow::FLOAT }
+        Self {
+            internal,
+            format: glow::RGBA,
+            kind: glow::FLOAT,
+        }
     }
 }
 
@@ -39,9 +58,18 @@ pub(in crate::app::model_preview) struct Sampling {
 }
 
 impl Sampling {
-    pub(in crate::app::model_preview) const LINEAR_CLAMPED: Self = Self { filter: glow::LINEAR, clamp: true };
-    pub(in crate::app::model_preview) const NEAREST_CLAMPED: Self = Self { filter: glow::NEAREST, clamp: true };
-    pub(in crate::app::model_preview) const NEAREST: Self = Self { filter: glow::NEAREST, clamp: false };
+    pub(in crate::app::model_preview) const LINEAR_CLAMPED: Self = Self {
+        filter: glow::LINEAR,
+        clamp: true,
+    };
+    pub(in crate::app::model_preview) const NEAREST_CLAMPED: Self = Self {
+        filter: glow::NEAREST,
+        clamp: true,
+    };
+    pub(in crate::app::model_preview) const NEAREST: Self = Self {
+        filter: glow::NEAREST,
+        clamp: false,
+    };
 }
 
 enum Object {
@@ -59,7 +87,10 @@ pub(in crate::app::model_preview) struct Made<'a> {
 
 impl<'a> Made<'a> {
     pub(in crate::app::model_preview) fn new(gl: &'a glow::Context) -> Self {
-        Self { gl, objects: Vec::new() }
+        Self {
+            gl,
+            objects: Vec::new(),
+        }
     }
 
     /// A texture of `size` with no contents, sampled as `sampling`. Leaves
@@ -80,7 +111,17 @@ impl<'a> Made<'a> {
             self.objects.push(Object::Texture(texture));
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
             let empty = glow::PixelUnpackData::Slice(None);
-            gl.tex_image_2d(glow::TEXTURE_2D, 0, texels.internal as i32, size[0], size[1], 0, texels.format, texels.kind, empty);
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                texels.internal as i32,
+                size[0],
+                size[1],
+                0,
+                texels.format,
+                texels.kind,
+                empty,
+            );
             for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
                 gl.tex_parameter_i32(glow::TEXTURE_2D, name, sampling.filter as i32);
             }
@@ -99,7 +140,11 @@ impl<'a> Made<'a> {
     /// # Safety
     ///
     /// The context must be current on this thread.
-    pub(in crate::app::model_preview) unsafe fn renderbuffer(&mut self, size: [i32; 2], format: u32) -> Option<glow::NativeRenderbuffer> {
+    pub(in crate::app::model_preview) unsafe fn renderbuffer(
+        &mut self,
+        size: [i32; 2],
+        format: u32,
+    ) -> Option<glow::NativeRenderbuffer> {
         let gl = self.gl;
         unsafe {
             let renderbuffer = gl.create_renderbuffer().ok()?;
@@ -126,7 +171,13 @@ impl<'a> Made<'a> {
             self.objects.push(Object::Framebuffer(framebuffer));
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             for (attachment, texture) in textures {
-                gl.framebuffer_texture_2d(glow::FRAMEBUFFER, *attachment, glow::TEXTURE_2D, Some(*texture), 0);
+                gl.framebuffer_texture_2d(
+                    glow::FRAMEBUFFER,
+                    *attachment,
+                    glow::TEXTURE_2D,
+                    Some(*texture),
+                    0,
+                );
             }
             Some(framebuffer)
         }
@@ -137,11 +188,20 @@ impl<'a> Made<'a> {
     /// # Safety
     ///
     /// The context must be current on this thread.
-    pub(in crate::app::model_preview) unsafe fn color(&mut self, size: [i32; 2], texels: Texels, sampling: Sampling) -> Option<ColorTarget> {
+    pub(in crate::app::model_preview) unsafe fn color(
+        &mut self,
+        size: [i32; 2],
+        texels: Texels,
+        sampling: Sampling,
+    ) -> Option<ColorTarget> {
         unsafe {
             let texture = self.texture(size, texels, sampling)?;
             let framebuffer = self.framebuffer(&[(glow::COLOR_ATTACHMENT0, texture)])?;
-            Some(ColorTarget { framebuffer, texture, size })
+            Some(ColorTarget {
+                framebuffer,
+                texture,
+                size,
+            })
         }
     }
 
@@ -163,7 +223,10 @@ impl<'a> Made<'a> {
             let framebuffer = self.framebuffer(&[(attachment, texture)])?;
             self.gl.draw_buffers(&[glow::NONE]);
             self.gl.read_buffer(glow::NONE);
-            Some(DepthTarget { framebuffer, texture })
+            Some(DepthTarget {
+                framebuffer,
+                texture,
+            })
         }
     }
 
@@ -172,9 +235,13 @@ impl<'a> Made<'a> {
     /// # Safety
     ///
     /// The context must be current on this thread.
-    pub(in crate::app::model_preview) unsafe fn complete(&self, framebuffers: &[glow::NativeFramebuffer]) -> bool {
+    pub(in crate::app::model_preview) unsafe fn complete(
+        &self,
+        framebuffers: &[glow::NativeFramebuffer],
+    ) -> bool {
         framebuffers.iter().all(|framebuffer| unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(*framebuffer));
+            self.gl
+                .bind_framebuffer(glow::FRAMEBUFFER, Some(*framebuffer));
             self.gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE
         })
     }
@@ -211,7 +278,12 @@ impl ColorTarget {
     /// # Safety
     ///
     /// The context must be current on this thread.
-    pub(in crate::app::model_preview) unsafe fn new(gl: &glow::Context, size: [i32; 2], texels: Texels, sampling: Sampling) -> Option<Self> {
+    pub(in crate::app::model_preview) unsafe fn new(
+        gl: &glow::Context,
+        size: [i32; 2],
+        texels: Texels,
+        sampling: Sampling,
+    ) -> Option<Self> {
         let mut made = Made::new(gl);
         let target = unsafe { made.color(size, texels, sampling) }?;
         made.keep();
@@ -249,21 +321,35 @@ pub(in crate::app::model_preview) struct H2Target {
 }
 
 impl H2Target {
-    pub(in crate::app::model_preview) unsafe fn new(gl: &glow::Context, width: i32, height: i32) -> Option<Self> {
+    pub(in crate::app::model_preview) unsafe fn new(
+        gl: &glow::Context,
+        width: i32,
+        height: i32,
+    ) -> Option<Self> {
         let size = [width, height];
         let mut made = Made::new(gl);
         unsafe {
             let color = made.texture(size, Texels::RGBA8, Sampling::NEAREST_CLAMPED)?;
             let depth = made.renderbuffer(size, glow::DEPTH24_STENCIL8)?;
             let framebuffer = made.framebuffer(&[(glow::COLOR_ATTACHMENT0, color)])?;
-            gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(depth));
+            gl.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::DEPTH_STENCIL_ATTACHMENT,
+                glow::RENDERBUFFER,
+                Some(depth),
+            );
             let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
             if status != glow::FRAMEBUFFER_COMPLETE {
                 eprintln!("model preview: render target incomplete: {status:#x}");
                 return None;
             }
             made.keep();
-            Some(Self { framebuffer, color, depth, size })
+            Some(Self {
+                framebuffer,
+                color,
+                depth,
+                size,
+            })
         }
     }
 
@@ -278,7 +364,10 @@ impl H2Target {
 
 /// The viewport of the framebuffer being drawn, copied into a texture of its
 /// size. A blit, as what is drawn to may be multisampled.
-pub(in crate::app::model_preview) unsafe fn copy_frame(gl: &glow::Context, copy: &mut Option<ColorTarget>) -> Option<glow::NativeTexture> {
+pub(in crate::app::model_preview) unsafe fn copy_frame(
+    gl: &glow::Context,
+    copy: &mut Option<ColorTarget>,
+) -> Option<glow::NativeTexture> {
     unsafe {
         let mut viewport = [0; 4];
         gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
@@ -286,19 +375,37 @@ pub(in crate::app::model_preview) unsafe fn copy_frame(gl: &glow::Context, copy:
         if width <= 0 || height <= 0 {
             return None;
         }
-        if copy.as_ref().is_some_and(|copy| copy.size != [width, height])
+        if copy
+            .as_ref()
+            .is_some_and(|copy| copy.size != [width, height])
             && let Some(old) = copy.take()
         {
             old.delete(gl);
         }
         let drawn_to = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
         if copy.is_none() {
-            *copy = Some(ColorTarget::new(gl, [width, height], Texels::RGBA8, Sampling::LINEAR_CLAMPED)?);
+            *copy = Some(ColorTarget::new(
+                gl,
+                [width, height],
+                Texels::RGBA8,
+                Sampling::LINEAR_CLAMPED,
+            )?);
         }
         let made = copy.as_ref()?;
         gl.bind_framebuffer(glow::READ_FRAMEBUFFER, drawn_to);
         gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(made.framebuffer));
-        gl.blit_framebuffer(x, y, x + width, y + height, 0, 0, width, height, glow::COLOR_BUFFER_BIT, glow::NEAREST);
+        gl.blit_framebuffer(
+            x,
+            y,
+            x + width,
+            y + height,
+            0,
+            0,
+            width,
+            height,
+            glow::COLOR_BUFFER_BIT,
+            glow::NEAREST,
+        );
         gl.bind_framebuffer(glow::FRAMEBUFFER, drawn_to);
         Some(made.texture)
     }
@@ -328,14 +435,23 @@ mod gl_tests {
         };
         unsafe {
             let mut made = Made::new(&gl);
-            made.color([4, 4], Texels::RGBA8, Sampling::LINEAR_CLAMPED).unwrap();
-            made.depth([4, 4], Texels::DEPTH24, Sampling::NEAREST, glow::DEPTH_ATTACHMENT).unwrap();
+            made.color([4, 4], Texels::RGBA8, Sampling::LINEAR_CLAMPED)
+                .unwrap();
+            made.depth(
+                [4, 4],
+                Texels::DEPTH24,
+                Sampling::NEAREST,
+                glow::DEPTH_ATTACHMENT,
+            )
+            .unwrap();
             made.renderbuffer([4, 4], glow::DEPTH24_STENCIL8).unwrap();
             assert_eq!(held(&gl), 5);
             drop(made);
             assert_eq!(held(&gl), 0, "a set never kept is gone");
             let mut made = Made::new(&gl);
-            let target = made.color([4, 4], Texels::RGBA8, Sampling::LINEAR_CLAMPED).unwrap();
+            let target = made
+                .color([4, 4], Texels::RGBA8, Sampling::LINEAR_CLAMPED)
+                .unwrap();
             assert!(made.complete(&[target.framebuffer]));
             made.keep();
             assert_eq!(held(&gl), 2, "a kept set stays");

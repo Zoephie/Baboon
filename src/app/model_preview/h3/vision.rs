@@ -25,7 +25,9 @@ const NOTHING_CLASS: usize = 4;
 fn vision_class(object: &TagFile) -> usize {
     let root = object.root();
     let team = match &object.header.group_tag.to_be_bytes() {
-        b"bipd" | b"gint" => root.descend("unit").and_then(|unit| unit.field("default team")),
+        b"bipd" | b"gint" => root
+            .descend("unit")
+            .and_then(|unit| unit.field("default team")),
         b"crea" => root.field("default team"),
         b"vehi" | b"weap" | b"eqip" | b"mach" | b"ctrl" => return 0,
         b"argd" | b"term" => return 3,
@@ -73,15 +75,24 @@ impl H3Vision {
     pub(crate) fn constants(&self, amount: f32, seconds: f32) -> H3VisionConstants {
         // The first sweep comes up from nothing; after that it only wraps.
         let turns = seconds / self.period();
-        let turns = if turns < 1.0 { turns } else { 1.0 + turns.fract() };
+        let turns = if turns < 1.0 {
+            turns
+        } else {
+            1.0 + turns.fract()
+        };
         let span = self.speed * self.delay + self.width + self.radius;
         let reached = span * turns;
-        let tinted = |color: [f32; 3], intensity: f32| color.map(|channel| channel * amount * intensity);
+        let tinted =
+            |color: [f32; 3], intensity: f32| color.map(|channel| channel * amount * intensity);
         let [red, green, blue] = tinted(self.color, self.intensity);
         let [ping_red, ping_green, ping_blue] = tinted(self.ping_color, self.ping_intensity);
         H3VisionConstants {
             falloff: 8f32.powf(0.125) / self.radius,
-            ping: [reached - (reached / span).floor() * span, reached.min(self.radius), -1.0 / self.width],
+            ping: [
+                reached - (reached / span).floor() * span,
+                reached.min(self.radius),
+                -1.0 / self.width,
+            ],
             color: [red, green, blue, amount * self.alpha],
             ping_color: [ping_red, ping_green, ping_blue, self.dimming],
         }
@@ -95,15 +106,24 @@ fn color_of(tag: TagStruct<'_>, name: &str) -> Option<[f32; 3]> {
 }
 
 /// `rasterizer_globals`' `vision_mode`, for an object of `model_tag`.
-pub(in crate::app::model_preview) fn read_h3_vision(reader: &TagReader, object: &TagFile) -> Option<H3Vision> {
-    let globals =
-        reader.load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
-    let path = globals.root().read_tag_ref_path("Vision Mode Settings").filter(|path| !path.is_empty())?;
+pub(in crate::app::model_preview) fn read_h3_vision(
+    reader: &TagReader,
+    object: &TagFile,
+) -> Option<H3Vision> {
+    let globals = reader
+        .load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg")
+        .ok()?;
+    let path = globals
+        .root()
+        .read_tag_ref_path("Vision Mode Settings")
+        .filter(|path| !path.is_empty())?;
     let tag = reader.load(&path, "vision_mode", b"vmdx").ok()?;
     let root = tag.root();
     let class = vision_class(object);
     let real = |name: String| root.read_real(&name).unwrap_or(0.0);
-    let mask = root.read_tag_ref_path("mask bitmap").filter(|path| !path.is_empty())?;
+    let mask = root
+        .read_tag_ref_path("mask bitmap")
+        .filter(|path| !path.is_empty())?;
     Some(H3Vision {
         radius: real("on_foot_radius".into()),
         speed: real("on_foot ping speed".into()),
@@ -133,13 +153,20 @@ pub(crate) struct H3MotionBlur {
 impl H3MotionBlur {
     fn new(max_blur: f32, blur_scale: f32, center_falloff: [f32; 2]) -> Self {
         let doubled = blur_scale * 2.0;
-        Self { most_pixels: max_blur * 1792.0 * 0.25 / doubled, step: doubled / 6.0, center_falloff }
+        Self {
+            most_pixels: max_blur * 1792.0 * 0.25 / doubled,
+            step: doubled / 6.0,
+            center_falloff,
+        }
     }
 }
 
-pub(in crate::app::model_preview) fn read_h3_motion_blur(reader: &TagReader) -> Option<H3MotionBlur> {
-    let globals =
-        reader.load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
+pub(in crate::app::model_preview) fn read_h3_motion_blur(
+    reader: &TagReader,
+) -> Option<H3MotionBlur> {
+    let globals = reader
+        .load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg")
+        .ok()?;
     let root = globals.root();
     let real = |name: &str| root.read_real(name);
     Some(H3MotionBlur::new(
@@ -151,7 +178,8 @@ pub(in crate::app::model_preview) fn read_h3_motion_blur(reader: &TagReader) -> 
 
 /// A column matrix's inverse, for `screen_to_world`; a singular one is none.
 pub(crate) fn inverted(matrix: &[f32; 16]) -> Option<[f32; 16]> {
-    let mut left: [[f64; 4]; 4] = std::array::from_fn(|row| std::array::from_fn(|column| matrix[column * 4 + row] as f64));
+    let mut left: [[f64; 4]; 4] =
+        std::array::from_fn(|row| std::array::from_fn(|column| matrix[column * 4 + row] as f64));
     let mut right: [[f64; 4]; 4] =
         std::array::from_fn(|row| std::array::from_fn(|column| f64::from(u8::from(row == column))));
     for at in 0..4 {
@@ -170,7 +198,9 @@ pub(crate) fn inverted(matrix: &[f32; 16]) -> Option<[f32; 16]> {
             right[row] = std::array::from_fn(|column| right[row][column] - right[at][column] * by);
         }
     }
-    Some(std::array::from_fn(|index| right[index % 4][index / 4] as f32))
+    Some(std::array::from_fn(|index| {
+        right[index % 4][index / 4] as f32
+    }))
 }
 
 #[cfg(test)]
@@ -199,21 +229,37 @@ mod tests {
     /// glowbug is on the player's, its lod banshee the covenant's.
     #[test]
     fn a_creature_is_classed_by_its_own_default_team() {
-        let Some(source) = kit_source(GameId::Halo3Odst) else { return };
+        let Some(source) = kit_source(GameId::Halo3Odst) else {
+            return;
+        };
         let class = |path: &str| {
-            let tag = load_referenced_tag_from_source(&source, path, "creature", b"crea").expect(path);
+            let tag =
+                load_referenced_tag_from_source(&source, path, "creature", b"crea").expect(path);
             vision_class(&tag)
         };
-        assert_eq!(class("objects\\levels\\multi\\guardian\\glowbug\\glowbug"), 1);
-        assert_eq!(class("objects\\characters\\ambient_life\\lod_banshee\\lod_banshee"), 0);
+        assert_eq!(
+            class("objects\\levels\\multi\\guardian\\glowbug\\glowbug"),
+            1
+        );
+        assert_eq!(
+            class("objects\\characters\\ambient_life\\lod_banshee\\lod_banshee"),
+            0
+        );
     }
 
     #[test]
     fn motion_blur_takes_the_shipped_globals_to_fifty_pixels_in_six_steps() {
         let blur = H3MotionBlur::new(0.08, 0.35, [7.0, 7.0]);
-        assert!((blur.most_pixels - 51.2).abs() < 1e-3, "{}", blur.most_pixels);
+        assert!(
+            (blur.most_pixels - 51.2).abs() < 1e-3,
+            "{}",
+            blur.most_pixels
+        );
         assert!((blur.step - 0.7 / 6.0).abs() < 1e-6);
-        assert_ne!(H3MotionBlur::new(0.08, 0.7, [7.0, 7.0]).most_pixels, blur.most_pixels);
+        assert_ne!(
+            H3MotionBlur::new(0.08, 0.7, [7.0, 7.0]).most_pixels,
+            blur.most_pixels
+        );
     }
 
     #[test]
@@ -252,15 +298,18 @@ mod tests {
 
     #[test]
     fn an_inverse_undoes_and_a_singular_matrix_has_none() {
-        let matrix = [2.0, 0.0, 0.0, 0.5, 0.0, 3.0, 1.0, 0.0, 0.0, 1.0, 4.0, 0.0, 1.0, 2.0, 3.0, 1.0];
+        let matrix = [
+            2.0, 0.0, 0.0, 0.5, 0.0, 3.0, 1.0, 0.0, 0.0, 1.0, 4.0, 0.0, 1.0, 2.0, 3.0, 1.0,
+        ];
         let back = inverted(&matrix).unwrap();
         for row in 0..4 {
             for column in 0..4 {
-                let product: f32 = (0..4).map(|at| matrix[at * 4 + row] * back[column * 4 + at]).sum();
+                let product: f32 = (0..4)
+                    .map(|at| matrix[at * 4 + row] * back[column * 4 + at])
+                    .sum();
                 assert!((product - f32::from(u8::from(row == column))).abs() < 1e-5);
             }
         }
         assert_eq!(inverted(&[0.0; 16]), None);
     }
 }
-

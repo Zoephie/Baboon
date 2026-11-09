@@ -53,7 +53,11 @@ fn periodic_table(function: usize, random: &mut SeedRandom) -> Vec<u8> {
     let x_table = variable_period_table(random);
     let wave = |x: f32| {
         let x = x.fract();
-        if x < 0.5 { x * 2.0 } else { 1.0 - (x - 0.5) * 2.0 }
+        if x < 0.5 {
+            x * 2.0
+        } else {
+            1.0 - (x - 0.5) * 2.0
+        }
     };
     let values: Vec<f32> = x_table
         .iter()
@@ -84,11 +88,19 @@ fn periodic_table(function: usize, random: &mut SeedRandom) -> Vec<u8> {
         .collect();
     let lowest = values.iter().copied().fold(f32::MAX, f32::min);
     let highest = values.iter().copied().fold(f32::MIN, f32::max);
-    let range = if PERIODIC_SLIDES.contains(&function) { 0.0 } else { highest - lowest };
+    let range = if PERIODIC_SLIDES.contains(&function) {
+        0.0
+    } else {
+        highest - lowest
+    };
     values
         .iter()
         .map(|value| {
-            let value = if range != 0.0 { (value - lowest) / range } else { *value };
+            let value = if range != 0.0 {
+                (value - lowest) / range
+            } else {
+                *value
+            };
             (value * 255.0).clamp(0.0, 255.0) as u8
         })
         .collect()
@@ -96,7 +108,9 @@ fn periodic_table(function: usize, random: &mut SeedRandom) -> Vec<u8> {
 
 static PERIODIC_TABLES: LazyLock<Vec<Vec<u8>>> = LazyLock::new(|| {
     let mut random = SeedRandom(PERIODIC_SEED);
-    (0..12).map(|function| periodic_table(function, &mut random)).collect()
+    (0..12)
+        .map(|function| periodic_table(function, &mut random))
+        .collect()
 });
 
 /// `periodic_function_evaluate`.

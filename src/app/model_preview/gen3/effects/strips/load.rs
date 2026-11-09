@@ -124,7 +124,8 @@ pub(super) struct StripProperty {
 impl StripProperty {
     fn read(holder: TagStruct<'_>, name: &str) -> Option<Self> {
         let property = holder.descend(name)?;
-        let input = |field: &str| StripInput::named(&property.read_enum_option(field).unwrap_or_default());
+        let input =
+            |field: &str| StripInput::named(&property.read_enum_option(field).unwrap_or_default());
         Some(Self {
             input: input("Input Variable"),
             range: input("Range Variable"),
@@ -167,13 +168,16 @@ impl StripProperty {
             range: StripInput::Invalid,
             adds: None,
             modifier: StripInput::Invalid,
-            function: TagFunction::parse_encoded(FunctionEncoding::H2, &function.to_bytes()).ok()?,
+            function: TagFunction::parse_encoded(FunctionEncoding::H2, &function.to_bytes())
+                .ok()?,
             ends: [[0.0; 3]; 2],
         })
     }
 
     pub(super) fn scalar(&self, state: &StripState) -> f32 {
-        let value = self.function.evaluate(self.input.of(state), self.range.of(state));
+        let value = self
+            .function
+            .evaluate(self.input.of(state), self.range.of(state));
         match self.adds {
             Some(true) => value + self.modifier.of(state),
             Some(false) => value * self.modifier.of(state),
@@ -182,7 +186,9 @@ impl StripProperty {
     }
 
     pub(super) fn color(&self, state: &StripState) -> [f32; 3] {
-        let color = self.function.evaluate_color(self.input.of(state), self.range.of(state));
+        let color = self
+            .function
+            .evaluate_color(self.input.of(state), self.range.of(state));
         [color.red, color.green, color.blue]
     }
 
@@ -218,7 +224,8 @@ impl StripShape {
                 if strip == 0 { [side, 0.0] } else { [0.0, side] }
             }
             Self::Ngon(sides) => {
-                let (sin, cos) = (std::f32::consts::TAU * (strip + offset) as f32 / sides as f32).sin_cos();
+                let (sin, cos) =
+                    (std::f32::consts::TAU * (strip + offset) as f32 / sides as f32).sin_cos();
                 [0.5 * cos, -0.5 * sin]
             }
         }
@@ -257,19 +264,31 @@ pub(super) struct StripLook {
 /// HLSL's `saturate`, which takes a NaN to 0 where Rust's `clamp` passes it
 /// through [inferred: the DirectX 10+ rule].
 pub(super) fn saturate(value: f32) -> f32 {
-    if value.is_nan() { 0.0 } else { value.clamp(0.0, 1.0) }
+    if value.is_nan() {
+        0.0
+    } else {
+        value.clamp(0.0, 1.0)
+    }
 }
 
 impl StripLook {
     /// A fade's `saturate`. Reach's step fades (a range of 0) meet a NaN at
     /// the cutoff, which comes out 0.
     pub(super) fn fade(&self, value: f32) -> f32 {
-        if self.reach { saturate(value) } else { value.clamp(0.0, 1.0) }
+        if self.reach {
+            saturate(value)
+        } else {
+            value.clamp(0.0, 1.0)
+        }
     }
 
     /// The uv scroll's clock: Reach's wraps at `period`, Halo 3's runs on.
     pub(super) fn scroll_time(&self, period: f32, time: f32) -> f32 {
-        if self.reach { time.rem_euclid(period) } else { time }
+        if self.reach {
+            time.rem_euclid(period)
+        } else {
+            time
+        }
     }
 }
 
@@ -283,7 +302,11 @@ pub(super) fn strip_fade(range: f32, cutoff: f32, scale: f32, by_range: bool) ->
 }
 
 /// `beam` is a `beam_system`'s, else a `contrail_system`'s.
-pub(super) fn read_strip_look(reader: &TagReader, element: TagStruct<'_>, beam: bool) -> Option<StripLook> {
+pub(super) fn read_strip_look(
+    reader: &TagReader,
+    element: TagStruct<'_>,
+    beam: bool,
+) -> Option<StripLook> {
     let reach = reader.source.game() == Some(GameId::HaloReach);
     let mut shader = read_sprite_shader(reader, element.descend("actual shader?")?)?;
     if reach && beam {
@@ -296,7 +319,10 @@ pub(super) fn read_strip_look(reader: &TagReader, element: TagStruct<'_>, beam: 
     let shape = match element.read_enum_option("profile shape").as_deref() {
         Some("cross") => StripShape::Cross,
         Some("n-gon") => {
-            let sides = element.read_int_any("number of n-gon sides").unwrap_or(0).max(0) as usize;
+            let sides = element
+                .read_int_any("number of n-gon sides")
+                .unwrap_or(0)
+                .max(0) as usize;
             StripShape::Ngon(sides.max(3))
         }
         _ => StripShape::Ribbon,
@@ -318,7 +344,11 @@ pub(super) fn read_strip_look(reader: &TagReader, element: TagStruct<'_>, beam: 
         edge_fade: fade(real("edge fade range"), real("edge fade cutoff"), degrees),
         angle_fade: (by_range && (angle_range != 0.0 || angle_begin != 0.0))
             .then_some([angle_range * degrees, angle_begin * degrees]),
-        sort_bias: if reach { element.read_int_any("sort bias").unwrap_or(0) as f32 * SORT_BIAS_STEP } else { 0.0 },
+        sort_bias: if reach {
+            element.read_int_any("sort bias").unwrap_or(0) as f32 * SORT_BIAS_STEP
+        } else {
+            0.0
+        },
         reach,
         shader: Arc::new(shader),
     })
@@ -354,10 +384,20 @@ fn read_beam(element: TagStruct<'_>) -> Option<BeamDefinition> {
     };
     let (mut own, mut profile) = (0, 0);
     let properties = [
-        &mut beam.length, &mut beam.offset, &mut beam.density, &mut beam.rotation, &mut beam.thickness,
-        &mut beam.color, &mut beam.alpha, &mut beam.black_point, &mut beam.palette, &mut beam.intensity,
+        &mut beam.length,
+        &mut beam.offset,
+        &mut beam.density,
+        &mut beam.rotation,
+        &mut beam.thickness,
+        &mut beam.color,
+        &mut beam.alpha,
+        &mut beam.black_point,
+        &mut beam.palette,
+        &mut beam.intensity,
     ];
-    properties.into_iter().for_each(|property| property.allocate(&mut own, &mut profile));
+    properties
+        .into_iter()
+        .for_each(|property| property.allocate(&mut own, &mut profile));
     Some(beam)
 }
 
@@ -404,11 +444,22 @@ fn read_contrail(element: TagStruct<'_>) -> Option<ContrailDefinition> {
     };
     let (mut own, mut profile) = (0, 0);
     let properties = [
-        &mut contrail.emission_rate, &mut contrail.lifespan, &mut contrail.acceleration, &mut contrail.size,
-        &mut contrail.offset, &mut contrail.rotation, &mut contrail.color, &mut contrail.alpha,
-        &mut contrail.secondary_alpha, &mut contrail.black_point, &mut contrail.palette, &mut contrail.intensity,
+        &mut contrail.emission_rate,
+        &mut contrail.lifespan,
+        &mut contrail.acceleration,
+        &mut contrail.size,
+        &mut contrail.offset,
+        &mut contrail.rotation,
+        &mut contrail.color,
+        &mut contrail.alpha,
+        &mut contrail.secondary_alpha,
+        &mut contrail.black_point,
+        &mut contrail.palette,
+        &mut contrail.intensity,
     ];
-    properties.into_iter().for_each(|property| property.allocate(&mut own, &mut profile));
+    properties
+        .into_iter()
+        .for_each(|property| property.allocate(&mut own, &mut profile));
     Some(contrail)
 }
 
@@ -465,18 +516,23 @@ pub(in crate::app::model_preview) fn read_h3_strips(
         type Read = fn(TagStruct<'_>) -> Option<StripKind>;
         let beam = part.group == beam_group;
         let (blocks, group_name, code, read): (&str, &str, &[u8; 4], Read) = if beam {
-                ("beams", "beam_system", b"beam", |element| read_beam(element).map(StripKind::Beam))
-            } else if part.group == contrail_group {
-                ("contrails", "contrail_system", b"cntl", |element| read_contrail(element).map(StripKind::Contrail))
-            } else {
-                return;
-            };
+            ("beams", "beam_system", b"beam", |element| {
+                read_beam(element).map(StripKind::Beam)
+            })
+        } else if part.group == contrail_group {
+            ("contrails", "contrail_system", b"cntl", |element| {
+                read_contrail(element).map(StripKind::Contrail)
+            })
+        } else {
+            return;
+        };
         let Ok(tag) = reader.load(&part.path, group_name, code) else {
             return;
         };
         let (offset, yaw, pitch) = read_part_placement(part.part);
         for element in elements(tag.root(), blocks) {
-            let (Some(look), Some(kind)) = (read_strip_look(reader, element, beam), read(element)) else {
+            let (Some(look), Some(kind)) = (read_strip_look(reader, element, beam), read(element))
+            else {
                 continue;
             };
             let (look, kind) = (Arc::new(look), Arc::new(kind));
@@ -485,7 +541,9 @@ pub(in crate::app::model_preview) fn read_h3_strips(
                 let (place, node) = part.placed(place, node);
                 let place = part_frame(&place, offset, yaw, pitch);
                 let end = part.secondary_marker.as_ref().and_then(|name| {
-                    let far = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(name))?;
+                    let far = markers
+                        .iter()
+                        .find(|marker| marker.name.eq_ignore_ascii_case(name))?;
                     let (far, node) = frame(far);
                     Some((node, far.position))
                 });
@@ -513,7 +571,10 @@ pub(in crate::app::model_preview) fn read_h3_strips(
 }
 
 /// The contrails an effect holds, as a particle starts them.
-pub(in crate::app::model_preview) fn read_carried_strips(reader: &TagReader, path: &str) -> Vec<Gen3StripAt> {
+pub(in crate::app::model_preview) fn read_carried_strips(
+    reader: &TagReader,
+    path: &str,
+) -> Vec<Gen3StripAt> {
     let mut strips = Vec::new();
     let Ok(effect) = reader.load(path, "effect", b"effe") else {
         return strips;
@@ -532,7 +593,10 @@ pub(in crate::app::model_preview) fn read_carried_strips(reader: &TagReader, pat
                 continue;
             };
             for element in elements(tag.root(), "contrails") {
-                let (Some(look), Some(contrail)) = (read_strip_look(reader, element, false), read_contrail(element)) else {
+                let (Some(look), Some(contrail)) = (
+                    read_strip_look(reader, element, false),
+                    read_contrail(element),
+                ) else {
                     continue;
                 };
                 strips.push(Gen3StripAt {

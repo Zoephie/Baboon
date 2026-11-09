@@ -3,8 +3,8 @@
 
 use eframe::glow::{self, HasContext as _};
 
-use super::super::gl::glsl::{fill, VIEW_DEPTH};
 use super::super::gl::buffer::slice_bytes;
+use super::super::gl::glsl::{VIEW_DEPTH, fill};
 use super::super::*;
 use super::camera::*;
 
@@ -14,7 +14,10 @@ pub(in crate::app::model_preview) const CE_FLARE_STRIDE: i32 = 6 * 4;
 pub(in crate::app::model_preview) const CE_FLARE_VERTEX: &str = include_str!("shaders/flare.vert");
 
 pub(in crate::app::model_preview) fn ce_flare_fragment() -> String {
-    fill(include_str!("shaders/flare.frag"), &[("view_depth", &VIEW_DEPTH)])
+    fill(
+        include_str!("shaders/flare.frag"),
+        &[("view_depth", &VIEW_DEPTH)],
+    )
 }
 
 /// What every game's camera-facing quads draw with (flares, antennas, effect
@@ -45,19 +48,33 @@ pub(in crate::app::model_preview) fn ce_flare_quad(
     let (sine, cosine) = sprite.rotation.sin_cos();
     let center = sprite.center;
     let depth = ce_flare_clip(camera, center);
-    [[0.0, 0.0, -1.0, -1.0], [1.0, 0.0, 1.0, -1.0], [0.0, 1.0, -1.0, 1.0], [1.0, 1.0, 1.0, 1.0]].map(
-        |[u, v, x, y]| {
-            let across = x * sprite.extent[0];
-            let upward = y * sprite.extent[1];
-            let (right, up) = (across * cosine - upward * sine, across * sine + upward * cosine);
-            let corner = std::array::from_fn(|axis| {
-                center[axis] + view.right[axis] * right + view.up[axis] * up
-            });
-            let clip = ce_flare_clip(camera, corner);
-            let scale = depth[3] / clip[3];
-            [clip[0] * scale, clip[1] * scale, depth[2], depth[3], u, 1.0 - v]
-        },
-    )
+    [
+        [0.0, 0.0, -1.0, -1.0],
+        [1.0, 0.0, 1.0, -1.0],
+        [0.0, 1.0, -1.0, 1.0],
+        [1.0, 1.0, 1.0, 1.0],
+    ]
+    .map(|[u, v, x, y]| {
+        let across = x * sprite.extent[0];
+        let upward = y * sprite.extent[1];
+        let (right, up) = (
+            across * cosine - upward * sine,
+            across * sine + upward * cosine,
+        );
+        let corner = std::array::from_fn(|axis| {
+            center[axis] + view.right[axis] * right + view.up[axis] * up
+        });
+        let clip = ce_flare_clip(camera, corner);
+        let scale = depth[3] / clip[3];
+        [
+            clip[0] * scale,
+            clip[1] * scale,
+            depth[2],
+            depth[3],
+            u,
+            1.0 - v,
+        ]
+    })
 }
 
 /// How much of `patch` the model leaves showing, if any of it is on screen.
@@ -70,7 +87,11 @@ pub(in crate::app::model_preview) unsafe fn ce_flare_occlusion(
 ) -> Option<f32> {
     unsafe {
         let vertices = ce_flare_quad(camera, view, patch);
-        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+        gl.buffer_data_u8_slice(
+            glow::ARRAY_BUFFER,
+            slice_bytes(&vertices),
+            glow::STREAM_DRAW,
+        );
         gl.enable(glow::DEPTH_TEST);
         gl.color_mask(false, false, false, false);
         let mut samples = [0.0; 2];
@@ -111,7 +132,11 @@ pub(in crate::app::model_preview) unsafe fn draw_flare_sprites(
                 continue;
             };
             let vertices = ce_flare_quad(camera, view, sprite);
-            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                slice_bytes(&vertices),
+                glow::STREAM_DRAW,
+            );
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
             let [red, green, blue] = sprite.color;
             gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, sprite.alpha);
@@ -128,7 +153,10 @@ pub(in crate::app::model_preview) unsafe fn draw_flare_sprites(
     }
 }
 
-pub(in crate::app::model_preview) unsafe fn link_sprite_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<SpriteGl> {
+pub(in crate::app::model_preview) unsafe fn link_sprite_gl(
+    gl: &glow::Context,
+    main: glow::NativeProgram,
+) -> Option<SpriteGl> {
     unsafe {
         let program = link_h2_program(gl, main, CE_FLARE_VERTEX, &ce_flare_fragment())
             .map_err(|error| eprintln!("model preview: {error}"))
@@ -168,7 +196,13 @@ mod tests {
     /// particle program is checked.
     #[test]
     fn the_flare_and_reach_composite_programs_compile_under_glslang() {
-        assert_compiles_under_glslang("flare", &[("vert", CE_FLARE_VERTEX), ("frag", &ce_flare_fragment())]);
-        assert_compiles_under_glslang("reach_composite", &[("frag", super::reach::composite::REACH_COMPOSITE_FRAGMENT)]);
+        assert_compiles_under_glslang(
+            "flare",
+            &[("vert", CE_FLARE_VERTEX), ("frag", &ce_flare_fragment())],
+        );
+        assert_compiles_under_glslang(
+            "reach_composite",
+            &[("frag", super::reach::composite::REACH_COMPOSITE_FRAGMENT)],
+        );
     }
 }

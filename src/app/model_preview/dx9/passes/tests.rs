@@ -1,5 +1,5 @@
-use super::*;
 use super::super::super::functions::object_input;
+use super::*;
 
 fn animation(kind: H2AnimationKind, period: f32, value: f32) -> H2Animation {
     let function = blam_tags::tag_function::H2Function::new_constant(value);
@@ -8,10 +8,13 @@ fn animation(kind: H2AnimationKind, period: f32, value: f32) -> H2Animation {
         period,
         held_input: None,
         range_input: None,
-        function: Arc::new(TagFunction::parse_encoded(
-            blam_tags::tag_function::FunctionEncoding::H2,
-            &function.to_bytes(),
-        ).unwrap()),
+        function: Arc::new(
+            TagFunction::parse_encoded(
+                blam_tags::tag_function::FunctionEncoding::H2,
+                &function.to_bytes(),
+            )
+            .unwrap(),
+        ),
     }
 }
 
@@ -20,15 +23,23 @@ fn a_period_wraps_time_and_no_period_reads_it_raw() {
     let cycling = animation(H2AnimationKind::Value, 4.0, 0.0);
     assert_eq!(cycling.input(1.0.into()), 0.25);
     assert_eq!(cycling.input(5.0.into()), 0.25);
-    assert_eq!(animation(H2AnimationKind::Value, 0.0, 0.0).input(5.0.into()), 5.0);
+    assert_eq!(
+        animation(H2AnimationKind::Value, 0.0, 0.0).input(5.0.into()),
+        5.0
+    );
 }
 
 #[test]
 fn a_texture_transform_moves_scales_and_turns_as_the_game_builds_it() {
     let row = |form, animations| {
         let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
-        H2AnimatedRow { register: 1, form, scale: [2.0, 4.0, 8.0], animations }
-            .apply(&mut rows, 0.0.into());
+        H2AnimatedRow {
+            register: 1,
+            form,
+            scale: [2.0, 4.0, 8.0],
+            animations,
+        }
+        .apply(&mut rows, 0.0.into());
         rows[1]
     };
     let moved = vec![
@@ -36,18 +47,29 @@ fn a_texture_transform_moves_scales_and_turns_as_the_game_builds_it() {
         animation(H2AnimationKind::TranslationY, 0.0, 0.5),
     ];
     // `sub_6D8B60` leaves a translation unscaled.
-    assert_eq!(row(H2RowForm::SimpleXform, moved.clone()), [2.0, 4.0, 0.25, 0.5]);
+    assert_eq!(
+        row(H2RowForm::SimpleXform, moved.clone()),
+        [2.0, 4.0, 0.25, 0.5]
+    );
     assert_eq!(row(H2RowForm::Row1, moved.clone()), [2.0, 0.0, 0.0, 0.25]);
     assert_eq!(row(H2RowForm::Row2, moved), [0.0, 4.0, 0.0, 0.5]);
 
     let deep = vec![animation(H2AnimationKind::TranslationZ, 0.0, 0.5)];
     assert_eq!(row(H2RowForm::Row3, deep), [0.0, 0.0, 8.0, 0.5]);
     let even = vec![animation(H2AnimationKind::ScaleUniform, 0.0, 3.0)];
-    assert_eq!(row(H2RowForm::Row3, even), [0.0, 0.0, 3.0, 0.0], "uniform scale reaches z");
+    assert_eq!(
+        row(H2RowForm::Row3, even),
+        [0.0, 0.0, 3.0, 0.0],
+        "uniform scale reaches z"
+    );
 
     let turned = row(
         H2RowForm::Row1,
-        vec![animation(H2AnimationKind::Rotation, 0.0, std::f32::consts::FRAC_PI_2)],
+        vec![animation(
+            H2AnimationKind::Rotation,
+            0.0,
+            std::f32::consts::FRAC_PI_2,
+        )],
     );
     // A quarter turn about the middle of the map keeps the middle in place.
     assert!(turned[0].abs() < 1e-6, "{turned:?}");
@@ -60,12 +82,21 @@ fn an_object_input_holds_still_at_what_a_whole_object_exports() {
     assert_eq!(object_input("shield_vitality"), 1.0);
     assert_eq!(object_input("object_overshield_amount"), 0.0);
     assert_eq!(object_input("boost"), 0.0);
-    let held = H2Animation { held_input: Some(("boost".to_owned(), 1.0)), ..animation(H2AnimationKind::Value, 4.0, 0.0) };
+    let held = H2Animation {
+        held_input: Some(("boost".to_owned(), 1.0)),
+        ..animation(H2AnimationKind::Value, 4.0, 0.0)
+    };
     assert_eq!(held.input(3.0.into()), 1.0);
     assert!(!held.moves());
     // An object's functions take over from the resting value.
     let values = FunctionValues::from([("boost".to_owned(), 0.25)]);
-    assert_eq!(held.input(H2Clock { time: 3.0, values: Some(&values) }), 0.25);
+    assert_eq!(
+        held.input(H2Clock {
+            time: 3.0,
+            values: Some(&values)
+        }),
+        0.25
+    );
 }
 
 #[test]
@@ -77,7 +108,10 @@ fn only_a_non_constant_function_moves() {
 fn the_lights_choose_between_the_game_s_two_lightmap_paths() {
     assert_eq!(Dx9Layer::Lightmap.implementation(), 3);
     assert_eq!(Dx9Layer::ObjectLightmap.implementation(), 2);
-    assert_eq!(Dx9Layer::ObjectLightmap.tag_name(), Dx9Layer::Lightmap.tag_name());
+    assert_eq!(
+        Dx9Layer::ObjectLightmap.tag_name(),
+        Dx9Layer::Lightmap.tag_name()
+    );
 }
 
 #[test]
@@ -88,13 +122,29 @@ fn change_colors_filter_by_variant_and_fall_back_to_white() {
         upper: [value + 0.25; 3],
         variant: variant.to_owned(),
     };
-    let list = [entry(1.0, 0.25, "minor"), entry(1.0, 0.5, "major"), entry(0.0, 0.75, "")];
+    let list = [
+        entry(1.0, 0.25, "minor"),
+        entry(1.0, 0.5, "major"),
+        entry(0.0, 0.75, ""),
+    ];
     assert_eq!(change_color_for(&list, "minor"), [0.375; 3]);
     assert_eq!(change_color_for(&list, "major"), [0.625; 3]);
-    assert_eq!(change_color_for(&list, "ultra"), [1.0; 3], "nothing allowed");
+    assert_eq!(
+        change_color_for(&list, "ultra"),
+        [1.0; 3],
+        "nothing allowed"
+    );
     assert_eq!(change_color_for(&[], "minor"), [1.0; 3]);
-    let shared = [entry(1.0, 0.0, ""), entry(2.0, 0.5, ""), entry(1.0, 0.75, "")];
-    assert_eq!(change_color_for(&shared, "any"), [0.625; 3], "the middle of the weights");
+    let shared = [
+        entry(1.0, 0.0, ""),
+        entry(2.0, 0.5, ""),
+        entry(1.0, 0.75, ""),
+    ];
+    assert_eq!(
+        change_color_for(&shared, "any"),
+        [0.625; 3],
+        "the middle of the weights"
+    );
 }
 
 #[test]
@@ -105,10 +155,18 @@ fn a_block_with_no_weights_shares_them_evenly() {
         upper: [value; 3],
         variant: variant.to_owned(),
     };
-    let list = [entry(0.25, "minor"), entry(0.5, "major"), entry(0.75, "major")];
+    let list = [
+        entry(0.25, "minor"),
+        entry(0.5, "major"),
+        entry(0.75, "major"),
+    ];
     assert_eq!(change_color_for(&list, "minor"), [0.25; 3]);
     assert_eq!(change_color_for(&list, "major"), [0.5; 3]);
-    assert_eq!(change_color_for(&list, "ultra"), [1.0; 3], "no entry for this variant");
+    assert_eq!(
+        change_color_for(&list, "ultra"),
+        [1.0; 3],
+        "no entry for this variant"
+    );
 }
 
 #[test]
@@ -131,7 +189,10 @@ fn the_source_file_follows_the_pass_path() {
         implementation: 0,
         vertex_shader: String::new(),
         blend: None,
-        depth: Dx9Depth { compare: None, write: false },
+        depth: Dx9Depth {
+            compare: None,
+            write: false,
+        },
         channels: String::new(),
         custom_channels: None,
         alpha_test: None,
@@ -140,11 +201,19 @@ fn the_source_file_follows_the_pass_path() {
         vertex_constants: Vec::new(),
         animations: Default::default(),
     };
-    assert_eq!(pass.pixel_shader_file(), "shaders_shader_passes_transparent_lit_0.psh");
+    assert_eq!(
+        pass.pixel_shader_file(),
+        "shaders_shader_passes_transparent_lit_0.psh"
+    );
 }
 
 fn permutation(weight: f32, lower: [f32; 3], upper: [f32; 3]) -> ChangePermutation {
-    ChangePermutation { weight, lower, upper, variant: String::new() }
+    ChangePermutation {
+        weight,
+        lower,
+        upper,
+        variant: String::new(),
+    }
 }
 
 #[test]
@@ -170,14 +239,20 @@ fn ce_colors_blend_the_short_way_round_the_hue() {
     assert!(mixed[0] > 0.99 && mixed[1] < 0.01, "{mixed:?}");
     // Unlike an RGB blend, yellow keeps its brightness between red and green.
     let middle = hsv_interpolate([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.5, false);
-    assert!((middle[0] - 1.0).abs() < 1e-5 && (middle[1] - 1.0).abs() < 1e-5, "{middle:?}");
+    assert!(
+        (middle[0] - 1.0).abs() < 1e-5 && (middle[1] - 1.0).abs() < 1e-5,
+        "{middle:?}"
+    );
     // The long way from red to green goes through blue.
     let long = hsv_interpolate([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.5, true);
     assert!(long[2] > 0.99 && long[1] < 0.01, "{long:?}");
     // A color survives the trip.
     let color = [0.34, 0.4, 0.15];
     let back = hsv_to_rgb(rgb_to_hsv(color));
-    assert!(color.iter().zip(back).all(|(a, b)| (a - b).abs() < 1e-5), "{back:?}");
+    assert!(
+        color.iter().zip(back).all(|(a, b)| (a - b).abs() < 1e-5),
+        "{back:?}"
+    );
 }
 
 /// The dx9 pipeline is neutral: Halo CE's shaders hook into it through
@@ -189,16 +264,28 @@ fn only_the_dx9_game_table_names_halo_ce() {
     let mut naming = Vec::new();
     while let Some(path) = files.pop() {
         if path.is_dir() {
-            files.extend(std::fs::read_dir(&path).unwrap().map(|entry| entry.unwrap().path()));
+            files.extend(
+                std::fs::read_dir(&path)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path()),
+            );
             continue;
         }
-        if path.extension().is_none_or(|extension| extension != "rs") || path == root.join("render.rs") {
+        if path.extension().is_none_or(|extension| extension != "rs")
+            || path == root.join("render.rs")
+        {
             continue;
         }
         let source = std::fs::read_to_string(&path).unwrap();
         for (number, line) in source.lines().enumerate() {
             // Spelled apart, so this test's own source is not a match.
-            if [concat!("super::", "ce::"), concat!("model_preview::", "ce::")].iter().any(|path| line.contains(path)) {
+            if [
+                concat!("super::", "ce::"),
+                concat!("model_preview::", "ce::"),
+            ]
+            .iter()
+            .any(|path| line.contains(path))
+            {
                 naming.push(format!("{}:{}", path.display(), number + 1));
             }
         }

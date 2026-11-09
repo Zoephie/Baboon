@@ -7,24 +7,24 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::super::common::fields::{elements, has_flag, object_block};
-use crate::app::model_preview::common::flares::FlareSprite;
 use super::super::super::common::view::{ViewFrame, posed_on};
 use super::super::super::effects::{
     EffectTimes, for_each_attached_part, marker_name, part_markers,
 };
 use super::super::super::functions::FunctionValues;
+use crate::app::model_preview::common::flares::FlareSprite;
+use crate::app::model_preview::common::marker::MarkerFrame;
 use blam_tags::tag_function::transition_function_evaluate;
 
 use super::super::super::common::image::Image;
 use super::super::super::common::named_function::tag_function_at;
-use super::super::pipeline::EXPOSURE;
 use super::super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
 use super::super::super::*;
-use crate::core::h2_pixel_shader::SamplerKind;
-use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
+use super::super::pipeline::EXPOSURE;
 use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
+use crate::core::h2_pixel_shader::SamplerKind;
 
 use super::super::super::h3::lights::{H3Light, SMALLEST};
 
@@ -117,12 +117,18 @@ impl Gen3FlareColor {
         let first = elements(root, block).into_iter().next()?;
         Some(Self {
             function: Arc::new(tag_function_at(&first, "function")?),
-            input: first.read_string_id("input name").or_else(|| first.read_string_id("Input Variable")).unwrap_or_default(),
+            input: first
+                .read_string_id("input name")
+                .or_else(|| first.read_string_id("Input Variable"))
+                .unwrap_or_default(),
         })
     }
 
     fn at(&self, input: f32, values: Option<&FunctionValues>) -> [f32; 3] {
-        let driven = values.filter(|_| !self.input.is_empty()).and_then(|values| values.get(&self.input)).copied();
+        let driven = values
+            .filter(|_| !self.input.is_empty())
+            .and_then(|values| values.get(&self.input))
+            .copied();
         let input = driven.unwrap_or_else(|| self.function.evaluate(input, 0.0));
         let color = self.function.evaluate_color(input, 1.0);
         [color.red, color.green, color.blue]
@@ -130,7 +136,13 @@ impl Gen3FlareColor {
 }
 
 /// `lens_flares_evaluate_corona_rotation_function`.
-fn corona_rotation(function: i128, scale: f32, position: [f32; 3], forward: [f32; 3], view: &ViewFrame) -> f32 {
+fn corona_rotation(
+    function: i128,
+    scale: f32,
+    position: [f32; 3],
+    forward: [f32; 3],
+    view: &ViewFrame,
+) -> f32 {
     let across = cross(cross(forward, view.forward), forward);
     let to_flare: [f32; 3] = std::array::from_fn(|axis| position[axis] - view.eye[axis]);
     let back = forward.map(|axis| -axis);
@@ -141,7 +153,11 @@ fn corona_rotation(function: i128, scale: f32, position: [f32; 3], forward: [f32
         4 => (dot(to_flare, view.forward), -dot(to_flare, view.up)),
         _ => return 0.0,
     };
-    if x == 0.0 { 0.0 } else { x.atan2(y) * scale / std::f32::consts::PI }
+    if x == 0.0 {
+        0.0
+    } else {
+        x.atan2(y) * scale / std::f32::consts::PI
+    }
 }
 
 /// A flare at a marker of the object it is attached to.
@@ -184,7 +200,10 @@ pub(in crate::app::model_preview) enum OcclusionOffset {
 
 impl OcclusionOffset {
     pub(in crate::app::model_preview) fn read(root: TagStruct<'_>) -> Self {
-        match root.read_enum_option("occlusion offset direction").as_deref() {
+        match root
+            .read_enum_option("occlusion offset direction")
+            .as_deref()
+        {
             Some("marker forward") => Self::MarkerForward,
             Some("none") => Self::None,
             _ => Self::TowardViewer,
@@ -209,7 +228,10 @@ fn block_function(root: TagStruct<'_>, block: &str) -> Option<Arc<TagFunction>> 
     tag_function_at(&first, "function").map(Arc::new)
 }
 
-pub(in crate::app::model_preview) fn read_h3_flare(reader: &TagReader, path: &str) -> Option<Gen3Flare> {
+pub(in crate::app::model_preview) fn read_h3_flare(
+    reader: &TagReader,
+    path: &str,
+) -> Option<Gen3Flare> {
     let tag = reader.load(path, "lens_flare", b"lens").ok()?;
     let root = tag.root();
     if has_flag(root, "flags", "only render in first person") {
@@ -217,8 +239,12 @@ pub(in crate::app::model_preview) fn read_h3_flare(reader: &TagReader, path: &st
     }
     let reflection = *elements(root, "reflections").first()?;
     let reflected = |wanted: &str| has_flag(reflection, "flags", wanted);
-    let bitmap = root.read_tag_ref_path("bitmap").filter(|bitmap| !bitmap.is_empty());
-    let override_map = reflection.read_tag_ref_path("bitmapOverride").filter(|bitmap| !bitmap.is_empty());
+    let bitmap = root
+        .read_tag_ref_path("bitmap")
+        .filter(|bitmap| !bitmap.is_empty());
+    let override_map = reflection
+        .read_tag_ref_path("bitmapOverride")
+        .filter(|bitmap| !bitmap.is_empty());
     let bitmap = override_map.or(bitmap)?;
     let index = reflection.read_int_any("bitmap index").unwrap_or(0).max(0) as usize;
     let bitmap = read_h3_bitmap(reader, &bitmap, index as i16, SamplerKind::Texture2D)?;
@@ -236,31 +262,56 @@ pub(in crate::app::model_preview) fn read_h3_flare(reader: &TagReader, path: &st
     };
     let radius = reflection.read_real_bounds("radius");
     let brightness = reflection.read_fraction_bounds("brightness");
-    let curve = |name: &str| reflection.descend(name).and_then(|curve| tag_function_at(&curve, "function")).map(Arc::new);
-    let curves = curve("radius curve").zip(curve("brightness curve")).map(|(radius, brightness)| ReachFlareCurves { radius, brightness });
+    let curve = |name: &str| {
+        reflection
+            .descend(name)
+            .and_then(|curve| tag_function_at(&curve, "function"))
+            .map(Arc::new)
+    };
+    let curves = curve("radius curve")
+        .zip(curve("brightness curve"))
+        .map(|(radius, brightness)| ReachFlareCurves { radius, brightness });
     // Reach's inner scale is a real fraction; Halo 3's an enum.
     let inner = match curves {
-        Some(_) => FlareInner::Fraction(root.read_real("occlusion inner radius scale").unwrap_or(1.0)),
-        None => FlareInner::Halved(root.read_int_any("occlusion inner radius scale").unwrap_or(0)),
+        Some(_) => FlareInner::Fraction(
+            root.read_real("occlusion inner radius scale")
+                .unwrap_or(1.0),
+        ),
+        None => FlareInner::Halved(
+            root.read_int_any("occlusion inner radius scale")
+                .unwrap_or(0),
+        ),
     };
     let color = reflection.read_rgb("color");
     let fade = |name: &str| root.read_real(name).unwrap_or(0.0);
     Some(Gen3Flare {
         cones: [fade("falloff angle"), fade("cutoff angle")],
-        near_fade: [fade("near fade begin distance"), fade("near fade end distance")],
+        near_fade: [
+            fade("near fade begin distance"),
+            fade("near fade end distance"),
+        ],
         far_fade: [fade("near fade distance"), fade("far fade distance")],
         tests_occlusion: !has_flag(root, "flags", "no occlusion test"),
-        falloff: root.read_int_any("falloff function").and_then(|index| u8::try_from(index).ok()).unwrap_or(0),
+        falloff: root
+            .read_int_any("falloff function")
+            .and_then(|index| u8::try_from(index).ok())
+            .unwrap_or(0),
         occlusion_offset: fade("occlusion offset distance"),
         occlusion_offset_direction: OcclusionOffset::read(root),
         inner,
         curves,
-        rotation_offset: reflection.read_real("rotation offset").unwrap_or(0.0).to_radians(),
+        rotation_offset: reflection
+            .read_real("rotation offset")
+            .unwrap_or(0.0)
+            .to_radians(),
         radius: [radius.lower, radius.upper],
         brightness: [brightness.lower, brightness.upper],
         color: [color.red, color.green, color.blue],
         modulation: reflection.read_real("modulation factor").unwrap_or(0.0),
-        tint_power: reflection.read_real("tint power").filter(|power| *power > SMALLEST).unwrap_or(4.0),
+        tint_power: reflection
+            .read_real("tint power")
+            .filter(|power| *power > SMALLEST)
+            .unwrap_or(4.0),
         aspect,
         time_brightness: block_function(root, "time brightness"),
         age_brightness: block_function(root, "age brightness"),
@@ -291,54 +342,81 @@ pub(in crate::app::model_preview) fn read_h3_flares(
         return flares;
     };
     let flare_group = u32::from_be_bytes(*b"lens");
-    let mut place_flare = |path: &str,
-                           found: Vec<RenderModelPreviewMarker>,
-                           scale_by: String,
-                           secondary_by: String,
-                           by_effect: Option<Gen3EffectScale>,
-                           event: Option<(Arc<EffectTimes>, usize)>,
-                           placed: &dyn Fn(MarkerFrame, usize) -> (MarkerFrame, usize)| {
-        let Some(flare) = read_h3_flare(reader, path).map(Arc::new) else {
-            return;
+    let mut place_flare =
+        |path: &str,
+         found: Vec<RenderModelPreviewMarker>,
+         scale_by: String,
+         secondary_by: String,
+         by_effect: Option<Gen3EffectScale>,
+         event: Option<(Arc<EffectTimes>, usize)>,
+         placed: &dyn Fn(MarkerFrame, usize) -> (MarkerFrame, usize)| {
+            let Some(flare) = read_h3_flare(reader, path).map(Arc::new) else {
+                return;
+            };
+            for marker in &found {
+                let (place, node) = frame(marker);
+                let (place, node) = placed(place, node);
+                flares.push(Gen3FlareAt {
+                    object: owner,
+                    node,
+                    position: place.position,
+                    forward: place.axes[0],
+                    only_under: marker.only_under.clone(),
+                    scale_by: scale_by.clone(),
+                    secondary_by: if flare.curves.is_some() {
+                        secondary_by.clone()
+                    } else {
+                        String::new()
+                    },
+                    by_effect,
+                    event: event.clone(),
+                    flare: Arc::clone(&flare),
+                    light: None,
+                });
+            }
         };
-        for marker in &found {
-            let (place, node) = frame(marker);
-            let (place, node) = placed(place, node);
-            flares.push(Gen3FlareAt {
-                object: owner,
-                node,
-                position: place.position,
-                forward: place.axes[0],
-                only_under: marker.only_under.clone(),
-                scale_by: scale_by.clone(),
-                secondary_by: if flare.curves.is_some() { secondary_by.clone() } else { String::new() },
-                by_effect,
-                event: event.clone(),
-                flare: Arc::clone(&flare),
-                light: None,
-            });
-        }
-    };
     for attachment in elements(block, "attachments") {
         let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
             continue;
         };
         if group == flare_group && !path.is_empty() {
             let name = marker_name(attachment, "marker");
-            let scale_by = attachment.read_string_id("primary scale").unwrap_or_default();
+            let scale_by = attachment
+                .read_string_id("primary scale")
+                .unwrap_or_default();
             // Reach's `render_object_attachments` (0x8274f128) scales by both.
-            let secondary_by = attachment.read_string_id("secondary scale").unwrap_or_default();
-            place_flare(&path, part_markers(markers, &name, false), scale_by, secondary_by, None, None, &|place, node| (place, node));
+            let secondary_by = attachment
+                .read_string_id("secondary scale")
+                .unwrap_or_default();
+            place_flare(
+                &path,
+                part_markers(markers, &name, false),
+                scale_by,
+                secondary_by,
+                None,
+                None,
+                &|place, node| (place, node),
+            );
         }
     }
     for_each_attached_part(reader, object, |part| {
         if part.group == flare_group {
-            let by_effect = Some(Gen3EffectScale { scaled: part.scaled });
+            let by_effect = Some(Gen3EffectScale {
+                scaled: part.scaled,
+            });
             let event = Some((Arc::clone(&part.times), part.event));
             let placed = |place, node| part.placed(place, node);
             let scale_by = part.effect.scale_by.clone();
             let found = part.effect.locations(markers, &part.marker, &frame);
-            place_flare(&part.path, found, scale_by, String::new(), by_effect, event, &placed);
+            place_flare(
+                &part.path,
+                found,
+                scale_by,
+                String::new(),
+                by_effect,
+                event,
+                &placed,
+            );
         }
     });
     flares
@@ -413,12 +491,20 @@ impl Gen3FlareAt {
             return (self.scale(values, time), [1.0; 3]);
         };
         let most = color.into_iter().fold(0.0, f32::max);
-        if most > 1.0 { (scale * most, color.map(|channel| channel / most)) } else { (scale, color) }
+        if most > 1.0 {
+            (scale * most, color.map(|channel| channel / most))
+        } else {
+            (scale, color)
+        }
     }
 
     /// Whether its event's clock runs from when `scale_name` came on.
     pub(crate) fn event_time(&self, time: f32, onset: f32) -> f32 {
-        if self.event.is_some() { time - onset } else { time }
+        if self.event.is_some() {
+            time - onset
+        } else {
+            time
+        }
     }
 
     pub(crate) fn bitmap(&self) -> &Gen3Bitmap {
@@ -427,7 +513,9 @@ impl Gen3FlareAt {
 
     pub(crate) fn animates(&self) -> bool {
         let moving = |function: &Option<Arc<TagFunction>>| {
-            function.as_ref().is_some_and(|function| function.as_constant().is_none())
+            function
+                .as_ref()
+                .is_some_and(|function| function.as_constant().is_none())
         };
         moving(&self.flare.time_brightness)
             || moving(&self.flare.time_rotation)
@@ -444,8 +532,17 @@ impl Gen3FlareAt {
             },
             None => 1.0,
         };
-        let named = |name: &str| values.and_then(|values| values.get(name)).copied().unwrap_or(0.0);
-        let secondary = if self.secondary_by.is_empty() { 1.0 } else { named(&self.secondary_by) };
+        let named = |name: &str| {
+            values
+                .and_then(|values| values.get(name))
+                .copied()
+                .unwrap_or(0.0)
+        };
+        let secondary = if self.secondary_by.is_empty() {
+            1.0
+        } else {
+            named(&self.secondary_by)
+        };
         if self.scale_by.is_empty() {
             return aged * secondary;
         }
@@ -484,15 +581,22 @@ impl Gen3FlareAt {
         }
         let (position, forward) = posed_on(self.node, self.position, self.forward, bones);
         let offset = match flare.occlusion_offset_direction {
-            OcclusionOffset::TowardViewer => unit_by_reciprocal(std::array::from_fn(|axis| view.eye[axis] - position[axis])),
+            OcclusionOffset::TowardViewer => {
+                unit_by_reciprocal(std::array::from_fn(|axis| view.eye[axis] - position[axis]))
+            }
             OcclusionOffset::MarkerForward => forward,
             OcclusionOffset::None => [0.0; 3],
         };
         let radius = self.radius(scale);
-        let across = pixels(position, [radius * flare.aspect[0], radius * flare.aspect[1]]);
+        let across = pixels(
+            position,
+            [radius * flare.aspect[0], radius * flare.aspect[1]],
+        );
         let radius = radius * flare.inner.share(across);
         Some(FlareSprite {
-            center: std::array::from_fn(|axis| position[axis] + offset[axis] * flare.occlusion_offset),
+            center: std::array::from_fn(|axis| {
+                position[axis] + offset[axis] * flare.occlusion_offset
+            }),
             extent: [radius; 2],
             rotation: 0.0,
             color: [0.0; 3],
@@ -547,7 +651,11 @@ impl Gen3FlareAt {
                 corona *= 1.0 - ((angle - falloff) / (cutoff - falloff)).clamp(0.0, 1.0);
             }
         }
-        let age = self.event.as_ref().and_then(|(times, event)| times.age(*event, time)).unwrap_or(0.0);
+        let age = self
+            .event
+            .as_ref()
+            .and_then(|(times, event)| times.age(*event, time))
+            .unwrap_or(0.0);
         if let Some(function) = &flare.time_brightness {
             corona *= function.evaluate(time, 0.0);
         }
@@ -572,10 +680,18 @@ impl Gen3FlareAt {
             return None;
         }
         let spin = |function: &Option<Arc<TagFunction>>, input: f32| {
-            function.as_ref().map_or(0.0, |function| std::f32::consts::PI * function.evaluate(input, 0.0))
+            function.as_ref().map_or(0.0, |function| {
+                std::f32::consts::PI * function.evaluate(input, 0.0)
+            })
         };
         let mut rotation = flare.rotation_offset
-            + corona_rotation(flare.rotation_function, flare.rotation_scale, position, forward, view)
+            + corona_rotation(
+                flare.rotation_function,
+                flare.rotation_scale,
+                position,
+                forward,
+                view,
+            )
             + spin(&flare.time_rotation, time)
             + spin(&flare.age_rotation, age);
         if flare.rotates_from_center {
@@ -620,9 +736,21 @@ mod tests {
         let hidden = occlusion_fraction(4, true, 460.0 / 1023.0);
         assert!((hidden - 10.0 / 255.0).abs() < 0.01, "{hidden}");
         assert_eq!(occlusion_fraction(4, true, 1.0), 1.0);
-        assert_eq!(occlusion_fraction(0, true, 0.5), 0.5, "linear takes no table");
-        assert_eq!(occlusion_fraction(0, true, MINIMUM_VISIBLE), 0.0, "too little to draw");
-        assert_eq!(occlusion_fraction(0, false, 0.02), 0.02, "only a tested share has a floor");
+        assert_eq!(
+            occlusion_fraction(0, true, 0.5),
+            0.5,
+            "linear takes no table"
+        );
+        assert_eq!(
+            occlusion_fraction(0, true, MINIMUM_VISIBLE),
+            0.0,
+            "too little to draw"
+        );
+        assert_eq!(
+            occlusion_fraction(0, false, 0.02),
+            0.02,
+            "only a tested share has a floor"
+        );
     }
 
     #[test]
@@ -632,7 +760,11 @@ mod tests {
         assert_eq!(reach.share(300.0), 0.625);
         assert_eq!(reach.share(600.0), 0.25);
         assert_eq!(reach.share(5000.0), 0.25);
-        assert_eq!(FlareInner::Halved(2).share(5000.0), 0.25, "Halo 3's ignores its size");
+        assert_eq!(
+            FlareInner::Halved(2).share(5000.0),
+            0.25,
+            "Halo 3's ignores its size"
+        );
         assert_eq!(FlareInner::Halved(2).share(0.0), 0.25);
     }
 
@@ -642,15 +774,31 @@ mod tests {
         use crate::app::model_preview::harness::kit::kit_source;
         if let Some(reach) = kit_source(crate::core::game::GameId::HaloReach) {
             let path = "objects\\props\\human\\unsc\\light_fixture_telescoping\\fx\\wide_flare";
-            let flare = read_h3_flare(&crate::app::model_preview::load::TagReader::new(&reach), path).unwrap();
+            let flare = read_h3_flare(
+                &crate::app::model_preview::load::TagReader::new(&reach),
+                path,
+            )
+            .unwrap();
             assert!(flare.curves.is_some());
-            assert!(matches!(flare.inner, FlareInner::Fraction(_)), "{:?}", flare.inner);
+            assert!(
+                matches!(flare.inner, FlareInner::Fraction(_)),
+                "{:?}",
+                flare.inner
+            );
         }
         if let Some(halo3) = kit_source(crate::core::game::GameId::Halo3) {
             let path = "objects\\vehicles\\warthog\\fx\\running\\headlights";
-            let flare = read_h3_flare(&crate::app::model_preview::load::TagReader::new(&halo3), path).unwrap();
+            let flare = read_h3_flare(
+                &crate::app::model_preview::load::TagReader::new(&halo3),
+                path,
+            )
+            .unwrap();
             assert!(flare.curves.is_none());
-            assert!(matches!(flare.inner, FlareInner::Halved(_)), "{:?}", flare.inner);
+            assert!(
+                matches!(flare.inner, FlareInner::Halved(_)),
+                "{:?}",
+                flare.inner
+            );
         }
     }
 
@@ -679,13 +827,21 @@ mod tests {
                 ],
             ),
         ];
-        let directions = [OcclusionOffset::TowardViewer, OcclusionOffset::MarkerForward, OcclusionOffset::None];
+        let directions = [
+            OcclusionOffset::TowardViewer,
+            OcclusionOffset::MarkerForward,
+            OcclusionOffset::None,
+        ];
         for (game, paths) in kits {
             let Some(source) = crate::app::model_preview::harness::kit::kit_source(game) else {
                 continue;
             };
             for (path, direction) in paths.into_iter().zip(directions) {
-                let flare = read_h3_flare(&crate::app::model_preview::load::TagReader::new(&source), path).unwrap_or_else(|| panic!("{path}"));
+                let flare = read_h3_flare(
+                    &crate::app::model_preview::load::TagReader::new(&source),
+                    path,
+                )
+                .unwrap_or_else(|| panic!("{path}"));
                 assert_eq!(flare.occlusion_offset_direction, direction, "{path}");
             }
         }
@@ -693,9 +849,23 @@ mod tests {
 
     #[test]
     fn a_coronas_rotation_follows_the_eye_only_when_it_has_a_function() {
-        let view = ViewFrame { eye: [0.0; 3], forward: [1.0, 0.0, 0.0], right: [0.0, -1.0, 0.0], up: [0.0, 0.0, 1.0] };
-        assert_eq!(corona_rotation(0, 1.0, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], &view), 0.0);
-        let turned = corona_rotation(4, std::f32::consts::PI, [1.0, 0.0, 1.0], [0.0, 1.0, 0.0], &view);
+        let view = ViewFrame {
+            eye: [0.0; 3],
+            forward: [1.0, 0.0, 0.0],
+            right: [0.0, -1.0, 0.0],
+            up: [0.0, 0.0, 1.0],
+        };
+        assert_eq!(
+            corona_rotation(0, 1.0, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], &view),
+            0.0
+        );
+        let turned = corona_rotation(
+            4,
+            std::f32::consts::PI,
+            [1.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+            &view,
+        );
         assert!((turned - (1.0f32).atan2(-1.0)).abs() < 1e-5, "{turned}");
     }
 

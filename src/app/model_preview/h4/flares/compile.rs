@@ -6,13 +6,13 @@ use super::*;
 /// technique's `screen` pass draws every reflection.
 const LENS_FLARE: usize = 46;
 
-pub(crate) fn h4_flare_pass(reader: &TagReader) -> Result<super::super::super::gen3::shaders::Gen3Pass, String> {
+pub(crate) fn h4_flare_pass(
+    reader: &TagReader,
+) -> Result<super::super::super::gen3::shaders::Gen3Pass, String> {
     use crate::core::hlsl::emit::Stage;
-    let globals = reader.load("globals\\rasterizer_globals",
-        "rasterizer_globals",
-        b"rasg",
-    )
-    .map_err(|error| error.to_string())?;
+    let globals = reader
+        .load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg")
+        .map_err(|error| error.to_string())?;
     let explicit = elements(globals.root(), "explicit shaders");
     let entry = explicit.get(LENS_FLARE).ok_or("no explicit shader 46")?;
     let path = |field: &str| {

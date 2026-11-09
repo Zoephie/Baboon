@@ -3,21 +3,21 @@
 //! holograms), and its place in the gen3 pipeline (`render.rs`): its frame
 //! values and lighting, the passes of each, its bloom and composite.
 
-mod features;
-pub(in crate::app::model_preview) mod materials;
-pub(in crate::app::model_preview) mod effects;
-pub(in crate::app::model_preview) mod object;
 pub(in crate::app::model_preview) mod attached;
 pub(in crate::app::model_preview) mod bloom;
 pub(super) mod camo;
 pub(super) mod camo_pass;
 pub(in crate::app::model_preview) mod composite;
+pub(in crate::app::model_preview) mod effects;
+mod features;
 pub(super) mod flares;
 pub(in crate::app::model_preview) mod holograms;
-pub(super) mod lighting;
 pub(in crate::app::model_preview) mod light_pass;
-pub(in crate::app::model_preview) mod pass_hooks;
+pub(super) mod lighting;
 pub(super) mod lights;
+pub(in crate::app::model_preview) mod materials;
+pub(in crate::app::model_preview) mod object;
+pub(in crate::app::model_preview) mod pass_hooks;
 pub(in crate::app::model_preview) mod render;
 pub(super) mod shadow;
 pub(in crate::app::model_preview) mod shadow_pass;
@@ -35,7 +35,8 @@ pub(crate) struct H4Features {
     pub cheap_lights: Vec<super::h4::lights::H4CheapLight>,
     /// Explicit 187 and 204's screen-space passes, by (physically correct,
     /// technique).
-    pub light_passes: std::collections::BTreeMap<(bool, usize), std::sync::Arc<super::gen3::shaders::Gen3Pass>>,
+    pub light_passes:
+        std::collections::BTreeMap<(bool, usize), std::sync::Arc<super::gen3::shaders::Gen3Pass>>,
     /// Halo 4's attached `lens_flare`s, and explicit 46's pass that draws them.
     pub flares: Vec<super::h4::flares::H4FlareAt>,
     pub flare_pass: Option<std::sync::Arc<super::gen3::shaders::Gen3Pass>>,

@@ -20,16 +20,44 @@ impl CheapTexels {
         let image = bitmap.image(0)?;
         let format = image.format().ok()?;
         let (width, height) = (image.width(), image.height());
-        let top = image.pixel_bytes().ok()?.get(..format.level_bytes(width, height) as usize)?;
-        let rgba = blam_tags::bitmap::decode::decode_to_rgba8(format, width, height, top, bitmap.p8_palette()).ok()?;
-        Some(Self::of_bytes(width as usize, height as usize, &rgba, format.is_signed()))
+        let top = image
+            .pixel_bytes()
+            .ok()?
+            .get(..format.level_bytes(width, height) as usize)?;
+        let rgba = blam_tags::bitmap::decode::decode_to_rgba8(
+            format,
+            width,
+            height,
+            top,
+            bitmap.p8_palette(),
+        )
+        .ok()?;
+        Some(Self::of_bytes(
+            width as usize,
+            height as usize,
+            &rgba,
+            format.is_signed(),
+        ))
     }
 
     /// From the decoder's bytes, which bias a signed byte by 128.
     fn of_bytes(width: usize, height: usize, rgba: &[u8], signed: bool) -> Self {
-        let value = |byte: u8| if signed { ((f32::from(byte) - 128.0) / 127.0).max(-1.0) } else { f32::from(byte) / 255.0 };
-        let texels = rgba.chunks_exact(4).map(|texel| std::array::from_fn(|channel| value(texel[channel]))).collect();
-        Self { width, height, texels }
+        let value = |byte: u8| {
+            if signed {
+                ((f32::from(byte) - 128.0) / 127.0).max(-1.0)
+            } else {
+                f32::from(byte) / 255.0
+            }
+        };
+        let texels = rgba
+            .chunks_exact(4)
+            .map(|texel| std::array::from_fn(|channel| value(texel[channel])))
+            .collect();
+        Self {
+            width,
+            height,
+            texels,
+        }
     }
 
     /// `generate_random`: a point sample at `index · transform.xy +
@@ -38,10 +66,17 @@ impl CheapTexels {
         if self.width == 0 || self.height == 0 {
             return [0.0; 4];
         }
-        let (u, v) = (index * transform[0] + transform[2], index * transform[1] + transform[3]);
-        let column = ((u * self.width as f32).floor() as i64).rem_euclid(self.width as i64) as usize;
+        let (u, v) = (
+            index * transform[0] + transform[2],
+            index * transform[1] + transform[3],
+        );
+        let column =
+            ((u * self.width as f32).floor() as i64).rem_euclid(self.width as i64) as usize;
         let row = ((v * self.height as f32).floor() as i64).rem_euclid(self.height as i64) as usize;
-        self.texels.get(row * self.width + column).copied().unwrap_or([0.0; 4])
+        self.texels
+            .get(row * self.width + column)
+            .copied()
+            .unwrap_or([0.0; 4])
     }
 }
 
@@ -67,14 +102,26 @@ impl CheapRenderTexture {
                 let (across, down) = ((width >> level).max(1), (height >> level).max(1));
                 let mut rgba = Vec::new();
                 for layer in 0..layers {
-                    let bytes = super::super::super::materials::array_layer_bytes(&image, layer, level)?;
-                    let decoded = blam_tags::bitmap::decode::decode_to_rgba8(format, across, down, bytes, bitmap.p8_palette());
+                    let bytes =
+                        super::super::super::materials::array_layer_bytes(&image, layer, level)?;
+                    let decoded = blam_tags::bitmap::decode::decode_to_rgba8(
+                        format,
+                        across,
+                        down,
+                        bytes,
+                        bitmap.p8_palette(),
+                    );
                     rgba.extend(decoded.ok()?);
                 }
                 Some(rgba)
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(Self { width: width as usize, height: height as usize, layers: layers as usize, levels })
+        Some(Self {
+            width: width as usize,
+            height: height as usize,
+            layers: layers as usize,
+            levels,
+        })
     }
 }
 
@@ -109,7 +156,9 @@ impl CheapTypeTag {
     fn read(element: TagStruct<'_>) -> Self {
         let real = |name: &str| element.read_real(name).unwrap_or(0.0);
         let color = match element.field("color0").and_then(|field| field.value()) {
-            Some(TagFieldData::RealArgbColor(color)) => [color.red, color.green, color.blue, color.alpha],
+            Some(TagFieldData::RealArgbColor(color)) => {
+                [color.red, color.green, color.blue, color.alpha]
+            }
             _ => [0.0; 4],
         };
         let index = |name: &str| element.read_int_any(name).map_or(-1, |index| index as i64);
@@ -121,7 +170,9 @@ impl CheapTypeTag {
             elasticity: real("elasticity"),
             death: real("death"),
             change: index("change type"),
-            velocity_facing: element.field("orientation").is_some_and(|field| field.enum_is("velocity")),
+            velocity_facing: element
+                .field("orientation")
+                .is_some_and(|field| field.enum_is("velocity")),
             color,
             intensity: real("intensity0"),
             fade_start: real("fade start"),
@@ -146,7 +197,10 @@ impl CheapTypeTag {
     /// row 3. No Halo 4 tool was at hand; the kit's shipped type texture
     /// agrees (`kit_halo_4s_type_table_matches_the_shipped_type_texture`).
     pub(super) fn compiled(&self, own: usize, textures: usize, halo4: bool) -> CheapType {
-        let texture = usize::try_from(self.texture).ok().filter(|texture| *texture < textures).unwrap_or(0);
+        let texture = usize::try_from(self.texture)
+            .ok()
+            .filter(|texture| *texture < textures)
+            .unwrap_or(0);
         let change = usize::try_from(self.change).unwrap_or(own) as f32;
         let fade = (1.0 - self.fade_start).clamp(1e-4, 1.0).recip();
         let facing = if self.velocity_facing { 1.0 } else { -1.0 };
@@ -162,7 +216,9 @@ impl CheapTypeTag {
             rows[FADE] = [0.0, 0.0, 0.0, fade];
             return CheapType { rows, texture };
         }
-        let turbulence = usize::try_from(self.turbulence_type).unwrap_or(0).min(MOST_TURBULENCE_TYPES - 1);
+        let turbulence = usize::try_from(self.turbulence_type)
+            .unwrap_or(0)
+            .min(MOST_TURBULENCE_TYPES - 1);
         let array = (turbulence as f32 + 0.5) / MOST_TURBULENCE_TYPES as f32;
         rows[PHYSICS] = [self.drag, self.gravity, self.turbulence, array];
         rows[COLLISION] = [self.depth_range, self.elasticity, self.death, change];
@@ -190,7 +246,9 @@ pub(super) const MOST_TURBULENCE_TYPES: usize = 8;
 /// The two agree only for type 0; past it the transform is another type's
 /// (type 1 and 3 take 0 and 1), as the game has it.
 pub(super) fn turbulence_of(place: f32) -> (usize, usize) {
-    let layer = (place * MOST_TURBULENCE_TYPES as f32 - 0.5).round().max(0.0) as usize;
+    let layer = (place * MOST_TURBULENCE_TYPES as f32 - 0.5)
+        .round()
+        .max(0.0) as usize;
     (layer, (4.0 * place).max(0.0) as usize)
 }
 
@@ -207,10 +265,13 @@ pub(super) struct CheapTurbulence {
 
 impl CheapTurbulence {
     fn read(reader: &TagReader, holder: TagStruct<'_>, centered: bool) -> Option<Self> {
-        let path = holder.read_tag_ref_path("turbulence").filter(|path| !path.is_empty())?;
+        let path = holder
+            .read_tag_ref_path("turbulence")
+            .filter(|path| !path.is_empty())?;
         Some(Self {
             texels: CheapTexels::read(reader, &path)?,
-            rates: ["turb du dt", "turb dv dt", "turb du dp", "turb dv dp"].map(|name| holder.read_real(name).unwrap_or(0.0)),
+            rates: ["turb du dt", "turb dv dt", "turb du dp", "turb dv dp"]
+                .map(|name| holder.read_real(name).unwrap_or(0.0)),
             centered,
         })
     }
@@ -218,7 +279,11 @@ impl CheapTurbulence {
     /// The push at ring slot `index`, by `transform`.
     pub(super) fn push(&self, index: usize, transform: [f32; 4]) -> [f32; 4] {
         let sample = self.texels.generate(index as f32, transform);
-        if self.centered { sample.map(|value| value * 2.0 - 1.0) } else { sample }
+        if self.centered {
+            sample.map(|value| value * 2.0 - 1.0)
+        } else {
+            sample
+        }
     }
 }
 
@@ -240,7 +305,9 @@ pub(crate) struct CheapLibrary {
 
 impl CheapLibrary {
     pub(super) fn read(reader: &TagReader, path: &str) -> Option<Self> {
-        let tag = reader.load(path, "cheap_particle_type_library", b"cptl").ok()?;
+        let tag = reader
+            .load(path, "cheap_particle_type_library", b"cptl")
+            .ok()?;
         let root = tag.root();
         let textures = elements(root, "textures").len();
         let types = elements(root, "types");
@@ -251,12 +318,18 @@ impl CheapLibrary {
         // so each type's own map stands in [inferred].
         let turbulence: Vec<CheapTurbulence> = if halo4 {
             let kinds = elements(root, "turbulence types");
-            kinds.iter().map(|kind| CheapTurbulence::read(reader, *kind, true)).collect::<Option<_>>()?
+            kinds
+                .iter()
+                .map(|kind| CheapTurbulence::read(reader, *kind, true))
+                .collect::<Option<_>>()?
         } else {
             vec![CheapTurbulence::read(reader, root, false)?]
         };
         Some(Self {
-            names: types.iter().map(|element| element.read_string_id("name").unwrap_or_default()).collect(),
+            names: types
+                .iter()
+                .map(|element| element.read_string_id("name").unwrap_or_default())
+                .collect(),
             types: types
                 .iter()
                 .enumerate()
@@ -272,7 +345,9 @@ impl CheapLibrary {
     /// Row `row` of type `kind`. The texture is 256 types wide, and a type
     /// past the library's reads nothing.
     pub(super) fn row(&self, kind: usize, row: usize) -> [f32; 4] {
-        self.types.get(kind).map_or([0.0; 4], |found| found.rows[row])
+        self.types
+            .get(kind)
+            .map_or([0.0; 4], |found| found.rows[row])
     }
 
     pub(crate) fn render_texture(&self) -> Option<&CheapRenderTexture> {

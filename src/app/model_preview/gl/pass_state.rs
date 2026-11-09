@@ -67,7 +67,12 @@ impl PassState {
         source_alpha: u32,
         destination_alpha: u32,
     ) -> Self {
-        self.with(StateCall::BlendFuncSeparate(source, destination, source_alpha, destination_alpha))
+        self.with(StateCall::BlendFuncSeparate(
+            source,
+            destination,
+            source_alpha,
+            destination_alpha,
+        ))
     }
 
     pub(in crate::app::model_preview) fn color_mask(self, mask: [bool; 4]) -> Self {
@@ -86,11 +91,18 @@ impl PassState {
         self.with(StateCall::UseProgram(Some(program)))
     }
 
-    pub(in crate::app::model_preview) fn bind_vertex_array(self, array: glow::NativeVertexArray) -> Self {
+    pub(in crate::app::model_preview) fn bind_vertex_array(
+        self,
+        array: glow::NativeVertexArray,
+    ) -> Self {
         self.with(StateCall::BindVertexArray(Some(array)))
     }
 
-    pub(in crate::app::model_preview) fn bind_buffer(self, target: u32, buffer: glow::NativeBuffer) -> Self {
+    pub(in crate::app::model_preview) fn bind_buffer(
+        self,
+        target: u32,
+        buffer: glow::NativeBuffer,
+    ) -> Self {
         self.with(StateCall::BindBuffer(target, Some(buffer)))
     }
 
@@ -98,7 +110,11 @@ impl PassState {
         self.with(StateCall::ActiveTexture(unit))
     }
 
-    pub(in crate::app::model_preview) fn bind_texture(self, target: u32, texture: Option<glow::NativeTexture>) -> Self {
+    pub(in crate::app::model_preview) fn bind_texture(
+        self,
+        target: u32,
+        texture: Option<glow::NativeTexture>,
+    ) -> Self {
         self.with(StateCall::BindTexture(target, texture))
     }
 
@@ -110,11 +126,18 @@ impl PassState {
         self.with(StateCall::PolygonOffset(factor, units))
     }
 
-    pub(in crate::app::model_preview) fn blend_color(self, [red, green, blue, alpha]: [f32; 4]) -> Self {
+    pub(in crate::app::model_preview) fn blend_color(
+        self,
+        [red, green, blue, alpha]: [f32; 4],
+    ) -> Self {
         self.with(StateCall::BlendColor([red, green, blue, alpha]))
     }
 
-    pub(in crate::app::model_preview) fn uniform_1_i32(self, location: Option<glow::NativeUniformLocation>, value: i32) -> Self {
+    pub(in crate::app::model_preview) fn uniform_1_i32(
+        self,
+        location: Option<glow::NativeUniformLocation>,
+        value: i32,
+    ) -> Self {
         self.with(StateCall::Uniform1i(location, value))
     }
 
@@ -128,13 +151,22 @@ impl PassState {
         texture: Option<glow::NativeTexture>,
         location: Option<glow::NativeUniformLocation>,
     ) -> Self {
-        self.active_texture(glow::TEXTURE0 + unit).bind_texture(target, texture).uniform_1_i32(location, unit as i32)
+        self.active_texture(glow::TEXTURE0 + unit)
+            .bind_texture(target, texture)
+            .uniform_1_i32(location, unit as i32)
     }
 
     /// `texture` bound to `target` on `unit`, then unit 0 active again: how
     /// a pass binds a map beside the one on unit 0.
-    pub(in crate::app::model_preview) fn texture_on(self, unit: u32, target: u32, texture: Option<glow::NativeTexture>) -> Self {
-        self.active_texture(unit).bind_texture(target, texture).active_texture(glow::TEXTURE0)
+    pub(in crate::app::model_preview) fn texture_on(
+        self,
+        unit: u32,
+        target: u32,
+        texture: Option<glow::NativeTexture>,
+    ) -> Self {
+        self.active_texture(unit)
+            .bind_texture(target, texture)
+            .active_texture(glow::TEXTURE0)
     }
 
     /// Faces culled as the model shows them, the back face named: off with
@@ -143,7 +175,8 @@ impl PassState {
         if show_backfaces {
             self.disable(glow::CULL_FACE)
         } else {
-            self.enable(glow::CULL_FACE).with(StateCall::CullFace(glow::BACK))
+            self.enable(glow::CULL_FACE)
+                .with(StateCall::CullFace(glow::BACK))
         }
     }
 
@@ -172,10 +205,17 @@ impl PassState {
                     StateCall::Disable(capability) => gl.disable(capability),
                     StateCall::BlendEquation(mode) => gl.blend_equation(mode),
                     StateCall::BlendFunc(source, destination) => gl.blend_func(source, destination),
-                    StateCall::BlendFuncSeparate(source, destination, source_alpha, destination_alpha) => {
+                    StateCall::BlendFuncSeparate(
+                        source,
+                        destination,
+                        source_alpha,
+                        destination_alpha,
+                    ) => {
                         gl.blend_func_separate(source, destination, source_alpha, destination_alpha)
                     }
-                    StateCall::ColorMask([red, green, blue, alpha]) => gl.color_mask(red, green, blue, alpha),
+                    StateCall::ColorMask([red, green, blue, alpha]) => {
+                        gl.color_mask(red, green, blue, alpha)
+                    }
                     StateCall::DepthMask(write) => gl.depth_mask(write),
                     StateCall::DepthFunc(function) => gl.depth_func(function),
                     StateCall::CullFace(face) => gl.cull_face(face),
@@ -185,8 +225,12 @@ impl PassState {
                     StateCall::ActiveTexture(unit) => gl.active_texture(unit),
                     StateCall::BindTexture(target, texture) => gl.bind_texture(target, texture),
                     StateCall::PolygonOffset(factor, units) => gl.polygon_offset(factor, units),
-                    StateCall::BlendColor([red, green, blue, alpha]) => gl.blend_color(red, green, blue, alpha),
-                    StateCall::Uniform1i(location, value) => gl.uniform_1_i32(location.as_ref(), value),
+                    StateCall::BlendColor([red, green, blue, alpha]) => {
+                        gl.blend_color(red, green, blue, alpha)
+                    }
+                    StateCall::Uniform1i(location, value) => {
+                        gl.uniform_1_i32(location.as_ref(), value)
+                    }
                 }
             }
         }
@@ -199,7 +243,11 @@ mod tests {
 
     #[test]
     fn a_state_keeps_its_calls_in_the_order_they_were_named() {
-        let state = PassState::new().depth_mask(false).enable(glow::BLEND).cull_back_unless(false).culling_unless(true);
+        let state = PassState::new()
+            .depth_mask(false)
+            .enable(glow::BLEND)
+            .cull_back_unless(false)
+            .culling_unless(true);
         assert_eq!(
             state.calls(),
             [
@@ -210,13 +258,19 @@ mod tests {
                 StateCall::Disable(glow::CULL_FACE),
             ]
         );
-        assert_eq!(PassState::new().culling_unless(false).calls(), [StateCall::Enable(glow::CULL_FACE)], "no face named");
+        assert_eq!(
+            PassState::new().culling_unless(false).calls(),
+            [StateCall::Enable(glow::CULL_FACE)],
+            "no face named"
+        );
     }
 
     #[test]
     fn a_sampler_binds_its_texture_then_sets_its_unit() {
         assert_eq!(
-            PassState::new().sampler(3, glow::TEXTURE_3D, None, None).calls(),
+            PassState::new()
+                .sampler(3, glow::TEXTURE_3D, None, None)
+                .calls(),
             [
                 StateCall::ActiveTexture(glow::TEXTURE3),
                 StateCall::BindTexture(glow::TEXTURE_3D, None),
@@ -228,7 +282,9 @@ mod tests {
     #[test]
     fn a_texture_on_another_unit_leaves_unit_0_active() {
         assert_eq!(
-            PassState::new().texture_on(glow::TEXTURE2, glow::TEXTURE_3D, None).calls(),
+            PassState::new()
+                .texture_on(glow::TEXTURE2, glow::TEXTURE_3D, None)
+                .calls(),
             [
                 StateCall::ActiveTexture(glow::TEXTURE2),
                 StateCall::BindTexture(glow::TEXTURE_3D, None),

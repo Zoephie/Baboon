@@ -12,17 +12,17 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::has_flag;
-use super::super::common::view::posed_on;
-use super::super::functions::FunctionValues;
 use super::super::common::named_function::{NamedFunction, tag_function_at};
+use super::super::common::view::posed_on;
 use super::super::effects::part_markers;
+use super::super::functions::FunctionValues;
 use super::super::reach::lights::object_value;
 use super::super::*;
-use crate::app::model_preview::common::math::{cross, unit_unless_under_micro};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
+use crate::app::model_preview::common::marker::MarkerFrame;
+use crate::app::model_preview::common::math::{cross, unit_unless_under_micro};
 
 pub(super) const SMALLEST: f32 = 1e-4;
 /// An attached light's datum `+20`, which `light_new_attached` (X360
@@ -549,7 +549,15 @@ pub(crate) fn read_h4_lights(
     let cheap_group = u32::from_be_bytes(*b"gldf");
     let mut light_tags: HashMap<String, Option<Arc<H4LightTag>>> = HashMap::new();
     for attachment in object_attachments(object, &[light_group, cheap_group]) {
-        let ObjectAttachment { group, path, marker: name, scale_by, secondary_by, change_color, force_on } = attachment;
+        let ObjectAttachment {
+            group,
+            path,
+            marker: name,
+            scale_by,
+            secondary_by,
+            change_color,
+            force_on,
+        } = attachment;
         if group == light_group {
             let tag = light_tags
                 .entry(path.clone())
@@ -608,7 +616,9 @@ fn read_cheap_light(reader: &TagReader, path: &str) -> Option<H4CheapLight> {
         scale_by: String::new(),
         secondary_by: String::new(),
         change_color: None,
-        on_time: root.field("function input").is_none_or(|input| input.enum_is("time/age")),
+        on_time: root
+            .field("function input")
+            .is_none_or(|input| input.enum_is("time/age")),
         color: function("color")?,
         intensity: function("intensity")?,
         falloff_end: function("Falloff End")?,
@@ -668,7 +678,9 @@ mod tests {
     /// The Marines' monocle light, colour 0 in the kit, never draws.
     #[test]
     fn the_forge_light_draws_and_the_monocle_light_does_not() {
-        let Some(source) = kit_source(GameId::Halo4) else { return };
+        let Some(source) = kit_source(GameId::Halo4) else {
+            return;
+        };
         let forge = read_light_tag(
             &crate::app::model_preview::load::TagReader::new(&source),
             "objects\\levels\\forge\\ff_light_white\\ff_light_white",
@@ -685,8 +697,11 @@ mod tests {
             "{}",
             lit.outer
         );
-        let monocle =
-            read_light_tag(&crate::app::model_preview::load::TagReader::new(&source), "objects\\characters\\marine\\fx\\monocle_light").unwrap();
+        let monocle = read_light_tag(
+            &crate::app::model_preview::load::TagReader::new(&source),
+            "objects\\characters\\marine\\fx\\monocle_light",
+        )
+        .unwrap();
         assert!(
             attached(monocle)
                 .lit(None, &[[1.0; 3]; 4], None, 0.0, [3.0, 0.0, 0.0])
@@ -708,11 +723,16 @@ mod tests {
     /// the way out.
     #[test]
     fn the_jackal_eye_light_runs_on_its_scale() {
-        let Some(source) = kit_source(GameId::Halo4) else { return };
+        let Some(source) = kit_source(GameId::Halo4) else {
+            return;
+        };
         let light = H4CheapLight {
             scale_by: "alive".to_owned(),
-            ..read_cheap_light(&crate::app::model_preview::load::TagReader::new(&source), "objects\\characters\\storm_jackal\\fx\\sniper_eye")
-                .unwrap()
+            ..read_cheap_light(
+                &crate::app::model_preview::load::TagReader::new(&source),
+                "objects\\characters\\storm_jackal\\fx\\sniper_eye",
+            )
+            .unwrap()
         };
         assert!(!light.on_time);
         assert!(

@@ -1,8 +1,8 @@
 //! The game table: what each game's renderer is handed per frame, the trait it implements, and the route from a preview to its game.
 
+use super::super::gen3::render::Gen3Pipeline;
 use super::*;
 use eframe::glow;
-use super::super::gen3::render::Gen3Pipeline;
 
 /// What a game's drawing is handed each frame.
 pub(in crate::app::model_preview) struct FrameCx<'a> {
@@ -29,7 +29,13 @@ pub(in crate::app::model_preview) trait GameRender {
     /// Each simulation the game keeps for `slot` while it holds its `uploads`th
     /// model, by name: what the G-sim gate reads.
     #[cfg(test)]
-    fn each_simulation(&self, _slot: usize, _uploads: u64, _visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {}
+    fn each_simulation(
+        &self,
+        _slot: usize,
+        _uploads: u64,
+        _visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug),
+    ) {
+    }
 }
 
 /// Each game's drawing, by the game a preview is from.
@@ -45,8 +51,19 @@ pub(super) struct GameRenders {
 impl GameRenders {
     /// Each game's own simulations for `slot`.
     #[cfg(test)]
-    pub(super) fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
-        let Self { plain, dx9, h3, reach, h4 } = self;
+    pub(super) fn each_simulation(
+        &self,
+        slot: usize,
+        uploads: u64,
+        visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug),
+    ) {
+        let Self {
+            plain,
+            dx9,
+            h3,
+            reach,
+            h4,
+        } = self;
         for game in [plain as &dyn GameRender, dx9, h3, reach, h4] {
             game.each_simulation(slot, uploads, visit);
         }
@@ -66,7 +83,10 @@ impl GameRenders {
 
 /// The flare images a game uploads after Halo 3's and Reach's in the slot's,
 /// by the drawing its preview goes to.
-pub(super) unsafe fn game_flare_images(gl: &glow::Context, frame: &ModelGpuFrame) -> Vec<Vec<Option<glow::NativeTexture>>> {
+pub(super) unsafe fn game_flare_images(
+    gl: &glow::Context,
+    frame: &ModelGpuFrame,
+) -> Vec<Vec<Option<glow::NativeTexture>>> {
     match Route::of(&frame.preview) {
         Route::Halo4 => unsafe { h4::flares::pass::h4_flare_images(gl, frame) },
         _ => Vec::new(),
@@ -110,15 +130,29 @@ mod tests {
     fn a_preview_routes_by_its_game_then_its_generation() {
         use blam_tags::game::Game;
         let route = |game: Option<GameId>, generation: Option<Game>| {
-            Route::of(&RenderModelPreview { game, generation, ..Default::default() })
+            Route::of(&RenderModelPreview {
+                game,
+                generation,
+                ..Default::default()
+            })
         };
         assert_eq!(route(Some(GameId::Halo3), Some(Game::Halo3)), Route::Halo3);
-        assert_eq!(route(Some(GameId::Halo3Odst), Some(Game::Halo3)), Route::Halo3);
-        assert_eq!(route(Some(GameId::HaloReach), Some(Game::Halo3)), Route::Reach);
+        assert_eq!(
+            route(Some(GameId::Halo3Odst), Some(Game::Halo3)),
+            Route::Halo3
+        );
+        assert_eq!(
+            route(Some(GameId::HaloReach), Some(Game::Halo3)),
+            Route::Reach
+        );
         assert_eq!(route(Some(GameId::Halo4), Some(Game::Halo3)), Route::Halo4);
         assert_eq!(route(Some(GameId::HaloCe), Some(Game::Halo1)), Route::Dx9);
         assert_eq!(route(Some(GameId::Halo2), Some(Game::Halo2)), Route::Dx9);
-        assert_eq!(route(None, Some(Game::Halo3)), Route::Halo3, "a gen3 tag of no game, as Halo 3's");
+        assert_eq!(
+            route(None, Some(Game::Halo3)),
+            Route::Halo3,
+            "a gen3 tag of no game, as Halo 3's"
+        );
         assert_eq!(route(None, None), Route::Plain, "geometry no tag gave");
     }
 
@@ -128,10 +162,20 @@ mod tests {
     #[test]
     fn a_halo_ce_frame_forgets_its_running_events_before_it_finds_a_slot() {
         use super::super::super::ce::draw::{CE_EVENTS_RUNNING, ce_events_running};
-        let preview = RenderModelPreview { game: Some(GameId::HaloCe), ..Default::default() };
+        let preview = RenderModelPreview {
+            game: Some(GameId::HaloCe),
+            ..Default::default()
+        };
         let data = model_preview_data(String::new(), String::new(), preview, Vec::new());
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(64.0, 64.0));
-        let frame = build_frame(&data, &ModelPreviewState::default(), rect, 0.0, [0.0; 3], &[]);
+        let frame = build_frame(
+            &data,
+            &ModelPreviewState::default(),
+            rect,
+            0.0,
+            [0.0; 3],
+            &[],
+        );
         CE_EVENTS_RUNNING.with(|running| running.borrow_mut().insert(frame.geometry_id));
         assert!(ce_events_running(frame.geometry_id));
         GameRenders::default().of(&frame).begin(&frame);

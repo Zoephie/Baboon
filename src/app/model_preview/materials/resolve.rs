@@ -65,19 +65,39 @@ pub(crate) fn resolve_model_textures(
 /// takes its passes. So do its damage shaders, which take their turn over the
 /// object; a hologram shader's bloom passes go to the frame's bloom with the
 /// rest. A held weapon is an object of its own, without them.
-pub(super) fn share_object_layers(materials: &[RenderModelPreviewMaterial], textures: &mut [MaterialTextures]) {
+pub(super) fn share_object_layers(
+    materials: &[RenderModelPreviewMaterial],
+    textures: &mut [MaterialTextures],
+) {
     let transparent = Dx9Layer::Transparent as usize;
     let bloom = Dx9Layer::Bloom as usize;
     if let Some(overlay) = materials.iter().position(|material| material.overlay) {
         let passes = std::mem::take(&mut textures[overlay].h2_layers[transparent]);
-        share_with_object(materials, textures, materials[overlay].object, Dx9Layer::Hologram as usize, &passes);
+        share_with_object(
+            materials,
+            textures,
+            materials[overlay].object,
+            Dx9Layer::Hologram as usize,
+            &passes,
+        );
     }
-    for (layer, from) in
-        [(Dx9Layer::ShieldDamaged, transparent), (Dx9Layer::Overshield, transparent), (Dx9Layer::HologramBloom, bloom)]
-    {
-        if let Some(owner) = materials.iter().position(|material| material.shield == Some(layer)) {
+    for (layer, from) in [
+        (Dx9Layer::ShieldDamaged, transparent),
+        (Dx9Layer::Overshield, transparent),
+        (Dx9Layer::HologramBloom, bloom),
+    ] {
+        if let Some(owner) = materials
+            .iter()
+            .position(|material| material.shield == Some(layer))
+        {
             let passes = std::mem::take(&mut textures[owner].h2_layers[from]);
-            share_with_object(materials, textures, materials[owner].object, layer as usize, &passes);
+            share_with_object(
+                materials,
+                textures,
+                materials[owner].object,
+                layer as usize,
+                &passes,
+            );
         }
     }
 }
@@ -110,7 +130,9 @@ fn resolve_one_material(
         .as_ref()
         .and_then(|names| names.name_for(material.shader_group))
         .map(str::to_owned)
-        .or_else(|| blam_tags::paths::group_tag_to_extension(material.shader_group).map(str::to_owned));
+        .or_else(|| {
+            blam_tags::paths::group_tag_to_extension(material.shader_group).map(str::to_owned)
+        });
     let Some(extension) = extension else {
         return MaterialTextures::failed(format!(
             "unknown shader group {:?}",
@@ -118,18 +140,17 @@ fn resolve_one_material(
         ));
     };
     let group = material.shader_group.to_be_bytes();
-    let shader =
-        match reader.load(&material.shader_path, &extension, &group) {
-            Ok(tag) => tag,
-            Err(error) => return MaterialTextures::failed(error.to_string()),
-        };
+    let shader = match reader.load(&material.shader_path, &extension, &group) {
+        Ok(tag) => tag,
+        Err(error) => return MaterialTextures::failed(error.to_string()),
+    };
     if group == *b"mat " {
         return super::super::h4::materials::resolve_h4_material(reader, &shader, caches);
     }
     match blam_tags::game::Game::of(&shader) {
         blam_tags::game::Game::Halo1 => {
             return resolve_ce_shader(reader, &shader, group, material.permutation, caches);
-        },
+        }
         blam_tags::game::Game::Halo2 if group == *b"shad" => {
             return resolve_h2_shader(reader, &shader, caches);
         }
@@ -147,12 +168,22 @@ fn resolve_one_material(
     // the detail maps' tiling is exactly such a value. It is not required
     // though: a definition that will not parse still leaves every explicitly
     // authored bitmap working, which is nearly all of them.
-    let definition = cached_render_method_definition(&reader.source, &render_method.definition_path, &mut caches.definitions);
+    let definition = cached_render_method_definition(
+        &reader.source,
+        &render_method.definition_path,
+        &mut caches.definitions,
+    );
     if let Some(definition) = &definition
         && reader.source.game() == Some(GameId::HaloReach)
     {
         reach_version_update(&mut render_method, definition);
-        let reference = reach_reference(reader, &render_method, &material.shader_path, definition, &mut caches.references);
+        let reference = reach_reference(
+            reader,
+            &render_method,
+            &material.shader_path,
+            definition,
+            &mut caches.references,
+        );
         render_method.apply_reference_shader(definition, reference.as_deref());
     }
     let resolved = definition.map(|definition| {
@@ -164,12 +195,19 @@ fn resolve_one_material(
         })
     });
 
-    let shield_only = render_method.flags.contains(blam_tags::render_method::GlobalRenderMethodFlags::OnlyRenderForShields);
-    let never_shield = render_method.flags.contains(blam_tags::render_method::GlobalRenderMethodFlags::NeverRenderForShields);
+    let shield_only = render_method
+        .flags
+        .contains(blam_tags::render_method::GlobalRenderMethodFlags::OnlyRenderForShields);
+    let never_shield = render_method
+        .flags
+        .contains(blam_tags::render_method::GlobalRenderMethodFlags::NeverRenderForShields);
     let values = Values {
         resolved: resolved.as_ref(),
         method: &render_method,
-        sort_layer: shader.root().descend("render_method").map_or(2, super::super::particles::gen3_sort_layer),
+        sort_layer: shader
+            .root()
+            .descend("render_method")
+            .map_or(2, super::super::particles::gen3_sort_layer),
     };
     let mut textures = MaterialTextures {
         used_shader_parameters_only: resolved.is_none(),
@@ -210,7 +248,12 @@ fn resolve_one_material(
 }
 
 /// Decode a map in the shape its sampler asks for.
-pub(in crate::app::model_preview) fn decode_image(reader: &TagReader, path: &str, kind: SamplerKind, index: usize) -> Option<Image> {
+pub(in crate::app::model_preview) fn decode_image(
+    reader: &TagReader,
+    path: &str,
+    kind: SamplerKind,
+    index: usize,
+) -> Option<Image> {
     let tag = reader.load(path, "bitmap", b"bitm").ok()?;
     if kind == SamplerKind::Texture2D {
         let image = decode_thumbnail(&tag, index, MAX_TEXTURE_EDGE).ok()?;
@@ -237,7 +280,10 @@ pub(in crate::app::model_preview) fn decode_image(reader: &TagReader, path: &str
         }
         let face = |index: usize| decode(image.cube_face_bytes(index as u32).ok()?);
         let faces = [face(0)?, face(1)?, face(2)?, face(3)?, face(4)?, face(5)?];
-        return Some(Image::Cube { size: width as usize, faces });
+        return Some(Image::Cube {
+            size: width as usize,
+            faces,
+        });
     }
     let depth = image.depth() as usize;
     let mut rgba = Vec::new();
@@ -249,7 +295,12 @@ pub(in crate::app::model_preview) fn decode_image(reader: &TagReader, path: &str
         };
         rgba.extend(decode(slice)?);
     }
-    Some(Image::Volume { width: width as usize, height: height as usize, depth, rgba })
+    Some(Image::Volume {
+        width: width as usize,
+        height: height as usize,
+        depth,
+        rgba,
+    })
 }
 
 /// One layer of a texture array at mip `level`. Each layer keeps its whole
@@ -266,5 +317,8 @@ pub(in crate::app::model_preview) fn array_layer_bytes<'a>(
     let before = format.surface_bytes(width, height, level);
     let size = format.level_bytes((width >> level).max(1), (height >> level).max(1));
     let start = usize::try_from(layer as u64 * chain + before).ok()?;
-    image.pixel_bytes().ok()?.get(start..start.checked_add(size as usize)?)
+    image
+        .pixel_bytes()
+        .ok()?
+        .get(start..start.checked_add(size as usize)?)
 }

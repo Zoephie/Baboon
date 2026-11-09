@@ -1,8 +1,8 @@
 //! The main model program: its GLSL for each dialect, the vertex layout and the linker that binds its attributes.
 
-use super::*;
 use super::super::gl::glsl::fill;
 use super::super::gl::link::link;
+use super::*;
 use eframe::glow;
 
 /// GPU skinning bone budget: three vec4 uniform rows per bone. Halo node
@@ -27,7 +27,11 @@ pub(super) const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
 /// modern source before its `main`.
 pub(in crate::app::model_preview) fn model_vertex_prelude(version_declaration: &str) -> String {
     let (vertex, _) = model_shader_sources(version_declaration, true, "");
-    vertex.split("void main()").next().unwrap_or_default().to_owned()
+    vertex
+        .split("void main()")
+        .next()
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// Build the two GLSL sources.
@@ -165,7 +169,10 @@ pub(in crate::app::model_preview) unsafe fn link_h2_program(
         }
         attributes.push((PRT_CLUSTER_ATTRIBUTE, "a_prt_cluster"));
         attributes.push((PRT_WEIGHTS_ATTRIBUTE, "a_prt_weights"));
-        let stages = [(glow::VERTEX_SHADER, vertex_source), (glow::FRAGMENT_SHADER, fragment_source)];
+        let stages = [
+            (glow::VERTEX_SHADER, vertex_source),
+            (glow::FRAGMENT_SHADER, fragment_source),
+        ];
         link(gl, &stages, &attributes).map_err(|error| format!("Halo 2 pass: {error}"))
     }
 }
@@ -196,7 +203,11 @@ mod tests {
 
     #[test]
     fn every_shader_dialect_compiles_under_glslang() {
-        if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
+        if std::process::Command::new("glslangValidator")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
             eprintln!("skipping: glslangValidator is not on PATH (brew install glslang)");
             return;
         }

@@ -119,7 +119,11 @@ pub(in crate::app) struct Dx9Pass {
 impl Dx9Pass {
     /// The kit's generated source for this pass's implementation.
     pub(in crate::app) fn pixel_shader_file(&self) -> String {
-        format!("{}_{}.psh", self.path.replace(['\\', '/'], "_"), self.implementation)
+        format!(
+            "{}_{}.psh",
+            self.path.replace(['\\', '/'], "_"),
+            self.implementation
+        )
     }
 }
 
@@ -190,7 +194,11 @@ pub(crate) struct Dx9DrawPass {
 
 impl Dx9DrawPass {
     /// A pass with nothing bound, its stage's values and textures to fill.
-    pub(in crate::app::model_preview) fn new(stage: Dx9VertexStage, fragment: String, depth: Dx9Depth) -> Self {
+    pub(in crate::app::model_preview) fn new(
+        stage: Dx9VertexStage,
+        fragment: String,
+        depth: Dx9Depth,
+    ) -> Self {
         Self {
             stage,
             fragment,
@@ -222,25 +230,43 @@ impl Dx9DrawPass {
 
     /// Whether this pass looks different from one moment to the next.
     pub(crate) fn moves(&self) -> bool {
-        self.animated_constants.iter().flat_map(|(_, _, animations)| animations)
+        self.animated_constants
+            .iter()
+            .flat_map(|(_, _, animations)| animations)
             .chain(self.animated_rows.iter().flat_map(|row| &row.animations))
-            .chain(self.animated_row_values.iter().flat_map(|(_, _, animations)| animations))
+            .chain(
+                self.animated_row_values
+                    .iter()
+                    .flat_map(|(_, _, animations)| animations),
+            )
             .chain(self.animated_tints())
             .any(H2Animation::moves)
-            || self.ce_animation.as_ref().is_some_and(|animation| animation.moves())
+            || self
+                .ce_animation
+                .as_ref()
+                .is_some_and(|animation| animation.moves())
     }
 
     /// Whether it moves by itself while `outputs` hold.
     pub(crate) fn moves_with(&self, outputs: &[f32; 4]) -> bool {
-        self.ce_animation.as_ref().is_some_and(|animation| animation.moves_with(outputs))
+        self.ce_animation
+            .as_ref()
+            .is_some_and(|animation| animation.moves_with(outputs))
     }
 
     /// The object functions its animations read.
     pub(crate) fn function_inputs(&self) -> impl Iterator<Item = &str> {
-        let constants = self.animated_constants.iter().flat_map(|(_, _, animations)| animations);
+        let constants = self
+            .animated_constants
+            .iter()
+            .flat_map(|(_, _, animations)| animations);
         constants
             .chain(self.animated_rows.iter().flat_map(|row| &row.animations))
-            .chain(self.animated_row_values.iter().flat_map(|(_, _, animations)| animations))
+            .chain(
+                self.animated_row_values
+                    .iter()
+                    .flat_map(|(_, _, animations)| animations),
+            )
             .chain(self.animated_tints())
             .flat_map(|animation| [&animation.held_input, &animation.range_input])
             .filter_map(|input| input.as_ref().map(|(name, _)| name.as_str()))
@@ -249,12 +275,21 @@ impl Dx9DrawPass {
     /// Whether it changes with the object's outputs.
     pub(crate) fn reads_outputs(&self) -> bool {
         self.numeric.is_some()
-            || self.ce_animation.as_ref().is_some_and(|animation| animation.reads_outputs())
+            || self
+                .ce_animation
+                .as_ref()
+                .is_some_and(|animation| animation.reads_outputs())
     }
 
-    pub(crate) fn texture_rows_at(&self, clock: H2Clock<'_>, outputs: &[f32; 4]) -> [[f32; 4]; H2_TEXTURE_ROWS] {
+    pub(crate) fn texture_rows_at(
+        &self,
+        clock: H2Clock<'_>,
+        outputs: &[f32; 4],
+    ) -> [[f32; 4]; H2_TEXTURE_ROWS] {
         let mut rows = self.texture_rows;
-        self.animated_rows.iter().for_each(|row| row.apply(&mut rows, clock));
+        self.animated_rows
+            .iter()
+            .for_each(|row| row.apply(&mut rows, clock));
         for (row, channel, animations) in &self.animated_row_values {
             if let Some(vector) = animated_vector(animations, clock) {
                 rows[*row][*channel] = vector[*channel];
@@ -267,7 +302,9 @@ impl Dx9DrawPass {
     }
 
     fn animated_tints(&self) -> impl Iterator<Item = &H2Animation> {
-        self.animated_tint_facing.iter().chain(&self.animated_tint_glancing)
+        self.animated_tint_facing
+            .iter()
+            .chain(&self.animated_tint_glancing)
             .flat_map(|(_, animations)| animations)
     }
 
@@ -314,7 +351,11 @@ pub(crate) fn normalization_face(face: usize, size: usize) -> Vec<u8> {
                 4 => [u, -v, 1.0],
                 _ => [-u, -v, -1.0],
             };
-            let length = direction.iter().map(|axis: &f32| axis * axis).sum::<f32>().sqrt();
+            let length = direction
+                .iter()
+                .map(|axis: &f32| axis * axis)
+                .sum::<f32>()
+                .sqrt();
             for axis in direction {
                 rgba.push(((axis / length * 0.5 + 0.5) * 255.0).round() as u8);
             }
@@ -332,5 +373,11 @@ pub(crate) const H2_REFLECTION_SCALE: f32 = 2.0;
 
 /// Rows of an identity 2D transform: `x` in even registers, `y` in odd ones.
 pub(in crate::app::model_preview) fn identity_rows() -> [[f32; 4]; H2_TEXTURE_ROWS] {
-    std::array::from_fn(|row| if row % 2 == 0 { [1.0, 0.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0, 0.0] })
+    std::array::from_fn(|row| {
+        if row % 2 == 0 {
+            [1.0, 0.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0, 0.0]
+        }
+    })
 }

@@ -1,7 +1,7 @@
+use super::model_preview_supports_textures;
 use super::*;
 use crate::app::model_preview::harness::kit::kit_root;
 use crate::core::game::GameId;
-use super::model_preview_supports_textures;
 
 fn bitmap_header_control_rows(screen_width: f32, wrap_width: f32) -> (f32, f32) {
     let context = egui::Context::default();
@@ -113,39 +113,28 @@ fn model_setup_header_groups_stay_inside_their_card() {
                     ui.set_width(width);
                     let mut actions_bounds = egui::Rect::NOTHING;
                     let mut actions_area = egui::Rect::NOTHING;
-                    let card =
-                        draw_model_preview_section(ui, "Model Setup", None, |ui, part| {
-                            if part == ModelPreviewSectionPart::Header {
-                                actions_area = ui.max_rect();
-                                draw_model_setup_header_controls(
-                                    ui,
-                                    width,
-                                    &data,
-                                    &mut state,
-                                    |ui, _| {
-                                        icon_text_dropdown_button(
-                                            ui,
-                                            ButtonIcon::Save,
-                                            "Save",
-                                            |_| {},
-                                        );
-                                        icon_text_button(
-                                            ui,
-                                            ButtonIcon::Garbage,
-                                            "Delete",
-                                            true,
-                                        );
-                                        icon_text_button(
-                                            ui,
-                                            ButtonIcon::Refresh,
-                                            "Refresh Model",
-                                            true,
-                                        );
-                                    },
-                                );
-                                actions_bounds = ui.min_rect();
-                            }
-                        });
+                    let card = draw_model_preview_section(ui, "Model Setup", None, |ui, part| {
+                        if part == ModelPreviewSectionPart::Header {
+                            actions_area = ui.max_rect();
+                            draw_model_setup_header_controls(
+                                ui,
+                                width,
+                                &data,
+                                &mut state,
+                                |ui, _| {
+                                    icon_text_dropdown_button(ui, ButtonIcon::Save, "Save", |_| {});
+                                    icon_text_button(ui, ButtonIcon::Garbage, "Delete", true);
+                                    icon_text_button(
+                                        ui,
+                                        ButtonIcon::Refresh,
+                                        "Refresh Model",
+                                        true,
+                                    );
+                                },
+                            );
+                            actions_bounds = ui.min_rect();
+                        }
+                    });
                     assert!(
                         actions_bounds.right() <= actions_area.right() + 1.0,
                         "width {width}: controls {actions_bounds:?}, area {actions_area:?}"
@@ -266,10 +255,7 @@ fn overlay_permutations_follow_the_selection_or_fall_back() {
     };
     select(&mut state, "__unnamed", "monitor");
     select(&mut state, "hull", "base");
-    assert_eq!(
-        frame::visible_batch_indices(&preview, &state),
-        [0, 2, 4, 5]
-    );
+    assert_eq!(frame::visible_batch_indices(&preview, &state), [0, 2, 4, 5]);
 
     // A matching collision permutation wins over the fallback.
     select(&mut state, "hull", "broken");
@@ -294,7 +280,9 @@ fn overlay_permutations_follow_the_selection_or_fall_back() {
 /// permutation name, which hid the collision layer entirely.
 #[test]
 fn halo_ce_monitor_collision_overlay_is_drawn() {
-    let Some(tags) = kit_root(GameId::HaloCe) else { return };
+    let Some(tags) = kit_root(GameId::HaloCe) else {
+        return;
+    };
     let biped = tags.join("characters/monitor/monitor.biped");
     let definitions = crate::core::bundled::locate_definitions_root();
     let source = TagSource::LooseFolder {
@@ -317,8 +305,12 @@ fn halo_ce_monitor_collision_overlay_is_drawn() {
     )
     .unwrap();
     let mut preview = build_render_preview(&render).unwrap();
-    let collision =
-        halo1_object_collision_overlay(&object, &crate::app::model_preview::load::TagReader::new(&source)).unwrap().expect("collision overlay");
+    let collision = halo1_object_collision_overlay(
+        &object,
+        &crate::app::model_preview::load::TagReader::new(&source),
+    )
+    .unwrap()
+    .expect("collision overlay");
     merge_preview_append(&mut preview, &collision);
     let data = model_preview_data(String::new(), String::new(), preview, Vec::new());
     let mut state = ModelPreviewState {
@@ -355,14 +347,16 @@ fn collision_toggle_is_available_only_with_collision_geometry() {
     with_collision
         .batches
         .push(layer_batch("body", "base", ModelPreviewLayer::Collision));
-    let render_only =
-        model_preview_data(String::new(), String::new(), render_only, Vec::new());
+    let render_only = model_preview_data(String::new(), String::new(), render_only, Vec::new());
     let with_collision =
         model_preview_data(String::new(), String::new(), with_collision, Vec::new());
     let mut state = ModelPreviewState::default();
     let collision = ModelPreviewLayer::Collision;
 
-    assert!(overlay_layer_available(&render_only, &state, collision), "unknown yet");
+    assert!(
+        overlay_layer_available(&render_only, &state, collision),
+        "unknown yet"
+    );
     state.overlays_loaded = true;
     assert!(!overlay_layer_available(&render_only, &state, collision));
     assert!(overlay_layer_available(&with_collision, &state, collision));
@@ -422,12 +416,11 @@ fn variant_buttons_wrap_without_widening_a_narrow_setup_card() {
                 egui::CentralPanel::default().show(context, |ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     let available = ui.available_width();
-                    card_rect =
-                        draw_model_preview_section(ui, "Model Setup", None, |ui, part| {
-                            if part == ModelPreviewSectionPart::Body {
-                                draw_variant_controls(ui, &data, &mut state);
-                            }
-                        });
+                    card_rect = draw_model_preview_section(ui, "Model Setup", None, |ui, part| {
+                        if part == ModelPreviewSectionPart::Body {
+                            draw_variant_controls(ui, &data, &mut state);
+                        }
+                    });
                     assert!(
                         card_rect.width() <= available + 1.0,
                         "pane {width}: card {}, available {available}",
@@ -503,10 +496,7 @@ fn animation_groups_and_scrubber_fit_narrow_cards() {
                                     });
                                     animation_header_group(ui, 112.0, |ui| {
                                         for _ in 0..4 {
-                                            ui.add_sized(
-                                                ICON_BUTTON_SIZE,
-                                                egui::Button::new(""),
-                                            );
+                                            ui.add_sized(ICON_BUTTON_SIZE, egui::Button::new(""));
                                         }
                                     });
                                     animation_header_group(ui, 90.0, |ui| {
@@ -522,9 +512,7 @@ fn animation_groups_and_scrubber_fit_narrow_cards() {
                                 let mut frame = 2.0;
                                 ui.spacing_mut().slider_width =
                                     (ui.available_width() - 2.0).max(1.0);
-                                ui.add(
-                                    egui::Slider::new(&mut frame, 0.0..=9.0).show_value(false),
-                                );
+                                ui.add(egui::Slider::new(&mut frame, 0.0..=9.0).show_value(false));
                             }
                         });
                     assert!(
@@ -643,16 +631,17 @@ fn section_body_stays_below_header_inside_a_horizontal_row() {
             egui::CentralPanel::default().show(context, |ui| {
                 ui.horizontal(|ui| {
                     ui.allocate_ui(Vec2::new(360.0, 0.0), |ui| {
-                        draw_model_preview_section(ui, "Model Preview", None, |ui, part| {
-                            match part {
+                        draw_model_preview_section(
+                            ui,
+                            "Model Preview",
+                            None,
+                            |ui, part| match part {
                                 ModelPreviewSectionPart::Header => {
                                     header_rect = Some(ui.max_rect())
                                 }
-                                ModelPreviewSectionPart::Body => {
-                                    body_rect = Some(ui.max_rect())
-                                }
-                            }
-                        });
+                                ModelPreviewSectionPart::Body => body_rect = Some(ui.max_rect()),
+                            },
+                        );
                     });
                 });
             });
@@ -705,7 +694,8 @@ fn animation_picker_expands_after_clearing_search() {
     let mut playback = PreviewAnimationPlayback::default();
     let frame = |playback: &mut PreviewAnimationPlayback| {
         let mut popup_id = None;
-        let _ = crate::app::run_ui_test(&ctx, 
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -715,8 +705,8 @@ fn animation_picker_expands_after_clearing_search() {
             },
             |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    let id = ui
-                        .make_persistent_id(("model_animation_popup", "test_animation_picker"));
+                    let id =
+                        ui.make_persistent_id(("model_animation_popup", "test_animation_picker"));
                     egui::Popup::open_id(ui.ctx(), id);
                     popup_id = Some(id);
                     draw_animation_combo(
@@ -778,8 +768,18 @@ fn a_looping_clock_wraps_to_the_loop_frame() {
         ..Default::default()
     };
     playback.time = 9.5 / ANIMATION_FRAME_RATE;
-    advance_playback_clock(&mut playback, 1, 1.0 / ANIMATION_FRAME_RATE, 10.0 / ANIMATION_FRAME_RATE, 9.0);
-    assert!((playback.time * ANIMATION_FRAME_RATE - 4.5).abs() < 1e-3, "{}", playback.time * ANIMATION_FRAME_RATE);
+    advance_playback_clock(
+        &mut playback,
+        1,
+        1.0 / ANIMATION_FRAME_RATE,
+        10.0 / ANIMATION_FRAME_RATE,
+        9.0,
+    );
+    assert!(
+        (playback.time * ANIMATION_FRAME_RATE - 4.5).abs() < 1e-3,
+        "{}",
+        playback.time * ANIMATION_FRAME_RATE
+    );
 }
 
 #[test]
@@ -790,11 +790,7 @@ fn textured_shading_is_limited_to_supported_editing_kits() {
     assert!(model_preview_supports_textures(Some(GameId::Halo4)));
     assert!(model_preview_supports_textures(Some(GameId::Halo2)));
     assert!(model_preview_supports_textures(Some(GameId::HaloCe)));
-    for game in [
-        None,
-        Some(GameId::Halo2Amp),
-        Some(GameId::CampaignEvolved),
-    ] {
+    for game in [None, Some(GameId::Halo2Amp), Some(GameId::CampaignEvolved)] {
         assert!(!model_preview_supports_textures(game), "{game:?}");
     }
 }
@@ -814,7 +810,11 @@ fn frame_ticks_sit_where_the_handle_lands() {
             egui::CentralPanel::default().show(ui, |ui| {
                 ui.spacing_mut().slider_width = 400.0;
                 let mut value = frame as f32;
-                let response = ui.add(egui::Slider::new(&mut value, 0.0..=last).show_value(false).step_by(1.0));
+                let response = ui.add(
+                    egui::Slider::new(&mut value, 0.0..=last)
+                        .show_value(false)
+                        .step_by(1.0),
+                );
                 slider_rect = response.rect;
                 handle_shape = ui.style().visuals.handle_shape;
             });
@@ -824,11 +824,17 @@ fn frame_ticks_sit_where_the_handle_lands() {
         fn handle_x(shape: &egui::Shape, slider: egui::Rect) -> Option<f32> {
             let rect = match shape {
                 egui::Shape::Rect(rect) => rect.rect,
-                egui::Shape::Circle(circle) => egui::Rect::from_center_size(circle.center, egui::Vec2::splat(circle.radius * 2.0)),
-                egui::Shape::Vec(shapes) => return shapes.iter().find_map(|shape| handle_x(shape, slider)),
+                egui::Shape::Circle(circle) => egui::Rect::from_center_size(
+                    circle.center,
+                    egui::Vec2::splat(circle.radius * 2.0),
+                ),
+                egui::Shape::Vec(shapes) => {
+                    return shapes.iter().find_map(|shape| handle_x(shape, slider));
+                }
                 _ => return None,
             };
-            (slider.contains(rect.center()) && rect.width() < slider.height() * 2.0).then(|| rect.center().x)
+            (slider.contains(rect.center()) && rect.width() < slider.height() * 2.0)
+                .then(|| rect.center().x)
         }
         let handle_x = output
             .shapes
@@ -850,7 +856,11 @@ fn frame_ticks_sit_where_the_handle_lands() {
 fn a_long_animation_is_ticked_every_few_frames() {
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 18.0));
     let ticks = frame_tick_xs(rect, egui::style::HandleShape::Circle, 999.0, 1000);
-    assert!(ticks.len() < 100 && ticks.len() > 10, "{} ticks", ticks.len());
+    assert!(
+        ticks.len() < 100 && ticks.len() > 10,
+        "{} ticks",
+        ticks.len()
+    );
     assert!(ticks.windows(2).all(|pair| pair[1] - pair[0] >= 3.0));
 }
 
@@ -863,7 +873,12 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
     ctx.set_fonts(crate::app::foundation_fonts());
     ctx.set_global_style(crate::app::foundation_style());
     let tag = TagFile::new(locate_definitions_root().join("halo3_mcc/render_model.json")).unwrap();
-    let data = model_preview_data("test".to_owned(), "test".to_owned(), RenderModelPreview::default(), Vec::new());
+    let data = model_preview_data(
+        "test".to_owned(),
+        "test".to_owned(),
+        RenderModelPreview::default(),
+        Vec::new(),
+    );
     let mut state = ModelPreviewState::default();
     let target = ModelRenderMode::ALL
         .into_iter()
@@ -877,7 +892,10 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
         let output = crate::app::run_ui_test(
             &ctx,
             egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 900.0))),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(800.0, 900.0),
+                )),
                 time: Some(time),
                 events,
                 ..Default::default()
@@ -902,7 +920,10 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
             .shapes
             .iter()
             .filter_map(|clipped| match &clipped.shape {
-                egui::Shape::Text(text) => Some((text.galley.text().trim().to_owned(), text.galley.rect.translate(text.pos.to_vec2()))),
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().trim().to_owned(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
                 _ => None,
             })
             .collect()
@@ -913,11 +934,21 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
         state: &mut ModelPreviewState,
     ) -> Vec<(String, egui::Rect)> {
         for step in 1..=3 {
-            frame(vec![egui::Event::PointerMoved(at - egui::vec2(0.0, 3.0 - step as f32))], state);
+            frame(
+                vec![egui::Event::PointerMoved(
+                    at - egui::vec2(0.0, 3.0 - step as f32),
+                )],
+                state,
+            );
         }
         for pressed in [true, false] {
             frame(
-                vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }],
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
                 state,
             );
         }
@@ -965,21 +996,43 @@ fn icon_checkbox_label_has_no_text_cursor() {
     Baboon::configure_context(&ctx);
     let mut checked = false;
     let mut frame = |events, time| {
-        crate::app::run_ui_test(&ctx, crate::app::loose_fixture::screen(events, time), |ui| {
-            model_view_icon_checkbox(ui, &mut checked, ModelViewCheckboxIcon::Markers, "Markers", None);
-        })
+        crate::app::run_ui_test(
+            &ctx,
+            crate::app::loose_fixture::screen(events, time),
+            |ui| {
+                model_view_icon_checkbox(
+                    ui,
+                    &mut checked,
+                    ModelViewCheckboxIcon::Markers,
+                    "Markers",
+                    None,
+                );
+            },
+        )
     };
     let first = frame(vec![], 0.0);
-    let at = first.shapes.iter().find_map(|shape| match &shape.shape {
-        egui::Shape::Text(text) if text.galley.text() == "Markers" =>
-            Some(egui::Rect::from_min_size(text.pos, text.galley.size()).center()),
-        _ => None,
-    }).expect("checkbox label");
+    let at = first
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Markers" => {
+                Some(egui::Rect::from_min_size(text.pos, text.galley.size()).center())
+            }
+            _ => None,
+        })
+        .expect("checkbox label");
     let hover = frame(vec![egui::Event::PointerMoved(at)], 0.1);
     assert_ne!(hover.platform_output.cursor_icon, egui::CursorIcon::Text);
     for (time, pressed) in [(0.2, true), (0.3, false)] {
-        frame(vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary,
-            pressed, modifiers: Default::default() }], time);
+        frame(
+            vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            }],
+            time,
+        );
     }
     assert!(checked, "clicking the label still toggles its checkbox");
 }
@@ -991,33 +1044,74 @@ fn menu_checkbox_glyphs_align_with_option_icons() {
     let mut checked = false;
     let mut output = None;
     for time in [0.0, 0.1] {
-        output = Some(crate::app::run_ui_test(&ctx, crate::app::loose_fixture::screen(vec![], time), |ui| {
-            ui.scope_builder(egui::UiBuilder::new().ui_stack_info(egui::UiStackInfo::new(egui::UiKind::Menu)), |ui| {
-                crate::app::browser::style_list_menu(ui);
-                selectable_icon_text_button(ui, ButtonIcon::FolderOpen, "Folders", true);
-                model_view_icon_checkbox(ui, &mut checked, ModelViewCheckboxIcon::Markers, "Markers", None);
-                ui.baboon_checkbox(&mut checked, "Show prefixes");
-                ui.baboon_radio_value(&mut checked, true, "Textured");
-            });
-        }));
+        output = Some(crate::app::run_ui_test(
+            &ctx,
+            crate::app::loose_fixture::screen(vec![], time),
+            |ui| {
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .ui_stack_info(egui::UiStackInfo::new(egui::UiKind::Menu)),
+                    |ui| {
+                        crate::app::browser::style_list_menu(ui);
+                        selectable_icon_text_button(ui, ButtonIcon::FolderOpen, "Folders", true);
+                        model_view_icon_checkbox(
+                            ui,
+                            &mut checked,
+                            ModelViewCheckboxIcon::Markers,
+                            "Markers",
+                            None,
+                        );
+                        ui.baboon_checkbox(&mut checked, "Show prefixes");
+                        ui.baboon_radio_value(&mut checked, true, "Textured");
+                    },
+                );
+            },
+        ));
     }
     let output = output.unwrap();
-    let images: Vec<_> = output.shapes.iter().filter_map(|shape| match &shape.shape {
-        egui::Shape::Mesh(mesh) => Some(mesh.calc_bounds()),
-        egui::Shape::Circle(circle) => Some(egui::Rect::from_center_size(circle.center, Vec2::splat(circle.radius * 2.0))),
-        egui::Shape::Rect(rect) if rect.brush.is_some() => Some(rect.rect),
-        _ => None,
-    }).filter(|rect| (14.0..=16.1).contains(&rect.width()) && (rect.height() - rect.width()).abs() < 0.1).collect();
-    let glyph_x = |label| {
-        let y = output.shapes.iter().find_map(|shape| match &shape.shape {
-            egui::Shape::Text(text) if text.galley.text() == label =>
-                Some(text.pos.y + text.galley.size().y * 0.5),
+    let images: Vec<_> = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Mesh(mesh) => Some(mesh.calc_bounds()),
+            egui::Shape::Circle(circle) => Some(egui::Rect::from_center_size(
+                circle.center,
+                Vec2::splat(circle.radius * 2.0),
+            )),
+            egui::Shape::Rect(rect) if rect.brush.is_some() => Some(rect.rect),
             _ => None,
-        }).expect("row label");
-        images.iter().filter(|rect| (rect.center().y - y).abs() < 1.0)
-            .map(|rect| rect.left()).min_by(f32::total_cmp).expect("row glyph")
+        })
+        .filter(|rect| {
+            (14.0..=16.1).contains(&rect.width()) && (rect.height() - rect.width()).abs() < 0.1
+        })
+        .collect();
+    let glyph_x = |label| {
+        let y = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == label => {
+                    Some(text.pos.y + text.galley.size().y * 0.5)
+                }
+                _ => None,
+            })
+            .expect("row label");
+        images
+            .iter()
+            .filter(|rect| (rect.center().y - y).abs() < 1.0)
+            .map(|rect| rect.left())
+            .min_by(f32::total_cmp)
+            .expect("row glyph")
     };
-    assert_eq!(glyph_x("Markers"), glyph_x("Folders"), "icon-checkbox row inset");
-    assert_eq!(glyph_x("Show prefixes"), glyph_x("Folders"), "plain checkbox inset");
+    assert_eq!(
+        glyph_x("Markers"),
+        glyph_x("Folders"),
+        "icon-checkbox row inset"
+    );
+    assert_eq!(
+        glyph_x("Show prefixes"),
+        glyph_x("Folders"),
+        "plain checkbox inset"
+    );
     assert_eq!(glyph_x("Textured"), glyph_x("Folders"), "radio row inset");
 }

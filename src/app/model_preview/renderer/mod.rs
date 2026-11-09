@@ -1,9 +1,9 @@
 //! Depth-tested Glow rendering, markers, and preview geometry conversion.
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
+use super::dx9::draw::*;
 use super::gl::scope::PostScope;
 use super::*;
-use super::dx9::draw::*;
 use eframe::glow::{self, HasContext as _};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -82,7 +82,12 @@ pub(in crate::app::model_preview) fn paint_model_gl(
                 failed: HashMap::new(),
             });
         }
-        let Some(CachedModelGlRenderer { renderer: Ok(renderer), failed, .. }) = cached.as_mut() else {
+        let Some(CachedModelGlRenderer {
+            renderer: Ok(renderer),
+            failed,
+            ..
+        }) = cached.as_mut()
+        else {
             return;
         };
         if failed.contains_key(&frame.geometry_id) {
@@ -91,7 +96,9 @@ pub(in crate::app::model_preview) fn paint_model_gl(
         // A panic part way through leaves the scene target bound; what the
         // frame drew into goes back, so the rest of the window still draws.
         let state = unsafe { PostScope::capture(gl) };
-        let painted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { renderer.paint(gl, frame) }));
+        let painted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+            renderer.paint(gl, frame)
+        }));
         if let Err(panic) = painted {
             unsafe {
                 state.restore(gl);
@@ -105,7 +112,6 @@ pub(in crate::app::model_preview) fn paint_model_gl(
     });
 }
 
-
 /// The preview's renderer: what every game draws with ([`RenderCore`]),
 /// and each game's own drawing ([`GameRender`]), which it hands the frame to.
 pub(super) struct ModelGlRenderer {
@@ -115,13 +121,19 @@ pub(super) struct ModelGlRenderer {
 
 impl ModelGlRenderer {
     pub(super) fn new(gl: &glow::Context) -> Result<Self, String> {
-        Ok(Self { core: RenderCore::new(gl)?, games: GameRenders::default() })
+        Ok(Self {
+            core: RenderCore::new(gl)?,
+            games: GameRenders::default(),
+        })
     }
 
     /// The shared gen3 targets' normal texture, between frames.
     #[cfg(test)]
     pub(in crate::app::model_preview) fn gen3_targets_normal(&self) -> Option<glow::NativeTexture> {
-        self.core.gen3_targets.as_ref().map(|targets| targets.normal)
+        self.core
+            .gen3_targets
+            .as_ref()
+            .map(|targets| targets.normal)
     }
 
     /// Draw `frame`: its slot, the game's preparation, the scene target, the
@@ -134,12 +146,20 @@ impl ModelGlRenderer {
                 return;
             };
             let game = self.games.of(frame);
-            game.prepare(&mut FrameCx { gl, frame, core: &mut self.core, slot });
+            game.prepare(&mut FrameCx {
+                gl,
+                frame,
+                core: &mut self.core,
+                slot,
+            });
             let scene = self.core.begin_scene(gl, frame);
             // The game's passes need the scene target's stencil and copies;
             // without one, the frame draws as with them off.
             if scene.is_none() && frame.game_shaders && self.core.shaders_supported {
-                let plain = ModelGpuFrame { game_shaders: false, ..frame.clone() };
+                let plain = ModelGpuFrame {
+                    game_shaders: false,
+                    ..frame.clone()
+                };
                 self.paint(gl, &plain);
                 return;
             }
@@ -148,21 +168,36 @@ impl ModelGlRenderer {
             if frame.render_mode.draws_shading() {
                 gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
                 gl.uniform_1_f32(Some(&self.core.unlit), 0.0);
-                game.shade(&mut FrameCx { gl, frame, core: &mut self.core, slot });
+                game.shade(&mut FrameCx {
+                    gl,
+                    frame,
+                    core: &mut self.core,
+                    slot,
+                });
             }
             if frame.render_mode.draws_wireframe() {
                 self.core.draw_wireframe(gl, frame, slot);
             }
-            game.finish(&mut FrameCx { gl, frame, core: &mut self.core, slot });
+            game.finish(&mut FrameCx {
+                gl,
+                frame,
+                core: &mut self.core,
+                slot,
+            });
             self.core.end_frame(gl, scene);
         }
     }
 
     #[cfg(test)]
-    pub(super) fn for_each_simulation(&self, geometry_id: u64, mut visit: impl FnMut(&str, &dyn std::fmt::Debug)) {
+    pub(super) fn for_each_simulation(
+        &self,
+        geometry_id: u64,
+        mut visit: impl FnMut(&str, &dyn std::fmt::Debug),
+    ) {
         self.core.for_each_simulation(geometry_id, &mut visit);
         if let Some(slot) = self.core.slot_of(geometry_id) {
-            self.games.each_simulation(slot, self.core.slot_uploads(slot), &mut visit);
+            self.games
+                .each_simulation(slot, self.core.slot_uploads(slot), &mut visit);
         }
     }
 }

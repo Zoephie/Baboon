@@ -151,7 +151,9 @@ impl FieldLines<'_> {
 
 impl std::fmt::Write for FieldLines<'_> {
     fn write_str(&mut self, text: &str) -> std::fmt::Result {
-        as_before(self.renamed, text).bytes().for_each(|byte| self.step(byte));
+        as_before(self.renamed, text)
+            .bytes()
+            .for_each(|byte| self.step(byte));
         Ok(())
     }
 }
@@ -176,11 +178,20 @@ impl<'a> FieldLines<'a> {
 }
 
 /// A line per top-level field of `value`'s `Debug`.
-pub(in crate::app::model_preview) fn field_lines(out: &mut String, prefix: &str, value: &impl std::fmt::Debug) {
+pub(in crate::app::model_preview) fn field_lines(
+    out: &mut String,
+    prefix: &str,
+    value: &impl std::fmt::Debug,
+) {
     field_lines_renamed(out, prefix, value, renamed_from_env());
 }
 
-fn field_lines_renamed(out: &mut String, prefix: &str, value: &dyn std::fmt::Debug, renamed: &Renamed) {
+fn field_lines_renamed(
+    out: &mut String,
+    prefix: &str,
+    value: &dyn std::fmt::Debug,
+    renamed: &Renamed,
+) {
     let mut lines = FieldLines::new(out, prefix, renamed);
     let _ = write!(lines, "{value:?}");
     lines.close();
@@ -189,7 +200,12 @@ fn field_lines_renamed(out: &mut String, prefix: &str, value: &dyn std::fmt::Deb
 /// A line per field of a struct that is itself a field, read as though its
 /// fields were its holder's own: its closing ` }` becomes the `,` that would
 /// follow them there, or stays for the holder's `last` field.
-pub(super) fn inline_field_lines(out: &mut String, prefix: &str, value: &dyn std::fmt::Debug, last: bool) {
+pub(super) fn inline_field_lines(
+    out: &mut String,
+    prefix: &str,
+    value: &dyn std::fmt::Debug,
+    last: bool,
+) {
     /// The bytes but the last two, which are the struct's ` }`.
     struct Held<'a> {
         lines: FieldLines<'a>,
@@ -207,10 +223,17 @@ pub(super) fn inline_field_lines(out: &mut String, prefix: &str, value: &dyn std
             Ok(())
         }
     }
-    let mut held = Held { lines: FieldLines::new(out, prefix, renamed_from_env()), held: std::collections::VecDeque::new() };
+    let mut held = Held {
+        lines: FieldLines::new(out, prefix, renamed_from_env()),
+        held: std::collections::VecDeque::new(),
+    };
     let _ = write!(held, "{value:?}");
     let Held { mut lines, held } = held;
-    let ending: Vec<u8> = if held.iter().eq(b" }") && !last { b",".to_vec() } else { held.into() };
+    let ending: Vec<u8> = if held.iter().eq(b" }") && !last {
+        b",".to_vec()
+    } else {
+        held.into()
+    };
     ending.into_iter().for_each(|byte| lines.step(byte));
     lines.close();
 }
@@ -298,9 +321,26 @@ mod tests {
             field_lines_renamed(&mut out, "p", value, renamed);
             out
         };
-        let old = lines(&Holder { image: H2Image { width: 4 }, label: "Images" }, &Renamed::new());
-        let new = Holder { image: Image { width: 4 }, label: "Images" };
-        assert_ne!(lines(&new, &Renamed::new()), old, "without the map the new name shows");
-        assert_eq!(lines(&new, &renamed), old, "under the map it reads as before");
+        let old = lines(
+            &Holder {
+                image: H2Image { width: 4 },
+                label: "Images",
+            },
+            &Renamed::new(),
+        );
+        let new = Holder {
+            image: Image { width: 4 },
+            label: "Images",
+        };
+        assert_ne!(
+            lines(&new, &Renamed::new()),
+            old,
+            "without the map the new name shows"
+        );
+        assert_eq!(
+            lines(&new, &renamed),
+            old,
+            "under the map it reads as before"
+        );
     }
 }

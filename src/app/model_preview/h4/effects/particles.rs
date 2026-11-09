@@ -3,9 +3,9 @@
 //! `pack_particle_state` packs it for the vertex shader to unpack. See
 //! `docs/h4-preview-research/particles.md`.
 
+use super::super::super::particles::ParticleMaterial;
 use crate::app::model_preview::load::TagReader;
 use blam_tags::TagStruct;
-use super::super::super::particles::ParticleMaterial;
 
 use super::super::super::common::fields::elements;
 use super::super::super::common::named_function::tag_function_at;
@@ -109,15 +109,23 @@ impl H4ParticleModel {
             .map(|vertex| [vertex.texcoord.x, vertex.texcoord.y])
             .collect();
         let bounds = |values: &mut dyn Iterator<Item = f32>| {
-            values.fold([f32::INFINITY, f32::NEG_INFINITY], |[low, high], value| [low.min(value), high.max(value)])
+            values.fold([f32::INFINITY, f32::NEG_INFINITY], |[low, high], value| {
+                [low.min(value), high.max(value)]
+            })
         };
-        let position_bounds: [[f32; 2]; 3] =
-            std::array::from_fn(|axis| bounds(&mut positions.iter().map(|position| position[axis])));
-        let texcoord_bounds: [[f32; 2]; 2] =
-            std::array::from_fn(|axis| bounds(&mut texcoords.iter().map(|texcoord| texcoord[axis])));
+        let position_bounds: [[f32; 2]; 3] = std::array::from_fn(|axis| {
+            bounds(&mut positions.iter().map(|position| position[axis]))
+        });
+        let texcoord_bounds: [[f32; 2]; 2] = std::array::from_fn(|axis| {
+            bounds(&mut texcoords.iter().map(|texcoord| texcoord[axis]))
+        });
         let unit = |value: f32, [low, high]: [f32; 2]| {
             let extent = high - low;
-            let along = if extent > 0.0 { (value - low) / extent } else { 0.0 };
+            let along = if extent > 0.0 {
+                (value - low) / extent
+            } else {
+                0.0
+            };
             (along.clamp(0.0, 1.0) * 65535.0).round() as u32
         };
         let vertices = strip
@@ -126,8 +134,10 @@ impl H4ParticleModel {
             .zip(&positions)
             .zip(&texcoords)
             .map(|((vertex, position), texcoord)| {
-                let [x, y, z] = std::array::from_fn(|axis| unit(position[axis], position_bounds[axis]));
-                let [u, v] = std::array::from_fn(|axis| unit(texcoord[axis], texcoord_bounds[axis]));
+                let [x, y, z] =
+                    std::array::from_fn(|axis| unit(position[axis], position_bounds[axis]));
+                let [u, v] =
+                    std::array::from_fn(|axis| unit(texcoord[axis], texcoord_bounds[axis]));
                 [
                     x | (y << 16),
                     z,
@@ -149,8 +159,18 @@ impl H4ParticleModel {
             variants,
             vertex_count: strip.max_size as u32,
             position: [
-                [extent(position_bounds[0]), extent(position_bounds[1]), extent(position_bounds[2]), 0.0],
-                [position_bounds[0][0], position_bounds[1][0], position_bounds[2][0], 0.0],
+                [
+                    extent(position_bounds[0]),
+                    extent(position_bounds[1]),
+                    extent(position_bounds[2]),
+                    0.0,
+                ],
+                [
+                    position_bounds[0][0],
+                    position_bounds[1][0],
+                    position_bounds[2][0],
+                    0.0,
+                ],
             ],
             texcoord: [
                 extent(texcoord_bounds[0]),
@@ -186,7 +206,9 @@ pub(crate) fn read_h4_particle_material(
     root: TagStruct<'_>,
     model: Option<&blam_tags::ParticleModelStrip>,
 ) -> Result<std::sync::Arc<dyn ParticleMaterial>, String> {
-    Ok(std::sync::Arc::new(read_h4_particle_render(reader, root, model)?))
+    Ok(std::sync::Arc::new(read_h4_particle_render(
+        reader, root, model,
+    )?))
 }
 
 impl ParticleMaterial for H4ParticleRender {
@@ -593,10 +615,10 @@ pub(crate) fn custom_vert_registers(sets: &[[[f32; 2]; 4]; 5]) -> [[f32; 4]; 10]
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::app::export::load_referenced_tag_from_source;
     use crate::app::model_preview::harness::kit::{kit_root, kit_source};
     use crate::core::game::GameId;
-    use crate::app::export::load_referenced_tag_from_source;
-    use super::*;
 
     #[test]
     fn halves_round_to_nearest_even_and_keep_their_extremes() {
@@ -693,19 +715,28 @@ mod tests {
     /// compression constants) gives back each strip vertex.
     #[test]
     fn the_rifle_casing_unpacks_to_its_strip() {
-        let Some(root) = kit_root(GameId::Halo4) else { return };
+        let Some(root) = kit_root(GameId::Halo4) else {
+            return;
+        };
         let path = root.join("fx/reach/particles/models/weapons/bullet_casings/sniper_rifle/sniper_rifle.particle_model");
-        let strip = blam_tags::particle_model_strip(&blam_tags::TagFile::read(&path).unwrap()).unwrap();
+        let strip =
+            blam_tags::particle_model_strip(&blam_tags::TagFile::read(&path).unwrap()).unwrap();
         let model = H4ParticleModel::of(&strip).unwrap();
         assert_eq!(model.vertex_count, 78);
         assert_eq!(model.variants[0], [1.0, 78.0, 0.0, 0.0]);
         assert_eq!(model.variants[1], [0.0, 77.0, 0.0, 0.0]);
         assert_eq!(model.vertices.len(), strip.vertices.len());
-        let ushort = |word: u32| [(word & 0xFFFF) as f32 / 65535.0, (word >> 16) as f32 / 65535.0];
+        let ushort = |word: u32| {
+            [
+                (word & 0xFFFF) as f32 / 65535.0,
+                (word >> 16) as f32 / 65535.0,
+            ]
+        };
         // Normals are well inside half's normal range: no subnormals here.
         let half = |word: u32| {
             let one = |bits: u32| {
-                let (sign, exponent, mantissa) = ((bits >> 15) & 1, (bits >> 10) & 0x1F, bits & 0x3FF);
+                let (sign, exponent, mantissa) =
+                    ((bits >> 15) & 1, (bits >> 10) & 0x1F, bits & 0x3FF);
                 let magnitude = if exponent == 0 && mantissa == 0 {
                     0.0
                 } else {
@@ -719,14 +750,24 @@ mod tests {
         for (words, vertex) in model.vertices.iter().zip(&strip.vertices) {
             let [x, y] = ushort(words[0]);
             let [z, _] = ushort(words[1]);
-            let unpacked = [x * scale[0] + offset[0], y * scale[1] + offset[1], z * scale[2] + offset[2]];
+            let unpacked = [
+                x * scale[0] + offset[0],
+                y * scale[1] + offset[1],
+                z * scale[2] + offset[2],
+            ];
             let wanted = [vertex.position.x, vertex.position.y, vertex.position.z];
             for axis in 0..3 {
                 let step = scale[axis] / 65535.0;
-                assert!((unpacked[axis] - wanted[axis]).abs() <= step, "{unpacked:?} {wanted:?}");
+                assert!(
+                    (unpacked[axis] - wanted[axis]).abs() <= step,
+                    "{unpacked:?} {wanted:?}"
+                );
             }
             let [u, v] = ushort(words[2]);
-            let texcoord = [u * model.texcoord[0] + model.texcoord[2], v * model.texcoord[1] + model.texcoord[3]];
+            let texcoord = [
+                u * model.texcoord[0] + model.texcoord[2],
+                v * model.texcoord[1] + model.texcoord[3],
+            ];
             assert!((texcoord[0] - vertex.texcoord.x).abs() <= model.texcoord[0] / 65535.0);
             assert!((texcoord[1] - vertex.texcoord.y).abs() <= model.texcoord[1] / 65535.0);
             let [i, j] = half(words[3]);
@@ -741,7 +782,9 @@ mod tests {
 
     #[test]
     fn the_equipment_icon_reads_its_draw() {
-        let Some(source) = kit_source(GameId::Halo4) else { return };
+        let Some(source) = kit_source(GameId::Halo4) else {
+            return;
+        };
         let tag = load_referenced_tag_from_source(
             &source,
             "objects\\equipment\\sprint\\fx\\particles\\equipment_icon",
@@ -749,7 +792,12 @@ mod tests {
             b"prt3",
         )
         .unwrap();
-        let render = read_h4_particle_render(&crate::app::model_preview::load::TagReader::new(&source), tag.root(), None).unwrap();
+        let render = read_h4_particle_render(
+            &crate::app::model_preview::load::TagReader::new(&source),
+            tag.root(),
+            None,
+        )
+        .unwrap();
         assert_eq!(render.flags, [0x40, DEPTH_FADE, STATIC_FRAME]);
         assert_eq!(render.material.blend_mode, BLEND_ADD_SRC_TIMES_SRCALPHA);
         assert_eq!(render.sprite, [-1.0, -1.0, 2.0, 2.0]);

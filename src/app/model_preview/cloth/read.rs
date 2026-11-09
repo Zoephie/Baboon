@@ -43,8 +43,10 @@ impl H3ClothAt {
 fn cloth_tags(object: &TagFile) -> Vec<String> {
     let group = u32::from_be_bytes(*b"clwd");
     let mut paths = Vec::new();
-    let widgets = object_block(object, "widgets").map_or(Vec::new(), |holder| elements(holder, "widgets"));
-    let attachments = object_block(object, "attachments").map_or(Vec::new(), |holder| elements(holder, "attachments"));
+    let widgets =
+        object_block(object, "widgets").map_or(Vec::new(), |holder| elements(holder, "widgets"));
+    let attachments = object_block(object, "attachments")
+        .map_or(Vec::new(), |holder| elements(holder, "attachments"));
     for entry in widgets.iter().chain(&attachments) {
         if let Some((found, path)) = entry.read_tag_ref_with_group("type")
             && found == group
@@ -68,7 +70,10 @@ fn read_cloth_tag(
     // The ranges are `tool.exe`'s postprocess, which tags on disk have not been through.
     let int = |name: &str| root.read_int_any(name).unwrap_or(0).clamp(2, 32) as usize;
     let size = [int("grid x dimension"), int("grid y dimension")];
-    let spacing = [root.read_real("grid spacing x")?, root.read_real("grid spacing y")?];
+    let spacing = [
+        root.read_real("grid spacing x")?,
+        root.read_real("grid spacing y")?,
+    ];
     let (places, uvs, indices) = flag_grid(size, spacing, game);
     if places.is_empty() {
         return None;
@@ -77,13 +82,23 @@ fn read_cloth_tag(
     // Halo 2's tool limits none of these.
     let real = |name: &str, low: f32, high: f32| {
         let value = properties.read_real(name).unwrap_or(0.0);
-        if clamps { value.clamp(low, high) } else { value }
+        if clamps {
+            value.clamp(low, high)
+        } else {
+            value
+        }
     };
     // The bounding sphere's middle, carried as a marker of the object's own.
-    let middle = RenderModelPreviewMarker { position: center, scale: 1.0, ..Default::default() };
+    let middle = RenderModelPreviewMarker {
+        position: center,
+        scale: 1.0,
+        ..Default::default()
+    };
     let (middle, middle_node) = frame(&middle);
     let placed = |name: &str| -> Vec<(usize, [f32; 3])> {
-        let named = markers.iter().filter(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(name));
+        let named = markers
+            .iter()
+            .filter(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(name));
         named
             .map(|marker| {
                 let (place, node) = frame(marker);
@@ -102,14 +117,20 @@ fn read_cloth_tag(
         .iter()
         .find(|marker| marker.name.eq_ignore_ascii_case(&attach_name))
         .and_then(|marker| marker.only_under.clone());
-    let secondary = placed(&marker_name(root, "secondary axis attachment name")).first().copied();
+    let secondary = placed(&marker_name(root, "secondary axis attachment name"))
+        .first()
+        .copied();
     let high = places.len() / size[0].max(1);
     let spheres = elements(root, "collision spheres")
         .into_iter()
         .take(MOST_SPHERES)
         .filter_map(|sphere| {
             let (node, position) = *placed(&marker_name(sphere, "object marker name")).first()?;
-            Some(ClothSphere { node, position, radius: sphere.read_real("radius")? })
+            Some(ClothSphere {
+                node,
+                position,
+                radius: sphere.read_real("radius")?,
+            })
         })
         .collect();
     let links = generate_links(&places, &indices, real("longest_rod", 1.0, 10.0));
@@ -121,7 +142,10 @@ fn read_cloth_tag(
         links,
         pins,
         spheres,
-        iterations: properties.read_int_any("Number iterations").unwrap_or(1).clamp(1, 8) as i32,
+        iterations: properties
+            .read_int_any("Number iterations")
+            .unwrap_or(1)
+            .clamp(1, 8) as i32,
         gravity: real("weight", -10.0, 10.0) * gravity_per_tick(tick_rate(game)),
         drag: real("drag", 0.0, 0.5),
         wind_scale: real("wind_scale", 0.0, 3.0),
@@ -178,13 +202,22 @@ pub(super) fn cloth_region_name(path: &str, game: ClothGame) -> String {
 /// tag's shader from the first active permutation of a region of its own.
 /// `center` is the middle of the object's bounding sphere, in its own space,
 /// where Reach starts a sheet; the other games start one at its first pin.
-pub(in crate::app::model_preview) fn read_cloth<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+pub(in crate::app::model_preview) fn read_cloth<
+    F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
+>(
     cx: &super::super::load::LoadCx<'_, F>,
     preview: &mut RenderModelPreview,
     game: ClothGame,
     center: [f32; 3],
 ) {
-    let super::super::load::LoadCx { reader, object, owner, markers, frame, .. } = *cx;
+    let super::super::load::LoadCx {
+        reader,
+        object,
+        owner,
+        markers,
+        frame,
+        ..
+    } = *cx;
     for path in cloth_tags(object) {
         let Ok(tag) = reader.load(&path, "cloth", b"clwd") else {
             continue;
@@ -193,22 +226,29 @@ pub(in crate::app::model_preview) fn read_cloth<F: Fn(&RenderModelPreviewMarker)
         let Some((shader_group, shader_path)) = root.read_tag_ref_with_group("Shader") else {
             continue;
         };
-        let Some((mut cloth, uvs, under)) = read_cloth_tag(root, markers, &frame, game, center) else {
+        let Some((mut cloth, uvs, under)) = read_cloth_tag(root, markers, &frame, game, center)
+        else {
             continue;
         };
         cloth.first_vertex = preview.vertices.len();
         let sheet = sheet_vertices(&uvs, game);
-        let Some(base) = VertexBase::of(cloth.first_vertex, sheet.len(), Overflow::RefusesAppend) else {
+        let Some(base) = VertexBase::of(cloth.first_vertex, sheet.len(), Overflow::RefusesAppend)
+        else {
             continue;
         };
         let count = cloth.places.len() as u32;
         let index_start = preview.indices.len() as u32;
         preview.vertices.extend(sheet);
         // The sides face apart, as `cloth_render_opaque`'s cull modes have it.
-        preview.indices.extend(cloth.indices.iter().map(|index| base.offset(*index as u32)));
-        preview.indices.extend(cloth.indices.chunks_exact(3).rev().flat_map(|triangle| {
-            [triangle[2], triangle[1], triangle[0]].map(|index| base.offset(index as u32) + count)
-        }));
+        preview
+            .indices
+            .extend(cloth.indices.iter().map(|index| base.offset(*index as u32)));
+        preview
+            .indices
+            .extend(cloth.indices.chunks_exact(3).rev().flat_map(|triangle| {
+                [triangle[2], triangle[1], triangle[0]]
+                    .map(|index| base.offset(index as u32) + count)
+            }));
         let name = cloth_region_name(&path, game);
         preview.materials.push(RenderModelPreviewMaterial {
             shader_path,
@@ -222,7 +262,10 @@ pub(in crate::app::model_preview) fn read_cloth<F: Fn(&RenderModelPreviewMarker)
             Some(under) => under,
             None => {
                 let permutation = "cloth".to_owned();
-                preview.regions.push(RenderModelPreviewRegion { name: name.clone(), permutations: vec![permutation.clone()] });
+                preview.regions.push(RenderModelPreviewRegion {
+                    name: name.clone(),
+                    permutations: vec![permutation.clone()],
+                });
                 (name, permutation)
             }
         };

@@ -11,22 +11,22 @@ use std::sync::{Arc, LazyLock};
 
 use blam_tags::{TagBlock, TagFieldData, TagStruct};
 
-use super::super::dx9::passes::{
-    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass, Dx9DrawTexture,
-    H2_GLSL_VERSION,
-};
+use super::super::common::fields::{argb, has_flag, has_flag_in_any};
 use super::super::common::image::Image;
 use super::super::dx9::passes::{CeNumeric, PassAnimation};
-use super::super::common::fields::{argb, has_flag, has_flag_in_any};
-use super::super::dx9::stage::{H2_TEXTURE_ROWS, Dx9VertexStage};
+use super::super::dx9::passes::{
+    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass,
+    Dx9DrawTexture, H2_GLSL_VERSION,
+};
+use super::super::dx9::stage::{Dx9VertexStage, H2_TEXTURE_ROWS};
+use crate::app::model_preview::ce::blend::{FADE_MODES, FramebufferBlend};
+use crate::app::model_preview::common::random::{high16_times_inverse_65535, lcg_step};
 use crate::core::ce_pixel_shader::{TranslatedFxShader, translate_fx};
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
-use crate::app::model_preview::common::random::{high16_times_inverse_65535, lcg_step};
-use crate::app::model_preview::ce::blend::{FADE_MODES, FramebufferBlend};
 
-pub(in crate::app::model_preview) mod resolve;
 mod base;
+pub(in crate::app::model_preview) mod resolve;
 pub(in crate::app::model_preview) use base::*;
 mod periodic;
 pub(in crate::app::model_preview) use periodic::*;

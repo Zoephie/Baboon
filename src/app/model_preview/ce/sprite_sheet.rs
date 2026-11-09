@@ -1,14 +1,14 @@
 //! Halo CE's sprite sheets and secondary maps, which effects, particle systems and contrails share.
 
-use std::sync::Arc;
-use blam_tags::TagStruct;
 use super::super::common::fields::elements;
-use super::super::common::view::ViewFrame;
-use super::shaders::{CeMapAnimation, read_effect_map_animation};
 use super::super::common::image::Image;
+use super::super::common::view::ViewFrame;
 use super::super::materials::decode_image;
 use super::super::*;
+use super::shaders::{CeMapAnimation, read_effect_map_animation};
 use crate::core::h2_pixel_shader::SamplerKind;
+use blam_tags::TagStruct;
+use std::sync::Arc;
 
 /// One sprite of a bitmap's sequence: its rect across the bitmap, the point
 /// it hangs from, and the image it is cut from.
@@ -61,8 +61,14 @@ pub(crate) struct CeSecondaryDraw {
 }
 
 /// An effect shader's `bitmap` and how it is laid, by the field's name.
-pub(in crate::app::model_preview) fn read_secondary_map(reader: &TagReader, holder: TagStruct<'_>, bitmap_field: &str) -> Option<Arc<CeSecondaryMap>> {
-    let path = holder.read_tag_ref_path(bitmap_field).filter(|path| !path.is_empty())?;
+pub(in crate::app::model_preview) fn read_secondary_map(
+    reader: &TagReader,
+    holder: TagStruct<'_>,
+    bitmap_field: &str,
+) -> Option<Arc<CeSecondaryMap>> {
+    let path = holder
+        .read_tag_ref_path(bitmap_field)
+        .filter(|path| !path.is_empty())?;
     let image = decode_image(reader, &path, SamplerKind::Texture2D, 0)?;
     Some(Arc::new(CeSecondaryMap {
         anchor: Anchor::read(holder),
@@ -77,7 +83,11 @@ impl CeSecondaryMap {
     /// the `secondary map radius` the draw gives the shader.
     /// Sprites draw with no object's animation, which reads every source as one.
     pub(crate) fn draw(self: &Arc<Self>, time: f32, radius: f32) -> CeSecondaryDraw {
-        let scale = if self.zsprite_scale == 0.0 { 1.0 } else { self.zsprite_scale };
+        let scale = if self.zsprite_scale == 0.0 {
+            1.0
+        } else {
+            self.zsprite_scale
+        };
         CeSecondaryDraw {
             map: self.clone(),
             mode: match self.anchor {
@@ -100,7 +110,10 @@ pub(crate) struct CeSpriteSheet {
     pub(crate) images: Vec<Option<Arc<Image>>>,
 }
 
-pub(in crate::app::model_preview) fn read_sprite_sheet(reader: &TagReader, bitmap_path: &str) -> Option<CeSpriteSheet> {
+pub(in crate::app::model_preview) fn read_sprite_sheet(
+    reader: &TagReader,
+    bitmap_path: &str,
+) -> Option<CeSpriteSheet> {
     let bitmap = reader.load(bitmap_path, "bitmap", b"bitm").ok()?;
     let sizes: Vec<[f32; 2]> = elements(bitmap.root(), "bitmaps")
         .iter()
@@ -126,7 +139,11 @@ pub(in crate::app::model_preview) fn read_sprite_sheet(reader: &TagReader, bitma
                 .collect()
         })
         .collect();
-    let used: Vec<usize> = sequences.iter().flatten().map(|sprite| sprite.image).collect();
+    let used: Vec<usize> = sequences
+        .iter()
+        .flatten()
+        .map(|sprite| sprite.image)
+        .collect();
     let images = (0..sizes.len())
         .map(|index| {
             used.contains(&index)
@@ -135,13 +152,20 @@ pub(in crate::app::model_preview) fn read_sprite_sheet(reader: &TagReader, bitma
                 .map(Arc::new)
         })
         .collect();
-    Some(CeSpriteSheet { sizes, sequences, images })
+    Some(CeSpriteSheet {
+        sizes,
+        sequences,
+        images,
+    })
 }
 
 impl CeSpriteSheet {
     /// How many sprites a sequence has; none past the end.
     pub(crate) fn count(&self, sequence: i32) -> usize {
-        usize::try_from(sequence).ok().and_then(|at| self.sequences.get(at)).map_or(0, Vec::len)
+        usize::try_from(sequence)
+            .ok()
+            .and_then(|at| self.sequences.get(at))
+            .map_or(0, Vec::len)
     }
 
     /// `build_sprite` for one sprite, facing the view as mode 0 does: the
@@ -158,7 +182,10 @@ impl CeSpriteSheet {
         mirror: bool,
         view: &ViewFrame,
     ) -> Option<(usize, [[f32; 5]; 4])> {
-        let frame = usize::try_from(sequence).ok().and_then(|at| self.sequences.get(at)).and_then(|frames| frames.get(sprite))?;
+        let frame = usize::try_from(sequence)
+            .ok()
+            .and_then(|at| self.sequences.get(at))
+            .and_then(|frames| frames.get(sprite))?;
         let size = self.sizes.get(frame.image).map_or(1.0, |size| size[0]) * scale;
         let [left, right, top, bottom] = frame.rect;
         let center_uv = [left + frame.registration[0], top + frame.registration[1]];
@@ -171,9 +198,19 @@ impl CeSpriteSheet {
             if mirror {
                 x = -x;
             }
-            let place: [f32; 3] = std::array::from_fn(|axis| center[axis] + (view.right[axis] * x + view.up[axis] * y) * size);
+            let place: [f32; 3] = std::array::from_fn(|axis| {
+                center[axis] + (view.right[axis] * x + view.up[axis] * y) * size
+            });
             [place[0], place[1], place[2], u, v]
         };
-        Some((frame.image, [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)]))
+        Some((
+            frame.image,
+            [
+                corner(left, bottom),
+                corner(right, bottom),
+                corner(left, top),
+                corner(right, top),
+            ],
+        ))
     }
 }

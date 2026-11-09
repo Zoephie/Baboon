@@ -5,7 +5,11 @@ use super::*;
 fn an_event_particle_count_wraps_as_the_byte_it_is_kept_in() {
     assert_eq!(event_particle_count(12.9), 12.0);
     assert_eq!(event_particle_count(255.5), 255.0);
-    assert_eq!(event_particle_count(256.0), 0.0, "past a byte it comes round");
+    assert_eq!(
+        event_particle_count(256.0),
+        0.0,
+        "past a byte it comes round"
+    );
     assert_eq!(event_particle_count(300.0), 44.0);
 }
 
@@ -13,13 +17,25 @@ fn an_event_particle_count_wraps_as_the_byte_it_is_kept_in() {
 /// fps frame owes a quarter of one, and the tick lands on the fourth.
 #[test]
 fn effects_tick_at_30_whatever_the_frame_rate() {
-    let inputs = |_| CeObjectInputs { outputs: [0.0; 4], active: [false; 4], change_colors: [[0.0; 3]; 4] };
+    let inputs = |_| CeObjectInputs {
+        outputs: [0.0; 4],
+        active: [false; 4],
+        change_colors: [[0.0; 3]; 4],
+    };
     let mut field = CeParticleField::default();
     field.advance(&[], &CeEventPlays::default(), inputs, None, 0.0, 10.0, 0);
     let settled = field.tick;
     let mut ticks = Vec::new();
     for frame in 1..=8 {
-        field.advance(&[], &CeEventPlays::default(), inputs, None, 0.0, 10.0 + frame as f32 / 120.0, 0);
+        field.advance(
+            &[],
+            &CeEventPlays::default(),
+            inputs,
+            None,
+            0.0,
+            10.0 + frame as f32 / 120.0,
+            0,
+        );
         ticks.push(field.tick - settled);
     }
     assert_eq!(ticks, [0, 0, 0, 1, 1, 1, 1, 2]);
@@ -27,7 +43,12 @@ fn effects_tick_at_30_whatever_the_frame_rate() {
 
 #[test]
 fn a_sprite_turns_as_build_sprite_compute_basis_turns_it() {
-    let view = ViewFrame { eye: [0.0; 3], forward: [1.0, 0.0, 0.0], right: [0.0, -1.0, 0.0], up: [0.0, 0.0, 1.0] };
+    let view = ViewFrame {
+        eye: [0.0; 3],
+        forward: [1.0, 0.0, 0.0],
+        right: [0.0, -1.0, 0.0],
+        up: [0.0, 0.0, 1.0],
+    };
     // Parallel: across along the way it goes, up square to it and the eye.
     let (across, up) = sprite_basis(1, [0.0, 2.0, 0.0], [1.0, 0.0, 0.0], &view);
     assert_eq!(across, [0.0, 1.0, 0.0]);

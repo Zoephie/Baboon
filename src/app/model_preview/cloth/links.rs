@@ -37,7 +37,11 @@ pub(crate) fn away_from_pole(pole: [f32; 3], angle: f32, vector: [f32; 3]) -> [f
 /// texture spans the longer side. Reach's `create_cloth_grid_data` (the 360's
 /// 0x82C916E8, MCC's 0x140D994E0) spans the texture across each side by its
 /// own step instead: `u = j / (wide - 1)`, `v = 1 - i / (high - 1)`.
-pub(super) fn flag_grid(size: [usize; 2], spacing: [f32; 2], game: ClothGame) -> (Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<usize>) {
+pub(super) fn flag_grid(
+    size: [usize; 2],
+    spacing: [f32; 2],
+    game: ClothGame,
+) -> (Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<usize>) {
     let rules = game.rules();
     let most = rules.most_vertices;
     let [mut wide, mut high] = size;
@@ -54,14 +58,20 @@ pub(super) fn flag_grid(size: [usize; 2], spacing: [f32; 2], game: ClothGame) ->
     }
     let shared = ((wide - 1).max(high - 1) as f32).recip();
     let [across, down] = if rules.spans_texture_per_side {
-        [((wide - 1).max(1) as f32).recip(), ((high - 1).max(1) as f32).recip()]
+        [
+            ((wide - 1).max(1) as f32).recip(),
+            ((high - 1).max(1) as f32).recip(),
+        ]
     } else {
         [shared; 2]
     };
     for row in 0..high {
         for column in 0..wide {
             places.push([column as f32 * spacing[0], 0.0, -(row as f32) * spacing[1]]);
-            uvs.push([column as f32 * across, (high - 1) as f32 * down - row as f32 * down]);
+            uvs.push([
+                column as f32 * across,
+                (high - 1) as f32 * down - row as f32 * down,
+            ]);
         }
     }
     for row in 0..high - 1 {
@@ -80,25 +90,44 @@ pub(super) struct ClothLink {
 }
 
 pub(super) fn find_link(links: &[ClothLink], a: usize, b: usize) -> Option<usize> {
-    links.iter().position(|link| link.ends == [a, b] || link.ends == [b, a])
+    links
+        .iter()
+        .position(|link| link.ends == [a, b] || link.ends == [b, a])
 }
 
 /// `cloth_add_link`.
 fn add_link(links: &mut Vec<ClothLink>, places: &[[f32; 3]], a: usize, b: usize) {
-    links.push(ClothLink { ends: [a, b], length: distance(places[a], places[b]) });
+    links.push(ClothLink {
+        ends: [a, b],
+        length: distance(places[a], places[b]),
+    });
 }
 
 /// `cloth_add_link_if_short`: what stiffens the sheet, up to `longest_rod`
 /// of the link it grew from.
-fn add_short_link(links: &mut Vec<ClothLink>, places: &[[f32; 3]], longest: f32, a: usize, b: usize, scale: f32) {
-    if a != b && find_link(links, a, b).is_none() && longest >= distance(places[a], places[b]) * scale {
+fn add_short_link(
+    links: &mut Vec<ClothLink>,
+    places: &[[f32; 3]],
+    longest: f32,
+    a: usize,
+    b: usize,
+    scale: f32,
+) {
+    if a != b
+        && find_link(links, a, b).is_none()
+        && longest >= distance(places[a], places[b]) * scale
+    {
         add_link(links, places, a, b);
     }
 }
 
 /// `cloth_generate_links`: an edge first met is a link, and one met again links
 /// what lies across it. Then every link stiffens each of its two ends.
-pub(super) fn generate_links(places: &[[f32; 3]], indices: &[usize], longest: f32) -> Vec<ClothLink> {
+pub(super) fn generate_links(
+    places: &[[f32; 3]],
+    indices: &[usize],
+    longest: f32,
+) -> Vec<ClothLink> {
     let mut links = Vec::new();
     for triangle in indices.chunks_exact(3) {
         for edge in 0..3 {
@@ -108,7 +137,10 @@ pub(super) fn generate_links(places: &[[f32; 3]], indices: &[usize], longest: f3
                 continue;
             };
             let across = triangle[(edge + 2) % 3];
-            let ClothLink { ends: [first, second], length } = links[found];
+            let ClothLink {
+                ends: [first, second],
+                length,
+            } = links[found];
             let other = indices.chunks_exact(3).find_map(|triangle| {
                 (0..3).find_map(|at| {
                     let (near, far) = (triangle[at], triangle[(at + 1) % 3]);
@@ -123,7 +155,10 @@ pub(super) fn generate_links(places: &[[f32; 3]], indices: &[usize], longest: f3
         }
     }
     for at in 0..links.len() {
-        let ClothLink { ends: [a, b], length } = links[at];
+        let ClothLink {
+            ends: [a, b],
+            length,
+        } = links[at];
         for (from, not) in [(a, b), (b, a)] {
             for triangle in indices.chunks_exact(3) {
                 if triangle.contains(&from) && !triangle.contains(&not) {
@@ -186,11 +221,19 @@ pub(super) fn cloth_pins(
             } else {
                 (increment * at as f32).ceil() as usize * wide
             };
-            ClothPin { vertex, node: *node, position: *position }
+            ClothPin {
+                vertex,
+                node: *node,
+                position: *position,
+            }
         })
         .collect();
     if let (true, Some((node, position))) = (pins.len() < most, secondary) {
-        pins.push(ClothPin { vertex: vertex_count - 1, node, position });
+        pins.push(ClothPin {
+            vertex: vertex_count - 1,
+            node,
+            position,
+        });
     }
     pins
 }

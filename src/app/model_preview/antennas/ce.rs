@@ -6,15 +6,15 @@ use std::sync::Arc;
 use blam_tags::TagFile;
 
 use super::super::ce::lights::marker_or_origin;
-use crate::app::model_preview::common::fields::argb;
 use super::super::common::fields::{elements, object_block};
-use super::super::common::math::dot;
-use super::super::common::view::{ViewFrame, posed_on};
 use super::super::common::image::Image;
+use super::super::common::math::dot;
+use super::super::common::sprites::AntennaQuad;
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::materials::decode_image;
 use super::super::*;
 use super::{ANTENNA_TRIM, AntennaSprite, antenna_sprite};
-use super::super::common::sprites::AntennaQuad;
+use crate::app::model_preview::common::fields::argb;
 use crate::core::h2_pixel_shader::SamplerKind;
 
 /// One segment of an antenna: a bitmap sprite stretched along it.
@@ -76,13 +76,19 @@ impl CeAntenna {
             let corner = |u: f32, v: f32| {
                 let along = (u - (x + left)) * segment.scale;
                 let side = (y + top - v) * segment.scale;
-                let place: [f32; 3] =
-                    std::array::from_fn(|axis| origin[axis] + forward[axis] * along + across[axis] * side);
+                let place: [f32; 3] = std::array::from_fn(|axis| {
+                    origin[axis] + forward[axis] * along + across[axis] * side
+                });
                 [place[0], place[1], place[2], u, v]
             };
             let [red, green, blue, alpha] = segment.color;
             quads.push(AntennaQuad {
-                corners: [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)],
+                corners: [
+                    corner(left, bottom),
+                    corner(right, bottom),
+                    corner(left, top),
+                    corner(right, top),
+                ],
                 color: [red, green, blue, alpha * self.fade],
             });
             origin = std::array::from_fn(|axis| origin[axis] + forward[axis] * segment.length);
@@ -91,18 +97,33 @@ impl CeAntenna {
     }
 }
 
-fn read_antenna(reader: &TagReader, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeAntenna> {
+fn read_antenna(
+    reader: &TagReader,
+    path: &str,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+) -> Option<CeAntenna> {
     let tag = reader.load(path, "antenna", b"ant!").ok()?;
     let root = tag.root();
-    let name = root.read_string("attachment marker name").unwrap_or_default();
+    let name = root
+        .read_string("attachment marker name")
+        .unwrap_or_default();
     let (node, position, forward) = marker_or_origin(markers, &name, owner)?;
-    let bitmap_path = root.read_tag_ref_path("bitmaps").filter(|path| !path.is_empty())?;
+    let bitmap_path = root
+        .read_tag_ref_path("bitmaps")
+        .filter(|path| !path.is_empty())?;
     let bitmap = reader.load(&bitmap_path, "bitmap", b"bitm").ok()?;
     let mut image_index = None;
     let mut segments = Vec::new();
     for vertex in elements(root, "vertices") {
         let sequence = vertex.read_int_any("sequence index").unwrap_or(0).max(0) as usize;
-        let AntennaSprite { rect, registration, index, covered, .. } = antenna_sprite(&bitmap, sequence, ANTENNA_TRIM)?;
+        let AntennaSprite {
+            rect,
+            registration,
+            index,
+            covered,
+            ..
+        } = antenna_sprite(&bitmap, sequence, ANTENNA_TRIM)?;
         image_index.get_or_insert(index);
         let length = vertex.read_real("length").unwrap_or(0.0);
         segments.push(CeAntennaSegment {
@@ -168,14 +189,16 @@ mod tests {
             forward: [0.0, 0.0, 2.0],
             segments: vec![segment.clone(), segment],
             fade: 1.0,
-            image: Arc::new(Image::Flat(crate::app::model_preview::materials::TextureImage {
-                rgba: Vec::new(),
-                width: 0,
-                height: 0,
-                repeat_x: true,
-                repeat_y: true,
-                scale: [1.0; 2],
-            })),
+            image: Arc::new(Image::Flat(
+                crate::app::model_preview::materials::TextureImage {
+                    rgba: Vec::new(),
+                    width: 0,
+                    height: 0,
+                    repeat_x: true,
+                    repeat_y: true,
+                    scale: [1.0; 2],
+                },
+            )),
         };
         let quads = antenna.quads(None, &VIEW);
         assert_eq!(quads.len(), 2);

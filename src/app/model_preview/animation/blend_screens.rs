@@ -37,12 +37,23 @@ pub(crate) struct BlendScreenData {
 impl BlendScreenData {
     pub(crate) fn parse(section: &[u8]) -> Option<Self> {
         let byte = |at: usize| section.get(at).copied();
-        let word = |at: usize| Some(u32::from_le_bytes(section.get(at..at + 4)?.try_into().ok()?) as usize);
-        let float = |at: usize| Some(f32::from_le_bytes(section.get(at..at + 4)?.try_into().ok()?));
+        let word = |at: usize| {
+            Some(u32::from_le_bytes(section.get(at..at + 4)?.try_into().ok()?) as usize)
+        };
+        let float = |at: usize| {
+            Some(f32::from_le_bytes(
+                section.get(at..at + 4)?.try_into().ok()?,
+            ))
+        };
         let (kind, points, count) = (byte(0)?, byte(1)? as usize, byte(2)? as usize);
         let (points_at, elements_at) = (word(4)?, word(8)?);
         let points = (0..points)
-            .map(|index| Some([float(points_at + 8 * index)?, float(points_at + 8 * index + 4)?]))
+            .map(|index| {
+                Some([
+                    float(points_at + 8 * index)?,
+                    float(points_at + 8 * index + 4)?,
+                ])
+            })
             .collect::<Option<Vec<_>>>()?;
         let stride = if kind == 0 { 4 } else { 8 };
         let elements = (0..count)
@@ -51,11 +62,22 @@ impl BlendScreenData {
                 Some(if kind == 0 {
                     [byte(at)?, byte(at + 1)?, 0, byte(at + 2)?, byte(at + 3)?, 0]
                 } else {
-                    [byte(at)?, byte(at + 1)?, byte(at + 2)?, byte(at + 3)?, byte(at + 4)?, byte(at + 5)?]
+                    [
+                        byte(at)?,
+                        byte(at + 1)?,
+                        byte(at + 2)?,
+                        byte(at + 3)?,
+                        byte(at + 4)?,
+                        byte(at + 5)?,
+                    ]
                 })
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(Self { kind, points, elements })
+        Some(Self {
+            kind,
+            points,
+            elements,
+        })
     }
 
     /// `set_euler_angles`' bounds: a sphere's all the way round, the
@@ -67,22 +89,36 @@ impl BlendScreenData {
         }
         let bound = |axis: usize| {
             let values = self.points.iter().map(|point| point[axis]);
-            (values.clone().fold(f32::INFINITY, f32::min), values.fold(f32::NEG_INFINITY, f32::max))
+            (
+                values.clone().fold(f32::INFINITY, f32::min),
+                values.fold(f32::NEG_INFINITY, f32::max),
+            )
         };
         let ((low_yaw, high_yaw), (low_pitch, high_pitch)) = (bound(0), bound(1));
         if low_yaw > high_yaw {
             return (yaw, pitch);
         }
-        (yaw.clamp(low_yaw, high_yaw), pitch.clamp(low_pitch, high_pitch))
+        (
+            yaw.clamp(low_yaw, high_yaw),
+            pitch.clamp(low_pitch, high_pitch),
+        )
     }
 
     /// `compute_frame_weights_from_blend_screen_data`: interpolation weights
     /// and their frames, and the index the second blend breaks at.
-    pub(crate) fn weights(&self, yaw: f32, pitch: f32) -> Option<([f32; 3], [usize; 3], Option<usize>)> {
+    pub(crate) fn weights(
+        &self,
+        yaw: f32,
+        pitch: f32,
+    ) -> Option<([f32; 3], [usize; 3], Option<usize>)> {
         let (yaw, pitch) = self.clamped(yaw, pitch);
         match self.kind {
-            0 => self.segments(yaw, pitch).map(|(weights, frames)| (weights, frames, None)),
-            1 => self.triangulation(yaw, pitch).map(|(weights, frames)| (weights, frames, None)),
+            0 => self
+                .segments(yaw, pitch)
+                .map(|(weights, frames)| (weights, frames, None)),
+            1 => self
+                .triangulation(yaw, pitch)
+                .map(|(weights, frames)| (weights, frames, None)),
             2 => self.sphere(yaw, pitch),
             _ => None,
         }
@@ -106,10 +142,19 @@ impl BlendScreenData {
         let reached = length2_squared(sub2(q, start));
         for segment in &self.elements {
             let (a, b) = (self.point(segment[0]), self.point(segment[1]));
-            if length2_squared(sub2(a, start)) <= reached && reached <= length2_squared(sub2(b, start)) {
+            if length2_squared(sub2(a, start)) <= reached
+                && reached <= length2_squared(sub2(b, start))
+            {
                 let length = length2_squared(sub2(b, a)).sqrt();
-                let t = if length > EPS { length2_squared(sub2(p, a)).sqrt() / length } else { 0.0 };
-                return Some(([1.0 - t, t, 0.0], [segment[0] as usize, segment[1] as usize, 0]));
+                let t = if length > EPS {
+                    length2_squared(sub2(p, a)).sqrt() / length
+                } else {
+                    0.0
+                };
+                return Some((
+                    [1.0 - t, t, 0.0],
+                    [segment[0] as usize, segment[1] as usize, 0],
+                ));
             }
         }
         None
@@ -120,7 +165,13 @@ impl BlendScreenData {
     fn triangulation(&self, yaw: f32, pitch: f32) -> Option<([f32; 3], [usize; 3])> {
         let snap = |value: f32| if value.abs() < EPS { 0.0 } else { value };
         let p = [snap(yaw), snap(pitch)];
-        let frames = |triangle: &[u8; 6]| [triangle[0] as usize, triangle[1] as usize, triangle[2] as usize];
+        let frames = |triangle: &[u8; 6]| {
+            [
+                triangle[0] as usize,
+                triangle[1] as usize,
+                triangle[2] as usize,
+            ]
+        };
         for triangle in &self.elements {
             let [a, b, c] = [0, 1, 2].map(|corner| self.point(triangle[corner]));
             if point_in_triangle2(p, a, b, c) {
@@ -134,7 +185,10 @@ impl BlendScreenData {
                 if triangle[3 + edge] != 0xFF {
                     continue;
                 }
-                let (a, b) = (self.point(triangle[edge]), self.point(triangle[(edge + 1) % 3]));
+                let (a, b) = (
+                    self.point(triangle[edge]),
+                    self.point(triangle[(edge + 1) % 3]),
+                );
                 let (q, _) = closest_on_line2(p, a, sub2(b, a));
                 let distance = length2_squared(sub2(p, q));
                 if best.is_none_or(|(known, _, _)| distance < known) {
@@ -143,7 +197,10 @@ impl BlendScreenData {
             }
         }
         let (_, triangle, edge) = best?;
-        let (a, b) = (self.point(triangle[edge]), self.point(triangle[(edge + 1) % 3]));
+        let (a, b) = (
+            self.point(triangle[edge]),
+            self.point(triangle[(edge + 1) % 3]),
+        );
         let (_, s) = closest_on_line2(p, a, sub2(b, a));
         let mut weights = [0.0; 3];
         weights[(edge + 1) % 3] = s;
@@ -163,7 +220,11 @@ impl BlendScreenData {
         let mut breaks = None;
         for triangle in &self.elements {
             breaks = None;
-            let mut corners = [triangle[0] as usize, triangle[1] as usize, triangle[2] as usize];
+            let mut corners = [
+                triangle[0] as usize,
+                triangle[1] as usize,
+                triangle[2] as usize,
+            ];
             let original = corners;
             let mut slot = None;
             for (index, corner) in corners.iter().enumerate() {
@@ -189,7 +250,9 @@ impl BlendScreenData {
             let q = corners.map(on_sphere);
             let normal = cross(minus(q[1], q[0]), minus(q[2], q[0]));
             let length = dot(normal, normal).sqrt();
-            let (normal, distance) = if length < EPS { ([0.0; 3], 0.0) } else {
+            let (normal, distance) = if length < EPS {
+                ([0.0; 3], 0.0)
+            } else {
                 let normal = normal.map(|value| value / length);
                 (normal, dot(normal, q[0]))
             };
@@ -220,7 +283,11 @@ impl BlendScreenData {
         let (t, kept, corners, q) = best?;
         let hit = ray.map(|value| value * t);
         let mut order = [0usize, 1, 2];
-        order.sort_by(|left, right| kept[*right].partial_cmp(&kept[*left]).unwrap_or(std::cmp::Ordering::Equal));
+        order.sort_by(|left, right| {
+            kept[*right]
+                .partial_cmp(&kept[*left])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         let (_, s) = closest_on_line3(hit, q[order[0]], minus(q[order[1]], q[order[0]]));
         Some(([1.0 - s, s, 0.0], order.map(|index| corners[index]), breaks))
     }
@@ -256,7 +323,11 @@ fn point_in_triangle2(p: [f32; 2], a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> boo
     [(a, b), (b, c), (c, a)].iter().all(|(u, v)| {
         let w = sub2(p, *u);
         let length = length2_squared(w).sqrt();
-        let s = if length >= EPS { cross2(sub2(*v, *u), w) / length } else { 0.0 };
+        let s = if length >= EPS {
+            cross2(sub2(*v, *u), w) / length
+        } else {
+            0.0
+        };
         s > -EPS
     })
 }
@@ -275,12 +346,20 @@ fn barycentric2(p: [f32; 2], a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> (f32, f32
 /// `barycentric_coordinates_to_interpolation_weights`.
 fn to_interpolation(a: f32, b: f32, c: f32) -> [f32; 3] {
     let s = a + b;
-    if s.abs() > EPS { [a / s, b / s, c] } else { [a, b, c] }
+    if s.abs() > EPS {
+        [a / s, b / s, c]
+    } else {
+        [a, b, c]
+    }
 }
 
 /// `vector3d_from_euler_angles2d`.
 fn direction(yaw: f32, pitch: f32) -> [f32; 3] {
-    [yaw.cos() * pitch.cos(), yaw.sin() * pitch.cos(), pitch.sin()]
+    [
+        yaw.cos() * pitch.cos(),
+        yaw.sin() * pitch.cos(),
+        pitch.sin(),
+    ]
 }
 
 fn closest_on_line3(p: [f32; 3], a: [f32; 3], d: [f32; 3]) -> ([f32; 3], f32) {
@@ -322,11 +401,18 @@ struct Screen {
 /// (`find_hierarchical_property_index_and_graph`).
 fn overlay_group(graph: &TagFile, clip: usize) -> Option<usize> {
     let content = graph.root().descend("content")?;
-    let group = |holder: &TagStruct<'_>| holder.read_int_any("overlay group").and_then(|index| usize::try_from(index).ok());
+    let group = |holder: &TagStruct<'_>| {
+        holder
+            .read_int_any("overlay group")
+            .and_then(|index| usize::try_from(index).ok())
+    };
     let names = |entry: &TagStruct<'_>| {
         let animation = entry.descend("animation")?;
-        let own = animation.read_int_any("graph index").is_none_or(|graph| graph < 0);
-        own.then(|| animation.read_block_index("animation")).and_then(|index| usize::try_from(index).ok())
+        let own = animation
+            .read_int_any("graph index")
+            .is_none_or(|graph| graph < 0);
+        own.then(|| animation.read_block_index("animation"))
+            .and_then(|index| usize::try_from(index).ok())
     };
     for mode in elements(content, "modes") {
         for class in elements(mode, "weapon class") {
@@ -352,11 +438,16 @@ fn overlay_group(graph: &TagFile, clip: usize) -> Option<usize> {
 /// postprocessed flags have it.
 fn node_mask(definitions: TagStruct<'_>, index: Option<usize>, nodes: usize) -> Vec<bool> {
     let mut mask = vec![true; nodes];
-    let Some(entry) = index.and_then(|index| elements(definitions, "node masks").get(index).copied()) else {
+    let Some(entry) =
+        index.and_then(|index| elements(definitions, "node masks").get(index).copied())
+    else {
         return mask;
     };
     for listed in elements(entry, "nodes") {
-        if let Some(node) = usize::try_from(listed.read_block_index("node")).ok().and_then(|node| mask.get_mut(node)) {
+        if let Some(node) = usize::try_from(listed.read_block_index("node"))
+            .ok()
+            .and_then(|node| mask.get_mut(node))
+        {
             *node = false;
         }
     }
@@ -370,17 +461,25 @@ fn screens(graph: &TagFile, clip: usize, nodes: usize) -> Vec<Screen> {
     let Some(definitions) = graph.root().descend("definitions") else {
         return Vec::new();
     };
-    let Some(group) = overlay_group(graph, clip).and_then(|group| elements(definitions, "overlay groups").get(group).copied()) else {
+    let Some(group) = overlay_group(graph, clip)
+        .and_then(|group| elements(definitions, "overlay groups").get(group).copied())
+    else {
         return Vec::new();
     };
     let all = elements(definitions, "NEW blend screens");
     let functions = elements(definitions, "functions");
     let mut out = Vec::new();
     for item in elements(group, "blend screens") {
-        if item.read_int_any("flags").is_some_and(|flags| flags & ITEM_DISABLED != 0) {
+        if item
+            .read_int_any("flags")
+            .is_some_and(|flags| flags & ITEM_DISABLED != 0)
+        {
             continue;
         }
-        let Some(screen) = usize::try_from(item.read_block_index("blend screen")).ok().and_then(|index| all.get(index)) else {
+        let Some(screen) = usize::try_from(item.read_block_index("blend screen"))
+            .ok()
+            .and_then(|index| all.get(index))
+        else {
             continue;
         };
         let flags = screen.read_int_any("flags").unwrap_or(0);
@@ -395,14 +494,19 @@ fn screens(graph: &TagFile, clip: usize, nodes: usize) -> Vec<Screen> {
             .ok()
             .and_then(|index| functions.get(index))
             .and_then(|function| tag_function_at(&function.descend("function")?, "function"));
-        let weight = function.map_or(input, |function| function.evaluate(input, 0.0)).clamp(0.0, 1.0);
+        let weight = function
+            .map_or(input, |function| function.evaluate(input, 0.0))
+            .clamp(0.0, 1.0);
         if weight <= 0.0 {
             continue;
         }
         let Some(animation) = screen.descend("animation") else {
             continue;
         };
-        if animation.read_int_any("graph index").is_some_and(|graph| graph >= 0) {
+        if animation
+            .read_int_any("graph index")
+            .is_some_and(|graph| graph >= 0)
+        {
             continue;
         }
         let Some(animation) = usize::try_from(animation.read_block_index("animation")).ok() else {
@@ -432,7 +536,11 @@ fn blend_into(into: &mut [OverlayDelta], from: &[OverlayDelta], weight: f32) {
             into.rotation = Some(a.nlerp(b, weight));
         }
         if let (Some(a), Some(b)) = (into.translation, from.translation) {
-            into.translation = Some(RealPoint3d { x: a.x + (b.x - a.x) * weight, y: a.y + (b.y - a.y) * weight, z: a.z + (b.z - a.z) * weight });
+            into.translation = Some(RealPoint3d {
+                x: a.x + (b.x - a.x) * weight,
+                y: a.y + (b.y - a.y) * weight,
+                z: a.z + (b.z - a.z) * weight,
+            });
         }
         if let (Some(a), Some(b)) = (into.scale, from.scale) {
             into.scale = Some(a + (b - a) * weight);
@@ -481,13 +589,22 @@ fn lay(transform: &mut NodeTransform, delta: &OverlayDelta, weight: f32, full: b
             turn
         } else {
             let sign = if turn.w < 0.0 { -1.0 } else { 1.0 };
-            RealQuaternion { i: turn.i * weight, j: turn.j * weight, k: turn.k * weight, w: sign + (turn.w - sign) * weight }
+            RealQuaternion {
+                i: turn.i * weight,
+                j: turn.j * weight,
+                k: turn.k * weight,
+                w: sign + (turn.w - sign) * weight,
+            }
         };
         transform.rotation = transform.rotation * turn;
     }
     if let Some(moved) = delta.translation {
         let t = transform.translation;
-        transform.translation = RealPoint3d { x: t.x + moved.x * weight, y: t.y + moved.y * weight, z: t.z + moved.z * weight };
+        transform.translation = RealPoint3d {
+            x: t.x + moved.x * weight,
+            y: t.y + moved.y * weight,
+            z: t.z + moved.z * weight,
+        };
     }
     if let Some(scale) = delta.scale {
         transform.scale *= 1.0 + weight * (scale - 1.0);
@@ -499,7 +616,9 @@ fn lay(transform: &mut NodeTransform, delta: &OverlayDelta, weight: f32, full: b
 fn aim() -> (f32, f32) {
     #[cfg(test)]
     if let Ok(aim) = std::env::var("H2_SHOT_AIM") {
-        let mut parts = aim.split(',').map(|part| part.trim().parse::<f32>().unwrap_or(0.0).to_radians());
+        let mut parts = aim
+            .split(',')
+            .map(|part| part.trim().parse::<f32>().unwrap_or(0.0).to_radians());
         return (parts.next().unwrap_or(0.0), parts.next().unwrap_or(0.0));
     }
     (0.0, 0.0)
@@ -507,7 +626,13 @@ fn aim() -> (f32, f32) {
 
 /// Lay the blend screens of `clip`'s state over its `pose`, aiming and
 /// looking as [`aim`] has it, if `graph` mixes on the data-driven board.
-pub(crate) fn lay_blend_screens(graph: &TagFile, animation: &Animation<'_>, skeleton: &Skeleton, clip: usize, pose: &mut Pose) {
+pub(crate) fn lay_blend_screens(
+    graph: &TagFile,
+    animation: &Animation<'_>,
+    skeleton: &Skeleton,
+    clip: usize,
+    pose: &mut Pose,
+) {
     let data_driven = graph
         .root()
         .descend("definitions")
@@ -523,7 +648,10 @@ pub(crate) fn lay_blend_screens(graph: &TagFile, animation: &Animation<'_>, skel
         if group.animation_type.as_deref() != Some("overlay") {
             continue;
         }
-        let Some(data) = group.data_section("blend_screen_data").and_then(BlendScreenData::parse) else {
+        let Some(data) = group
+            .data_section("blend_screen_data")
+            .and_then(BlendScreenData::parse)
+        else {
             continue;
         };
         // Every source this preview runs is aim or look, or reads nothing.
@@ -534,11 +662,23 @@ pub(crate) fn lay_blend_screens(graph: &TagFile, animation: &Animation<'_>, skel
         let Some(deltas) = overlay_deltas(group, skeleton) else {
             continue;
         };
-        compose(&deltas, weights, frames, breaks, screen.piecewise, screen.weight, &screen.mask, pose);
+        compose(
+            &deltas,
+            weights,
+            frames,
+            breaks,
+            screen.piecewise,
+            screen.weight,
+            &screen.mask,
+            pose,
+        );
     }
 }
 
-fn overlay_deltas(group: &AnimationGroup<'_>, skeleton: &Skeleton) -> Option<Vec<Vec<OverlayDelta>>> {
+fn overlay_deltas(
+    group: &AnimationGroup<'_>,
+    skeleton: &Skeleton,
+) -> Option<Vec<Vec<OverlayDelta>>> {
     Some(group.decode().ok()?.overlay_deltas(skeleton))
 }
 
@@ -575,7 +715,11 @@ fn compose(
         None => decode_and_apply(deltas, base, &extras, weight, mask, pose),
         Some(_) => {
             let secondary = if weights[2] > EPS { weights[2] } else { 0.0 };
-            let first = if piecewise { weight } else { weight * (1.0 - secondary) };
+            let first = if piecewise {
+                weight
+            } else {
+                weight * (1.0 - secondary)
+            };
             decode_and_apply(deltas, base, &extras, first, mask, pose);
             if secondary > EPS {
                 decode_and_apply(deltas, frames[2], &[], weight * secondary, mask, pose);
@@ -602,12 +746,28 @@ mod tests {
         }
         let none = 0xFF;
         let triangles = [
-            [0, 1, 11, 6, 12, 4], [2, 1, 7, 2, 9, 3], [1, 2, 12, 1, 5, 12], [3, 2, 7, 5, 1, 10],
-            [11, 10, 0, none, none, 0], [3, 12, 2, 13, 2, 3], [1, 0, 6, 0, 8, 9], [4, 3, 9, 14, 11, none],
-            [5, 6, 0, none, 6, none], [6, 7, 1, none, 1, 6], [7, 8, 3, none, 11, 3], [8, 9, 3, none, 7, 10],
-            [12, 11, 1, none, 0, 2], [12, 3, 13, 5, 14, none], [4, 13, 3, 15, 13, 7], [4, 14, 13, none, none, 14],
+            [0, 1, 11, 6, 12, 4],
+            [2, 1, 7, 2, 9, 3],
+            [1, 2, 12, 1, 5, 12],
+            [3, 2, 7, 5, 1, 10],
+            [11, 10, 0, none, none, 0],
+            [3, 12, 2, 13, 2, 3],
+            [1, 0, 6, 0, 8, 9],
+            [4, 3, 9, 14, 11, none],
+            [5, 6, 0, none, 6, none],
+            [6, 7, 1, none, 1, 6],
+            [7, 8, 3, none, 11, 3],
+            [8, 9, 3, none, 7, 10],
+            [12, 11, 1, none, 0, 2],
+            [12, 3, 13, 5, 14, none],
+            [4, 13, 3, 15, 13, 7],
+            [4, 14, 13, none, none, 14],
         ];
-        BlendScreenData { kind: 1, points, elements: triangles.to_vec() }
+        BlendScreenData {
+            kind: 1,
+            points,
+            elements: triangles.to_vec(),
+        }
     }
 
     fn close(a: [f32; 3], b: [f32; 3]) -> bool {
@@ -617,60 +777,129 @@ mod tests {
     #[test]
     fn dead_ahead_is_the_middle_frame_whole() {
         let (weights, frames, breaks) = aim_still_up().weights(0.0, 0.0).unwrap();
-        assert_eq!((weights, frames, breaks), ([1.0, 0.0, 0.0], [2, 1, 7], None));
+        assert_eq!(
+            (weights, frames, breaks),
+            ([1.0, 0.0, 0.0], [2, 1, 7], None)
+        );
     }
 
     #[test]
     fn the_spec_vectors_come_back() {
         let screen = aim_still_up();
-        let at = |yaw: f32, pitch: f32| screen.weights(yaw.to_radians(), pitch.to_radians()).unwrap();
+        let at = |yaw: f32, pitch: f32| {
+            screen
+                .weights(yaw.to_radians(), pitch.to_radians())
+                .unwrap()
+        };
         let (weights, frames, _) = at(30.0, 20.0);
-        assert!(close(weights, [0.75096, 0.24904, 0.40816]) && frames == [1, 2, 12], "{weights:?} {frames:?}");
+        assert!(
+            close(weights, [0.75096, 0.24904, 0.40816]) && frames == [1, 2, 12],
+            "{weights:?} {frames:?}"
+        );
         let (weights, frames, _) = at(-30.0, -20.0);
-        assert!(close(weights, [0.97778, 0.02222, 0.54545]) && frames == [3, 2, 7], "{weights:?} {frames:?}");
+        assert!(
+            close(weights, [0.97778, 0.02222, 0.54545]) && frames == [3, 2, 7],
+            "{weights:?} {frames:?}"
+        );
         let (weights, frames, _) = at(100.0, 0.0);
-        assert!(close(weights, [0.0, 0.0, 1.0]) && frames == [1, 2, 12], "clamped to 73.5: {weights:?} {frames:?}");
+        assert!(
+            close(weights, [0.0, 0.0, 1.0]) && frames == [1, 2, 12],
+            "clamped to 73.5: {weights:?} {frames:?}"
+        );
         let (weights, frames, _) = at(60.0, 80.0);
-        assert!(close(weights, [0.27222, 0.72778, 0.18367]) && frames == [11, 10, 0], "{weights:?} {frames:?}");
+        assert!(
+            close(weights, [0.27222, 0.72778, 0.18367]) && frames == [11, 10, 0],
+            "{weights:?} {frames:?}"
+        );
     }
 
     #[test]
     fn a_line_of_poses_splits_between_its_neighbours() {
         let degrees = |pitch: f32| [0.0, pitch.to_radians()];
         let points = [52.4, 33.1, 0.0, -30.2, -43.8].map(degrees).to_vec();
-        let segments = [[4, 3, 0, 0xFF, 1, 0], [3, 2, 0, 0, 2, 0], [2, 1, 0, 1, 3, 0], [1, 0, 0, 2, 0xFF, 0]];
-        let line = BlendScreenData { kind: 0, points, elements: segments.to_vec() };
+        let segments = [
+            [4, 3, 0, 0xFF, 1, 0],
+            [3, 2, 0, 0, 2, 0],
+            [2, 1, 0, 1, 3, 0],
+            [1, 0, 0, 2, 0xFF, 0],
+        ];
+        let line = BlendScreenData {
+            kind: 0,
+            points,
+            elements: segments.to_vec(),
+        };
         let (weights, frames, _) = line.weights(0.0, 0.0).unwrap();
-        assert!(close(weights, [0.0, 1.0, 0.0]) && frames[..2] == [3, 2], "{weights:?} {frames:?}");
+        assert!(
+            close(weights, [0.0, 1.0, 0.0]) && frames[..2] == [3, 2],
+            "{weights:?} {frames:?}"
+        );
         // The spec gives these pitches to a tenth of a degree, so the
         // weights here agree with its exact ones to a few thousandths.
         let (weights, frames, _) = line.weights(0.0, 20f32.to_radians()).unwrap();
-        assert!((weights[0] - 0.39518).abs() < 2e-3 && frames[..2] == [2, 1], "{weights:?} {frames:?}");
+        assert!(
+            (weights[0] - 0.39518).abs() < 2e-3 && frames[..2] == [2, 1],
+            "{weights:?} {frames:?}"
+        );
     }
 
     #[test]
     fn a_sphere_blends_pitch_on_its_own() {
         let degrees = |yaw: f32, pitch: f32| [yaw.to_radians(), pitch.to_radians()];
-        let points = vec![degrees(-2.0, 0.0), degrees(180.0, 0.0), degrees(90.0, 0.0), degrees(-90.0, 0.0), degrees(0.0, -90.0), degrees(0.0, 90.0)];
+        let points = vec![
+            degrees(-2.0, 0.0),
+            degrees(180.0, 0.0),
+            degrees(90.0, 0.0),
+            degrees(-90.0, 0.0),
+            degrees(0.0, -90.0),
+            degrees(0.0, 90.0),
+        ];
         // `banshee_d:acc`'s first triangle holds dead ahead, with its pitch-only
         // vertex 5; the rest of its triangles are not needed to reach it.
-        let triangles = vec![[0, 2, 5, 0xFF, 0xFF, 0xFF], [3, 0, 4, 0xFF, 0xFF, 0xFF], [0, 3, 5, 0xFF, 0xFF, 0xFF], [2, 0, 4, 0xFF, 0xFF, 0xFF]];
-        let sphere = BlendScreenData { kind: 2, points, elements: triangles };
+        let triangles = vec![
+            [0, 2, 5, 0xFF, 0xFF, 0xFF],
+            [3, 0, 4, 0xFF, 0xFF, 0xFF],
+            [0, 3, 5, 0xFF, 0xFF, 0xFF],
+            [2, 0, 4, 0xFF, 0xFF, 0xFF],
+        ];
+        let sphere = BlendScreenData {
+            kind: 2,
+            points,
+            elements: triangles,
+        };
         let (weights, frames, breaks) = sphere.weights(0.0, 30f32.to_radians()).unwrap();
         assert_eq!(breaks, Some(2));
         assert_eq!(frames[2], 5, "the pitch-only vertex last");
-        assert!((weights[2] - 1.0 / 3.0).abs() < 1e-4, "30 of its 90: {weights:?}");
+        assert!(
+            (weights[2] - 1.0 / 3.0).abs() < 1e-4,
+            "30 of its 90: {weights:?}"
+        );
     }
 
     #[test]
     fn a_partial_overlay_turns_part_of_the_way() {
         let mut transform = NodeTransform::IDENTITY;
-        let half_turn = RealQuaternion { i: 0.0, j: 0.0, k: 1.0, w: 0.0 };
-        let delta = OverlayDelta { rotation: Some(half_turn), translation: Some(RealPoint3d { x: 2.0, y: 0.0, z: 0.0 }), scale: Some(3.0) };
+        let half_turn = RealQuaternion {
+            i: 0.0,
+            j: 0.0,
+            k: 1.0,
+            w: 0.0,
+        };
+        let delta = OverlayDelta {
+            rotation: Some(half_turn),
+            translation: Some(RealPoint3d {
+                x: 2.0,
+                y: 0.0,
+                z: 0.0,
+            }),
+            scale: Some(3.0),
+        };
         lay(&mut transform, &delta, 0.5, false);
         assert!((transform.translation.x - 1.0).abs() < 1e-6);
         assert!((transform.scale - 2.0).abs() < 1e-6);
-        assert!((transform.rotation.k - 0.5).abs() < 1e-6 && (transform.rotation.w - 0.5).abs() < 1e-6, "unnormalized");
+        assert!(
+            (transform.rotation.k - 0.5).abs() < 1e-6 && (transform.rotation.w - 0.5).abs() < 1e-6,
+            "unnormalized"
+        );
         let mut whole = NodeTransform::IDENTITY;
         lay(&mut whole, &delta, 1.0, true);
         assert_eq!(whole.rotation, half_turn);
@@ -681,18 +910,32 @@ mod tests {
     /// screens do not; the aim screen leaves out the `look` mask's nodes.
     #[test]
     fn the_spartans_rifle_idle_runs_its_aim_and_look_screens() {
-        let Some(root) = kit_root(GameId::HaloReach) else { return };
-        let path = std::path::Path::new(&root).join("objects/characters/spartans/spartans.model_animation_graph");
+        let Some(root) = kit_root(GameId::HaloReach) else {
+            return;
+        };
+        let path = std::path::Path::new(&root)
+            .join("objects/characters/spartans/spartans.model_animation_graph");
         let graph = TagFile::read(path).unwrap();
         let animation = Animation::new(&graph).unwrap();
         let idle = animation.find("combat:rifle:idle").unwrap().index;
         assert_eq!(overlay_group(&graph, idle), Some(57));
         let skeleton = Skeleton::from_tag(&graph);
         let running = screens(&graph, idle, skeleton.nodes.len());
-        let names: Vec<_> = running.iter().filter_map(|screen| animation.get(screen.animation)?.name.clone()).collect();
-        assert_eq!(names, ["combat:rifle:aim_still_up", "combat:rifle:look_still_up"]);
-        let left_out: Vec<_> = (0..skeleton.nodes.len()).filter(|node| !running[0].mask[*node]).collect();
+        let names: Vec<_> = running
+            .iter()
+            .filter_map(|screen| animation.get(screen.animation)?.name.clone())
+            .collect();
+        assert_eq!(
+            names,
+            ["combat:rifle:aim_still_up", "combat:rifle:look_still_up"]
+        );
+        let left_out: Vec<_> = (0..skeleton.nodes.len())
+            .filter(|node| !running[0].mask[*node])
+            .collect();
         assert_eq!(left_out, [27, 30, 38, 42]);
-        assert!(running[1].mask.iter().all(|node| *node), "no mask is every node");
+        assert!(
+            running[1].mask.iter().all(|node| *node),
+            "no mask is every node"
+        );
     }
 }

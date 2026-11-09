@@ -10,20 +10,20 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
-use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
-use super::super::common::view::{ViewFrame, posed_on};
-use super::super::functions::FunctionValues;
 use super::super::common::named_function::tag_function_at;
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::effects::{
     CHEAP_PARTICLE_EMITTER, EffectOnsets, EffectTimes, for_each_attached_part, part_frame,
     read_part_placement,
 };
+use super::super::functions::FunctionValues;
 use super::super::particles::{PRE_ROLL, Random, particle_game_time};
 use super::super::reach::lights::object_value;
 use super::super::*;
-use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::common::marker::MarkerFrame;
+use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 
 mod library;
 pub(in crate::app::model_preview) use library::*;
@@ -71,8 +71,13 @@ const RENDER: usize = 4;
 
 /// `cheap_particles_initialize.hlsl`: an empty slot, `(0, 0, 0, 2)` and
 /// `(0, 1, 0, 0)`, dead by its age.
-const EMPTY: CheapParticle =
-    CheapParticle { position: [0.0; 3], age: 2.0, velocity: [0.0, 1.0, 0.0], delta_age: 0.0, parameters: [0; 4] };
+const EMPTY: CheapParticle = CheapParticle {
+    position: [0.0; 3],
+    age: 2.0,
+    velocity: [0.0, 1.0, 0.0],
+    delta_age: 0.0,
+    parameters: [0; 4],
+};
 
 /// HLSL's `frac`.
 fn frac(x: f32) -> f32 {

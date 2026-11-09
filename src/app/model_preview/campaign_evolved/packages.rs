@@ -57,7 +57,10 @@ pub(super) fn cev_read_uasset_by_package(
 /// the same way as [`cev_read_uasset_by_package`]. Bulk data isn't in the
 /// directory index — it shares the package's chunk id with the BulkData type,
 /// fetched via [`IoStoreArchive::read_bulk_for`].
-pub(super) fn cev_read_bulk_by_package(containers: &[MountedContainer], package: &str) -> Option<Vec<u8>> {
+pub(super) fn cev_read_bulk_by_package(
+    containers: &[MountedContainer],
+    package: &str,
+) -> Option<Vec<u8>> {
     let (c, e) = cev_package_entries(containers, package).next()?;
     c.archive.read_bulk_for(e.chunk_index, 0).ok()
 }
@@ -137,9 +140,13 @@ pub(super) fn cev_load_variant_meshes(
         let Ok(bytes) = containers[ci].archive.read(&path) else {
             continue;
         };
-        let Ok(hdr) =
-            FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None)
-        else {
+        let Ok(hdr) = FZenPackageHeader::deserialize(
+            &mut Cursor::new(&bytes[..]),
+            None,
+            CEV_CV,
+            CEV_HV,
+            None,
+        ) else {
             continue;
         };
         let names = hdr.name_map.copy_raw_names();

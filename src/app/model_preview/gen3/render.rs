@@ -51,7 +51,13 @@ pub(in crate::app::model_preview) trait Gen3Game {
     }
 
     /// After the albedo and its decals, before the lights.
-    unsafe fn after_albedo(&mut self, _cx: &mut Gen3Cx<'_>, _albedo: glow::NativeFramebuffer, _size: [i32; 2]) {}
+    unsafe fn after_albedo(
+        &mut self,
+        _cx: &mut Gen3Cx<'_>,
+        _albedo: glow::NativeFramebuffer,
+        _size: [i32; 2],
+    ) {
+    }
 
     /// The self shadow ahead of the lit pass.
     unsafe fn self_shadow(
@@ -81,7 +87,12 @@ pub(in crate::app::model_preview) trait Gen3Game {
     fn lit_values(&mut self, _cx: &mut Gen3Cx<'_>) {}
 
     /// Lights drawn over the screen after the static lighting.
-    unsafe fn screen_lights(&mut self, _cx: &mut Gen3Cx<'_>, _accumulation: glow::NativeFramebuffer) {}
+    unsafe fn screen_lights(
+        &mut self,
+        _cx: &mut Gen3Cx<'_>,
+        _accumulation: glow::NativeFramebuffer,
+    ) {
+    }
 
     /// What composites among the blended parts, where it lies farther than
     /// `nearer_than`.
@@ -135,15 +146,33 @@ pub(in crate::app::model_preview) trait Gen3Game {
     }
 
     /// Over the finished picture, before its screen shaders.
-    unsafe fn before_screen_shaders(&mut self, _cx: &mut Gen3Cx<'_>, _screen: &Gen3ScreenSettings, _copies: &PictureCopies) {}
+    unsafe fn before_screen_shaders(
+        &mut self,
+        _cx: &mut Gen3Cx<'_>,
+        _screen: &Gen3ScreenSettings,
+        _copies: &PictureCopies,
+    ) {
+    }
 
     /// Over the finished picture, after its blur.
-    unsafe fn after_blur(&mut self, _cx: &mut Gen3Cx<'_>, _screen: &Gen3ScreenSettings, _copies: &PictureCopies) {}
+    unsafe fn after_blur(
+        &mut self,
+        _cx: &mut Gen3Cx<'_>,
+        _screen: &Gen3ScreenSettings,
+        _copies: &PictureCopies,
+    ) {
+    }
 
     /// Each simulation the game keeps for `slot` while it holds its
     /// `uploads`th model, by name.
     #[cfg(test)]
-    fn each_simulation(&self, _slot: usize, _uploads: u64, _visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {}
+    fn each_simulation(
+        &self,
+        _slot: usize,
+        _uploads: u64,
+        _visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug),
+    ) {
+    }
 }
 
 /// A gen3 game's drawing: the slot's own draw, then the gen3 pipeline with
@@ -158,7 +187,13 @@ pub(in crate::app::model_preview) struct Gen3Pipeline<G> {
 impl<G: Gen3Game + Default> Default for Gen3Pipeline<G> {
     fn default() -> Self {
         let game = G::default();
-        Self { state: Gen3State { hooks: game.pass_hooks(), ..Default::default() }, game }
+        Self {
+            state: Gen3State {
+                hooks: game.pass_hooks(),
+                ..Default::default()
+            },
+            game,
+        }
     }
 }
 
@@ -195,7 +230,10 @@ impl<G: Gen3Game> GameRender for Gen3Pipeline<G> {
             // A material with translated passes draws through them; the rest
             // carry only the shadow passes, which replace nothing.
             let frame = cx.frame;
-            cx.core.draw_slot_batches(cx.gl, frame, cx.slot, &|core, material| core.gen3_material(frame, material).is_some());
+            cx.core
+                .draw_slot_batches(cx.gl, frame, cx.slot, &|core, material| {
+                    core.gen3_material(frame, material).is_some()
+                });
             let order = cx.frame.visible_batches.clone();
             let (state, game) = self.parts();
             state.draw(cx.core, game, cx.gl, cx.frame, cx.slot, &order);
@@ -208,7 +246,14 @@ impl<G: Gen3Game> GameRender for Gen3Pipeline<G> {
                 if cx.core.draws_object_sprites(cx.frame) {
                     use super::sprites::SpriteStage;
                     let (state, game) = self.parts();
-                    state.draw_sprites(cx.core, game, cx.gl, cx.frame, cx.slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
+                    state.draw_sprites(
+                        cx.core,
+                        game,
+                        cx.gl,
+                        cx.frame,
+                        cx.slot,
+                        SpriteStage::FartherThan(f32::NEG_INFINITY),
+                    );
                     state.draw_sprites(cx.core, game, cx.gl, cx.frame, cx.slot, SpriteStage::Rest);
                 }
             }
@@ -222,7 +267,12 @@ impl<G: Gen3Game> GameRender for Gen3Pipeline<G> {
     }
 
     #[cfg(test)]
-    fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
+    fn each_simulation(
+        &self,
+        slot: usize,
+        uploads: u64,
+        visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug),
+    ) {
         self.game.each_simulation(slot, uploads, visit);
     }
 }
@@ -249,10 +299,22 @@ mod tests {
             pitch: 0.25,
             kind: Some("vehicle".to_owned()),
         };
-        let options = ShotOptions { time: 3.0, ..ShotOptions::new(GameId::Halo3) };
-        let without = ShotOptions { no_game: true, ..options.clone() };
+        let options = ShotOptions {
+            time: 3.0,
+            ..ShotOptions::new(GameId::Halo3)
+        };
+        let without = ShotOptions {
+            no_game: true,
+            ..options.clone()
+        };
         let shown = shoot(&source, &[(shot.clone(), options), (shot, without)]);
-        assert!(shown[0].pixels.iter().any(|byte| *byte != 0), "the warthog drew");
-        assert!(shown[0].pixels == shown[1].pixels, "the frame with no game drew differently");
+        assert!(
+            shown[0].pixels.iter().any(|byte| *byte != 0),
+            "the warthog drew"
+        );
+        assert!(
+            shown[0].pixels == shown[1].pixels,
+            "the frame with no game drew differently"
+        );
     }
 }

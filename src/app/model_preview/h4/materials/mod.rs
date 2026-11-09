@@ -6,24 +6,28 @@
 //! level at all the game picks `static_per_vertex_color`, which no material
 //! shader compiles. What blends draws `single_pass_single_probe`.
 
-use super::super::*;
-use blam_tags::render_method::{
-    BitmapAddressMode, BitmapFilterMode,
-};
 use super::super::common::fields::elements;
-use super::super::gen3::shaders::{Gen3Blend, Gen3Material, Gen3Pass, Gen3MaterialDialect, Gen3Texture};
+use super::super::gen3::shaders::{
+    Gen3Blend, Gen3Material, Gen3MaterialDialect, Gen3Pass, Gen3Texture,
+};
+use super::super::*;
 use crate::app::model_preview::common::image::Sampler;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::hlsl::parse::TextureKind;
-use std::sync::Arc;
+use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use super::super::materials::*;
 use super::super::gen3::materials::*;
-use crate::app::model_preview::h4::materials::shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
+use super::super::materials::*;
+use crate::app::model_preview::h4::materials::shaders::{
+    H4_DEFINES, H4ShaderSource, translate_pass,
+};
+use crate::app::model_preview::h4::materials::submit::{
+    H4HologramPost, H4ScreenMaterial, H4Submit,
+};
 use crate::core::hlsl::emit::Stage;
 use crate::core::hlsl::parse::Program;
-use crate::app::model_preview::h4::materials::submit::{H4HologramPost, H4ScreenMaterial, H4Submit};
 use blam_tags::material::{Material, MaterialShader, bake, shader_flags};
 
 mod options;
@@ -32,7 +36,7 @@ mod resolve;
 pub(in crate::app::model_preview) use resolve::*;
 mod effect;
 pub(in crate::app::model_preview) use effect::*;
-#[cfg(test)]
-mod tests;
 pub(crate) mod shaders;
 pub(in crate::app::model_preview) mod submit;
+#[cfg(test)]
+mod tests;

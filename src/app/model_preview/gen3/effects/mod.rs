@@ -2,5 +2,5 @@
 
 pub(crate) mod flares;
 pub(crate) mod light_volumes;
-pub(crate) mod strips;
 pub(crate) mod screen;
+pub(crate) mod strips;

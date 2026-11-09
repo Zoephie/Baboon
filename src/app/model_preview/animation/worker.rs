@@ -52,7 +52,11 @@ impl Baboon {
             generation: kit.generation,
         };
         let geometry_id = data.geometry_id;
-        if let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(key) {
+        if let Some(state) = self.views[self.model.kits[kit_index].id]
+            .caches
+            .model_previews
+            .get_mut(key)
+        {
             state.animation.requested_list = true;
         }
 
@@ -124,7 +128,11 @@ impl Baboon {
         };
         let geometry_id = data.geometry_id;
         let mut layers = Vec::new();
-        if let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(key) {
+        if let Some(state) = self.views[self.model.kits[kit_index].id]
+            .caches
+            .model_previews
+            .get_mut(key)
+        {
             state.animation.decoding = Some(selected);
             if let Some(Ok(data)) = &state.data
                 && let Some(clips) = data.animations.as_deref()
@@ -167,7 +175,11 @@ impl Baboon {
             return true;
         };
         let stale = self.model.resolve_stamp(stamp).is_none();
-        let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(&key) else {
+        let Some(state) = self.views[self.model.kits[kit_index].id]
+            .caches
+            .model_previews
+            .get_mut(&key)
+        else {
             return true;
         };
         // Listed for geometry a reload has since replaced, which lists its own.
@@ -184,22 +196,29 @@ impl Baboon {
             Ok(entries) => {
                 if let Some(Ok(data)) = state.data.as_mut() {
                     // Taken only by the game it is for: H2 reads it below.
-                    let ce_clip =
-                        data.ce_weapons.as_ref().and_then(|weapons| Some((state.clip_after_load.take()?, weapons)));
+                    let ce_clip = data
+                        .ce_weapons
+                        .as_ref()
+                        .and_then(|weapons| Some((state.clip_after_load.take()?, weapons)));
                     if let Some((clip, weapons)) = ce_clip {
-                        let held = weapons.equippable.iter().find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
+                        let held = weapons
+                            .equippable
+                            .iter()
+                            .find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
                         let class = held.map_or("unarmed", |weapon| weapon.class.as_str());
-                        state.animation.selected = super::super::ce::weapons::clip_after_weapon_change(
-                            &entries,
-                            &weapons.hidden_clips,
-                            &clip,
-                            class,
-                        );
+                        state.animation.selected =
+                            super::super::ce::weapons::clip_after_weapon_change(
+                                &entries,
+                                &weapons.hidden_clips,
+                                &clip,
+                                class,
+                            );
                     }
                     if let Some(weapons) = data.weapons.as_mut() {
                         let (class, kinds) = weapons
                             .held(state.weapon.as_deref(), state.secondary_weapon.as_deref());
-                        let names: Vec<_> = entries.iter().map(|entry| entry.name.as_str()).collect();
+                        let names: Vec<_> =
+                            entries.iter().map(|entry| entry.name.as_str()).collect();
                         weapons.hidden_clips = weapons.hidden(&names, &class, &kinds);
                         if let Some(clip) = state.clip_after_load.take() {
                             let hidden = &weapons.hidden_clips;
@@ -210,13 +229,15 @@ impl Baboon {
                                 })
                             };
                             let mode = clip.split(':').next().unwrap_or_default();
-                            state.animation.selected = shown(clip.split('%').next().unwrap_or_default())
-                                .or_else(|| shown(&format!("{mode}:{class}:idle")));
+                            state.animation.selected =
+                                shown(clip.split('%').next().unwrap_or_default())
+                                    .or_else(|| shown(&format!("{mode}:{class}:idle")));
                         }
                     }
                     // Any other reload: the same clip, if the geometry still has it.
                     if let Some(clip) = state.clip_after_load.take() {
-                        state.animation.selected = entries.iter().position(|entry| entry.name == clip);
+                        state.animation.selected =
+                            entries.iter().position(|entry| entry.name == clip);
                     }
                     data.animations = Some(std::sync::Arc::new(entries));
                 }
@@ -238,7 +259,11 @@ impl Baboon {
             return true;
         };
         let stale = self.model.resolve_stamp(stamp).is_none();
-        let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(&key) else {
+        let Some(state) = self.views[self.model.kits[kit_index].id]
+            .caches
+            .model_previews
+            .get_mut(&key)
+        else {
             return true;
         };
         // Decoded for geometry a reload has since replaced: what it holds,

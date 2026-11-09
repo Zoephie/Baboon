@@ -97,7 +97,9 @@ impl Gen3Material {
         }
     }
 
-    pub(crate) fn h4_mut(&mut self) -> Option<&mut Arc<super::super::super::h4::materials::submit::H4Submit>> {
+    pub(crate) fn h4_mut(
+        &mut self,
+    ) -> Option<&mut Arc<super::super::super::h4::materials::submit::H4Submit>> {
         match &mut self.dialect {
             Gen3MaterialDialect::Halo4(submit) => Some(submit),
             Gen3MaterialDialect::Halo3 | Gen3MaterialDialect::Reach => None,
@@ -149,7 +151,10 @@ mod texel_tests {
         let values = Some(&values);
         assert_eq!(animation("power", "").sample(0.0, 0, values), (0.25, 1.0));
         assert_eq!(animation("", "heat").sample(0.0, 0, values), (1.0, 0.5));
-        assert_eq!(animation("power", "heat").sample(0.0, 0, values), (0.25, 0.5));
+        assert_eq!(
+            animation("power", "heat").sample(0.0, 0, values),
+            (0.25, 0.5)
+        );
         assert_eq!(animation("missing", "").sample(0.0, 0, values), (0.0, 1.0));
     }
 
@@ -157,7 +162,11 @@ mod texel_tests {
     fn render_time_is_the_clock_only_in_odst_screen_shaders() {
         let values = FunctionValues::new();
         let mut timed = animation("render_time", "");
-        assert_eq!(timed.sample(0.25, 0, Some(&values)), (0.0, 1.0), "an object function, and none is set");
+        assert_eq!(
+            timed.sample(0.25, 0, Some(&values)),
+            (0.0, 1.0),
+            "an object function, and none is set"
+        );
         timed.clock = Gen3Clock::Odst;
         assert_eq!(timed.sample(0.25, 0, Some(&values)), (0.0, 1.0));
         timed.clock = Gen3Clock::OdstScreen;
@@ -169,7 +178,11 @@ mod texel_tests {
         let mut unique = animation("unique_id", "");
         unique.period = 4.0;
         assert_eq!(unique.sample(1.0, 0, None), (0.25, 0.0));
-        assert_eq!(unique.sample(1.0, 2, None), (0.75, 0.0), "Halo 3: time plus the object's index");
+        assert_eq!(
+            unique.sample(1.0, 2, None),
+            (0.75, 0.0),
+            "Halo 3: time plus the object's index"
+        );
         unique.clock = Gen3Clock::Odst;
         assert_eq!(unique.sample(1.0, 2, None).0, (1.0 + 2.0 * 1.37317) / 4.0);
     }
@@ -183,7 +196,11 @@ mod texel_tests {
         assert_eq!(unique.sample(1.0, 2, None), (held, 0.0));
         assert_eq!(unique.sample(3.0, 2, None), (held, 0.0), "no time in it");
         unique.clock = Gen3Clock::Odst;
-        assert_ne!(unique.sample(1.0, 2, None), unique.sample(3.0, 2, None), "ODST's runs on");
+        assert_ne!(
+            unique.sample(1.0, 2, None),
+            unique.sample(3.0, 2, None),
+            "ODST's runs on"
+        );
     }
 
     #[test]
@@ -193,7 +210,12 @@ mod texel_tests {
 
     #[test]
     fn the_dxgi_tables_signed_formats_read_signed_whatever_the_curve() {
-        for format in [BitmapFormat::DxnSnorm, BitmapFormat::V8u8, BitmapFormat::Q8w8v8u8, BitmapFormat::V16u16] {
+        for format in [
+            BitmapFormat::DxnSnorm,
+            BitmapFormat::V8u8,
+            BitmapFormat::Q8w8v8u8,
+            BitmapFormat::V16u16,
+        ] {
             assert_eq!(ImageTexels::of(format, false), ImageTexels::Signed);
             assert_eq!(ImageTexels::of(format, true), ImageTexels::Signed);
         }
@@ -201,22 +223,60 @@ mod texel_tests {
 
     #[test]
     fn unsigned_formats_follow_the_curve() {
-        assert_eq!(ImageTexels::of(BitmapFormat::A8r8g8b8, true), ImageTexels::Srgb);
-        assert_eq!(ImageTexels::of(BitmapFormat::A8r8g8b8, false), ImageTexels::Linear);
-        assert_eq!(ImageTexels::of(BitmapFormat::Dxn, false), ImageTexels::Linear);
+        assert_eq!(
+            ImageTexels::of(BitmapFormat::A8r8g8b8, true),
+            ImageTexels::Srgb
+        );
+        assert_eq!(
+            ImageTexels::of(BitmapFormat::A8r8g8b8, false),
+            ImageTexels::Linear
+        );
+        assert_eq!(
+            ImageTexels::of(BitmapFormat::Dxn, false),
+            ImageTexels::Linear
+        );
     }
 
     #[test]
     fn halo4_reads_srgb_only_through_formats_with_an_srgb_twin() {
-        assert_eq!(ImageTexels::of_halo4(BitmapFormat::Dxt1, 5), ImageTexels::Srgb);
-        assert_eq!(ImageTexels::of_halo4(BitmapFormat::A8r8g8b8, 0), ImageTexels::Srgb, "unknown curve, colour format");
+        assert_eq!(
+            ImageTexels::of_halo4(BitmapFormat::Dxt1, 5),
+            ImageTexels::Srgb
+        );
+        assert_eq!(
+            ImageTexels::of_halo4(BitmapFormat::A8r8g8b8, 0),
+            ImageTexels::Srgb,
+            "unknown curve, colour format"
+        );
         // Halo 3's rule would read these sRGB; Halo 4 has no sRGB view for them.
-        assert_eq!(ImageTexels::of_halo4(BitmapFormat::Dxt5a, 5), ImageTexels::Linear);
-        assert_eq!(ImageTexels::of_halo4(BitmapFormat::A4r4g4b4, 1), ImageTexels::Linear);
-        assert_eq!(ImageTexels::of_halo4(BitmapFormat::Dxt5, 2), ImageTexels::Linear, "gamma 2.0 is never sRGB");
-        assert_eq!(ImageTexels::of_halo4(BitmapFormat::Dxt5, 3), ImageTexels::Linear, "nor linear");
-        assert_eq!(ImageTexels::of_halo4(BitmapFormat::Dxn, 0), ImageTexels::Signed, "dxn is BC5_SNORM");
-        assert_eq!(ImageTexels::of(BitmapFormat::Dxn, false), ImageTexels::Linear, "Halo 3 reads its `dxn` differently");
+        assert_eq!(
+            ImageTexels::of_halo4(BitmapFormat::Dxt5a, 5),
+            ImageTexels::Linear
+        );
+        assert_eq!(
+            ImageTexels::of_halo4(BitmapFormat::A4r4g4b4, 1),
+            ImageTexels::Linear
+        );
+        assert_eq!(
+            ImageTexels::of_halo4(BitmapFormat::Dxt5, 2),
+            ImageTexels::Linear,
+            "gamma 2.0 is never sRGB"
+        );
+        assert_eq!(
+            ImageTexels::of_halo4(BitmapFormat::Dxt5, 3),
+            ImageTexels::Linear,
+            "nor linear"
+        );
+        assert_eq!(
+            ImageTexels::of_halo4(BitmapFormat::Dxn, 0),
+            ImageTexels::Signed,
+            "dxn is BC5_SNORM"
+        );
+        assert_eq!(
+            ImageTexels::of(BitmapFormat::Dxn, false),
+            ImageTexels::Linear,
+            "Halo 3 reads its `dxn` differently"
+        );
     }
 
     #[test]

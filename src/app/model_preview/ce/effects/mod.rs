@@ -15,24 +15,27 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use crate::app::model_preview::common::math::perpendicular;
+use super::super::ce::random::CeRandom;
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
+use super::super::common::image::Image;
 use super::super::common::point_physics::CePointPhysics;
-use super::lights::{CeEffectLightDef, CeLight, read_effect_light};
 use super::super::common::view::{ViewFrame, posed_on};
+use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
+use super::super::*;
+use super::lights::{CeEffectLightDef, CeLight, read_effect_light};
 use super::particle_systems::{
     CePctlDef, CePctlQuad, CeRunningSystem, MOST_SYSTEM_PARTICLES, new_unattached, read_pctl_def,
     unattached_quads, update_unattached,
 };
-use crate::app::model_preview::common::fields::argb;
-use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
-use super::super::common::image::Image;
-use super::super::*;
-use super::super::ce::random::CeRandom;
-use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
-use crate::app::model_preview::ce::sprite_sheet::{CeSecondaryDraw, CeSecondaryMap, CeSpriteFrame, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
-use crate::app::model_preview::ce::ticks::{CeTicks, PRE_ROLL, STEP};
 use crate::app::model_preview::ce::blend::FramebufferBlend;
+use crate::app::model_preview::ce::sprite_sheet::{
+    CeSecondaryDraw, CeSecondaryMap, CeSpriteFrame, CeSpriteSheet, read_secondary_map,
+    read_sprite_sheet,
+};
+use crate::app::model_preview::ce::ticks::{CeTicks, PRE_ROLL, STEP};
+use crate::app::model_preview::common::fields::argb;
+use crate::app::model_preview::common::math::perpendicular;
+use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 
 mod read;
 pub(in crate::app::model_preview) use read::*;

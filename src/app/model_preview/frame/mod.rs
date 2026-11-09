@@ -1,8 +1,10 @@
 //! What one paint of a preview draws: the frame snapshot the panel builds
 //! from its state, the visibility it derives and the function values.
 
+use super::dx9::passes::{
+    Dx9Layer, change_colors_for, h2_object_light_direction, h2_prt_object_lights,
+};
 use super::*;
-use super::dx9::passes::{Dx9Layer, change_colors_for, h2_object_light_direction, h2_prt_object_lights};
 
 mod visibility;
 pub(in crate::app::model_preview) use visibility::*;
@@ -39,7 +41,11 @@ pub(in crate::app::model_preview) fn build_frame(
     let preview = Arc::clone(&data.preview);
     let mut visible_batches = visible_batch_indices(&preview, state);
     let shield_batches = visible_batches.clone();
-    without_shield_parts(&mut visible_batches, &preview, data.textures.as_deref().map(Vec::as_slice));
+    without_shield_parts(
+        &mut visible_batches,
+        &preview,
+        data.textures.as_deref().map(Vec::as_slice),
+    );
     let skinning_rows = animation_skinning_rows(data, state);
     let mut function_values = function_values_for(data, &state.function_inputs, time);
     // What a function exports, which its inputs cannot reach: a scripted
@@ -174,9 +180,11 @@ pub(in crate::app::model_preview) struct CeObjectState {
 fn object_functions(
     data: &ModelPreviewData,
 ) -> impl Iterator<Item = &ce::functions::CeObjectFunctions> {
-    data.ce_object_functions
-        .iter()
-        .chain(data.ce_attached.iter().filter_map(|object| object.functions.as_ref()))
+    data.ce_object_functions.iter().chain(
+        data.ce_attached
+            .iter()
+            .filter_map(|object| object.functions.as_ref()),
+    )
 }
 
 pub(in crate::app::model_preview) fn object_states(
@@ -187,15 +195,34 @@ pub(in crate::app::model_preview) fn object_states(
 ) -> Vec<CeObjectState> {
     let state = |functions: Option<&ce::functions::CeObjectFunctions>, object, colors| {
         let (outputs, active) = functions.map_or(([0.0; 4], [false; 4]), |functions| {
-            let fired = ce::firing::fired_input(&data.preview.ce.firing, shots, data.geometry_id, object, time);
-            let inputs = functions.with_fired(functions.inputs_for(set, (data.geometry_id, object)), fired);
+            let fired = ce::firing::fired_input(
+                &data.preview.ce.firing,
+                shots,
+                data.geometry_id,
+                object,
+                time,
+            );
+            let inputs =
+                functions.with_fired(functions.inputs_for(set, (data.geometry_id, object)), fired);
             functions.outputs_active(&inputs, ce::functions::object_time(time, object))
         });
-        CeObjectState { outputs, active, change_colors: dx9::passes::ce_change_colors(colors) }
+        CeObjectState {
+            outputs,
+            active,
+            change_colors: dx9::passes::ce_change_colors(colors),
+        }
     };
-    let mut states = vec![state(data.ce_object_functions.as_ref(), 0, &data.change_colors)];
+    let mut states = vec![state(
+        data.ce_object_functions.as_ref(),
+        0,
+        &data.change_colors,
+    )];
     for (index, object) in data.ce_attached.iter().enumerate() {
-        states.push(state(object.functions.as_ref(), index as u8 + 1, &object.change_colors));
+        states.push(state(
+            object.functions.as_ref(),
+            index as u8 + 1,
+            &object.change_colors,
+        ));
     }
     states
 }
@@ -203,40 +230,72 @@ pub(in crate::app::model_preview) fn object_states(
 impl ModelGpuFrame {
     /// The outputs of the object that owns `material`.
     pub(in crate::app::model_preview) fn outputs_of(&self, material: usize) -> [f32; 4] {
-        let object = self.preview.materials.get(material).map_or(0, |material| material.object);
-        self.object_states.get(object as usize).map_or([0.0; 4], |state| state.outputs)
+        let object = self
+            .preview
+            .materials
+            .get(material)
+            .map_or(0, |material| material.object);
+        self.object_states
+            .get(object as usize)
+            .map_or([0.0; 4], |state| state.outputs)
     }
 
     /// The function values of the object that owns `material`.
-    pub(in crate::app::model_preview) fn function_values_of(&self, material: usize) -> Option<&super::functions::FunctionValues> {
-        let object = self.preview.materials.get(material).map_or(0, |material| material.object);
+    pub(in crate::app::model_preview) fn function_values_of(
+        &self,
+        material: usize,
+    ) -> Option<&super::functions::FunctionValues> {
+        let object = self
+            .preview
+            .materials
+            .get(material)
+            .map_or(0, |material| material.object);
         self.function_values_of_object(object)
     }
 
-    pub(in crate::app::model_preview) fn function_values_of_object(&self, object: u8) -> Option<&super::functions::FunctionValues> {
+    pub(in crate::app::model_preview) fn function_values_of_object(
+        &self,
+        object: u8,
+    ) -> Option<&super::functions::FunctionValues> {
         if object == 0 {
             return self.function_values.as_ref();
         }
-        self.attached_values.iter().find(|(owner, _)| *owner == object).map(|(_, values)| values)
+        self.attached_values
+            .iter()
+            .find(|(owner, _)| *owner == object)
+            .map(|(_, values)| values)
     }
 
     /// The change colors of the object that owns `material`.
     pub(in crate::app::model_preview) fn change_colors_of(&self, material: usize) -> [[f32; 3]; 4] {
-        let object = self.preview.materials.get(material).map_or(0, |material| material.object);
+        let object = self
+            .preview
+            .materials
+            .get(material)
+            .map_or(0, |material| material.object);
         self.change_colors_of_object(object)
     }
 
     /// The opened object's change colors by the selected variant; each
     /// attached object has its own, as `object_set_initial_change_colors`
     /// gives every object.
-    pub(in crate::app::model_preview) fn change_colors_of_object(&self, object: u8) -> [[f32; 3]; 4] {
+    pub(in crate::app::model_preview) fn change_colors_of_object(
+        &self,
+        object: u8,
+    ) -> [[f32; 3]; 4] {
         if object == 0 {
             return self.change_colors;
         }
-        if let Some((_, colors)) = self.attached_colors.iter().find(|(owner, _)| *owner == object) {
+        if let Some((_, colors)) = self
+            .attached_colors
+            .iter()
+            .find(|(owner, _)| *owner == object)
+        {
             return *colors;
         }
-        self.object_states.get(object as usize).map_or([[1.0; 3]; 4], |state| state.change_colors)
+        self.object_states
+            .get(object as usize)
+            .map_or([[1.0; 3]; 4], |state| state.change_colors)
     }
 
     /// Transparent passes draw whether or not game shaders are on.
@@ -248,20 +307,35 @@ impl ModelGpuFrame {
         }
     }
 
-    pub(in crate::app::model_preview) fn h2_object_prt_clusters(&self) -> Option<[Vec<[f32; 4]>; 2]> {
-        let prt = self.preview.h2.prt.as_ref().filter(|_| self.prt && self.game_shaders && !self.default_lights)?;
+    pub(in crate::app::model_preview) fn h2_object_prt_clusters(
+        &self,
+    ) -> Option<[Vec<[f32; 4]>; 2]> {
+        let prt = self
+            .preview
+            .h2
+            .prt
+            .as_ref()
+            .filter(|_| self.prt && self.game_shaders && !self.default_lights)?;
         let (lights, ambient) = h2_prt_object_lights(self.h2_object_light());
-        Some([prt.clusters_lit_by(&lights, ambient), prt.clusters_lit_by(&lights[..1], ambient)])
+        Some([
+            prt.clusters_lit_by(&lights, ambient),
+            prt.clusters_lit_by(&lights[..1], ambient),
+        ])
     }
 
     /// `lights_prepare_for_object_dynamic`, for the opened object and what it
     /// holds, as one sphere around the model.
-    pub(in crate::app::model_preview) fn ce_point_lights(&self) -> Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]> {
+    pub(in crate::app::model_preview) fn ce_point_lights(
+        &self,
+    ) -> Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]> {
         self.ce_point_lights_with(&[])
     }
 
     /// The same, with lights the object's effects have made besides.
-    pub(in crate::app::model_preview) fn ce_point_lights_with(&self, made: &[ce::lights::CeLight]) -> Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]> {
+    pub(in crate::app::model_preview) fn ce_point_lights_with(
+        &self,
+        made: &[ce::lights::CeLight],
+    ) -> Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]> {
         if self.preview.ce.lights.is_empty() && made.is_empty() {
             return Vec::new();
         }
@@ -272,12 +346,17 @@ impl ModelGpuFrame {
         };
         let (low, high) = (self.preview.bounds_min, self.preview.bounds_max);
         let center: [f32; 3] = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
-        let reach = (0..3).map(|axis| (high[axis] - center[axis]).powi(2)).sum::<f32>().sqrt();
+        let reach = (0..3)
+            .map(|axis| (high[axis] - center[axis]).powi(2))
+            .sum::<f32>()
+            .sqrt();
         let bones = self.bones.as_ref().map(|bones| bones.as_slice());
         let state = |object: u8| {
             let state = self.object_states.get(usize::from(object));
-            (state.map_or([0.0; 4], |state| state.outputs),
-             state.map_or([[1.0; 3]; 4], |state| state.change_colors))
+            (
+                state.map_or([0.0; 4], |state| state.outputs),
+                state.map_or([[1.0; 3]; 4], |state| state.change_colors),
+            )
         };
         (0..self.object_states.len().max(1) as u8)
             .map(|object| {
@@ -323,7 +402,11 @@ impl ModelGpuFrame {
     }
 
     pub(in crate::app::model_preview) fn h2_lightmap_layer(&self) -> Dx9Layer {
-        if self.default_lights { Dx9Layer::Lightmap } else { Dx9Layer::ObjectLightmap }
+        if self.default_lights {
+            Dx9Layer::Lightmap
+        } else {
+            Dx9Layer::ObjectLightmap
+        }
     }
 
     /// Which way the object path's direct light lies from a surface.
@@ -344,5 +427,8 @@ pub(in crate::app::model_preview) fn ce_event_plays(
 ) -> ce::effects::CeEventPlays {
     let effects = &data.preview.ce.effects;
     let count = |index| counts.get(&(data.geometry_id, index)).copied().unwrap_or(0);
-    ce::effects::CeEventPlays { counts: (0..effects.len()).map(count).collect(), scales }
+    ce::effects::CeEventPlays {
+        counts: (0..effects.len()).map(count).collect(),
+        scales,
+    }
 }

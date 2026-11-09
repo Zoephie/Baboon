@@ -25,12 +25,22 @@ pub(super) fn load_object(
     let mut data = load_tag_preview(model, entry, names, Some(reader), settings)?;
     data.default_variant = object_default_variant(model_tag);
     let mut notes = std::mem::take(&mut data.notes);
-    let object = ObjectLoad { reader, object: model_tag, model };
+    let object = ObjectLoad {
+        reader,
+        object: model_tag,
+        model,
+    };
     object.read_features(&mut data, &mut notes);
     let weapons_family = matches!(
         &reader.source,
         TagSource::LooseFolder {
-            game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4),
+            game: Some(
+                GameId::Halo2
+                    | GameId::Halo3
+                    | GameId::Halo3Odst
+                    | GameId::HaloReach
+                    | GameId::Halo4
+            ),
             ..
         }
     );
@@ -41,9 +51,16 @@ pub(super) fn load_object(
         let preview = std::sync::Arc::make_mut(&mut data.preview);
         let variants = &mut data.variants;
         let attach = |preview: &mut RenderModelPreview| {
-            super::super::weapons::variants::attach_variant_objects(reader, model, variants, preview)
+            super::super::weapons::variants::attach_variant_objects(
+                reader, model, variants, preview,
+            )
         };
-        data.attached.extend(feature_into(&mut notes, "the variants' children", preview, attach));
+        data.attached.extend(feature_into(
+            &mut notes,
+            "the variants' children",
+            preview,
+            attach,
+        ));
     }
     data.notes = notes;
     Ok(data)
@@ -65,8 +82,16 @@ impl ObjectLoad<'_> {
     }
 
     /// The object's change colors, then its functions.
-    pub(super) fn read_colors_and_functions(&self, data: &mut ModelPreviewData, notes: &mut Vec<String>) {
-        let Self { object: model_tag, model, .. } = *self;
+    pub(super) fn read_colors_and_functions(
+        &self,
+        data: &mut ModelPreviewData,
+        notes: &mut Vec<String>,
+    ) {
+        let Self {
+            object: model_tag,
+            model,
+            ..
+        } = *self;
         data.change_colors = feature(notes, "its change colors", || read_change_colors(model_tag));
         let functions = || super::super::functions::read_object_functions(model_tag, Some(model));
         data.object_functions = feature(notes, "its functions", functions);
@@ -74,8 +99,17 @@ impl ObjectLoad<'_> {
 
     /// What a biped holds: the settings' primary in its right hand and
     /// secondary in its left, each noted if it will not attach.
-    fn attach_unit_weapons(&self, data: &mut ModelPreviewData, notes: &mut Vec<String>, settings: &PreviewLoadSettings) {
-        let Self { reader, object: model_tag, .. } = *self;
+    fn attach_unit_weapons(
+        &self,
+        data: &mut ModelPreviewData,
+        notes: &mut Vec<String>,
+        settings: &PreviewLoadSettings,
+    ) {
+        let Self {
+            reader,
+            object: model_tag,
+            ..
+        } = *self;
         // Halo 4's kit graphs all use data-driven animation, which places the
         // hands by IK sets and chains (`biped_postprocess_node_matrices`,
         // X360 0x84B1A738), never the legacy `weapon ik`.
@@ -96,7 +130,9 @@ impl ObjectLoad<'_> {
                 // `unit_apply_ik` leaves two weapons in their own hands.
                 let ik = (secondary.is_none() && legacy_weapon_ik).then_some(&weapons);
                 let attach = |preview: &mut RenderModelPreview| {
-                    super::super::weapons::attach_weapon(reader, model_tag, path, left, owner, ik, preview)
+                    super::super::weapons::attach_weapon(
+                        reader, model_tag, path, left, owner, ik, preview,
+                    )
                 };
                 let attached = feature_into(notes, "a held weapon", preview, attach);
                 if attached.is_none() {
@@ -114,10 +150,18 @@ pub(in crate::app::model_preview) fn loose_weapon_paths(root: &std::path::Path) 
     let mut found = Vec::new();
     let mut folders = vec![root.to_path_buf()];
     while let Some(folder) = folders.pop() {
-        for path in std::fs::read_dir(folder).into_iter().flatten().flatten().map(|entry| entry.path()) {
+        for path in std::fs::read_dir(folder)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+        {
             if path.is_dir() {
                 folders.push(path);
-            } else if path.extension().is_some_and(|extension| extension == "weapon") {
+            } else if path
+                .extension()
+                .is_some_and(|extension| extension == "weapon")
+            {
                 let inner = path.strip_prefix(root).unwrap_or(&path).with_extension("");
                 found.push(inner.to_string_lossy().replace('/', "\\"));
             }

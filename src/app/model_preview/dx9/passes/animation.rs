@@ -16,7 +16,14 @@ pub(crate) trait PassAnimation: std::fmt::Debug + Send + Sync {
     /// The texture rows, reworked for `time` and `outputs`.
     fn apply_rows(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32, outputs: &[f32; 4]);
     /// The value constant `register` holds, if it animates it.
-    fn constant(&self, register: u32, value: &mut [f32; 4], time: f32, change_colors: &[[f32; 3]; 4], outputs: &[f32; 4]);
+    fn constant(
+        &self,
+        register: u32,
+        value: &mut [f32; 4],
+        time: f32,
+        change_colors: &[[f32; 3]; 4],
+        outputs: &[f32; 4],
+    );
     /// The constant that holds the way back along the view.
     fn eye_register(&self) -> Option<u32>;
 }
@@ -82,12 +89,18 @@ impl H2Animation {
     /// reads the time as it is instead.
     pub(super) fn input(&self, clock: H2Clock<'_>) -> f32 {
         match &self.held_input {
-            Some((name, rest)) => {
-                clock.values.and_then(|values| values.get(name)).copied().unwrap_or(*rest)
-            }
+            Some((name, rest)) => clock
+                .values
+                .and_then(|values| values.get(name))
+                .copied()
+                .unwrap_or(*rest),
             None if self.period > 0.0 => {
                 let input = clock.time / self.period;
-                if self.function.function_type() == FunctionType::Periodic { input } else { input.rem_euclid(1.0) }
+                if self.function.function_type() == FunctionType::Periodic {
+                    input
+                } else {
+                    input.rem_euclid(1.0)
+                }
             }
             None => clock.time,
         }
@@ -95,7 +108,11 @@ impl H2Animation {
 
     fn range(&self, clock: H2Clock<'_>) -> f32 {
         match &self.range_input {
-            Some((name, rest)) => clock.values.and_then(|values| values.get(name)).copied().unwrap_or(*rest),
+            Some((name, rest)) => clock
+                .values
+                .and_then(|values| values.get(name))
+                .copied()
+                .unwrap_or(*rest),
             None => 1.0,
         }
     }
@@ -109,7 +126,9 @@ impl H2Animation {
         let clock = clock.into();
         match self.kind {
             H2AnimationKind::Color => {
-                let color = self.function.evaluate_color(self.input(clock), self.range(clock));
+                let color = self
+                    .function
+                    .evaluate_color(self.input(clock), self.range(clock));
                 [color.red, color.green, color.blue, 1.0]
             }
             _ => [self.scalar(clock); 4],
@@ -131,7 +150,10 @@ impl H2Animation {
         let first = self.vector(0.0);
         (1..SAMPLES).any(|sample| {
             let vector = self.vector(span * sample as f32 / SAMPLES as f32);
-            vector.iter().zip(first).any(|(value, first)| (value - first).abs() >= VISIBLE)
+            vector
+                .iter()
+                .zip(first)
+                .any(|(value, first)| (value - first).abs() >= VISIBLE)
         })
     }
 
@@ -142,12 +164,21 @@ impl H2Animation {
 
 /// The last value or color of a parameter's animations, as they overwrite
 /// one another in the game.
-pub(in crate::app::model_preview) fn animated_vector(animations: &[H2Animation], clock: H2Clock<'_>) -> Option<[f32; 4]> {
-    animations.iter().rev().find(|animation| !animation.is_transform()).map(|last| last.vector(clock))
+pub(in crate::app::model_preview) fn animated_vector(
+    animations: &[H2Animation],
+    clock: H2Clock<'_>,
+) -> Option<[f32; 4]> {
+    animations
+        .iter()
+        .rev()
+        .find(|animation| !animation.is_transform())
+        .map(|last| last.vector(clock))
 }
 
 /// The bytes of a `mapping_function`, as the engine's H2 function.
-pub(in crate::app::model_preview) fn animation_function(property: &TagStruct<'_>) -> Option<TagFunction> {
+pub(in crate::app::model_preview) fn animation_function(
+    property: &TagStruct<'_>,
+) -> Option<TagFunction> {
     tag_function_at(property, "function")
 }
 
@@ -182,7 +213,9 @@ impl H2AnimatedRow {
         for animation in &self.animations {
             let value = animation.scalar(clock);
             match animation.kind {
-                H2AnimationKind::ScaleUniform => (scale_x, scale_y, scale_z) = (value, value, value),
+                H2AnimationKind::ScaleUniform => {
+                    (scale_x, scale_y, scale_z) = (value, value, value)
+                }
                 H2AnimationKind::ScaleX => scale_x = value,
                 H2AnimationKind::ScaleY => scale_y = value,
                 H2AnimationKind::ScaleZ => scale_z = value,
@@ -210,7 +243,10 @@ impl H2AnimatedRow {
     }
 }
 
-pub(in crate::app::model_preview) fn elements<'a>(holder: TagStruct<'a>, name: &str) -> impl Iterator<Item = TagStruct<'a>> {
+pub(in crate::app::model_preview) fn elements<'a>(
+    holder: TagStruct<'a>,
+    name: &str,
+) -> impl Iterator<Item = TagStruct<'a>> {
     let block = holder.field_path(name).and_then(|field| field.as_block());
     (0..block.as_ref().map_or(0, |block| block.len()))
         .filter_map(move |index| block.as_ref()?.element(index))

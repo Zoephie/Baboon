@@ -14,7 +14,12 @@ pub(crate) struct ViewFrame {
 }
 
 /// A point and direction on `node`, where the pose puts them.
-pub(in crate::app::model_preview) fn posed_on(node: usize, position: [f32; 3], direction: [f32; 3], bones: Option<&[[f32; 4]]>) -> ([f32; 3], [f32; 3]) {
+pub(in crate::app::model_preview) fn posed_on(
+    node: usize,
+    position: [f32; 3],
+    direction: [f32; 3],
+    bones: Option<&[[f32; 4]]>,
+) -> ([f32; 3], [f32; 3]) {
     let Some(rows) = bones.and_then(|bones| bones.get(node * 3..node * 3 + 3)) else {
         return (position, direction);
     };
@@ -22,7 +27,10 @@ pub(in crate::app::model_preview) fn posed_on(node: usize, position: [f32; 3], d
     let [i, j, k] = direction;
     let place = |row: &[f32; 4]| row[0] * x + row[1] * y + row[2] * z + row[3];
     let turn = |row: &[f32; 4]| row[0] * i + row[1] * j + row[2] * k;
-    ([place(&rows[0]), place(&rows[1]), place(&rows[2])], [turn(&rows[0]), turn(&rows[1]), turn(&rows[2])])
+    (
+        [place(&rows[0]), place(&rows[1]), place(&rows[2])],
+        [turn(&rows[0]), turn(&rows[1]), turn(&rows[2])],
+    )
 }
 
 pub(in crate::app::model_preview) fn ce_flare_view(camera: &ModelGpuCamera) -> ViewFrame {

@@ -324,13 +324,18 @@ fn two_tracers_get_different_seeds_inside_the_unit_range() {
 /// systems all read onto their materials.
 #[test]
 fn kit_halo_4_tracers_read_and_run_between_their_markers() {
-    let Some(root) = kit_root(GameId::Halo4) else { return };
+    let Some(root) = kit_root(GameId::Halo4) else {
+        return;
+    };
     let source = super::super::super::particles::loose_kit(&root, crate::core::game::GameId::Halo4);
     let path = "environments\\solo\\m90_sacrifice\\fx\\beams\\parts\\beam_beamhole";
-    let tag =
-        load_referenced_tag_from_source(&source, path, "tracer_system", b"trac").expect(path);
+    let tag = load_referenced_tag_from_source(&source, path, "tracer_system", b"trac").expect(path);
     let element = elements(tag.root(), "tracers")[0];
-    let tracer = read_tracer(&crate::app::model_preview::load::TagReader::new(&source), element).expect("its tracer");
+    let tracer = read_tracer(
+        &crate::app::model_preview::load::TagReader::new(&source),
+        element,
+    )
+    .expect("its tracer");
     assert!(
         tracer
             .material
@@ -391,9 +396,8 @@ fn kit_halo_4_tracers_read_and_run_between_their_markers() {
             }
             let relative = path.strip_prefix(&root).unwrap().with_extension("");
             let relative = relative.to_string_lossy().replace('/', "\\");
-            let tag =
-                load_referenced_tag_from_source(&source, &relative, "tracer_system", b"trac")
-                    .unwrap();
+            let tag = load_referenced_tag_from_source(&source, &relative, "tracer_system", b"trac")
+                .unwrap();
             if !has_flag(tag.root(), "tracer system flags", "point-to-point") {
                 continue;
             }
@@ -403,7 +407,10 @@ fn kit_halo_4_tracers_read_and_run_between_their_markers() {
                     disabled += 1;
                     continue;
                 }
-                match read_tracer(&crate::app::model_preview::load::TagReader::new(&source), element) {
+                match read_tracer(
+                    &crate::app::model_preview::load::TagReader::new(&source),
+                    element,
+                ) {
                     Some(_) => read += 1,
                     None => failures.push(relative.clone()),
                 }

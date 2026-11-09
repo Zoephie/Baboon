@@ -1,11 +1,11 @@
 //! The DX9 self shadow: the shadow map, its light matrix and the shadow pass, which
 //! Halo 2 draws and Halo 3 and ODST borrow.
 
-use super::super::*;
-use super::super::gl::scope::PostScope;
-use super::super::gl::pass_state::PassState;
-use super::super::gl::target::{Made, Sampling, Texels};
 use super::super::dx9::passes::{Dx9Layer, h2_prt_lights};
+use super::super::gl::pass_state::PassState;
+use super::super::gl::scope::PostScope;
+use super::super::gl::target::{Made, Sampling, Texels};
+use super::super::*;
 use eframe::glow::{self, HasContext as _};
 
 pub(in crate::app::model_preview) const H2_SHADOW_MAP_SIZE: i32 = 2048;
@@ -37,8 +37,19 @@ impl ShadowStyle {
     /// Halo 2's: the whole map, unbiased, masked in the stencil, from the
     /// key light.
     pub(in crate::app::model_preview) fn h2(frame: &ModelGpuFrame) -> Self {
-        let toward = if frame.default_lights { h2_prt_lights()[0].direction } else { frame.h2_object_light() };
-        Self { map_size: H2_SHADOW_MAP_SIZE, bias: None, stencil_mask: true, toward, alpha: 1.0, normal: None }
+        let toward = if frame.default_lights {
+            h2_prt_lights()[0].direction
+        } else {
+            frame.h2_object_light()
+        };
+        Self {
+            map_size: H2_SHADOW_MAP_SIZE,
+            bias: None,
+            stencil_mask: true,
+            toward,
+            alpha: 1.0,
+            normal: None,
+        }
     }
 }
 
@@ -52,14 +63,23 @@ pub(in crate::app::model_preview) struct ShadowNormalTarget {
 }
 
 /// A depth texture and the framebuffer to fill it through.
-pub(in crate::app::model_preview) unsafe fn h2_shadow_map(gl: &glow::Context) -> Option<(glow::NativeFramebuffer, glow::NativeTexture)> {
+pub(in crate::app::model_preview) unsafe fn h2_shadow_map(
+    gl: &glow::Context,
+) -> Option<(glow::NativeFramebuffer, glow::NativeTexture)> {
     unsafe {
         let draw = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
         let read = gl.get_parameter_framebuffer(glow::READ_FRAMEBUFFER_BINDING);
         let mut made = Made::new(gl);
         let size = [H2_SHADOW_MAP_SIZE; 2];
-        let map = made.depth(size, Texels::DEPTH24, Sampling::NEAREST_CLAMPED, glow::DEPTH_ATTACHMENT);
-        let complete = map.as_ref().is_some_and(|map| made.complete(&[map.framebuffer]));
+        let map = made.depth(
+            size,
+            Texels::DEPTH24,
+            Sampling::NEAREST_CLAMPED,
+            glow::DEPTH_ATTACHMENT,
+        );
+        let complete = map
+            .as_ref()
+            .is_some_and(|map| made.complete(&[map.framebuffer]));
         gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, draw);
         gl.bind_framebuffer(glow::READ_FRAMEBUFFER, read);
         let map = map.filter(|_| complete)?;
@@ -69,7 +89,10 @@ pub(in crate::app::model_preview) unsafe fn h2_shadow_map(gl: &glow::Context) ->
 }
 
 /// The view from the light, an orthographic box around the whole model.
-pub(in crate::app::model_preview) fn h2_shadow_matrix(preview: &RenderModelPreview, toward: [f32; 3]) -> [f32; 16] {
+pub(in crate::app::model_preview) fn h2_shadow_matrix(
+    preview: &RenderModelPreview,
+    toward: [f32; 3],
+) -> [f32; 16] {
     let center: [f32; 3] =
         std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
     let radius = (0..3)
@@ -79,7 +102,11 @@ pub(in crate::app::model_preview) fn h2_shadow_matrix(preview: &RenderModelPrevi
         .max(1e-4)
         * 0.55;
     let cross = |a: [f32; 3], b: [f32; 3]| {
-        [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
     };
     let unit = |v: [f32; 3]| {
         let length = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
@@ -90,14 +117,16 @@ pub(in crate::app::model_preview) fn h2_shadow_matrix(preview: &RenderModelPrevi
     let up = cross(right, forward);
     let dot = |a: [f32; 3]| a[0] * center[0] + a[1] * center[1] + a[2] * center[2];
     let row = |axis: [f32; 3]| {
-        [axis[0] / radius, axis[1] / radius, axis[2] / radius, -dot(axis) / radius]
+        [
+            axis[0] / radius,
+            axis[1] / radius,
+            axis[2] / radius,
+            -dot(axis) / radius,
+        ]
     };
     let [x, y, z] = [row(right), row(up), row(forward)];
     [
-        x[0], y[0], z[0], 0.0,
-        x[1], y[1], z[1], 0.0,
-        x[2], y[2], z[2], 0.0,
-        x[3], y[3], z[3], 1.0,
+        x[0], y[0], z[0], 0.0, x[1], y[1], z[1], 0.0, x[2], y[2], z[2], 0.0, x[3], y[3], z[3], 1.0,
     ]
 }
 
@@ -113,7 +142,11 @@ impl RenderCore {
         style: ShadowStyle,
     ) -> bool {
         unsafe {
-            let Some((framebuffer, _)) = *self.dx9.h2_shadow_map.get_or_insert_with(|| h2_shadow_map(gl)) else {
+            let Some((framebuffer, _)) = *self
+                .dx9
+                .h2_shadow_map
+                .get_or_insert_with(|| h2_shadow_map(gl))
+            else {
                 return false;
             };
             // The passes bind the light from it, here and in a later apply.
@@ -121,15 +154,23 @@ impl RenderCore {
             let size = style.map_size;
             let state = PostScope::capture(gl);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            PassState::new().disable(glow::SCISSOR_TEST).depth_mask(true).apply(gl);
+            PassState::new()
+                .disable(glow::SCISSOR_TEST)
+                .depth_mask(true)
+                .apply(gl);
             gl.clear_depth_f32(1.0);
             gl.clear(glow::DEPTH_BUFFER_BIT);
             gl.viewport(0, 0, size, size);
             if let Some((slope, depth)) = style.bias {
-                PassState::new().enable(glow::POLYGON_OFFSET_FILL).polygon_offset(slope, depth).apply(gl);
+                PassState::new()
+                    .enable(glow::POLYGON_OFFSET_FILL)
+                    .polygon_offset(slope, depth)
+                    .apply(gl);
             }
             self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::ShadowCaster, None);
-            PassState::new().disable(glow::POLYGON_OFFSET_FILL).apply(gl);
+            PassState::new()
+                .disable(glow::POLYGON_OFFSET_FILL)
+                .apply(gl);
             state.restore(gl);
             if !style.stencil_mask {
                 return true;

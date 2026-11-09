@@ -136,10 +136,16 @@ pub(in crate::app::model_preview) fn pose_for_shot(
     clip: &str,
 ) {
     let list = list_model_animations(source, entry).unwrap();
-    let index = list.iter().position(|animation| animation.name == clip).unwrap_or_else(|| {
-        let names: Vec<&str> = list.iter().map(|animation| animation.name.as_str()).collect();
-        panic!("H2_SHOT_CLIP: no clip {clip:?}; these are: {names:?}")
-    });
+    let index = list
+        .iter()
+        .position(|animation| animation.name == clip)
+        .unwrap_or_else(|| {
+            let names: Vec<&str> = list
+                .iter()
+                .map(|animation| animation.name.as_str())
+                .collect();
+            panic!("H2_SHOT_CLIP: no clip {clip:?}; these are: {names:?}")
+        });
     let layers = h2_held_layers(&list, index, data, state);
     let decoded = decode_held_animation(source, entry, index, &layers).unwrap();
     let at = std::env::var("H2_SHOT_FRAME").map_or(0, |frame| frame.parse().unwrap());
@@ -148,14 +154,17 @@ pub(in crate::app::model_preview) fn pose_for_shot(
         .nodes
         .iter()
         .map(|node| {
-            let source = decoded.skeleton_names.iter().position(|name| *name == node.name);
-            source.and_then(|source| decoded.frames[at].get(source).copied()).unwrap_or(
-                PreviewNodeTransform {
+            let source = decoded
+                .skeleton_names
+                .iter()
+                .position(|name| *name == node.name);
+            source
+                .and_then(|source| decoded.frames[at].get(source).copied())
+                .unwrap_or(PreviewNodeTransform {
                     rotation: node.bind_rotation,
                     translation: node.bind_translation,
                     scale: 1.0,
-                },
-            )
+                })
         })
         .collect();
     data.animations = Some(std::sync::Arc::new(list));
@@ -167,7 +176,9 @@ pub(in crate::app::model_preview) fn pose_for_shot(
         .map(|track| super::super::animation::ik::reach::ReachIkTrack {
             effector_frames: track.effector_frames.get(at).copied().into_iter().collect(),
             weights: track.weights.get(at).copied().into_iter().collect(),
-            poles: track.poles.map(|poles| poles.get(at).copied().into_iter().collect()),
+            poles: track
+                .poles
+                .map(|poles| poles.get(at).copied().into_iter().collect()),
             ..track
         })
         .collect();

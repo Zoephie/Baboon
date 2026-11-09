@@ -198,7 +198,8 @@ fn sbsp_preview_materials(root: &TagStruct<'_>) -> Vec<RenderModelPreviewMateria
                 .map(|(shader_group, path)| RenderModelPreviewMaterial {
                     shader_path: path,
                     shader_group,
-                    overlay: false, shield: None,
+                    overlay: false,
+                    shield: None,
                     permutation: 0,
                     object: 0,
                 })
@@ -284,7 +285,11 @@ fn append_sbsp_mesh(
     placement: &InstancePlacement,
     flip: bool,
 ) {
-    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), mesh.vertices.len(), Overflow::RefusesAppend) else {
+    let Some(vertex_base) = VertexBase::of(
+        preview.vertices.len(),
+        mesh.vertices.len(),
+        Overflow::RefusesAppend,
+    ) else {
         return;
     };
     preview.vertices.reserve(mesh.vertices.len());
@@ -377,7 +382,10 @@ fn append_sbsp_collision(root: &TagStruct<'_>, preview: &mut RenderModelPreview)
 /// Walk one collision BSP's surfaces: each surface rings its edges (an edge
 /// belongs to two surfaces; which side it is on decides start-vs-end vertex
 /// and forward-vs-reverse continuation), then fan-triangulates the ring.
-pub(super) fn append_collision_bsp_triangles(bsp: &TagStruct<'_>, triples: &mut Vec<([f32; 3], [f32; 3])>) {
+pub(super) fn append_collision_bsp_triangles(
+    bsp: &TagStruct<'_>,
+    triples: &mut Vec<([f32; 3], [f32; 3])>,
+) {
     let (Some(surfaces), Some(edges), Some(vertices)) = (
         bsp.field_path("surfaces")
             .and_then(|field| field.as_block()),

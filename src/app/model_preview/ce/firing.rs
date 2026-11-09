@@ -17,10 +17,10 @@
 use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, has_flag, object_block};
-use crate::app::model_preview::common::time::TICKS_PER_SECOND;
 use super::effects::CeEffectAt;
 use super::random::CeRandom;
 use crate::app::model_preview::ce::ticks::STEP;
+use crate::app::model_preview::common::time::TICKS_PER_SECOND;
 
 /// Below this a recovery time is none: tool bakes a whole tick's fall.
 const LEAST_RECOVERY_TIME: f32 = 0.0001;
@@ -57,17 +57,29 @@ pub(crate) struct CeWeaponFiring {
 
 /// Tool's bake of a time into what falls in a tick.
 fn fall_per_tick(seconds: f32) -> f32 {
-    if seconds <= LEAST_RECOVERY_TIME { 1.0 } else { STEP / seconds }
+    if seconds <= LEAST_RECOVERY_TIME {
+        1.0
+    } else {
+        STEP / seconds
+    }
 }
 
 /// The triggers of `weapon`, if it is one, with each firing effect found
 /// among `effects`, the object's event effects, by its path.
-pub(in crate::app::model_preview) fn read_ce_weapon_firing(weapon: &TagFile, object: u8, effects: &[CeEffectAt]) -> Option<CeWeaponFiring> {
+pub(in crate::app::model_preview) fn read_ce_weapon_firing(
+    weapon: &TagFile,
+    object: u8,
+    effects: &[CeEffectAt],
+) -> Option<CeWeaponFiring> {
     let holder = object_block(weapon, "triggers")?;
     let effect_index = |path: &str| {
-        effects
-            .iter()
-            .position(|effect| effect.object == object && effect.event.as_ref().is_some_and(|event| event.path == path))
+        effects.iter().position(|effect| {
+            effect.object == object
+                && effect
+                    .event
+                    .as_ref()
+                    .is_some_and(|event| event.path == path)
+        })
     };
     let triggers: Vec<CeTrigger> = elements(holder, "triggers")
         .into_iter()
@@ -86,21 +98,34 @@ pub(in crate::app::model_preview) fn read_ce_weapon_firing(weapon: &TagFile, obj
     })
 }
 
-fn read_trigger(trigger: TagStruct<'_>, effect_index: &impl Fn(&str) -> Option<usize>) -> CeTrigger {
+fn read_trigger(
+    trigger: TagStruct<'_>,
+    effect_index: &impl Fn(&str) -> Option<usize>,
+) -> CeTrigger {
     let real = |name: &str| trigger.read_real(name).unwrap_or(0.0);
     let short = |entry: TagStruct<'_>, name: &str| entry.read_int_any(name).unwrap_or(0) as i16;
-    let recovery = |name: &str| Some(real(name)).filter(|seconds| *seconds > 0.0).map(fall_per_tick);
+    let recovery = |name: &str| {
+        Some(real(name))
+            .filter(|seconds| *seconds > 0.0)
+            .map(fall_per_tick)
+    };
     let effects = elements(trigger, "firing effects")
         .into_iter()
         .map(|entry| {
-            let bounds = [short(entry, "shot count lower bound"), short(entry, "shot count upper bound")];
-            let path = entry.read_tag_ref_path("firing effect").filter(|path| !path.is_empty());
+            let bounds = [
+                short(entry, "shot count lower bound"),
+                short(entry, "shot count upper bound"),
+            ];
+            let path = entry
+                .read_tag_ref_path("firing effect")
+                .filter(|path| !path.is_empty());
             (bounds, path.and_then(|path| effect_index(&path)))
         })
         .collect();
     CeTrigger {
         illumination_fall: recovery("illumination recovery time"),
-        ejection_fall: recovery("ejection port recovery time").filter(|_| !has_flag(trigger, "flags", "ejects during chamber")),
+        ejection_fall: recovery("ejection port recovery time")
+            .filter(|_| !has_flag(trigger, "flags", "ejects during chamber")),
         // The first of the trigger's two: the rate of fire's, not the error's.
         rate_fall: fall_per_tick(real("deceleration time")),
         heat_per_round: real("heat generated per round"),
@@ -143,14 +168,28 @@ fn tick_of(time: f32) -> i64 {
 impl CeWeaponShots {
     /// `weapon_trigger_fire` for `trigger` at `time`, at the rate of fire
     /// `rate`: the firing effect it plays, by index among the preview's.
-    pub(crate) fn fire(&mut self, weapon: &CeWeaponFiring, trigger: usize, rate: f32, time: f32) -> Option<usize> {
+    pub(crate) fn fire(
+        &mut self,
+        weapon: &CeWeaponFiring,
+        trigger: usize,
+        rate: f32,
+        time: f32,
+    ) -> Option<usize> {
         let definition = weapon.triggers.get(trigger)?;
-        self.triggers.resize(weapon.triggers.len(), TriggerShots::default());
+        self.triggers
+            .resize(weapon.triggers.len(), TriggerShots::default());
         let now = tick_of(time);
         // The heat cools to this tick, then the shot adds its own, held as
         // an actor's weapon is, under the overheated threshold.
         let heat = self.heat_at(weapon, now) + definition.heat_per_round;
-        self.heat = Some((now, if heat > weapon.overheated_threshold { weapon.overheated_threshold } else { heat.min(1.0) }));
+        self.heat = Some((
+            now,
+            if heat > weapon.overheated_threshold {
+                weapon.overheated_threshold
+            } else {
+                heat.min(1.0)
+            },
+        ));
         let state = &mut self.triggers[trigger];
         state.last = Some((now, rate));
         let count = definition.effects.len() as i32;
@@ -159,7 +198,11 @@ impl CeWeaponShots {
         }
         if state.left <= 0 {
             let start = state.current;
-            let mut index = if definition.random { self.random.bits() as i32 % count } else { i32::from(start) };
+            let mut index = if definition.random {
+                self.random.bits() as i32 % count
+            } else {
+                i32::from(start)
+            };
             let full = ((1u32 << count) - 1) as u16;
             loop {
                 if state.used == full {
@@ -192,7 +235,9 @@ impl CeWeaponShots {
     fn heat_at(&self, weapon: &CeWeaponFiring, now: i64) -> f32 {
         self.heat
             .filter(|(tick, _)| *tick <= now)
-            .map_or(0.0, |(tick, heat)| (heat - weapon.heat_fall * (now - tick) as f32).max(0.0))
+            .map_or(0.0, |(tick, heat)| {
+                (heat - weapon.heat_fall * (now - tick) as f32).max(0.0)
+            })
     }
 
     /// What `weapon_export_function_values` gives the input `name` at
@@ -201,7 +246,11 @@ impl CeWeaponShots {
         let now = tick_of(time);
         // Since the trigger's last shot, in ticks, and its rate then.
         let since = |trigger: usize| {
-            let (tick, rate) = self.triggers.get(trigger)?.last.filter(|(tick, _)| *tick <= now)?;
+            let (tick, rate) = self
+                .triggers
+                .get(trigger)?
+                .last
+                .filter(|(tick, _)| *tick <= now)?;
             Some(((now - tick) as f32, rate))
         };
         let falling = |trigger: usize, fall: Option<f32>| -> f32 {
@@ -213,24 +262,45 @@ impl CeWeaponShots {
         let rate = |trigger: usize| -> f32 {
             let definition = weapon.triggers.get(trigger);
             match (since(trigger), definition) {
-                (Some((ticks, rate)), Some(definition)) => (rate - ticks * definition.rate_fall).max(0.0),
+                (Some((ticks, rate)), Some(definition)) => {
+                    (rate - ticks * definition.rate_fall).max(0.0)
+                }
                 _ => 0.0,
             }
         };
         // `+720` is the weapon's: either trigger's shot counts.
-        let fired_lately = (0..self.triggers.len()).filter_map(since).any(|(ticks, _)| ticks <= 1.0);
-        let fall = |trigger: usize, pick: fn(&CeTrigger) -> Option<f32>| weapon.triggers.get(trigger).and_then(pick);
+        let fired_lately = (0..self.triggers.len())
+            .filter_map(since)
+            .any(|(ticks, _)| ticks <= 1.0);
+        let fall = |trigger: usize, pick: fn(&CeTrigger) -> Option<f32>| {
+            weapon.triggers.get(trigger).and_then(pick)
+        };
         let value = match name {
             "heat" => self.heat_at(weapon, now),
             "primary rate of fire" | "primary firing on" => rate(0),
             "secondary rate of fire" | "secondary firing on" => rate(1),
-            "primary firing" => if fired_lately { rate(0) } else { 0.0 },
-            "secondary firing" => if fired_lately { rate(1) } else { 0.0 },
+            "primary firing" => {
+                if fired_lately {
+                    rate(0)
+                } else {
+                    0.0
+                }
+            }
+            "secondary firing" => {
+                if fired_lately {
+                    rate(1)
+                } else {
+                    0.0
+                }
+            }
             "primary ejection port" => falling(0, fall(0, |trigger| trigger.ejection_fall)),
             "secondary ejection port" => falling(1, fall(1, |trigger| trigger.ejection_fall)),
             "illumination" => (0..weapon.triggers.len())
                 .map(|trigger| falling(trigger, fall(trigger, |trigger| trigger.illumination_fall)))
-                .fold(self.heat_at(weapon, now) * weapon.heat_illumination, f32::max),
+                .fold(
+                    self.heat_at(weapon, now) * weapon.heat_illumination,
+                    f32::max,
+                ),
             _ => return None,
         };
         (value > 0.0).then_some(value)
@@ -238,9 +308,17 @@ impl CeWeaponShots {
 
     /// Whether anything a shot did still changes with time.
     pub(crate) fn moving(&self, weapon: &CeWeaponFiring, time: f32) -> bool {
-        const MOVING: [&str; 6] =
-            ["heat", "illumination", "primary rate of fire", "secondary rate of fire", "primary ejection port", "secondary ejection port"];
-        MOVING.iter().any(|name| self.input(weapon, name, time).is_some())
+        const MOVING: [&str; 6] = [
+            "heat",
+            "illumination",
+            "primary rate of fire",
+            "secondary rate of fire",
+            "primary ejection port",
+            "secondary ejection port",
+        ];
+        MOVING
+            .iter()
+            .any(|name| self.input(weapon, name, time).is_some())
     }
 }
 
@@ -258,8 +336,17 @@ pub(in crate::app::model_preview) fn fired_input<'a>(
 }
 
 /// Whether any shot fired on `geometry` still changes its weapon's inputs.
-pub(in crate::app::model_preview) fn shots_moving(firing: &[CeWeaponFiring], shots: &CeShots, geometry: u64, time: f32) -> bool {
-    firing.iter().any(|weapon| shots.get(&(geometry, weapon.object)).is_some_and(|fired| fired.moving(weapon, time)))
+pub(in crate::app::model_preview) fn shots_moving(
+    firing: &[CeWeaponFiring],
+    shots: &CeShots,
+    geometry: u64,
+    time: f32,
+) -> bool {
+    firing.iter().any(|weapon| {
+        shots
+            .get(&(geometry, weapon.object))
+            .is_some_and(|fired| fired.moving(weapon, time))
+    })
 }
 
 #[cfg(test)]
@@ -290,16 +377,32 @@ mod tests {
     fn a_shot_lights_the_weapon_and_lets_it_fall() {
         let weapon = rifle(vec![([1, 1], Some(7))], false);
         let mut shots = CeWeaponShots::default();
-        assert_eq!(shots.input(&weapon, "illumination", 10.0), None, "unfired, nothing");
+        assert_eq!(
+            shots.input(&weapon, "illumination", 10.0),
+            None,
+            "unfired, nothing"
+        );
         assert_eq!(shots.fire(&weapon, 0, 1.0, 10.0), Some(7));
         let at = |ticks: f32| 10.0 + ticks * STEP;
         assert_eq!(shots.input(&weapon, "illumination", at(0.5)), Some(1.0));
         let after_one = shots.input(&weapon, "illumination", at(1.5)).unwrap();
         assert!((after_one - (1.0 - 1.0 / 3.0)).abs() < 1e-5, "{after_one}");
-        assert_eq!(shots.input(&weapon, "illumination", at(3.5)), None, "dark in three ticks");
-        assert_eq!(shots.input(&weapon, "primary firing", at(1.5)), Some(1.0 - fall_per_tick(0.5)));
+        assert_eq!(
+            shots.input(&weapon, "illumination", at(3.5)),
+            None,
+            "dark in three ticks"
+        );
+        assert_eq!(
+            shots.input(&weapon, "primary firing", at(1.5)),
+            Some(1.0 - fall_per_tick(0.5))
+        );
         assert_eq!(shots.input(&weapon, "primary firing", at(2.5)), None);
-        assert!(shots.input(&weapon, "primary ejection port", at(3.5)).is_some(), "the port closes slower");
+        assert!(
+            shots
+                .input(&weapon, "primary ejection port", at(3.5))
+                .is_some(),
+            "the port closes slower"
+        );
     }
 
     /// In turn, the first pick steps on from the first entry, as the game
@@ -307,9 +410,14 @@ mod tests {
     /// for its shot count before the next.
     #[test]
     fn firing_effects_are_used_in_turn_for_their_shot_counts() {
-        let weapon = rifle(vec![([1, 1], Some(0)), ([2, 2], Some(1)), ([1, 1], Some(2))], false);
+        let weapon = rifle(
+            vec![([1, 1], Some(0)), ([2, 2], Some(1)), ([1, 1], Some(2))],
+            false,
+        );
         let mut shots = CeWeaponShots::default();
-        let picks: Vec<_> = (0..6).map(|shot| shots.fire(&weapon, 0, 1.0, shot as f32).unwrap()).collect();
+        let picks: Vec<_> = (0..6)
+            .map(|shot| shots.fire(&weapon, 0, 1.0, shot as f32).unwrap())
+            .collect();
         assert_eq!(picks, [1, 1, 2, 0, 1, 1]);
     }
 

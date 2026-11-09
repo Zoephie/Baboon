@@ -5,21 +5,21 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
-use crate::app::model_preview::common::sprites::AntennaQuad;
-use super::super::common::view::{ViewFrame, posed_on};
-use super::super::functions::FunctionValues;
-use super::effect_part::H2EffectPart;
-use super::super::effects::{for_each_attached_part, part_markers};
 use super::super::common::image::Image;
 use super::super::common::named_function::tag_function_at;
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::effects::marker_name;
+use super::super::effects::{for_each_attached_part, part_markers};
+use super::super::functions::FunctionValues;
 use super::super::materials::decode_image;
 use super::super::*;
-use crate::core::h2_pixel_shader::SamplerKind;
-use crate::app::model_preview::common::math::dot;
+use super::effect_part::H2EffectPart;
 use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::common::marker::MarkerFrame;
+use crate::app::model_preview::common::math::dot;
+use crate::app::model_preview::common::sprites::AntennaQuad;
+use crate::core::h2_pixel_shader::SamplerKind;
 
 /// `sprites[256]`.
 const MOST_SPRITES: usize = 256;
@@ -93,7 +93,11 @@ fn function_of(holder: TagStruct<'_>, name: &str) -> Option<TagFunction> {
     tag_function_at(&holder.descend(name)?, "function")
 }
 
-fn read_volume(reader: &TagReader, volume: TagStruct<'_>, glow: Option<&Arc<Image>>) -> Option<H2Volume> {
+fn read_volume(
+    reader: &TagReader,
+    volume: TagStruct<'_>,
+    glow: Option<&Arc<Image>>,
+) -> Option<H2Volume> {
     let flagged = |wanted: &str| has_flag(volume, "flags", wanted);
     let aspect = elements(volume, "aspect").first().and_then(|aspect| {
         Some(VolumeAspect {
@@ -104,18 +108,28 @@ fn read_volume(reader: &TagReader, volume: TagStruct<'_>, glow: Option<&Arc<Imag
             exponent: aspect.read_real("parallel exponent")?,
         })
     });
-    let own = volume.read_tag_ref_path("bitmap").filter(|path| !path.is_empty());
+    let own = volume
+        .read_tag_ref_path("bitmap")
+        .filter(|path| !path.is_empty());
     let bitmap = match own {
         Some(path) => decode_image(reader, &path, SamplerKind::Texture2D, 0).map(Arc::new),
         None => glow.cloned(),
     };
-    let count = volume.read_int_any("sprite count")?.clamp(4, MOST_SPRITES as i128) as usize;
+    let count = volume
+        .read_int_any("sprite count")?
+        .clamp(4, MOST_SPRITES as i128) as usize;
     let radius = function_of(volume, "radius function")?;
     let setting = |name: &str| {
-        volume.read_real(&format!("{name}*")).or_else(|| volume.read_real(name)).unwrap_or(0.0)
+        volume
+            .read_real(&format!("{name}*"))
+            .or_else(|| volume.read_real(name))
+            .unwrap_or(0.0)
     };
     let integer = |name: &str| {
-        volume.read_int_any(&format!("{name}*")).or_else(|| volume.read_int_any(name)).unwrap_or(0)
+        volume
+            .read_int_any(&format!("{name}*"))
+            .or_else(|| volume.read_int_any(name))
+            .unwrap_or(0)
     };
     let solver = Solver {
         min_fraction: setting("radius frac min").clamp(0.00390625, 1.0),
@@ -125,7 +139,9 @@ fn read_volume(reader: &TagReader, volume: TagStruct<'_>, glow: Option<&Arc<Imag
         tolerance: setting("x-delta max error").clamp(0.001, 0.1),
     };
     let solver = Solver {
-        max_iterations: (integer("x-buffer max iterations") as usize).max(solver.min_iterations).min(256),
+        max_iterations: (integer("x-buffer max iterations") as usize)
+            .max(solver.min_iterations)
+            .min(256),
         ..solver
     };
     let forced = |wanted: &str| flagged(wanted);
@@ -137,7 +153,11 @@ fn read_volume(reader: &TagReader, volume: TagStruct<'_>, glow: Option<&Arc<Imag
         spacing: postprocessed_spacing(
             &radius,
             count,
-            [forced("force linear radius function"), forced("force linear offset"), forced("force differential evaluation")],
+            [
+                forced("force linear radius function"),
+                forced("force linear offset"),
+                forced("force differential evaluation"),
+            ],
             &solver,
         ),
         offset: function_of(volume, "offset function")?,
@@ -154,11 +174,17 @@ fn read_volume(reader: &TagReader, volume: TagStruct<'_>, glow: Option<&Arc<Imag
 pub(in crate::app::model_preview) fn read_glow(reader: &TagReader) -> Option<Arc<Image>> {
     let globals = reader.load("globals\\globals", "globals", b"matg").ok()?;
     let data = elements(globals.root(), "rasterizer data");
-    let path = data.first()?.read_tag_ref_path("glow").filter(|path| !path.is_empty())?;
+    let path = data
+        .first()?
+        .read_tag_ref_path("glow")
+        .filter(|path| !path.is_empty())?;
     decode_image(reader, &path, SamplerKind::Texture2D, 0).map(Arc::new)
 }
 
-pub(in crate::app::model_preview) fn read_h2_bitmap(reader: &TagReader, path: &str) -> Option<Arc<Image>> {
+pub(in crate::app::model_preview) fn read_h2_bitmap(
+    reader: &TagReader,
+    path: &str,
+) -> Option<Arc<Image>> {
     decode_image(reader, path, SamplerKind::Texture2D, 0).map(Arc::new)
 }
 
@@ -179,9 +205,13 @@ pub(in crate::app::model_preview) fn read_h2_light_volumes(
     let (volume_group, light_group) = (u32::from_be_bytes(*b"MGS2"), u32::from_be_bytes(*b"ligh"));
     let mut found = Vec::new();
     let mut glow = None;
-    let attachments = object_block(object, "attachments").map(|block| elements(block, "attachments"));
+    let attachments =
+        object_block(object, "attachments").map(|block| elements(block, "attachments"));
     for attachment in attachments.unwrap_or_default() {
-        let Some((kind, path)) = attachment.read_tag_ref_with_group("type").filter(|(_, path)| !path.is_empty()) else {
+        let Some((kind, path)) = attachment
+            .read_tag_ref_with_group("type")
+            .filter(|(_, path)| !path.is_empty())
+        else {
             continue;
         };
         let (path, attached) = if kind == volume_group {
@@ -190,7 +220,10 @@ pub(in crate::app::model_preview) fn read_h2_light_volumes(
             let Ok(light) = reader.load(&path, "light", b"ligh") else {
                 continue;
             };
-            let named = light.root().read_tag_ref_path("light volume").filter(|path| !path.is_empty());
+            let named = light
+                .root()
+                .read_tag_ref_path("light volume")
+                .filter(|path| !path.is_empty());
             match named.filter(|_| super::lights::light_can_shine(light.root())) {
                 Some(named) => (named, false),
                 None => continue,
@@ -205,14 +238,20 @@ pub(in crate::app::model_preview) fn read_h2_light_volumes(
         let root = tag.root();
         let real = |name: &str| root.read_real(name).unwrap_or(0.0);
         let volumes = elements(root, "volumes");
-        let volumes: Vec<H2Volume> =
-            volumes.iter().filter_map(|volume| read_volume(reader, *volume, glow.as_ref())).collect();
-        let scaled_by_marker = volumes.first().is_some_and(|volume| volume.scaled_by_marker);
+        let volumes: Vec<H2Volume> = volumes
+            .iter()
+            .filter_map(|volume| read_volume(reader, *volume, glow.as_ref()))
+            .collect();
+        let scaled_by_marker = volumes
+            .first()
+            .is_some_and(|volume| volume.scaled_by_marker);
         let volumes = Arc::new(volumes);
         let name = marker_name(attachment, "marker");
         // `sub_86F0D0`: none, or one of the four. A light's own volume is white.
         let change_color = function_slot_of(attachment, "change color").filter(|_| attached);
-        let named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name));
+        let named = markers
+            .iter()
+            .filter(|marker| marker.name.eq_ignore_ascii_case(&name));
         for marker in named.take(if attached { usize::MAX } else { 1 }) {
             let (place, node) = frame(marker);
             found.push(H2LightVolume {
@@ -221,9 +260,18 @@ pub(in crate::app::model_preview) fn read_h2_light_volumes(
                 node,
                 position: place.position,
                 forward: place.axes[0],
-                falloff: [real("falloff distance from camera"), real("cutoff distance from camera")],
-                scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
-                marker_scale: if attached && scaled_by_marker { marker.scale } else { 1.0 },
+                falloff: [
+                    real("falloff distance from camera"),
+                    real("cutoff distance from camera"),
+                ],
+                scale_by: attachment
+                    .read_string_id("primary scale")
+                    .unwrap_or_default(),
+                marker_scale: if attached && scaled_by_marker {
+                    marker.scale
+                } else {
+                    1.0
+                },
                 change_color,
                 volumes: Arc::clone(&volumes),
                 effect: None,
@@ -241,8 +289,10 @@ pub(in crate::app::model_preview) fn read_h2_light_volumes(
         let root = tag.root();
         let real = |name: &str| root.read_real(name).unwrap_or(0.0);
         let volumes = elements(root, "volumes");
-        let volumes: Vec<H2Volume> =
-            volumes.iter().filter_map(|volume| read_volume(reader, *volume, glow.as_ref())).collect();
+        let volumes: Vec<H2Volume> = volumes
+            .iter()
+            .filter_map(|volume| read_volume(reader, *volume, glow.as_ref()))
+            .collect();
         let volumes = Arc::new(volumes);
         for marker in part_markers(markers, &part.marker, part.effect.once) {
             let (place, node) = frame(&marker);
@@ -253,7 +303,10 @@ pub(in crate::app::model_preview) fn read_h2_light_volumes(
                 node,
                 position: place.position,
                 forward: place.axes[0],
-                falloff: [real("falloff distance from camera"), real("cutoff distance from camera")],
+                falloff: [
+                    real("falloff distance from camera"),
+                    real("cutoff distance from camera"),
+                ],
                 scale_by: part.effect.scale_by.clone(),
                 marker_scale: 1.0,
                 change_color: None,
@@ -265,18 +318,28 @@ pub(in crate::app::model_preview) fn read_h2_light_volumes(
     found
 }
 
-
 /// `(cutoff - distance) / (cutoff - falloff)`, or all of it with no range.
 fn camera_fade([falloff, cutoff]: [f32; 2], distance: f32) -> f32 {
-    if cutoff <= falloff { 1.0 } else { ((cutoff - distance) / (cutoff - falloff)).clamp(0.0, 1.0) }
+    if cutoff <= falloff {
+        1.0
+    } else {
+        ((cutoff - distance) / (cutoff - falloff)).clamp(0.0, 1.0)
+    }
 }
 
 /// `sub_94BE80`: how much of the aspect applies, by how side on the axis is.
 fn aspect_amount(threshold_radians: f32, exponent: f32, facing_cosine: f32) -> f32 {
-    let side_on = (facing_cosine.clamp(0.0, 1.0).acos() * 2.0 / std::f32::consts::PI).clamp(0.0, 1.0);
+    let side_on =
+        (facing_cosine.clamp(0.0, 1.0).acos() * 2.0 / std::f32::consts::PI).clamp(0.0, 1.0);
     let threshold = (threshold_radians * 2.0 / std::f32::consts::PI).clamp(0.0, 0.9999);
     let amount = ((side_on - threshold) / (1.0 - threshold)).clamp(0.0, 1.0);
-    if amount > 0.0 && exponent > 0.0 { amount.powf(exponent) } else if amount > 0.0 { 1.0 } else { 0.0 }
+    if amount > 0.0 && exponent > 0.0 {
+        amount.powf(exponent)
+    } else if amount > 0.0 {
+        1.0
+    } else {
+        0.0
+    }
 }
 
 /// The `x-buffer` settings of tool's offset solver.
@@ -300,10 +363,16 @@ fn postprocessed_spacing(
     [linear_radius, linear_offset, differential]: [bool; 3],
     solver: &Solver,
 ) -> Spacing {
-    let (linear_radius, linear_offset) = if differential { (false, false) } else { (linear_radius, linear_offset) };
+    let (linear_radius, linear_offset) = if differential {
+        (false, false)
+    } else {
+        (linear_radius, linear_offset)
+    };
     let h2 = radius.as_h2();
     let kind = h2.map(|h2| h2.function_type());
-    let (low, high) = h2.map_or((0.0, 1.0), |h2| (h2.clamp_range_min(), h2.clamp_range_max()));
+    let (low, high) = h2.map_or((0.0, 1.0), |h2| {
+        (h2.clamp_range_min(), h2.clamp_range_max())
+    });
     use blam_tags::tag_function::FunctionType;
     let flag = if differential {
         None
@@ -336,12 +405,25 @@ fn postprocessed_spacing(
 /// its share of the running sum, until the largest move against its own
 /// radius is under the tolerance past the minimum passes, or out of passes.
 /// Every `spacing`th sample is a sprite's offset, at range 0 and range 1.
-fn solve_offsets(radius: &TagFunction, count: usize, solver: &Solver, (low, high): (f32, f32)) -> Vec<[f32; 2]> {
+fn solve_offsets(
+    radius: &TagFunction,
+    count: usize,
+    solver: &Solver,
+    (low, high): (f32, f32),
+) -> Vec<[f32; 2]> {
     let last = solver.spacing * (count - 1);
-    let normal = if high > 0.0 || low > 0.0 { 1.0 / high.max(low) } else { 1.0 };
+    let normal = if high > 0.0 || low > 0.0 {
+        1.0 / high.max(low)
+    } else {
+        1.0
+    };
     let mut table = vec![[0.0; 2]; count];
     for range in 0..2 {
-        let (mut x, mut r, mut sum) = (vec![0.0f32; last + 1], vec![0.0f32; last + 1], vec![0.0f32; last + 1]);
+        let (mut x, mut r, mut sum) = (
+            vec![0.0f32; last + 1],
+            vec![0.0f32; last + 1],
+            vec![0.0f32; last + 1],
+        );
         for pass in 0..solver.max_iterations {
             let mut worst = 0.0f32;
             let mut done = false;
@@ -368,7 +450,11 @@ fn solve_offsets(radius: &TagFunction, count: usize, solver: &Solver, (low, high
             }
             for at in 0..=last {
                 let size = radius.evaluate(x[at], range as f32) * normal;
-                r[at] = if solver.min_fraction <= size { size.min(1.0) } else { solver.min_fraction };
+                r[at] = if solver.min_fraction <= size {
+                    size.min(1.0)
+                } else {
+                    solver.min_fraction
+                };
                 sum[at] = r[at] + if at > 0 { sum[at - 1] } else { 0.0 };
             }
         }
@@ -398,9 +484,22 @@ impl Geometric {
         } else if r0 <= r1 * 0.00390625 {
             r0 = r1 * 0.00390625;
         }
-        let ratio = if r0.abs() >= 0.0001 { (r1 / r0).powf(1.0 / (count - 1) as f32) } else { 1.0 };
-        let scale = if (r0 - r1).abs() < 0.0001 { 1.0 } else { 1.0 / (r1 - r0) };
-        Self { first: r0, ratio, scale, shift: -(r0 * scale) }
+        let ratio = if r0.abs() >= 0.0001 {
+            (r1 / r0).powf(1.0 / (count - 1) as f32)
+        } else {
+            1.0
+        };
+        let scale = if (r0 - r1).abs() < 0.0001 {
+            1.0
+        } else {
+            1.0 / (r1 - r0)
+        };
+        Self {
+            first: r0,
+            ratio,
+            scale,
+            shift: -(r0 * scale),
+        }
     }
 
     fn place(&self, sprite: usize) -> f32 {
@@ -414,7 +513,9 @@ impl H2Volume {
         match &self.spacing {
             Spacing::Linear => sprite as f32 / (self.count - 1) as f32,
             Spacing::Geometric => geometric.map_or(0.0, |geometric| geometric.place(sprite)),
-            Spacing::Table(table) => table.get(sprite).map_or(0.0, |[low, high]| (1.0 - range) * low + high * range),
+            Spacing::Table(table) => table
+                .get(sprite)
+                .map_or(0.0, |[low, high]| (1.0 - range) * low + high * range),
             Spacing::Nowhere => 0.0,
         }
     }
@@ -433,8 +534,6 @@ impl H2LightVolume {
     pub(crate) fn effect_part(&self) -> Option<&H2EffectPart> {
         self.effect.as_ref()
     }
-
-
 
     pub(crate) fn volumes(&self) -> &[H2Volume] {
         &self.volumes
@@ -456,11 +555,21 @@ impl H2LightVolume {
         onset: f32,
     ) -> Option<([f32; 3], f32)> {
         let Some(part) = &self.effect else {
-            let tint = self.change_color.and_then(|index| change_colors.get(index)).copied().unwrap_or([1.0; 3]);
-            return Some((tint, super::lights::attachment_value(&self.scale_by, values)));
+            let tint = self
+                .change_color
+                .and_then(|index| change_colors.get(index))
+                .copied()
+                .unwrap_or([1.0; 3]);
+            return Some((
+                tint,
+                super::lights::attachment_value(&self.scale_by, values),
+            ));
         };
         let lit = part.light(&self.scale_by, values, time, onset)?;
-        let kept = self.volumes.first().is_some_and(|volume| volume.not_scaled_by_duration);
+        let kept = self
+            .volumes
+            .first()
+            .is_some_and(|volume| volume.not_scaled_by_duration);
         let fade = if lit.lasts && !kept { lit.fade } else { 1.0 };
         Some(([fade; 3], lit.brightness))
     }
@@ -490,7 +599,10 @@ impl H2LightVolume {
             return Vec::new();
         }
         let facing_cosine = dot(unit_eye, forward).abs();
-        let facing = 1.0 - volume.facing.evaluate((1.0 - facing_cosine).clamp(0.0, 1.0), 0.0);
+        let facing = 1.0
+            - volume
+                .facing
+                .evaluate((1.0 - facing_cosine).clamp(0.0, 1.0), 0.0);
         let amount = volume.aspect.as_ref().map_or(0.0, |aspect| {
             aspect_amount(aspect.threshold, aspect.exponent, facing_cosine)
         });
@@ -505,13 +617,20 @@ impl H2LightVolume {
             let across = dot(forward, view.right) * depth - x * toward;
             let up = dot(forward, view.up) * depth - y * toward;
             let length = (across * across + up * up).sqrt();
-            if length > 0.0 { (across / length, up / length) } else { (1.0, 0.0) }
+            if length > 0.0 {
+                (across / length, up / length)
+            } else {
+                (1.0, 0.0)
+            }
         } else {
             (1.0, 0.0)
         };
-        let side: [f32; 3] = std::array::from_fn(|axis| view.right[axis] * cos + view.up[axis] * sin);
-        let lift: [f32; 3] = std::array::from_fn(|axis| view.up[axis] * cos - view.right[axis] * sin);
-        let geometric = (volume.spacing == Spacing::Geometric).then(|| Geometric::of(&volume.radius, volume.count, facing));
+        let side: [f32; 3] =
+            std::array::from_fn(|axis| view.right[axis] * cos + view.up[axis] * sin);
+        let lift: [f32; 3] =
+            std::array::from_fn(|axis| view.up[axis] * cos - view.right[axis] * sin);
+        let geometric = (volume.spacing == Spacing::Geometric)
+            .then(|| Geometric::of(&volume.radius, volume.count, facing));
         (0..volume.count)
             .filter_map(|sprite| {
                 let along = volume.place_along(sprite, facing, geometric.as_ref());
@@ -538,9 +657,12 @@ impl H2LightVolume {
                 let alpha = (shine * brightness).clamp(0.0, 1.0);
                 let color = volume.color.evaluate_color(along, facing);
                 let tint = std::array::from_fn::<f32, 3, _>(|channel| {
-                    [color.red, color.green, color.blue][channel].clamp(0.0, 1.0) * tint_by[channel] * alpha
+                    [color.red, color.green, color.blue][channel].clamp(0.0, 1.0)
+                        * tint_by[channel]
+                        * alpha
                 });
-                let center: [f32; 3] = std::array::from_fn(|axis| origin[axis] + forward[axis] * offset);
+                let center: [f32; 3] =
+                    std::array::from_fn(|axis| origin[axis] + forward[axis] * offset);
                 let corner = |x: f32, y: f32, u: f32, v: f32| -> [f32; 5] {
                     let [a, b, c] = std::array::from_fn(|axis| {
                         center[axis] + side[axis] * x * half_wide + lift[axis] * y * half_high
@@ -548,7 +670,12 @@ impl H2LightVolume {
                     [a, b, c, u, v]
                 };
                 Some(AntennaQuad {
-                    corners: [corner(-1.0, 1.0, 0.0, 0.0), corner(1.0, 1.0, 1.0, 0.0), corner(-1.0, -1.0, 0.0, 1.0), corner(1.0, -1.0, 1.0, 1.0)],
+                    corners: [
+                        corner(-1.0, 1.0, 0.0, 0.0),
+                        corner(1.0, 1.0, 1.0, 0.0),
+                        corner(-1.0, -1.0, 0.0, 1.0),
+                        corner(1.0, -1.0, 1.0, 1.0),
+                    ],
                     // `widget_light_volume`'s pixel shader: colour by its alpha by the
                     // map's colour, and an alpha of 0, so under `ONE, INV_SRC_ALPHA`
                     // it only adds light and never darkens what is behind.
@@ -564,8 +691,8 @@ attached!(H2LightVolume);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::model_preview::harness::kit::kit_root;
     use crate::app::model_preview::common::attached::Attached;
+    use crate::app::model_preview::harness::kit::kit_root;
     use crate::core::game::GameId;
 
     /// A held weapon's firing-effect volume answers its owner's panel under
@@ -587,16 +714,27 @@ mod tests {
             effect: None,
         };
         let fired = volume("firing effect: firing").on_attached("gun");
-        assert_eq!((fired.scale_by.as_str(), fired.object), ("gun: firing effect: firing", 0));
+        assert_eq!(
+            (fired.scale_by.as_str(), fired.object),
+            ("gun: firing effect: firing", 0)
+        );
         let steady = volume("heat").on_attached("gun");
         assert_eq!((steady.scale_by.as_str(), steady.object), ("heat", 1));
     }
 
     #[test]
     fn geometric_sprites_run_from_the_start_to_the_end() {
-        let geometric = Geometric { first: 0.5, ratio: 2.0f32.powf(1.0 / 3.0), scale: 2.0, shift: -1.0 };
+        let geometric = Geometric {
+            first: 0.5,
+            ratio: 2.0f32.powf(1.0 / 3.0),
+            scale: 2.0,
+            shift: -1.0,
+        };
         assert!(geometric.place(0).abs() < 1e-6);
-        assert!((geometric.place(3) - 1.0).abs() < 1e-5, "r0 0.5 to r1 1.0 over four sprites");
+        assert!(
+            (geometric.place(3) - 1.0).abs() < 1e-5,
+            "r0 0.5 to r1 1.0 over four sprites"
+        );
         assert!(geometric.place(1) < 1.0 / 3.0, "the small end packs closer");
     }
 
@@ -604,7 +742,9 @@ mod tests {
     /// start toward the end, as tool's solver leaves them.
     #[test]
     fn every_solved_table_climbs() {
-        let Some(tags) = kit_root(GameId::Halo2) else { return };
+        let Some(tags) = kit_root(GameId::Halo2) else {
+            return;
+        };
         let source = TagSource::LooseFolder {
             root: tags.clone(),
             game: Some(GameId::Halo2),
@@ -626,9 +766,14 @@ mod tests {
         for path in paths {
             let relative = path.strip_prefix(&tags).unwrap().with_extension("");
             let name = relative.to_string_lossy().replace('/', "\\");
-            let tag = load_referenced_tag_from_source(&source, &name, "light_volume", b"MGS2").unwrap();
+            let tag =
+                load_referenced_tag_from_source(&source, &name, "light_volume", b"MGS2").unwrap();
             for volume in elements(tag.root(), "volumes") {
-                let Some(read) = read_volume(&crate::app::model_preview::load::TagReader::new(&source), volume, None) else {
+                let Some(read) = read_volume(
+                    &crate::app::model_preview::load::TagReader::new(&source),
+                    volume,
+                    None,
+                ) else {
                     continue;
                 };
                 match &read.spacing {
@@ -640,14 +785,23 @@ mod tests {
                         tables += 1;
                         for range in 0..2 {
                             let column: Vec<f32> = table.iter().map(|entry| entry[range]).collect();
-                            assert!(column.windows(2).all(|pair| pair[1] >= pair[0] - 1e-5), "{name}: {column:?}");
-                            assert!(column.iter().all(|x| (0.0..=1.0 + 1e-5).contains(x)), "{name}: {column:?}");
+                            assert!(
+                                column.windows(2).all(|pair| pair[1] >= pair[0] - 1e-5),
+                                "{name}: {column:?}"
+                            );
+                            assert!(
+                                column.iter().all(|x| (0.0..=1.0 + 1e-5).contains(x)),
+                                "{name}: {column:?}"
+                            );
                         }
                     }
                 }
             }
         }
-        eprintln!("linear {}, geometric {}, table {}, nowhere {}", kinds[0], kinds[1], kinds[2], kinds[3]);
+        eprintln!(
+            "linear {}, geometric {}, table {}, nowhere {}",
+            kinds[0], kinds[1], kinds[2], kinds[3]
+        );
         assert!(tables > 0, "no volume needed the solver");
     }
 
@@ -662,8 +816,15 @@ mod tests {
     #[test]
     fn the_aspect_comes_in_as_the_axis_turns_side_on() {
         assert_eq!(aspect_amount(0.0, 1.0, 1.0), 0.0, "end on, none");
-        assert!((aspect_amount(0.0, 1.0, 0.0) - 1.0).abs() < 1e-5, "side on, all");
-        assert_eq!(aspect_amount(std::f32::consts::FRAC_PI_4, 1.0, 0.9), 0.0, "short of the threshold");
+        assert!(
+            (aspect_amount(0.0, 1.0, 0.0) - 1.0).abs() < 1e-5,
+            "side on, all"
+        );
+        assert_eq!(
+            aspect_amount(std::f32::consts::FRAC_PI_4, 1.0, 0.9),
+            0.0,
+            "short of the threshold"
+        );
         let half = aspect_amount(0.0, 2.0, std::f32::consts::FRAC_PI_4.cos());
         assert!((half - 0.25).abs() < 1e-5, "{half}");
     }

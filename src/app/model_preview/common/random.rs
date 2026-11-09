@@ -47,24 +47,49 @@ mod tests {
 
     #[test]
     fn each_map_keeps_its_bits_at_the_ends() {
-        assert_eq!(high16_over_65536(0xFFFF_FFFF).to_bits(), (65_535.0f32 / 65_536.0).to_bits());
+        assert_eq!(
+            high16_over_65536(0xFFFF_FFFF).to_bits(),
+            (65_535.0f32 / 65_536.0).to_bits()
+        );
         assert_eq!(high16_over_65535(0xFFFF_FFFF), 1.0);
-        assert_eq!(high24_over_2_24(0xFFFF_FFFF).to_bits(), (16_777_215.0f32 / 16_777_216.0).to_bits());
+        assert_eq!(
+            high24_over_2_24(0xFFFF_FFFF).to_bits(),
+            (16_777_215.0f32 / 16_777_216.0).to_bits()
+        );
         assert_eq!(high24_over_2_24(0), 0.0);
-        for map in [high16_over_65536, high16_over_65535, high16_times_inverse_65535] {
+        for map in [
+            high16_over_65536,
+            high16_over_65535,
+            high16_times_inverse_65535,
+        ] {
             assert_eq!(map(0), 0.0);
-            assert_eq!(map(0xFFFF), 0.0, "the low 16 bits never reach the 16-bit maps");
+            assert_eq!(
+                map(0xFFFF),
+                0.0,
+                "the low 16 bits never reach the 16-bit maps"
+            );
         }
     }
 
     /// Maps that look alike give different bits, which is why they are kept.
     #[test]
     fn maps_that_look_alike_disagree() {
-        let differs = (0..=u16::MAX).map(|high| u32::from(high) << 16).find(|&state| {
-            high16_over_65535(state).to_bits() != high16_times_inverse_65535(state).to_bits()
-        });
-        assert!(differs.is_some(), "dividing by 65535 and multiplying by its inverse part somewhere");
-        assert_ne!(high16_over_65536(0x8000_0000), high16_over_65535(0x8000_0000));
-        assert_ne!(high24_over_2_24(0x0000_0100), high16_over_65536(0x0000_0100));
+        let differs = (0..=u16::MAX)
+            .map(|high| u32::from(high) << 16)
+            .find(|&state| {
+                high16_over_65535(state).to_bits() != high16_times_inverse_65535(state).to_bits()
+            });
+        assert!(
+            differs.is_some(),
+            "dividing by 65535 and multiplying by its inverse part somewhere"
+        );
+        assert_ne!(
+            high16_over_65536(0x8000_0000),
+            high16_over_65535(0x8000_0000)
+        );
+        assert_ne!(
+            high24_over_2_24(0x0000_0100),
+            high16_over_65536(0x0000_0100)
+        );
     }
 }

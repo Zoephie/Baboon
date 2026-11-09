@@ -48,16 +48,26 @@ pub(super) fn frame_key(uniform: &str, frame: usize) -> String {
 
 /// What the engine's globals hold for an object of a gen3 game, by uniform
 /// name, at `size` and the frame's exposure `stops`. Each game gives its own.
-pub(in crate::app::model_preview) type FrameValues = fn(&ModelGpuFrame, &str, [i32; 2], f32) -> Option<Gen3Value>;
+pub(in crate::app::model_preview) type FrameValues =
+    fn(&ModelGpuFrame, &str, [i32; 2], f32) -> Option<Gen3Value>;
 
 /// Halo 3's and ODST's [`FrameValues`], which read no stops.
-pub(in crate::app::model_preview) fn halo3_frame_values(frame: &ModelGpuFrame, name: &str, size: [i32; 2], _stops: f32) -> Option<Gen3Value> {
+pub(in crate::app::model_preview) fn halo3_frame_values(
+    frame: &ModelGpuFrame,
+    name: &str,
+    size: [i32; 2],
+    _stops: f32,
+) -> Option<Gen3Value> {
     frame_value(frame, name, size)
 }
 
 /// What the rasterizer's globals hold for an object here, by uniform name:
 /// Halo 3's, which Reach's fall back to.
-pub(in crate::app::model_preview) fn frame_value(frame: &ModelGpuFrame, name: &str, size: [i32; 2]) -> Option<Gen3Value> {
+pub(in crate::app::model_preview) fn frame_value(
+    frame: &ModelGpuFrame,
+    name: &str,
+    size: [i32; 2],
+) -> Option<Gen3Value> {
     let [width, height] = size.map(|side| side as f32);
     let floats = |value: [f32; 4]| Some(Gen3Value::Floats(value));
     if let Some(index) = name
@@ -69,7 +79,9 @@ pub(in crate::app::model_preview) fn frame_value(frame: &ModelGpuFrame, name: &s
     }
     let eye = eye_position(&frame.camera);
     match name {
-        "v_always_true" | "p_shader_pc_specular_enabled" | "actually_calc_albedo" => Some(Gen3Value::Integer(1)),
+        "v_always_true" | "p_shader_pc_specular_enabled" | "actually_calc_albedo" => {
+            Some(Gen3Value::Integer(1))
+        }
         "Position_Compression_Scale" => floats([1.0; 4]),
         "screenspace_xform" => floats([1.0, 1.0, 0.0, 0.0]),
         "UV_Compression_Scale_Offset" => floats([1.0, 1.0, 0.0, 0.0]),
@@ -147,15 +159,30 @@ pub(in crate::app::model_preview) fn camera_to_world(frame: &ModelGpuFrame) -> [
 }
 
 /// A translated uniform's value, by its type.
-pub(in crate::app::model_preview) unsafe fn set_value(gl: &glow::Context, location: Option<&glow::NativeUniformLocation>, ty: &Type, value: &Gen3Value) {
+pub(in crate::app::model_preview) unsafe fn set_value(
+    gl: &glow::Context,
+    location: Option<&glow::NativeUniformLocation>,
+    ty: &Type,
+    value: &Gen3Value,
+) {
     unsafe {
         match (ty, value) {
             (Type::Scalar(Scalar::Float), Gen3Value::Floats(v)) => gl.uniform_1_f32(location, v[0]),
-            (Type::Vector(Scalar::Float, 2), Gen3Value::Floats(v)) => gl.uniform_2_f32(location, v[0], v[1]),
-            (Type::Vector(Scalar::Float, 3), Gen3Value::Floats(v)) => gl.uniform_3_f32(location, v[0], v[1], v[2]),
-            (Type::Vector(Scalar::Float, 4), Gen3Value::Floats(v)) => gl.uniform_4_f32_slice(location, v),
-            (Type::Scalar(Scalar::Float), Gen3Value::Integer(v)) => gl.uniform_1_f32(location, *v as f32),
-            (Type::Scalar(Scalar::Uint), Gen3Value::Integer(v)) => gl.uniform_1_u32(location, *v as u32),
+            (Type::Vector(Scalar::Float, 2), Gen3Value::Floats(v)) => {
+                gl.uniform_2_f32(location, v[0], v[1])
+            }
+            (Type::Vector(Scalar::Float, 3), Gen3Value::Floats(v)) => {
+                gl.uniform_3_f32(location, v[0], v[1], v[2])
+            }
+            (Type::Vector(Scalar::Float, 4), Gen3Value::Floats(v)) => {
+                gl.uniform_4_f32_slice(location, v)
+            }
+            (Type::Scalar(Scalar::Float), Gen3Value::Integer(v)) => {
+                gl.uniform_1_f32(location, *v as f32)
+            }
+            (Type::Scalar(Scalar::Uint), Gen3Value::Integer(v)) => {
+                gl.uniform_1_u32(location, *v as u32)
+            }
             (Type::Scalar(_), Gen3Value::Integer(v)) => gl.uniform_1_i32(location, *v),
             (Type::Scalar(_), Gen3Value::Floats(v)) => gl.uniform_1_i32(location, v[0] as i32),
             (Type::Array(element, Some(length)), Gen3Value::FloatArray(rows))
@@ -171,13 +198,23 @@ pub(in crate::app::model_preview) unsafe fn set_value(gl: &glow::Context, locati
 }
 
 impl Gen3State {
-    pub(super) unsafe fn upload(&mut self, core: &mut RenderCore, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(super) unsafe fn upload(
+        &mut self,
+        core: &mut RenderCore,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+    ) {
         let uploaded = &mut core.slots[slot].h3_textures;
         if uploaded.id == Some(frame.textures_id) {
             return;
         }
         unsafe {
-            for texture in uploaded.materials.drain(..).flat_map(|map| map.into_values()) {
+            for texture in uploaded
+                .materials
+                .drain(..)
+                .flat_map(|map| map.into_values())
+            {
                 gl.delete_texture(texture);
             }
             for texture in uploaded.gels.drain(..).flatten() {
@@ -187,37 +224,80 @@ impl Gen3State {
                 gl.delete_texture(texture);
             }
             let shields = frame.textures.iter().flat_map(|textures| textures.iter());
-            let global = shields.filter_map(|texture| texture.h3.as_ref()?.shield.as_ref()).next();
-            let settings = frame.preview.h3.shield.as_ref().or(global.map(|shield| &shield.settings));
-            let reach = frame.preview.reach.shield.as_ref().map(|shield| shield.settings.textures.iter());
-            let h4 = frame.preview.h4.shield.as_ref().map(|shield| shield.textures.iter());
+            let global = shields
+                .filter_map(|texture| texture.h3.as_ref()?.shield.as_ref())
+                .next();
+            let settings = frame
+                .preview
+                .h3
+                .shield
+                .as_ref()
+                .or(global.map(|shield| &shield.settings));
+            let reach = frame
+                .preview
+                .reach
+                .shield
+                .as_ref()
+                .map(|shield| shield.settings.textures.iter());
+            let h4 = frame
+                .preview
+                .h4
+                .shield
+                .as_ref()
+                .map(|shield| shield.textures.iter());
             for texture in reach.into_iter().flatten().chain(h4.into_iter().flatten()) {
-                if let Some(found) = upload_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
+                if let Some(found) = upload_image_linear(
+                    gl,
+                    &texture.image,
+                    texture.texels,
+                    &texture.mips,
+                    texture.sampler,
+                ) {
                     uploaded.shield.insert(texture.uniform.clone(), found);
                 }
             }
             if let Some(settings) = settings {
                 for texture in &settings.textures {
-                    if let Some(found) = upload_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
+                    if let Some(found) = upload_image_linear(
+                        gl,
+                        &texture.image,
+                        texture.texels,
+                        &texture.mips,
+                        texture.sampler,
+                    ) {
                         uploaded.shield.insert(texture.uniform.clone(), found);
                     }
                 }
             }
             uploaded.gels = frame
                 .preview
-                .h3.lights
+                .h3
+                .lights
                 .iter()
-                .map(|light| light.gel.as_ref().and_then(|gel| upload_image_linear(gl, gel, ImageTexels::Srgb, &[], None)))
+                .map(|light| {
+                    light
+                        .gel
+                        .as_ref()
+                        .and_then(|gel| upload_image_linear(gl, gel, ImageTexels::Srgb, &[], None))
+                })
                 .collect();
             for textures in frame.textures.iter().flat_map(|textures| textures.iter()) {
                 let mut map = HashMap::new();
                 if let Some(material) = &textures.h3 {
                     for texture in &material.textures {
-                        if let Some(uploaded) = upload_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
+                        if let Some(uploaded) = upload_image_linear(
+                            gl,
+                            &texture.image,
+                            texture.texels,
+                            &texture.mips,
+                            texture.sampler,
+                        ) {
                             map.insert(texture.uniform.clone(), uploaded);
                         }
                         for (at, image) in texture.frames.iter().enumerate() {
-                            if let Some(uploaded) = upload_image_linear(gl, image, texture.texels, &[], texture.sampler) {
+                            if let Some(uploaded) =
+                                upload_image_linear(gl, image, texture.texels, &[], texture.sampler)
+                            {
                                 map.insert(frame_key(&texture.uniform, at), uploaded);
                             }
                         }
@@ -238,13 +318,24 @@ impl Gen3State {
         material: &Gen3Material,
         uniform: &str,
     ) -> String {
-        let count = material.textures.iter().find(|texture| texture.uniform == uniform);
+        let count = material
+            .textures
+            .iter()
+            .find(|texture| texture.uniform == uniform);
         let count = count.map_or(0, |texture| texture.frames.len());
         let object = batch.material_index as usize;
-        let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
+        let owner = frame
+            .preview
+            .materials
+            .get(object)
+            .map_or(0, |material| material.object);
         // Halo 4: the sampler's frame-index function, on the object's values.
         if let Some(submit) = material.h4().filter(|_| count > 0) {
-            let drawn = super::super::super::h4::materials::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
+            let drawn = super::super::super::h4::materials::submit::DrawnObject {
+                values: frame.function_values_of(object),
+                time: frame.time,
+                owner,
+            };
             if let Some(index) = submit.frame(uniform, &drawn) {
                 return frame_key(uniform, index);
             }
@@ -253,7 +344,10 @@ impl Gen3State {
             animation.writes == Gen3Animated::Frame && animation.uniform == uniform
         });
         match animation.filter(|_| count > 0) {
-            Some(animation) => frame_key(uniform, animation.frame(count, frame.time, owner, frame.function_values_of(object))),
+            Some(animation) => frame_key(
+                uniform,
+                animation.frame(count, frame.time, owner, frame.function_values_of(object)),
+            ),
             None => uniform.to_owned(),
         }
     }

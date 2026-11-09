@@ -8,7 +8,11 @@ use super::*;
 /// `minor_scl`). `None` for models with no variants (CE gbxmodels), which fall
 /// back to base permutations.
 pub(super) fn default_variant_index(data: &ModelPreviewData) -> Option<usize> {
-    let named = |name: &str| data.variants.iter().position(|v| v.name.eq_ignore_ascii_case(name));
+    let named = |name: &str| {
+        data.variants
+            .iter()
+            .position(|v| v.name.eq_ignore_ascii_case(name))
+    };
     data.default_variant
         .as_deref()
         .and_then(named)
@@ -36,14 +40,18 @@ pub(super) fn compute_variant_selection(
     let selected_variant = variant.and_then(|idx| data.variants.get(idx));
     for region in &data.preview.regions {
         let named = selected_variant.and_then(|variant| variant.regions.get(&region.name));
-        let hidden = selected_variant.is_some_and(|variant| variant.hidden_regions.contains(&region.name));
+        let hidden =
+            selected_variant.is_some_and(|variant| variant.hidden_regions.contains(&region.name));
         let (enabled, permutation) = match named {
             Some(name) if region.permutations.contains(name) => (true, name.clone()),
             // The game resolves a name the render model lacks to no permutation.
             Some(_) => (false, default_permutation(region)),
             None => {
                 let empty = data.preview.instances.empty_regions.contains(&region.name);
-                (!hidden && !empty && !region.permutations.is_empty(), default_permutation(region))
+                (
+                    !hidden && !empty && !region.permutations.is_empty(),
+                    default_permutation(region),
+                )
             }
         };
         selections.insert(

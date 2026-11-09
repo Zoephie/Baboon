@@ -2,14 +2,19 @@
 
 use super::*;
 
-pub(in crate::app::model_preview) fn polygon_edges(polygon: &[egui::Pos2]) -> impl Iterator<Item = (&egui::Pos2, &egui::Pos2)> {
+pub(in crate::app::model_preview) fn polygon_edges(
+    polygon: &[egui::Pos2],
+) -> impl Iterator<Item = (&egui::Pos2, &egui::Pos2)> {
     polygon
         .iter()
         .zip(polygon.iter().cycle().skip(1))
         .take(polygon.len())
 }
 
-pub(in crate::app::model_preview) fn point_in_polygon(point: egui::Pos2, polygon: &[egui::Pos2]) -> bool {
+pub(in crate::app::model_preview) fn point_in_polygon(
+    point: egui::Pos2,
+    polygon: &[egui::Pos2],
+) -> bool {
     let mut inside = false;
     let mut previous = polygon[polygon.len() - 1];
     for &current in polygon {
@@ -56,7 +61,11 @@ pub(in crate::app::model_preview) fn draw_preview_hover_label(
     );
 }
 
-pub(in crate::app::model_preview) fn point_segment_distance(point: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
+pub(in crate::app::model_preview) fn point_segment_distance(
+    point: egui::Pos2,
+    a: egui::Pos2,
+    b: egui::Pos2,
+) -> f32 {
     let ab = b - a;
     let ap = point - a;
     let denom = ab.dot(ab);

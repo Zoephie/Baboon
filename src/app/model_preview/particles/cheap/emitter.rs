@@ -31,13 +31,21 @@ impl CheapEmitterTag {
             let bounds = root.read_real_bounds(name);
             [bounds.lower, bounds.upper]
         };
-        let function = root.descend("spawnrate").and_then(|holder| tag_function_at(&holder, "Mapping")).map(Arc::new);
+        let function = root
+            .descend("spawnrate")
+            .and_then(|holder| tag_function_at(&holder, "Mapping"))
+            .map(Arc::new);
         Self {
-            version: root.read_int_any("version").map_or(0, |version| version as i64),
+            version: root
+                .read_int_any("version")
+                .map_or(0, |version| version as i64),
             spawn_rate: real("spawn rate"),
             function,
             fade: [real("distance fade start"), real("distance fade end")],
-            types: std::array::from_fn(|at| root.read_string_id(&format!("type {at}")).unwrap_or_default()),
+            types: std::array::from_fn(|at| {
+                root.read_string_id(&format!("type {at}"))
+                    .unwrap_or_default()
+            }),
             weights: std::array::from_fn(|at| real(&format!("weight {at}"))),
             lifetime: bounds("lifetime"),
             position_scale: real("position scale"),
@@ -47,7 +55,13 @@ impl CheapEmitterTag {
             subframe: bounds("subframe offset"),
             rotation_randomness: real("rotation randomness"),
             scale_modifier: real("particle scale modifier"),
-            lighting: ["lighting contrast", "lighting offset", "lighting min", "lighting max"].map(real),
+            lighting: [
+                "lighting contrast",
+                "lighting offset",
+                "lighting min",
+                "lighting max",
+            ]
+            .map(real),
         }
     }
 
@@ -78,12 +92,30 @@ impl CheapEmitterTag {
         let inverse = |lifetime: f32| (if lifetime <= 0.0001 { 0.0001 } else { lifetime }).recip();
         let [directionality, speed, subframe] = [self.directionality, self.speed, self.subframe];
         let (shortest, longest) = (inverse(self.lifetime[0]), inverse(self.lifetime[1]));
-        let indices = self.types.each_ref().map(|name| names.iter().position(|known| known == name));
+        let indices = self
+            .types
+            .each_ref()
+            .map(|name| names.iter().position(|known| known == name));
         let (thresholds, steps) = type_thresholds(indices, self.weights);
         [
-            [self.position_scale, self.position_flatten, self.rotation_randomness.clamp(0.0, 1.0), modifier],
-            [directionality[0], directionality[1] - directionality[0], speed[0], speed[1] - speed[0]],
-            [subframe[0], subframe[1] - subframe[0], shortest, longest - shortest],
+            [
+                self.position_scale,
+                self.position_flatten,
+                self.rotation_randomness.clamp(0.0, 1.0),
+                modifier,
+            ],
+            [
+                directionality[0],
+                directionality[1] - directionality[0],
+                speed[0],
+                speed[1] - speed[0],
+            ],
+            [
+                subframe[0],
+                subframe[1] - subframe[0],
+                shortest,
+                longest - shortest,
+            ],
             thresholds,
             steps,
         ]
@@ -123,7 +155,10 @@ pub(super) fn manhattan(a: [f32; 3], b: [f32; 3]) -> f32 {
 /// threshold and its index step from the last found. The weight a found
 /// type adds is the one before it, found or not; with no weight at all,
 /// type 0 takes all of it.
-pub(super) fn type_thresholds(mut indices: [Option<usize>; 4], mut weights: [f32; 4]) -> ([f32; 4], [f32; 4]) {
+pub(super) fn type_thresholds(
+    mut indices: [Option<usize>; 4],
+    mut weights: [f32; 4],
+) -> ([f32; 4], [f32; 4]) {
     let mut total = 0.0;
     for (index, weight) in indices.iter().zip(&weights) {
         if index.is_some() {
@@ -203,14 +238,23 @@ pub(super) fn texture_transform(random: &mut Random) -> [f32; 4] {
 pub(super) fn spawn_transforms(random: &mut Random, correlate: bool) -> [[f32; 4]; 3] {
     let random_transform = texture_transform(random);
     let position = texture_transform(random);
-    let velocity = if correlate { position } else { texture_transform(random) };
+    let velocity = if correlate {
+        position
+    } else {
+        texture_transform(random)
+    };
     [random_transform, position, velocity]
 }
 
 /// `s_emitter::spawn`'s input to the spawn rate: the game time, or with an
 /// input variable the object's function of that name, `alpha` (440) the
 /// emitter's scale.
-pub(super) fn spawn_input(variable: &str, values: Option<&FunctionValues>, time: f32, scale: f32) -> f32 {
+pub(super) fn spawn_input(
+    variable: &str,
+    values: Option<&FunctionValues>,
+    time: f32,
+    scale: f32,
+) -> f32 {
     match variable {
         "" => particle_game_time(true, time),
         ALPHA => scale,
@@ -270,19 +314,33 @@ impl CheapEmitterDefinition {
         let tag = reader.load(path, "cheap_particle_emitter", b"cpem").ok()?;
         let root = tag.root();
         let emitter = CheapEmitterTag::read(root).upgraded();
-        let library_path = root.read_tag_ref_path("global type library").filter(|path| !path.is_empty())?;
+        let library_path = root
+            .read_tag_ref_path("global type library")
+            .filter(|path| !path.is_empty())?;
         let library = libraries
             .entry(library_path.to_ascii_lowercase())
             .or_insert_with(|| CheapLibrary::read(reader, &library_path).map(Arc::new))
             .clone()?;
         let mut map = |field: &str, default: &str| {
-            let path = root.read_tag_ref_path(field).filter(|path| !path.is_empty()).unwrap_or_else(|| default.to_owned());
-            maps.entry(path.to_ascii_lowercase()).or_insert_with(|| CheapTexels::read(reader, &path).map(Arc::new)).clone()
+            let path = root
+                .read_tag_ref_path(field)
+                .filter(|path| !path.is_empty())
+                .unwrap_or_else(|| default.to_owned());
+            maps.entry(path.to_ascii_lowercase())
+                .or_insert_with(|| CheapTexels::read(reader, &path).map(Arc::new))
+                .clone()
         };
-        let (position, velocity) = (map("position texture", DEFAULT_POSITION)?, map("velocity texture", DEFAULT_VELOCITY)?);
+        let (position, velocity) = (
+            map("position texture", DEFAULT_POSITION)?,
+            map("velocity texture", DEFAULT_VELOCITY)?,
+        );
         let flagged = |wanted: &str| has_flag(root, "flags", wanted);
         let spawnrate = root.descend("spawnrate");
-        let variable = |name: &str| spawnrate.and_then(|holder| holder.read_string_id(name)).unwrap_or_default();
+        let variable = |name: &str| {
+            spawnrate
+                .and_then(|holder| holder.read_string_id(name))
+                .unwrap_or_default()
+        };
         Some(Self {
             correlate: flagged(CORRELATE),
             position_local: flagged(POSITION_LOCAL),
@@ -304,14 +362,23 @@ impl CheapEmitterDefinition {
     /// `cheap_particles_spawn.hlsl`'s `spawn_particle` at ring slot `index`,
     /// for an emitter submitted as `at`, with the frame's random, position
     /// and velocity transforms, `lighting` packed, and the shaders' `dt`.
-    pub(super) fn spawn_particle(&self, at: &CheapSubmission, transforms: &[[f32; 4]; 3], lighting: f32, index: usize, dt: f32) -> CheapParticle {
+    pub(super) fn spawn_particle(
+        &self,
+        at: &CheapSubmission,
+        transforms: &[[f32; 4]; 3],
+        lighting: f32,
+        index: usize,
+        dt: f32,
+    ) -> CheapParticle {
         let [placement, speeds, times, thresholds, steps] = self.parameters;
         let library = &self.library;
         let (up, forward) = (at.up, at.forward);
         let left = cross(up, forward);
         // `mul(random, transform)`: rows up, left, forward and nothing.
         let local = |random: [f32; 4]| -> [f32; 3] {
-            std::array::from_fn(|axis| random[0] * up[axis] + random[1] * left[axis] + random[2] * forward[axis])
+            std::array::from_fn(|axis| {
+                random[0] * up[axis] + random[1] * left[axis] + random[2] * forward[axis]
+            })
         };
         let index_f = index as f32;
         let mut position = self.position.generate(index_f, transforms[1]);
@@ -321,7 +388,8 @@ impl CheapEmitterDefinition {
         }
         let position: [f32; 3] = std::array::from_fn(|axis| position[axis] * placement[0]);
         let along = dot(position, forward) * placement[1];
-        let mut position: [f32; 3] = std::array::from_fn(|axis| position[axis] - forward[axis] * along + at.position[axis]);
+        let mut position: [f32; 3] =
+            std::array::from_fn(|axis| position[axis] - forward[axis] * along + at.position[axis]);
         let random = library.random.generate(index_f, transforms[0]);
         let directionality = speeds[0] + speeds[1] * random[0];
         let speed = speeds[2] + speeds[3] * random[1];
@@ -330,15 +398,19 @@ impl CheapEmitterDefinition {
             let [x, y, z] = local(velocity);
             velocity = [x, y, z, 0.0];
         }
-        let mut direction: [f32; 3] =
-            std::array::from_fn(|axis| velocity[axis] + (forward[axis] - velocity[axis]) * directionality);
+        let mut direction: [f32; 3] = std::array::from_fn(|axis| {
+            velocity[axis] + (forward[axis] - velocity[axis]) * directionality
+        });
         if self.normalize {
             let length = dot(direction, direction).sqrt();
             direction = direction.map(|axis| axis / length);
         }
         let mut velocity = direction.map(|axis| axis * speed);
         let delta_age = random[2] * times[3] + times[2];
-        let kind: f32 = (0..4).filter(|&at| random[3] >= thresholds[at]).map(|at| steps[at]).sum();
+        let kind: f32 = (0..4)
+            .filter(|&at| random[3] >= thresholds[at])
+            .map(|at| steps[at])
+            .sum();
         let physics = library.row(kind as usize, PHYSICS);
         let (drag, gravity) = (physics[0], -physics[1]);
         // The subframe offset: an update without collision.
@@ -356,7 +428,13 @@ impl CheapEmitterDefinition {
         let local_dx = [frac(angle + 0.25) * 2.0 - 1.0, frac(angle) * 2.0 - 1.0]
             .map(|x| (placement[3] - placement[3] * x.abs()) * x);
         let parameters = pack_sbyte4([kind, lighting, local_dx[0], local_dx[1]]);
-        CheapParticle { position, age, velocity, delta_age, parameters }
+        CheapParticle {
+            position,
+            age,
+            velocity,
+            delta_age,
+            parameters,
+        }
     }
 }
 
@@ -400,14 +478,18 @@ pub(in crate::app::model_preview) fn read_reach_cheap_emitters(
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
 ) -> Vec<CheapEmitterAt> {
     let mut emitters = Vec::new();
-    let (mut definitions, mut libraries, mut maps) = (HashMap::new(), HashMap::new(), HashMap::new());
+    let (mut definitions, mut libraries, mut maps) =
+        (HashMap::new(), HashMap::new(), HashMap::new());
     for_each_attached_part(reader, object, |part| {
         if part.group != CHEAP_PARTICLE_EMITTER {
             return;
         }
         let definition = definitions
             .entry(part.path.to_ascii_lowercase())
-            .or_insert_with(|| CheapEmitterDefinition::read(reader, &part.path, &mut libraries, &mut maps).map(Arc::new))
+            .or_insert_with(|| {
+                CheapEmitterDefinition::read(reader, &part.path, &mut libraries, &mut maps)
+                    .map(Arc::new)
+            })
             .clone();
         let Some(definition) = definition else {
             return;
@@ -441,7 +523,12 @@ impl CheapEmitterAt {
     /// The functions it reads off its object: its effect's scales and its
     /// spawn rate's inputs.
     pub(crate) fn scale_names(&self) -> [&str; 4] {
-        [&self.scale_by, &self.secondary_by, &self.definition.input, &self.definition.range]
+        [
+            &self.scale_by,
+            &self.secondary_by,
+            &self.definition.input,
+            &self.definition.range,
+        ]
     }
 
     pub(crate) fn library(&self) -> &Arc<CheapLibrary> {
@@ -462,7 +549,11 @@ impl CheapEmitterAt {
         onset: f32,
     ) -> Option<CheapSubmission> {
         self.times.age(self.event, time - onset)?;
-        if !self.times.duration(self.event).is_some_and(|duration| duration > 0.0) {
+        if !self
+            .times
+            .duration(self.event)
+            .is_some_and(|duration| duration > 0.0)
+        {
             return None;
         }
         // `attachments_update` runs the effect while its function is on.
@@ -471,11 +562,17 @@ impl CheapEmitterAt {
             return None;
         }
         let effect_b = object_value(values, &self.secondary_by);
-        let scale = (if self.scaled { effect_a } else { 1.0 }) * (if self.b_scaled { effect_b } else { 1.0 });
+        let scale = (if self.scaled { effect_a } else { 1.0 })
+            * (if self.b_scaled { effect_b } else { 1.0 });
         let (position, forward) = posed_on(self.node, self.position, self.forward, bones);
         let (_, up) = posed_on(self.node, self.position, self.up, bones);
         let scale = scale * lod_scale(self.definition.lod, manhattan(position, eye));
-        (scale > 0.0).then_some(CheapSubmission { position, forward, up, scale })
+        (scale > 0.0).then_some(CheapSubmission {
+            position,
+            forward,
+            up,
+            scale,
+        })
     }
 }
 

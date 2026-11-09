@@ -9,7 +9,14 @@ use super::*;
 pub(in crate::app::model_preview) fn model_preview_supports_textures(game: Option<GameId>) -> bool {
     matches!(
         game,
-        Some(GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4 | GameId::Halo2 | GameId::HaloCe)
+        Some(
+            GameId::Halo3
+                | GameId::Halo3Odst
+                | GameId::HaloReach
+                | GameId::Halo4
+                | GameId::Halo2
+                | GameId::HaloCe
+        )
     )
 }
 
@@ -55,7 +62,14 @@ pub(in crate::app) fn draw_model_preview_panel(
                 return;
             }
         };
-        let panel = PreviewPanel { tag, entry, source_game, supports_textures, is_campaign_evolved, data };
+        let panel = PreviewPanel {
+            tag,
+            entry,
+            source_game,
+            supports_textures,
+            is_campaign_evolved,
+            data,
+        };
 
         let mut requests = SetupRequests::default();
         let page_width = ui.available_width();
@@ -155,29 +169,24 @@ pub(in crate::app::model_preview) fn draw_preview_beside_setup(
         ui.allocate_ui(Vec2::new(setup_width, 0.0), |ui| {
             ui.set_min_width(setup_width);
             ui.set_max_width(setup_width);
-            draw_model_preview_section(
-                ui,
-                "Model Setup",
-                Some(setup_body_height),
-                |ui, part| {
-                    if part == ModelPreviewSectionPart::Header {
-                        draw_model_setup_header_controls(
-                            ui,
-                            setup_width,
-                            panel.data,
-                            state,
-                            |ui, state| draw_setup_header_actions(ui, panel, state, edit, requests),
-                        );
-                    } else {
-                        crate::app::ScrollArea::vertical()
-                            .auto_shrink([false, false])
-                            .max_height(setup_body_height)
-                            .show(ui, |ui| {
-                                draw_setup_body(ui, panel.data, state);
-                            });
-                    }
-                },
-            );
+            draw_model_preview_section(ui, "Model Setup", Some(setup_body_height), |ui, part| {
+                if part == ModelPreviewSectionPart::Header {
+                    draw_model_setup_header_controls(
+                        ui,
+                        setup_width,
+                        panel.data,
+                        state,
+                        |ui, state| draw_setup_header_actions(ui, panel, state, edit, requests),
+                    );
+                } else {
+                    crate::app::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .max_height(setup_body_height)
+                        .show(ui, |ui| {
+                            draw_setup_body(ui, panel.data, state);
+                        });
+                }
+            });
         });
     });
 }
@@ -193,7 +202,9 @@ pub(in crate::app::model_preview) fn draw_preview_above_setup(
     requests: &mut SetupRequests,
 ) {
     draw_model_preview_section(ui, "Model Preview", None, |ui, part| match part {
-        ModelPreviewSectionPart::Header => draw_preview_header(ui, panel, state, model_preview_size),
+        ModelPreviewSectionPart::Header => {
+            draw_preview_header(ui, panel, state, model_preview_size)
+        }
         ModelPreviewSectionPart::Body => {
             let size = model_viewport_size(ui.available_width(), *model_preview_size);
             draw_model_viewport_with_stats(ui, panel.data, state, size);

@@ -7,24 +7,75 @@ use super::*;
 pub(super) fn chicago_color_table(function: i32) -> [f32; 12] {
     let mut table = [0.0; 12];
     let set = |table: &mut [f32; 12], pairs: &[(usize, f32)]| {
-        pairs.iter().for_each(|(index, value)| table[*index] = *value);
+        pairs
+            .iter()
+            .for_each(|(index, value)| table[*index] = *value);
     };
-    set(&mut table, match function {
-        0 => &[(3, 1.0), (10, 1.0)],
-        1 => &[(0, 1.0), (3, 1.0), (10, 1.0)],
-        2 => &[(0, 1.0), (10, 1.0)],
-        3 => &[(0, 1.0), (10, 2.0)],
-        4 => &[(0, 1.0), (3, 1.0), (9, 1.0), (8, 1.0), (10, 1.0), (11, 1.0)],
-        5 => &[(0, 1.0), (3, 1.0), (5, 1.0), (8, 2.0), (11, -1.0), (10, 1.0)],
-        6 => &[(3, 1.0), (5, 1.0), (6, 1.0), (8, 2.0), (11, -1.0), (10, 1.0)],
-        7 => &[(0, 1.0), (3, 1.0), (9, 1.0), (11, -1.0), (8, 1.0), (10, 1.0)],
-        8 => &[(3, 1.0), (4, 1.0), (9, 1.0), (11, -1.0), (8, 1.0), (10, 1.0)],
-        9 => &[(0, 1.0), (7, 1.0), (2, 1.0), (11, 1.0), (8, 1.0), (10, 1.0)],
-        10 => &[(4, 1.0), (7, 1.0), (2, 1.0), (11, 1.0), (8, 1.0), (10, 1.0)],
-        11 => &[(0, 1.0), (1, 1.0), (6, 1.0), (7, 1.0), (2, 1.0), (11, 1.0), (8, 1.0), (10, 1.0)],
-        12 => &[(1, 1.0), (6, 1.0), (4, 1.0), (7, 1.0), (2, 1.0), (11, 1.0), (8, 1.0), (10, 1.0)],
-        _ => &[],
-    });
+    set(
+        &mut table,
+        match function {
+            0 => &[(3, 1.0), (10, 1.0)],
+            1 => &[(0, 1.0), (3, 1.0), (10, 1.0)],
+            2 => &[(0, 1.0), (10, 1.0)],
+            3 => &[(0, 1.0), (10, 2.0)],
+            4 => &[(0, 1.0), (3, 1.0), (9, 1.0), (8, 1.0), (10, 1.0), (11, 1.0)],
+            5 => &[
+                (0, 1.0),
+                (3, 1.0),
+                (5, 1.0),
+                (8, 2.0),
+                (11, -1.0),
+                (10, 1.0),
+            ],
+            6 => &[
+                (3, 1.0),
+                (5, 1.0),
+                (6, 1.0),
+                (8, 2.0),
+                (11, -1.0),
+                (10, 1.0),
+            ],
+            7 => &[
+                (0, 1.0),
+                (3, 1.0),
+                (9, 1.0),
+                (11, -1.0),
+                (8, 1.0),
+                (10, 1.0),
+            ],
+            8 => &[
+                (3, 1.0),
+                (4, 1.0),
+                (9, 1.0),
+                (11, -1.0),
+                (8, 1.0),
+                (10, 1.0),
+            ],
+            9 => &[(0, 1.0), (7, 1.0), (2, 1.0), (11, 1.0), (8, 1.0), (10, 1.0)],
+            10 => &[(4, 1.0), (7, 1.0), (2, 1.0), (11, 1.0), (8, 1.0), (10, 1.0)],
+            11 => &[
+                (0, 1.0),
+                (1, 1.0),
+                (6, 1.0),
+                (7, 1.0),
+                (2, 1.0),
+                (11, 1.0),
+                (8, 1.0),
+                (10, 1.0),
+            ],
+            12 => &[
+                (1, 1.0),
+                (6, 1.0),
+                (4, 1.0),
+                (7, 1.0),
+                (2, 1.0),
+                (11, 1.0),
+                (8, 1.0),
+                (10, 1.0),
+            ],
+            _ => &[],
+        },
+    );
     table
 }
 
@@ -32,24 +83,29 @@ pub(super) fn chicago_color_table(function: i32) -> [f32; 12] {
 pub(super) fn chicago_alpha_table(function: i32) -> [f32; 10] {
     let mut table = [0.0; 10];
     let set = |table: &mut [f32; 10], pairs: &[(usize, f32)]| {
-        pairs.iter().for_each(|(index, value)| table[*index] = *value);
+        pairs
+            .iter()
+            .for_each(|(index, value)| table[*index] = *value);
     };
-    set(&mut table, match function {
-        0 => &[(2, 1.0), (8, 1.0)],
-        1 => &[(0, 1.0), (2, 1.0), (8, 1.0)],
-        2 => &[(0, 1.0), (8, 1.0)],
-        3 => &[(0, 1.0), (8, 2.0)],
-        4 => &[(0, 1.0), (2, 1.0), (7, 1.0), (9, 1.0), (6, 1.0), (8, 1.0)],
-        5 => &[(0, 1.0), (2, 1.0), (4, 1.0), (6, 2.0), (9, -1.0), (8, 1.0)],
-        6 => &[(2, 1.0), (4, 1.0), (5, 1.0), (6, 2.0), (9, -1.0), (8, 1.0)],
-        7 => &[(0, 1.0), (2, 1.0), (7, 1.0), (9, -1.0), (6, 1.0), (8, 1.0)],
-        8 => &[(2, 1.0), (3, 1.0), (7, 1.0), (9, -1.0), (6, 1.0), (8, 1.0)],
-        9 => &[(0, 1.0), (9, 1.0), (6, 1.0), (8, 1.0)],
-        10 => &[(3, 1.0), (9, 1.0), (6, 1.0), (8, 1.0)],
-        11 => &[(0, 1.0), (1, 1.0), (5, 1.0), (9, 1.0), (6, 1.0), (8, 1.0)],
-        12 => &[(1, 1.0), (5, 1.0), (3, 1.0), (9, 1.0), (6, 1.0), (8, 1.0)],
-        _ => &[],
-    });
+    set(
+        &mut table,
+        match function {
+            0 => &[(2, 1.0), (8, 1.0)],
+            1 => &[(0, 1.0), (2, 1.0), (8, 1.0)],
+            2 => &[(0, 1.0), (8, 1.0)],
+            3 => &[(0, 1.0), (8, 2.0)],
+            4 => &[(0, 1.0), (2, 1.0), (7, 1.0), (9, 1.0), (6, 1.0), (8, 1.0)],
+            5 => &[(0, 1.0), (2, 1.0), (4, 1.0), (6, 2.0), (9, -1.0), (8, 1.0)],
+            6 => &[(2, 1.0), (4, 1.0), (5, 1.0), (6, 2.0), (9, -1.0), (8, 1.0)],
+            7 => &[(0, 1.0), (2, 1.0), (7, 1.0), (9, -1.0), (6, 1.0), (8, 1.0)],
+            8 => &[(2, 1.0), (3, 1.0), (7, 1.0), (9, -1.0), (6, 1.0), (8, 1.0)],
+            9 => &[(0, 1.0), (9, 1.0), (6, 1.0), (8, 1.0)],
+            10 => &[(3, 1.0), (9, 1.0), (6, 1.0), (8, 1.0)],
+            11 => &[(0, 1.0), (1, 1.0), (5, 1.0), (9, 1.0), (6, 1.0), (8, 1.0)],
+            12 => &[(1, 1.0), (5, 1.0), (3, 1.0), (9, 1.0), (6, 1.0), (8, 1.0)],
+            _ => &[],
+        },
+    );
     table
 }
 
@@ -63,7 +119,11 @@ fn generic_stage_macro(
     fog: bool,
 ) -> String {
     let list = |range: std::ops::Range<usize>| {
-        values[range].iter().map(i32::to_string).collect::<Vec<_>>().join(",")
+        values[range]
+            .iter()
+            .map(i32::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
     };
     format!(
         "{index},{},{color_mux},{},{},{alpha_mux},{},{fog}",
@@ -152,7 +212,11 @@ fn read_transparent_maps(
     for slot in 0..4usize {
         let cube = slot == 0 && cube_first;
         let element = maps.and_then(|maps| maps.element(slot));
-        let kind = if cube { SamplerKind::Cube } else { SamplerKind::Texture2D };
+        let kind = if cube {
+            SamplerKind::Cube
+        } else {
+            SamplerKind::Texture2D
+        };
         let Some(element) = element else {
             textures.push(texture(slot as u32, kind, (!cube).then(|| flat(0))));
             continue;
@@ -182,7 +246,13 @@ fn read_transparent_maps(
                 element.read_real("map v-offset").unwrap_or(0.0),
             ];
             let rotation = element.read_real("map rotation").unwrap_or(0.0);
-            animations.push(read_map_animation(element, slot * 2, scale, offset, rotation));
+            animations.push(read_map_animation(
+                element,
+                slot * 2,
+                scale,
+                offset,
+                rotation,
+            ));
         }
     }
     (textures, animations)
@@ -194,7 +264,10 @@ fn first_map_digits(root: TagStruct<'_>) -> Option<CeNumeric> {
         .into_iter()
         .find_map(|name| root.field(name).and_then(|field| field.as_block()))?;
     Some(CeNumeric {
-        map: block.element(0)?.read_tag_ref_path("map").filter(|path| !path.is_empty())?,
+        map: block
+            .element(0)?
+            .read_tag_ref_path("map")
+            .filter(|path| !path.is_empty())?,
         count: 0,
         limit: root.read_int_any("numeric counter limit").unwrap_or(0) as i32,
         digit: 0,
@@ -221,12 +294,19 @@ fn transparent_pass(
     animation: CeModelAnimation,
 ) -> Dx9DrawPass {
     let has = |flag: &str| flags.has(flag);
-    let depth = Dx9Depth { compare: Some(Dx9Compare::LessOrEqual), write: false };
+    let depth = Dx9Depth {
+        compare: Some(Dx9Compare::LessOrEqual),
+        write: false,
+    };
     let stage = transparent_stage(first_map, has("first map is in screenspace"));
     let mut pass = Dx9DrawPass::new(stage, fragment, depth);
     pass.channels = [true, true, true, false];
     pass.blend = Some(FramebufferBlend::read(root).gl());
-    pass.cull = if has("two-sided") { Dx9Cull::None } else { Dx9Cull::Back };
+    pass.cull = if has("two-sided") {
+        Dx9Cull::None
+    } else {
+        Dx9Cull::Back
+    };
     pass.hidden_by_camo = !has("don't fade active-camouflage");
     pass.depth_bias = decal_bias(flags.has("decal"));
     pass.numeric = has("numeric").then(|| first_map_digits(root)).flatten();
@@ -234,7 +314,10 @@ fn transparent_pass(
     pass.constants = constants;
     pass.texture_rows = identity_map_rows();
     let fade_source = function_source(root, "framebuffer fade source");
-    pass.ce_animation = Some(Arc::new(CeModelAnimation { fade_source, ..animation }));
+    pass.ce_animation = Some(Arc::new(CeModelAnimation {
+        fade_source,
+        ..animation
+    }));
     pass
 }
 
@@ -245,8 +328,12 @@ const FIRST_MAP_TYPES: [&str; 4] = [
     "first map is viewer-centered cube map",
 ];
 
-const GENERIC_FIRST_MAP_TYPES: [&str; 4] =
-    ["2D map", "reflection cube map", "object-centered cube map", "viewer-centered cube map"];
+const GENERIC_FIRST_MAP_TYPES: [&str; 4] = [
+    "2D map",
+    "reflection cube map",
+    "object-centered cube map",
+    "viewer-centered cube map",
+];
 
 fn generic_pass(
     directory: &std::path::Path,
@@ -259,7 +346,8 @@ fn generic_pass(
     let (textures, maps) = read_transparent_maps(maps.as_ref(), first_map != 0, bitmap);
 
     let mut macros: Vec<(String, String)> = Vec::new();
-    let mut constants: Vec<(u32, [f32; 4])> = (0..16).map(|register| (register, [0.0; 4])).collect();
+    let mut constants: Vec<(u32, [f32; 4])> =
+        (0..16).map(|register| (register, [0.0; 4])).collect();
     let mut colors = Vec::new();
     let stages = root.field("stages").and_then(|field| field.as_block());
     let count = stages.as_ref().map_or(0, |stages| stages.len());
@@ -267,15 +355,19 @@ fn generic_pass(
         let mut values = [0; 26];
         (values[0], values[2], values[8]) = (5, 1, 1);
         (values[14], values[16], values[22]) = (5, 1, 1);
-        macros.push(("S0_CONFIGURATION".to_owned(), generic_stage_macro(0, false, false, &values, false)));
+        macros.push((
+            "S0_CONFIGURATION".to_owned(),
+            generic_stage_macro(0, false, false, &values, false),
+        ));
     }
     for index in 0..count {
         let Some(stage) = stages.as_ref().and_then(|stages| stages.element(index)) else {
             continue;
         };
         let enums = enum_values(stage, "color0 animation function");
-        let values: [i32; 26] =
-            enums.try_into().map_err(|_| "A stage has the wrong number of options.".to_owned())?;
+        let values: [i32; 26] = enums
+            .try_into()
+            .map_err(|_| "A stage has the wrong number of options.".to_owned())?;
         let has = |flag: &str| has_flag(stage, "flags", flag);
         macros.push((
             format!("S{index}_CONFIGURATION"),
@@ -284,7 +376,8 @@ fn generic_pass(
         let lower = argb(stage, "color0 animation lower bound");
         let upper = argb(stage, "color0 animation upper bound");
         let period = nonzero(stage.read_real("color0 animation period"), 1.0);
-        let function = option_index(stage, "color0 animation function", &PERIODIC_FUNCTIONS) as usize;
+        let function =
+            option_index(stage, "color0 animation function", &PERIODIC_FUNCTIONS) as usize;
         let channel = color_channel(stage, "color0 source");
         constants[index].1 = lower;
         constants[index + 8].1 = argb(stage, "color1");
@@ -302,12 +395,17 @@ fn generic_pass(
     let blend = FramebufferBlend::read(root).shader_number();
     let fade = option_index(root, "framebuffer fade mode", &FADE_MODES);
     let last = count.max(1);
-    macros.push((format!("S{last}_CONFIGURATION"), generic_fade_stage(blend, fade, last)));
+    macros.push((
+        format!("S{last}_CONFIGURATION"),
+        generic_fade_stage(blend, fade, last),
+    ));
     // Fog on and not planar: the last stage fades rather than fogs.
     constants.push((16, [1.0, 0.0, 0.0, 0.0]));
 
-    let mut defines: Vec<(&str, &str)> =
-        macros.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
+    let mut defines: Vec<(&str, &str)> = macros
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
     if first_map != 0 {
         defines.push(("FIRST_MAP_IS_CUBE", "1"));
     }
@@ -315,8 +413,14 @@ fn generic_pass(
     let shader = translate_fx(GENERIC_FILE, H2_GLSL_VERSION, &defines, read)?;
     let reference = flags.has("alpha-tested").then_some(ALPHA_REFERENCE);
     let fragment = shader.entry_tested("pixel_main(i)", reference);
-    let animation = CeModelAnimation { maps, colors, ..Default::default() };
-    Ok(transparent_pass(root, first_map, flags, fragment, textures, constants, animation))
+    let animation = CeModelAnimation {
+        maps,
+        colors,
+        ..Default::default()
+    };
+    Ok(transparent_pass(
+        root, first_map, flags, fragment, textures, constants, animation,
+    ))
 }
 
 fn chicago_pass(
@@ -333,7 +437,11 @@ fn chicago_pass(
     let mut replicate = [0.0; 3];
     let mut functions = [(0, 0); 3];
     let count = maps.as_ref().map_or(0, |maps| maps.len());
-    for (index, slot) in functions.iter_mut().enumerate().take(count.saturating_sub(1)) {
+    for (index, slot) in functions
+        .iter_mut()
+        .enumerate()
+        .take(count.saturating_sub(1))
+    {
         let Some(map) = maps.as_ref().and_then(|maps| maps.element(index)) else {
             continue;
         };
@@ -367,17 +475,36 @@ fn chicago_pass(
             ));
         }
     }
-    constants.push((19, [replicate[0], replicate[1], replicate[2], truth(custom)]));
-    constants.push((20, [truth(fade == 0), truth(fade == 1), truth(fade == 2), 0.0]));
-    constants.push((21, [truth(blend == 0), truth(blend == 1), truth(blend == 2), truth(blend == 3)]));
+    constants.push((
+        19,
+        [replicate[0], replicate[1], replicate[2], truth(custom)],
+    ));
+    constants.push((
+        20,
+        [truth(fade == 0), truth(fade == 1), truth(fade == 2), 0.0],
+    ));
+    constants.push((
+        21,
+        [
+            truth(blend == 0),
+            truth(blend == 1),
+            truth(blend == 2),
+            truth(blend == 3),
+        ],
+    ));
 
     let cube = if first_map != 0 { "1" } else { "0" };
     let read = |name: &str| read_shader_source(directory, name);
     let shader = translate_fx(CHICAGO_FILE, H2_GLSL_VERSION, &[("USE_CUBE", cube)], read)?;
     let reference = flags.has("alpha-tested").then_some(ALPHA_REFERENCE);
     let fragment = shader.entry_tested("pixel_main(i)", reference);
-    let animation = CeModelAnimation { maps: animations, ..Default::default() };
-    Ok(transparent_pass(root, first_map, flags, fragment, textures, constants, animation))
+    let animation = CeModelAnimation {
+        maps: animations,
+        ..Default::default()
+    };
+    Ok(transparent_pass(
+        root, first_map, flags, fragment, textures, constants, animation,
+    ))
 }
 
 /// A transparent shader's passes: its extra layers, then itself. Empty for
@@ -392,15 +519,27 @@ pub(in crate::app::model_preview) fn ce_transparent_passes(
         return Vec::new();
     };
     let single = match group {
-        b"sgla" => Some(glass_passes(&directory, root, &ShaderFlags::of(root), bitmap)),
+        b"sgla" => Some(glass_passes(
+            &directory,
+            root,
+            &ShaderFlags::of(root),
+            bitmap,
+        )),
         b"smet" => {
             let flags = ShaderFlags::of(root);
-            Some(meter_pass(&directory, root, &flags, bitmap).map(|mut pass| {
-                pass.depth_bias = decal_bias(flags.has("decal"));
-                vec![pass]
-            }))
+            Some(
+                meter_pass(&directory, root, &flags, bitmap).map(|mut pass| {
+                    pass.depth_bias = decal_bias(flags.has("decal"));
+                    vec![pass]
+                }),
+            )
         }
-        b"swat" => Some(water_passes(&directory, root, &ShaderFlags::of(root), bitmap)),
+        b"swat" => Some(water_passes(
+            &directory,
+            root,
+            &ShaderFlags::of(root),
+            bitmap,
+        )),
         b"spla" => Some(plasma_pass(&directory, root, bitmap).map(|pass| vec![pass])),
         _ => None,
     };
@@ -414,7 +553,9 @@ pub(in crate::app::model_preview) fn ce_transparent_passes(
         return Vec::new();
     }
     let mut passes = Vec::new();
-    let layers = root.field("extra layers").and_then(|field| field.as_block());
+    let layers = root
+        .field("extra layers")
+        .and_then(|field| field.as_block());
     for index in 0..layers.as_ref().map_or(0, |layers| layers.len()) {
         let Some(path) = layers
             .as_ref()
@@ -426,7 +567,12 @@ pub(in crate::app::model_preview) fn ce_transparent_passes(
         };
         for (extension, layer_group) in LAYER_GROUPS {
             if let Ok(tag) = reader.load(&path, extension, layer_group) {
-                passes.extend(ce_transparent_passes(reader, tag.root(), layer_group, bitmap));
+                passes.extend(ce_transparent_passes(
+                    reader,
+                    tag.root(),
+                    layer_group,
+                    bitmap,
+                ));
                 break;
             }
         }

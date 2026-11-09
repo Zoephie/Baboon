@@ -7,10 +7,16 @@ impl super::super::functions::ReadsOutputs for CeGlow {
         self.object
     }
     fn outputs_read(&self) -> Vec<usize> {
-        [self.rotation.source, self.translation.source, self.distance_source, self.size_source, self.color_source]
-            .into_iter()
-            .flatten()
-            .collect()
+        [
+            self.rotation.source,
+            self.translation.source,
+            self.distance_source,
+            self.size_source,
+            self.color_source,
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
     }
 }
 
@@ -100,7 +106,12 @@ fn read_bounds(root: TagStruct<'_>, name: &str) -> [f32; 2] {
     }
 }
 
-fn read_glow(reader: &TagReader, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeGlow> {
+fn read_glow(
+    reader: &TagReader,
+    path: &str,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+) -> Option<CeGlow> {
     let tag = reader.load(path, "glow", b"glw!").ok()?;
     let root = tag.root();
     let name = root.read_string("attachment marker").unwrap_or_default();
@@ -109,40 +120,79 @@ fn read_glow(reader: &TagReader, path: &str, owner: u8, markers: &[RenderModelPr
         .iter()
         .filter(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(&name))
         .take(5)
-        .map(|marker| GlowMarker { node: marker.node_index.max(0) as usize, position: marker.position, axes: marker.axes })
+        .map(|marker| GlowMarker {
+            node: marker.node_index.max(0) as usize,
+            position: marker.position,
+            axes: marker.axes,
+        })
         .collect();
     if found.is_empty() {
-        found.push(GlowMarker { node: 0, position: [0.0; 3], axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] });
+        found.push(GlowMarker {
+            node: 0,
+            position: [0.0; 3],
+            axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        });
     }
     // `glow_new`: only a bitmap of sprites makes one.
-    let bitmap_path = root.read_tag_ref_path("texture").filter(|path| !path.is_empty())?;
+    let bitmap_path = root
+        .read_tag_ref_path("texture")
+        .filter(|path| !path.is_empty())?;
     let bitmap = reader.load(&bitmap_path, "bitmap", b"bitm").ok()?;
-    if !bitmap.root().field("type").is_some_and(|field| field.enum_is("sprites")) {
+    if !bitmap
+        .root()
+        .field("type")
+        .is_some_and(|field| field.enum_is("sprites"))
+    {
         return None;
     }
     let sequence = *elements(bitmap.root(), "sequences").first()?;
     let sprite = *elements(sequence, "sprites").first()?;
     let real_of = |holder: TagStruct<'_>, name: &str| holder.read_real(name).unwrap_or(0.0);
-    let rect = [real_of(sprite, "left"), real_of(sprite, "right"), real_of(sprite, "top"), real_of(sprite, "bottom")];
+    let rect = [
+        real_of(sprite, "left"),
+        real_of(sprite, "right"),
+        real_of(sprite, "top"),
+        real_of(sprite, "bottom"),
+    ];
     let registration = sprite.read_point2d("registration point");
     let index = sprite.read_int_any("bitmap index").unwrap_or(0).max(0) as usize;
     let image_width = elements(bitmap.root(), "bitmaps")
         .get(index)
-        .map_or(1.0, |image| image.read_int_any("width").unwrap_or(1).max(1) as f32);
+        .map_or(1.0, |image| {
+            image.read_int_any("width").unwrap_or(1).max(1) as f32
+        });
     let dimension = ((rect[1] - rect[0]) * image_width).trunc();
-    let image = Arc::new(decode_image(reader, &bitmap_path, SamplerKind::Texture2D, index)?);
+    let image = Arc::new(decode_image(
+        reader,
+        &bitmap_path,
+        SamplerKind::Texture2D,
+        index,
+    )?);
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
-    let attachment = |n: usize| function_slot(root.fields().filter(|field| field.name() == "attachment").nth(n));
+    let attachment = |n: usize| {
+        function_slot(
+            root.fields()
+                .filter(|field| field.name() == "attachment")
+                .nth(n),
+        )
+    };
     let [color_low, color_high] = [argb(root, "color_bound_0"), argb(root, "color_bound_1")];
     Some(CeGlow {
         object: owner,
         markers: found,
         particle_count: root.read_int_any("number of particles").unwrap_or(0).max(0) as usize,
-        boundary: glow_option(root, "boundary effect", &[("bounce", Boundary::Bounce), ("wrap", Boundary::Wrap)]),
+        boundary: glow_option(
+            root,
+            "boundary effect",
+            &[("bounce", Boundary::Bounce), ("wrap", Boundary::Wrap)],
+        ),
         normal_distribution: glow_option(
             root,
             "normal particle distribution",
-            &[("distributed randomly", NormalDistribution::Randomly), ("distributed uniformly", NormalDistribution::Uniformly)],
+            &[
+                ("distributed randomly", NormalDistribution::Randomly),
+                ("distributed uniformly", NormalDistribution::Uniformly),
+            ],
         ),
         trailing_distribution: glow_option(
             root,
@@ -168,18 +218,30 @@ fn read_glow(reader: &TagReader, path: &str, owner: u8, markers: &[RenderModelPr
             high: real("effect trans vel mul high"),
         },
         distance_source: attachment(3),
-        distance: [real("min distance particle to object"), real("max distance particle to object")],
-        distance_multiplier: [real("distance to object mul low"), real("distance to object mul high")],
+        distance: [
+            real("min distance particle to object"),
+            real("max distance particle to object"),
+        ],
+        distance_multiplier: [
+            real("distance to object mul low"),
+            real("distance to object mul high"),
+        ],
         size_source: attachment(4),
         size: read_bounds(root, "particle size bounds"),
         color_source: attachment(5),
-        colors: [[color_low[0], color_low[1], color_low[2]], [color_high[0], color_high[1], color_high[2]]],
+        colors: [
+            [color_low[0], color_low[1], color_low[2]],
+            [color_high[0], color_high[1], color_high[2]],
+        ],
         color_rate: real("color rate of change"),
         fading: real("fading percentage of glow"),
         generation: real("particle generation freq"),
         lifetime: real("lifetime of trailing particles"),
         trailing_velocity: real("velocity of trailing particles"),
-        trailing_t: [real("trailing particle minimum t"), real("trailing particle maximum t")],
+        trailing_t: [
+            real("trailing particle minimum t"),
+            real("trailing particle maximum t"),
+        ],
         dimension,
         rect,
         registration: [registration.x, registration.y],
@@ -189,7 +251,12 @@ fn read_glow(reader: &TagReader, path: &str, owner: u8, markers: &[RenderModelPr
 }
 
 /// The glows among `object`'s widgets.
-pub(in crate::app::model_preview) fn read_ce_glows(reader: &TagReader, object: &TagFile, owner: u8, markers: &[RenderModelPreviewMarker]) -> Vec<CeGlow> {
+pub(in crate::app::model_preview) fn read_ce_glows(
+    reader: &TagReader,
+    object: &TagFile,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+) -> Vec<CeGlow> {
     let Some(block) = object_block(object, "widgets") else {
         return Vec::new();
     };
@@ -253,7 +320,10 @@ enum TrailingDistribution {
 /// not name, which the glow's switches pass over.
 fn glow_option<T: Copy>(root: TagStruct<'_>, field: &str, names: &[(&str, T)]) -> Option<T> {
     let held = root.read_enum_option(field)?;
-    names.iter().find(|(name, _)| *name == held).map(|(_, value)| *value)
+    names
+        .iter()
+        .find(|(name, _)| *name == held)
+        .map(|(_, value)| *value)
 }
 
 /// A `glow_particle`.
@@ -315,18 +385,28 @@ impl RunningGlow {
     /// through the four markers nearest `t`, swung about it by the angle.
     /// Two or three markers take a path in the game that reads curves it
     /// never fills in, so those glows are left out.
-    fn world_position(&self, markers: &[PosedMarker], particle: &mut GlowParticle, rotation_per_unit_t: f32) -> bool {
+    fn world_position(
+        &self,
+        markers: &[PosedMarker],
+        particle: &mut GlowParticle,
+        rotation_per_unit_t: f32,
+    ) -> bool {
         let count = markers.len();
         let last = count - 1;
         let t = particle.t;
-        let parent = (0..last).find(|&at| self.times[at] <= t && self.times[at + 1] > t).unwrap_or(last);
+        let parent = (0..last)
+            .find(|&at| self.times[at] <= t && self.times[at + 1] > t)
+            .unwrap_or(last);
         particle.parent = parent;
         if count < 4 {
             return false;
         }
         // Within range of the four the window takes; `t` past the ends would
         // read a fifth marker that is not there.
-        let segment = (0..last).find(|&at| self.times[at] <= t && t <= self.times[at + 1]).unwrap_or(last).min(last - 1);
+        let segment = (0..last)
+            .find(|&at| self.times[at] <= t && t <= self.times[at + 1])
+            .unwrap_or(last)
+            .min(last - 1);
         let (mut low, mut high) = (segment, segment + 1);
         while high - low + 1 < 4 {
             low = low.saturating_sub(1);
@@ -338,10 +418,16 @@ impl RunningGlow {
         let times: [f32; 4] = std::array::from_fn(|at| self.times[low + at]);
         let place = nonuniform_cubic(picked.map(|marker| marker.position), times, t);
         let up = nonuniform_cubic(picked.map(|marker| marker.up), times, t);
-        let left = nonuniform_cubic(picked.map(|marker| cross(marker.up, marker.forward)), times, t);
+        let left = nonuniform_cubic(
+            picked.map(|marker| cross(marker.up, marker.forward)),
+            times,
+            t,
+        );
         let angle = t * rotation_per_unit_t + particle.initial_angle;
         let (sine, cosine) = angle.sin_cos();
-        particle.position = std::array::from_fn(|axis| place[axis] + (left[axis] * cosine + up[axis] * sine) * particle.distance);
+        particle.position = std::array::from_fn(|axis| {
+            place[axis] + (left[axis] * cosine + up[axis] * sine) * particle.distance
+        });
         true
     }
 
@@ -357,7 +443,8 @@ impl RunningGlow {
                 if other == at {
                     continue;
                 }
-                let mut toward: [f32; 3] = std::array::from_fn(|axis| candidate.position[axis] - marker.position[axis]);
+                let mut toward: [f32; 3] =
+                    std::array::from_fn(|axis| candidate.position[axis] - marker.position[axis]);
                 let length = dot(toward, toward).sqrt();
                 if length.abs() >= 0.0001 {
                     toward = toward.map(|axis| axis / length);
@@ -380,7 +467,10 @@ impl RunningGlow {
         self.times[0] = 0.0;
         self.total = 0.0;
         for at in 0..count - 1 {
-            let [from, to] = [markers[self.order[at]].position, markers[self.order[at + 1]].position];
+            let [from, to] = [
+                markers[self.order[at]].position,
+                markers[self.order[at + 1]].position,
+            ];
             let step: [f32; 3] = std::array::from_fn(|axis| to[axis] - from[axis]);
             self.total += dot(step, step).sqrt();
             self.times[at + 1] = self.total;
@@ -414,7 +504,9 @@ impl RunningGlow {
         }
         if glow.color_source.is_none() && !glow.flags.modify_color_by_t {
             let at = random.range(0.0, 1.0);
-            particle.color = std::array::from_fn(|channel| (glow.colors[1][channel] - glow.colors[0][channel]) * at + glow.colors[0][channel]);
+            particle.color = std::array::from_fn(|channel| {
+                (glow.colors[1][channel] - glow.colors[0][channel]) * at + glow.colors[0][channel]
+            });
         }
         match glow.normal_distribution {
             Some(NormalDistribution::Randomly) => {
@@ -431,10 +523,20 @@ impl RunningGlow {
     }
 
     /// `glow_normal_particle_update_position`.
-    fn move_normal(&self, glow: &CeGlow, outputs: &[f32; 4], markers: &[PosedMarker], particle: &mut GlowParticle, step: f32, rotation: f32) {
+    fn move_normal(
+        &self,
+        glow: &CeGlow,
+        outputs: &[f32; 4],
+        markers: &[PosedMarker],
+        particle: &mut GlowParticle,
+        step: f32,
+        rotation: f32,
+    ) {
         if let Some(slot) = glow.distance_source {
             let [low, high] = glow.distance_multiplier;
-            particle.distance = ((high - low) * outputs[slot] + low) * (glow.distance[1] - glow.distance[0]) + glow.distance[0];
+            particle.distance = ((high - low) * outputs[slot] + low)
+                * (glow.distance[1] - glow.distance[0])
+                + glow.distance[0];
         }
         let total = self.total;
         if particle.reverse {
@@ -484,10 +586,14 @@ impl RunningGlow {
     fn color_normal(&self, glow: &CeGlow, outputs: &[f32; 4], particle: &mut GlowParticle) {
         let [low, high] = glow.colors;
         if let Some(slot) = glow.color_source {
-            particle.color = std::array::from_fn(|channel| (high[channel] - low[channel]) * outputs[slot] + low[channel]);
+            particle.color = std::array::from_fn(|channel| {
+                (high[channel] - low[channel]) * outputs[slot] + low[channel]
+            });
         }
         if glow.flags.modify_color_by_t {
-            particle.color = std::array::from_fn(|channel| (high[channel] - low[channel]) * glow.color_rate * particle.t + low[channel]);
+            particle.color = std::array::from_fn(|channel| {
+                (high[channel] - low[channel]) * glow.color_rate * particle.t + low[channel]
+            });
         }
         let along = particle.t / self.total;
         let edge = glow.fading * 0.5;
@@ -498,16 +604,26 @@ impl RunningGlow {
         } else {
             (1.0 - along) / edge
         };
-        particle.fade = if particle.fade >= 0.0 { particle.fade.min(1.0) } else { 0.0 };
+        particle.fade = if particle.fade >= 0.0 {
+            particle.fade.min(1.0)
+        } else {
+            0.0
+        };
     }
 
     /// `glow_trailing_particle_new`.
     fn trailing_particle(&mut self, glow: &CeGlow, markers: &[PosedMarker]) -> GlowParticle {
-        let mut particle = GlowParticle { trailing: true, ..GlowParticle::default() };
+        let mut particle = GlowParticle {
+            trailing: true,
+            ..GlowParticle::default()
+        };
         if markers.len() <= 1 {
             particle.position = markers[0].position;
         } else {
-            particle.t = self.random.range(glow.trailing_t[0] * self.total, glow.trailing_t[1] * self.total);
+            particle.t = self.random.range(
+                glow.trailing_t[0] * self.total,
+                glow.trailing_t[1] * self.total,
+            );
             self.world_position(markers, &mut particle, 0.0);
         }
         particle.initial_velocity = match glow.trailing_distribution {
@@ -515,7 +631,11 @@ impl RunningGlow {
             Some(TrailingDistribution::Normal) => markers[particle.parent].up,
             Some(TrailingDistribution::Randomly) => {
                 let random = &mut self.random;
-                let direction = [random.range(-1.0, 1.0), random.range(-1.0, 1.0), random.range(-1.0, 1.0)];
+                let direction = [
+                    random.range(-1.0, 1.0),
+                    random.range(-1.0, 1.0),
+                    random.range(-1.0, 1.0),
+                ];
                 nonzero_unit(direction).unwrap_or(direction)
             }
             None => [0.0; 3],
@@ -525,7 +645,9 @@ impl RunningGlow {
         particle.initial_size = self.random.range(glow.size[0], glow.size[1]) / glow.dimension;
         particle.lifetime = (glow.lifetime * 30.0) as i32;
         let at = self.random.range(0.0, 1.0);
-        particle.color = std::array::from_fn(|channel| (glow.colors[1][channel] - glow.colors[0][channel]) * at + glow.colors[0][channel]);
+        particle.color = std::array::from_fn(|channel| {
+            (glow.colors[1][channel] - glow.colors[0][channel]) * at + glow.colors[0][channel]
+        });
         particle
     }
 }
@@ -535,9 +657,14 @@ impl CeGlow {
         self.markers
             .iter()
             .map(|marker| {
-                let (position, forward) = posed_on(marker.node, marker.position, marker.axes[0], bones);
+                let (position, forward) =
+                    posed_on(marker.node, marker.position, marker.axes[0], bones);
                 let (_, up) = posed_on(marker.node, marker.position, marker.axes[2], bones);
-                PosedMarker { position, forward, up }
+                PosedMarker {
+                    position,
+                    forward,
+                    up,
+                }
             })
             .collect()
     }
@@ -548,10 +675,19 @@ const MOST_GLOW_PARTICLES: usize = 512;
 
 impl CeGlowField {
     /// `glow_update` for each glow, up to `time`.
-    pub(crate) fn advance(&mut self, glows: &[CeGlow], outputs_of: impl Fn(u8) -> [f32; 4], bones: Option<&[[f32; 4]]>, time: f32) {
+    pub(crate) fn advance(
+        &mut self,
+        glows: &[CeGlow],
+        outputs_of: impl Fn(u8) -> [f32; 4],
+        bones: Option<&[[f32; 4]]>,
+        time: f32,
+    ) {
         if self.running.len() != glows.len() || self.time.is_none_or(|last| time < last) {
             self.running = (0..glows.len())
-                .map(|at| RunningGlow { random: Lcg(CeRandom(at as u32 * 977 + 1)), ..RunningGlow::default() })
+                .map(|at| RunningGlow {
+                    random: Lcg(CeRandom(at as u32 * 977 + 1)),
+                    ..RunningGlow::default()
+                })
                 .collect();
             self.time = Some(time);
         }
@@ -561,7 +697,11 @@ impl CeGlowField {
         let ticks = ((time * 30.0).floor() - (last * 30.0).floor()).max(0.0) as i32;
         self.time = Some(time);
         // `glow_initialize`'s array, shared by every glow's particles.
-        let mut used: usize = self.running.iter().map(|running| running.particles.len()).sum();
+        let mut used: usize = self
+            .running
+            .iter()
+            .map(|running| running.particles.len())
+            .sum();
         for (glow, running) in glows.iter().zip(&mut self.running) {
             let outputs = &outputs_of(glow.object);
             let markers = glow.posed(bones);
@@ -586,7 +726,14 @@ impl CeGlowField {
             let mut particles = std::mem::take(&mut running.particles);
             if count > 1 {
                 for particle in particles.iter_mut().filter(|particle| !particle.trailing) {
-                    running.move_normal(glow, outputs, &markers, particle, seconds * velocity, rotation);
+                    running.move_normal(
+                        glow,
+                        outputs,
+                        &markers,
+                        particle,
+                        seconds * velocity,
+                        rotation,
+                    );
                     running.color_normal(glow, outputs, particle);
                     particle.present_size = particle.initial_size;
                 }
@@ -610,7 +757,8 @@ impl CeGlowField {
                 } else {
                     particle.initial_velocity
                 };
-                particle.position = std::array::from_fn(|axis| particle.position[axis] + velocity[axis] * seconds);
+                particle.position =
+                    std::array::from_fn(|axis| particle.position[axis] + velocity[axis] * seconds);
                 particle.ticks <= particle.lifetime
             });
             running.particles = particles;
@@ -632,13 +780,22 @@ impl CeGlowField {
     /// sprite of the first sequence, through `global_shader_effect_additive`.
     /// A size of zero is drawn a texel to a pixel, as `build_sprite` does,
     /// which `pixel` gives the world size of at a place.
-    pub(crate) fn quads(&self, glows: &[CeGlow], view: &ViewFrame, pixel: impl Fn([f32; 3]) -> f32) -> Vec<(usize, CeLightningQuad)> {
+    pub(crate) fn quads(
+        &self,
+        glows: &[CeGlow],
+        view: &ViewFrame,
+        pixel: impl Fn([f32; 3]) -> f32,
+    ) -> Vec<(usize, CeLightningQuad)> {
         let mut quads = Vec::new();
         for (index, (glow, running)) in glows.iter().zip(&self.running).enumerate() {
             let [left, right, top, bottom] = glow.rect;
             let center_uv = [left + glow.registration[0], top + glow.registration[1]];
             for particle in &running.particles {
-                let scale = if particle.present_size == 0.0 { pixel(particle.position) } else { particle.present_size };
+                let scale = if particle.present_size == 0.0 {
+                    pixel(particle.position)
+                } else {
+                    particle.present_size
+                };
                 let size = glow.image_width * scale;
                 // `glow_update` divides by the tag's values unguarded; one with
                 // a zero there goes NaN in the game too. Nothing to draw.
@@ -648,16 +805,24 @@ impl CeGlowField {
                 let corner = |u: f32, v: f32| {
                     let x = u - center_uv[0];
                     let y = center_uv[1] - v;
-                    let place: [f32; 3] =
-                        std::array::from_fn(|axis| particle.position[axis] + (view.right[axis] * x + view.up[axis] * y) * size);
+                    let place: [f32; 3] = std::array::from_fn(|axis| {
+                        particle.position[axis] + (view.right[axis] * x + view.up[axis] * y) * size
+                    });
                     [place[0], place[1], place[2], u, v]
                 };
                 let [red, green, blue] = particle.color;
                 quads.push((
                     index,
                     CeLightningQuad {
-                        corners: [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)],
-                        colors: [[red, green, blue, particle.fade].map(|channel| channel.clamp(0.0, 1.0)); 4],
+                        corners: [
+                            corner(left, bottom),
+                            corner(right, bottom),
+                            corner(left, top),
+                            corner(right, top),
+                        ],
+                        colors: [[red, green, blue, particle.fade]
+                            .map(|channel| channel.clamp(0.0, 1.0));
+                            4],
                     },
                 ));
             }

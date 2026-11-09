@@ -3,8 +3,11 @@ use crate::app::model_preview::harness::kit::kit_source;
 use crate::core::game::GameId;
 
 fn sniper_eye(source: &TagSource) -> H4FlareAt {
-    let flare = read_h4_lens_flare(&crate::app::model_preview::load::TagReader::new(source), "objects\\characters\\storm_jackal\\fx\\sniper_eye")
-        .expect("the sniper eye flare");
+    let flare = read_h4_lens_flare(
+        &crate::app::model_preview::load::TagReader::new(source),
+        "objects\\characters\\storm_jackal\\fx\\sniper_eye",
+    )
+    .expect("the sniper eye flare");
     H4FlareAt {
         object: 0,
         node: 0,
@@ -59,7 +62,9 @@ fn alive() -> FunctionValues {
 /// anamorphic bitmap, read by name from the H4 reflection layout.
 #[test]
 fn the_sniper_eye_reads_both_reflections_and_their_bitmaps() {
-    let Some(source) = kit_source(GameId::Halo4) else { return };
+    let Some(source) = kit_source(GameId::Halo4) else {
+        return;
+    };
     let at = sniper_eye(&source);
     assert_eq!(at.flare.reflections.len(), 2);
     assert_eq!(at.flare.images.len(), 2);
@@ -72,7 +77,9 @@ fn the_sniper_eye_reads_both_reflections_and_their_bitmaps() {
 /// is; from behind its cone puts it out, and so does a dead Jackal.
 #[test]
 fn the_sniper_eye_shows_within_its_cone_while_alive() {
-    let Some(source) = kit_source(GameId::Halo4) else { return };
+    let Some(source) = kit_source(GameId::Halo4) else {
+        return;
+    };
     let at = sniper_eye(&source);
     let colors = [[1.0; 3]; 4];
     let front = project([2.0, 0.0, 0.0]);
@@ -103,7 +110,9 @@ fn the_sniper_eye_shows_within_its_cone_while_alive() {
 /// its area in samples.
 #[test]
 fn a_simple_box_occludes_against_its_inner_share() {
-    let Some(source) = kit_source(GameId::Halo4) else { return };
+    let Some(source) = kit_source(GameId::Halo4) else {
+        return;
+    };
     let at = sniper_eye(&source);
     assert!(at.flare.flags.simple_occlusion_box);
     let front = project([2.0, 0.0, 0.0]);
@@ -127,7 +136,9 @@ fn a_simple_box_occludes_against_its_inner_share() {
 
 #[test]
 fn visibility_counts_a_glimpse_as_ten_samples_and_expects_at_least_ten() {
-    let Some(source) = kit_source(GameId::Halo4) else { return };
+    let Some(source) = kit_source(GameId::Halo4) else {
+        return;
+    };
     let at = sniper_eye(&source);
     assert_eq!(at.visibility(Some((5.0, 100.0))), 0.1);
     assert_eq!(at.visibility(Some((0.0, 100.0))), 0.0);

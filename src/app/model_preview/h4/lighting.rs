@@ -51,7 +51,8 @@ const SELF_ILLUM_CHANGE: f32 = 0.0;
 /// linear strength, linear angle, toe strength, toe numerator, toe
 /// denominator, linear white point. Every one of the kit's 125 enabled
 /// curves is this one.
-pub(in crate::app::model_preview) const H4_FILMIC_CURVE: [f32; 7] = [0.2, 0.3, 0.2, 0.2, 0.01, 0.4, 4.0];
+pub(in crate::app::model_preview) const H4_FILMIC_CURVE: [f32; 7] =
+    [0.2, 0.3, 0.2, 0.2, 0.01, 0.4, 4.0];
 
 /// `SetFilmicToneCurveParameters` (X360 0x83AFD0A0): the five constants
 /// `ApplyFilmicToneCurve` and `InverseFilmicToneCurve` read, each a splat.
@@ -60,10 +61,20 @@ pub(in crate::app::model_preview) const H4_FILMIC_CURVE: [f32; 7] = [0.2, 0.3, 0
 pub(in crate::app::model_preview) fn h4_filmic_params(curve: [f32; 7], inverse: bool) -> [f32; 5] {
     let [a, b, c, d, e, f, w] = curve;
     if curve.iter().any(|field| field.abs() < 1e-4) {
-        return if inverse { [1.0, 0.0, 0.0, 1.0, 0.0] } else { [0.0, 1.0, 0.0, 0.0, 1.0] };
+        return if inverse {
+            [1.0, 0.0, 0.0, 1.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0, 0.0, 1.0]
+        };
     }
     let white = 1.0 / ((w * (a * w + c * b) + d * e) / (w * (a * w + b) + d * f) - e / f);
-    [white * (a * f - a * e), white * (b * c * f - b * e), a * f, b * f, d * f * f]
+    [
+        white * (a * f - a * e),
+        white * (b * c * f - b * e),
+        a * f,
+        b * f,
+        d * f * f,
+    ]
 }
 
 /// `ApplyFilmicToneCurve`: `x(x·p0 + p1) / (x(x·p2 + p3) + p4)`.
@@ -108,13 +119,26 @@ pub(in crate::app::model_preview) fn h4_turned_vmf(to_camera: [f32; 3]) -> [[f32
     let target = half.map(|axis| axis / length);
     // Rodrigues' rotation from `up` to `target`.
     let cos = target[2];
-    let axis = [up[1] * target[2] - up[2] * target[1], up[2] * target[0] - up[0] * target[2], 0.0];
+    let axis = [
+        up[1] * target[2] - up[2] * target[1],
+        up[2] * target[0] - up[0] * target[2],
+        0.0,
+    ];
     let turn = |v: [f32; 4]| -> [f32; 4] {
         let k = axis;
-        let cross = [k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]];
+        let cross = [
+            k[1] * v[2] - k[2] * v[1],
+            k[2] * v[0] - k[0] * v[2],
+            k[0] * v[1] - k[1] * v[0],
+        ];
         let dot = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
-        let factor = if cos > -1.0 + 1e-6 { 1.0 / (1.0 + cos) } else { 0.0 };
-        let rotated: [f32; 3] = std::array::from_fn(|i| v[i] * cos + cross[i] + k[i] * dot * factor);
+        let factor = if cos > -1.0 + 1e-6 {
+            1.0 / (1.0 + cos)
+        } else {
+            0.0
+        };
+        let rotated: [f32; 3] =
+            std::array::from_fn(|i| v[i] * cos + cross[i] + k[i] * dot * factor);
         [rotated[0], rotated[1], rotated[2], v[3]]
     };
     let mut lobes = H4_DEFAULT_VMF;
@@ -127,7 +151,12 @@ pub(in crate::app::model_preview) fn h4_turned_vmf(to_camera: [f32; 3]) -> [[f32
 /// Halo 4's [`FrameValues`](super::super::gen3::pipeline::FrameValues):
 /// its engine constants have names of their own, and none fall back to
 /// Halo 3's.
-pub(in crate::app::model_preview) fn h4_frame_values(frame: &ModelGpuFrame, name: &str, _size: [i32; 2], _stops: f32) -> Option<Gen3Value> {
+pub(in crate::app::model_preview) fn h4_frame_values(
+    frame: &ModelGpuFrame,
+    name: &str,
+    _size: [i32; 2],
+    _stops: f32,
+) -> Option<Gen3Value> {
     if name == "ps_lighting_constants" && frame.light_follows_camera {
         let camera = super::super::gen3::pipeline::camera_to_world(frame);
         let backward = [camera[2], camera[6], camera[10]];
@@ -148,11 +177,21 @@ pub(in crate::app::model_preview) fn h4_frame_value(name: &str) -> Option<Gen3Va
         // the self-illumination one is `(illum, illum · e / 2^Y)`.
         "ps_view_exposure" | "vs_view_exposure" => {
             let exposure = h4_exposure(H4_PREVIEW_STOPS);
-            floats([exposure / H4_DARK_MULTIPLIER, H4_DARK_MULTIPLIER, exposure, 1.0])
+            floats([
+                exposure / H4_DARK_MULTIPLIER,
+                H4_DARK_MULTIPLIER,
+                exposure,
+                1.0,
+            ])
         }
         "ps_view_self_illum_exposure" | "vs_view_self_illum_exposure" => {
             let illum = h4_illum_scale(H4_PREVIEW_STOPS);
-            floats([illum, illum * h4_exposure(H4_PREVIEW_STOPS) / H4_DARK_MULTIPLIER, 0.0, 1.0])
+            floats([
+                illum,
+                illum * h4_exposure(H4_PREVIEW_STOPS) / H4_DARK_MULTIPLIER,
+                0.0,
+                1.0,
+            ])
         }
         // Uncompressed: the preview's vertices are already in model units.
         "vs_mesh_position_compression_scale" => floats([1.0, 1.0, 1.0, 0.0]),
@@ -172,11 +211,22 @@ pub(in crate::app::model_preview) fn h4_frame_value(name: &str) -> Option<Gen3Va
 /// `globals\defaults\default`'s colour grading texture: the camera fx
 /// settings the game falls back on with no cluster to read others from
 /// (`c_player_view::setup_camera_fx_parameters`, X360 0x82B704C8).
-pub(in crate::app::model_preview) fn read_h4_color_grading(reader: &TagReader) -> Option<super::super::gen3::materials::Gen3Bitmap> {
-    let settings = reader.load("globals\\defaults\\default", "camera_fx_settings", b"cfxs").ok()?;
+pub(in crate::app::model_preview) fn read_h4_color_grading(
+    reader: &TagReader,
+) -> Option<super::super::gen3::materials::Gen3Bitmap> {
+    let settings = reader
+        .load("globals\\defaults\\default", "camera_fx_settings", b"cfxs")
+        .ok()?;
     let grading = settings.root().descend("color_grading")?;
-    let path = grading.read_tag_ref_path("color grading texture").filter(|path| !path.is_empty())?;
-    super::super::gen3::materials::read_h3_bitmap(reader, &path, 0, crate::core::h2_pixel_shader::SamplerKind::Volume)
+    let path = grading
+        .read_tag_ref_path("color grading texture")
+        .filter(|path| !path.is_empty())?;
+    super::super::gen3::materials::read_h3_bitmap(
+        reader,
+        &path,
+        0,
+        crate::core::h2_pixel_shader::SamplerKind::Volume,
+    )
 }
 
 /// The light a white surface takes from the default lobes: `VMFDiffuse` for
@@ -185,11 +235,15 @@ pub(in crate::app::model_preview) fn read_h4_color_grading(reader: &TagReader) -
 fn default_irradiance(normal: [f32; 3]) -> [f32; 3] {
     let sh7 = default_sh()[7][3];
     let linear = |lobe: [f32; 4], color: [f32; 4]| {
-        let dot = 0.325_735 * (lobe[0] * normal[0] + lobe[1] * normal[1] + lobe[2] * normal[2]) + 0.282_094_8 * lobe[3];
+        let dot = 0.325_735 * (lobe[0] * normal[0] + lobe[1] * normal[1] + lobe[2] * normal[2])
+            + 0.282_094_8 * lobe[3];
         let scale = (dot * sh7).clamp(0.0, 1.0);
         [color[0] * scale, color[1] * scale, color[2] * scale]
     };
-    let [direct, indirect] = [linear(H4_DEFAULT_VMF[0], H4_DEFAULT_VMF[1]), linear(H4_DEFAULT_VMF[2], H4_DEFAULT_VMF[3])];
+    let [direct, indirect] = [
+        linear(H4_DEFAULT_VMF[0], H4_DEFAULT_VMF[1]),
+        linear(H4_DEFAULT_VMF[2], H4_DEFAULT_VMF[3]),
+    ];
     std::array::from_fn(|channel| direct[channel] + indirect[channel])
 }
 
@@ -206,9 +260,30 @@ mod tests {
     /// `lighting.md`'s figures: lit from straight above, a little from below.
     #[test]
     fn the_default_lobes_light_from_above() {
-        assert!(close(default_irradiance([0.0, 0.0, 1.0]), [1.0618, 1.0618, 1.0618]), "{:?}", default_irradiance([0.0, 0.0, 1.0]));
-        assert!(close(default_irradiance([0.0, 0.0, -1.0]), [0.3170, 0.2853, 0.2853]), "{:?}", default_irradiance([0.0, 0.0, -1.0]));
-        assert!(close(default_irradiance([1.0, 0.0, 0.0]), [0.1410, 0.1354, 0.1354]), "{:?}", default_irradiance([1.0, 0.0, 0.0]));
+        assert!(
+            close(
+                default_irradiance([0.0, 0.0, 1.0]),
+                [1.0618, 1.0618, 1.0618]
+            ),
+            "{:?}",
+            default_irradiance([0.0, 0.0, 1.0])
+        );
+        assert!(
+            close(
+                default_irradiance([0.0, 0.0, -1.0]),
+                [0.3170, 0.2853, 0.2853]
+            ),
+            "{:?}",
+            default_irradiance([0.0, 0.0, -1.0])
+        );
+        assert!(
+            close(
+                default_irradiance([1.0, 0.0, 0.0]),
+                [0.1410, 0.1354, 0.1354]
+            ),
+            "{:?}",
+            default_irradiance([1.0, 0.0, 0.0])
+        );
         // Not Reach's: its default probe lights the side far more.
         assert!(default_irradiance([1.0, 0.0, 0.0])[0] < 0.2);
     }
@@ -219,15 +294,31 @@ mod tests {
         // A camera off to +x, level with the object.
         let turned = h4_turned_vmf([1.0, 0.0, 0.0]);
         let half = std::f32::consts::FRAC_1_SQRT_2;
-        assert!((turned[0][0] - half).abs() < 1e-5 && (turned[0][2] - half).abs() < 1e-5, "{:?}", turned[0]);
+        assert!(
+            (turned[0][0] - half).abs() < 1e-5 && (turned[0][2] - half).abs() < 1e-5,
+            "{:?}",
+            turned[0]
+        );
         assert!((length(turned[0]) - 1.0).abs() < 1e-5);
-        assert!((length(turned[2]) - 0.8).abs() < 1e-5, "the dim lobe keeps its size");
-        assert!(turned[2][0] < 0.0 && turned[2][2] < 0.0, "and turns opposite: {:?}", turned[2]);
+        assert!(
+            (length(turned[2]) - 0.8).abs() < 1e-5,
+            "the dim lobe keeps its size"
+        );
+        assert!(
+            turned[2][0] < 0.0 && turned[2][2] < 0.0,
+            "and turns opposite: {:?}",
+            turned[2]
+        );
         assert_eq!(turned[1], H4_DEFAULT_VMF[1]);
         assert_eq!(turned[3], H4_DEFAULT_VMF[3]);
         // From straight above there is nothing to turn.
         let above = h4_turned_vmf([0.0, 0.0, 1.0]);
-        assert!(above.iter().zip(H4_DEFAULT_VMF).all(|(a, b)| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6)));
+        assert!(
+            above
+                .iter()
+                .zip(H4_DEFAULT_VMF)
+                .all(|(a, b)| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6))
+        );
         // Whatever faces the camera now takes more light than it did.
         let facing = |lobes: &[[f32; 4]; 4]| 0.325_735 * lobes[0][0] + 0.282_094_8 * lobes[0][3];
         assert!(facing(&turned) > facing(&H4_DEFAULT_VMF));
@@ -237,10 +328,15 @@ mod tests {
     fn exposure_at_zero_stops_is_the_settings_scale() {
         assert!((h4_exposure(0.0) - 0.669_433).abs() < 1e-6);
         assert!((h4_exposure(1.0) - 2.0 * 0.669_433).abs() < 1e-5);
-        let Some(Gen3Value::Floats(exposure)) = h4_frame_value("ps_view_exposure") else { panic!() };
+        let Some(Gen3Value::Floats(exposure)) = h4_frame_value("ps_view_exposure") else {
+            panic!()
+        };
         assert_eq!(exposure[1], 8.0);
         let expected = h4_exposure(H4_PREVIEW_STOPS);
-        assert!((exposure[0] * exposure[1] - expected).abs() < 1e-6, "the dark target times its multiplier is the exposure");
+        assert!(
+            (exposure[0] * exposure[1] - expected).abs() < 1e-6,
+            "the dark target times its multiplier is the exposure"
+        );
     }
 
     /// With no exposure change, self-illumination holds its preferred stops
@@ -252,7 +348,10 @@ mod tests {
             let self_illum = h4_illum_scale(stops) * h4_exposure(stops);
             assert!((self_illum - held).abs() < 1e-5, "{stops}: {self_illum}");
         }
-        assert!(h4_illum_scale(2.0) < h4_illum_scale(0.0), "it takes back what the scene's exposure adds");
+        assert!(
+            h4_illum_scale(2.0) < h4_illum_scale(0.0),
+            "it takes back what the scene's exposure adds"
+        );
     }
 
     /// The curve maps its white point to 1 and darkens the toe; with a field
@@ -271,15 +370,36 @@ mod tests {
     /// `m80_cam_fx_global`'s, as its doc says.
     #[test]
     fn the_preview_camera_fx_is_m80s() {
-        let Some(root) = kit_root(GameId::Halo4) else { return };
-        let path = std::path::Path::new(&root).join("environments/solo/m80_delta/m80_cam_fx_global.camera_fx_settings");
+        let Some(root) = kit_root(GameId::Halo4) else {
+            return;
+        };
+        let path = std::path::Path::new(&root)
+            .join("environments/solo/m80_delta/m80_cam_fx_global.camera_fx_settings");
         let tag = blam_tags::TagFile::read(path).unwrap();
         let root = tag.root();
-        let real = |name: &str| root.descend(name.rsplit_once('/').unwrap().0).and_then(|holder| holder.read_real(name.rsplit_once('/').unwrap().1)).unwrap();
+        let real = |name: &str| {
+            root.descend(name.rsplit_once('/').unwrap().0)
+                .and_then(|holder| holder.read_real(name.rsplit_once('/').unwrap().1))
+                .unwrap()
+        };
         assert_eq!(real("exposure/maximum"), H4_PREVIEW_STOPS);
-        assert_eq!(real("self_illum_preferred/preferred exposure"), SELF_ILLUM_PREFERRED);
+        assert_eq!(
+            real("self_illum_preferred/preferred exposure"),
+            SELF_ILLUM_PREFERRED
+        );
         assert_eq!(real("self_illum_scale/exposure change"), SELF_ILLUM_CHANGE);
-        let curve = ["shoulder strength", "linear strength", "linear angle", "toe strength", "toe numerator", "toe denominator", "linear white point"];
-        assert_eq!(curve.map(|field| real(&format!("filmic_tone_curve/{field}"))), H4_FILMIC_CURVE);
+        let curve = [
+            "shoulder strength",
+            "linear strength",
+            "linear angle",
+            "toe strength",
+            "toe numerator",
+            "toe denominator",
+            "linear white point",
+        ];
+        assert_eq!(
+            curve.map(|field| real(&format!("filmic_tone_curve/{field}"))),
+            H4_FILMIC_CURVE
+        );
     }
 }

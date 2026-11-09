@@ -1,6 +1,5 @@
 //! Each game's cloth rules: limits, tick rates, gravity and the sheet basis.
 
-
 /// `k_maximum_vertices_per_cloth`.
 const MOST_VERTICES: usize = 121;
 
@@ -150,9 +149,17 @@ impl ClothGame {
                 ClothGame::Halo3 => 60.0,
                 ClothGame::Reach => REACH_TICK_RATE,
             },
-            most_vertices: if halo2 { H2_MOST_VERTICES } else { MOST_VERTICES },
+            most_vertices: if halo2 {
+                H2_MOST_VERTICES
+            } else {
+                MOST_VERTICES
+            },
             spans_texture_per_side: reach,
-            most_attachments: if reach { REACH_MOST_ATTACHMENTS } else { MOST_ATTACHMENTS },
+            most_attachments: if reach {
+                REACH_MOST_ATTACHMENTS
+            } else {
+                MOST_ATTACHMENTS
+            },
             pins_secondary: !reach,
             clamps_properties: !halo2,
             sheet_basis: match self {
@@ -163,8 +170,16 @@ impl ClothGame {
             region_keeps_extension: reach,
             rests_at_first_pin: !reach,
             follows_center: reach,
-            most_iterations: if reach { REACH_MOST_ITERATIONS } else { MOST_ITERATIONS },
-            most_passes: if reach { REACH_MOST_PASSES } else { MOST_PASSES },
+            most_iterations: if reach {
+                REACH_MOST_ITERATIONS
+            } else {
+                MOST_ITERATIONS
+            },
+            most_passes: if reach {
+                REACH_MOST_PASSES
+            } else {
+                MOST_PASSES
+            },
             settles_new_sheet: reach,
             wind: match self {
                 ClothGame::Halo2 => ClothWind::Halo2,

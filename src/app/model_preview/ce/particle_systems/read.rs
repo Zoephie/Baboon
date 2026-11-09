@@ -57,7 +57,10 @@ pub(super) enum CreationPhysics {
 
 impl CreationPhysics {
     fn read(holder: TagStruct<'_>) -> Self {
-        match holder.read_enum_option("particle creation physics").as_deref() {
+        match holder
+            .read_enum_option("particle creation physics")
+            .as_deref()
+        {
             Some("explosion") => Self::Explosion,
             Some("jet") => Self::Jet,
             _ => Self::Default,
@@ -134,9 +137,11 @@ impl super::super::functions::ReadsOutputs for CeParticleSystemAt {
 
 fn bounds_of(holder: TagStruct<'_>, name: &str) -> [f32; 2] {
     match holder.field(name).and_then(|field| field.value()) {
-        Some(TagFieldData::RealBounds(bounds) | TagFieldData::AngleBounds(bounds) | TagFieldData::FractionBounds(bounds)) => {
-            [bounds.lower, bounds.upper]
-        }
+        Some(
+            TagFieldData::RealBounds(bounds)
+            | TagFieldData::AngleBounds(bounds)
+            | TagFieldData::FractionBounds(bounds),
+        ) => [bounds.lower, bounds.upper],
         _ => [0.0; 2],
     }
 }
@@ -148,16 +153,26 @@ fn argb_of(holder: TagStruct<'_>, name: &str) -> [f32; 4] {
 
 fn constants_of(holder: TagStruct<'_>) -> [f32; 3] {
     let found = elements(holder, "physics constants");
-    std::array::from_fn(|at| found.get(at).and_then(|constant| constant.read_real("k")).unwrap_or(0.0))
+    std::array::from_fn(|at| {
+        found
+            .get(at)
+            .and_then(|constant| constant.read_real("k"))
+            .unwrap_or(0.0)
+    })
 }
 
 fn read_physics(reader: &TagReader, holder: TagStruct<'_>) -> Option<CePointPhysics> {
-    let path = holder.read_tag_ref_path("point physics").filter(|path| !path.is_empty())?;
+    let path = holder
+        .read_tag_ref_path("point physics")
+        .filter(|path| !path.is_empty())?;
     let tag = reader.load(&path, "point_physics", b"pphy").ok()?;
     Some(CePointPhysics::read(&tag))
 }
 
-pub(in crate::app::model_preview) fn read_pctl_def(reader: &TagReader, path: &str) -> Option<CePctlDef> {
+pub(in crate::app::model_preview) fn read_pctl_def(
+    reader: &TagReader,
+    path: &str,
+) -> Option<CePctlDef> {
     let tag = reader.load(path, "particle_system", b"pctl").ok()?;
     let root = tag.root();
     let mut sheets: Vec<Arc<CeSpriteSheet>> = Vec::new();
@@ -170,8 +185,11 @@ pub(in crate::app::model_preview) fn read_pctl_def(reader: &TagReader, path: &st
             .map(|state| {
                 let real = |name: &str| state.read_real(name).unwrap_or(0.0);
                 // Tool's `sub_49BFC0`.
-                let radius = Some(real("radius multiplier")).filter(|radius| *radius > 0.0).unwrap_or(1.0);
-                let [red, green, blue, alpha] = crate::app::model_preview::common::fields::argb(*state, "color multiplier");
+                let radius = Some(real("radius multiplier"))
+                    .filter(|radius| *radius > 0.0)
+                    .unwrap_or(1.0);
+                let [red, green, blue, alpha] =
+                    crate::app::model_preview::common::fields::argb(*state, "color multiplier");
                 TypeState {
                     duration: bounds_of(*state, "duration bounds"),
                     transition: bounds_of(*state, "transition time bounds"),
@@ -193,7 +211,10 @@ pub(in crate::app::model_preview) fn read_pctl_def(reader: &TagReader, path: &st
             .collect();
         let mut particle_states = Vec::new();
         for state in elements(entry, "particle states") {
-            let Some(bitmap) = state.read_tag_ref_path("bitmaps").filter(|path| !path.is_empty()) else {
+            let Some(bitmap) = state
+                .read_tag_ref_path("bitmaps")
+                .filter(|path| !path.is_empty())
+            else {
                 continue;
             };
             let sheet_index = match sheet_paths.iter().position(|known| *known == bitmap) {
@@ -219,7 +240,9 @@ pub(in crate::app::model_preview) fn read_pctl_def(reader: &TagReader, path: &st
                 rotation_rate: bounds_of(state, "rotation rate"),
                 colors: [argb_of(state, "color 1"), argb_of(state, "color 2")],
                 // Tool's `sub_49BFE0`.
-                radius: Some(real("radius multiplier")).filter(|radius| *radius > 0.0).unwrap_or(1.0),
+                radius: Some(real("radius multiplier"))
+                    .filter(|radius| *radius > 0.0)
+                    .unwrap_or(1.0),
                 physics: read_physics(reader, state),
                 blend: FramebufferBlend::read(state),
                 map_flags: state.read_int_any("map flags").unwrap_or(0),
@@ -231,7 +254,9 @@ pub(in crate::app::model_preview) fn read_pctl_def(reader: &TagReader, path: &st
         types.push(ParticleType {
             flags: ParticleTypeFlags::read(entry),
             initial_count: int("initial particle count") as i32,
-            rotational: entry.field("complex sprite render modes").is_some_and(|field| field.enum_is("rotational")),
+            rotational: entry
+                .field("complex sprite render modes")
+                .is_some_and(|field| field.enum_is("rotational")),
             radius: entry.read_real("radius").unwrap_or(0.0),
             initial_physics: CreationPhysics::read(entry),
             constants: constants_of(entry),
@@ -243,7 +268,11 @@ pub(in crate::app::model_preview) fn read_pctl_def(reader: &TagReader, path: &st
     if types.is_empty() || types.iter().any(|kind| kind.states.is_empty()) {
         return None;
     }
-    Some(CePctlDef { types, physics: read_physics(reader, root), sheets })
+    Some(CePctlDef {
+        types,
+        physics: read_physics(reader, root),
+        sheets,
+    })
 }
 
 /// The particle systems among the object's attachments.
@@ -277,7 +306,13 @@ pub(in crate::app::model_preview) fn read_ce_particle_systems(
                 .iter()
                 .filter(|marker| marker.name.eq_ignore_ascii_case(&name))
                 .take(MOST_MARKERS)
-                .map(|marker| (marker.node_index.max(0) as usize, marker.position, marker.axes[0]))
+                .map(|marker| {
+                    (
+                        marker.node_index.max(0) as usize,
+                        marker.position,
+                        marker.axes[0],
+                    )
+                })
                 .collect()
         };
         systems.push(CeParticleSystemAt {

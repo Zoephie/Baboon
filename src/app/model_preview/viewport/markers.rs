@@ -4,7 +4,8 @@ use super::*;
 
 pub(in crate::app::model_preview) const ARMATURE_COLOR: Color32 = Color32::from_rgb(255, 204, 0);
 
-pub(in crate::app::model_preview) const MARKER_TOOLTIP_COLOR: Color32 = Color32::from_rgb(120, 235, 255);
+pub(in crate::app::model_preview) const MARKER_TOOLTIP_COLOR: Color32 =
+    Color32::from_rgb(120, 235, 255);
 
 pub(in crate::app::model_preview) fn animated_marker_transform(
     marker: &RenderModelPreviewMarker,
@@ -50,7 +51,10 @@ pub(in crate::app::model_preview) fn animated_marker_transform(
 
 pub(in crate::app::model_preview) const MARKER_AXIS_SCREEN_LENGTH: f32 = 15.0;
 
-pub(in crate::app::model_preview) fn marker_axis_screen_deltas(camera: &PreviewCamera, axes: [[f32; 3]; 3]) -> [Vec2; 3] {
+pub(in crate::app::model_preview) fn marker_axis_screen_deltas(
+    camera: &PreviewCamera,
+    axes: [[f32; 3]; 3],
+) -> [Vec2; 3] {
     axes.map(|axis| {
         let view_axis = camera.rotate_vector(axis);
         let screen = Vec2::new(view_axis[0], -view_axis[2]);

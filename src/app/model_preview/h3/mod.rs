@@ -4,14 +4,14 @@
 //! composite. Reach's flares read through `lights.rs` too. What Halo 3
 //! shares with Reach and Halo 4 is in `gen3`.
 
-mod features;
-pub(in crate::app::model_preview) mod object;
 pub(in crate::app::model_preview) mod attached;
 pub(in crate::app::model_preview) mod bloom;
 pub(in crate::app::model_preview) mod composite;
+mod features;
 pub(crate) mod leaves;
-pub(crate) mod lights;
 mod light_pass;
+pub(crate) mod lights;
+pub(in crate::app::model_preview) mod object;
 pub(in crate::app::model_preview) mod render;
 pub(in crate::app::model_preview) mod slot;
 pub(crate) mod vision;

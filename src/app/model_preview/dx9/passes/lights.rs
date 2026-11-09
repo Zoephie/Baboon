@@ -29,8 +29,12 @@ pub(crate) const H2_DEFAULT_LIGHTS: [H2DefaultLight; 2] = [
 
 /// Stands in for the direct light on the object path, where a shadow leaves
 /// the pass only its ambient, indirect and reflected light.
-pub(crate) const H2_SHADOWED_LIGHT: H2DefaultLight =
-    H2DefaultLight { position: [0.0; 3], color: [0.0; 3], specular: [0.0; 3], radius: 1.0 };
+pub(crate) const H2_SHADOWED_LIGHT: H2DefaultLight = H2DefaultLight {
+    position: [0.0; 3],
+    color: [0.0; 3],
+    specular: [0.0; 3],
+    radius: 1.0,
+};
 
 /// Which way the object path's direct light lies from a surface. A pass
 /// lights by the negated vector.
@@ -48,8 +52,14 @@ pub(crate) fn h2_prt_object_lights(direction: [f32; 3]) -> ([H2PrtLight; 2], [f3
     let channels = |[r, g, b, _]: [f32; 4]| [r, g, b];
     let [x, y, z, _] = DEFAULT_INDIRECT_VECTOR;
     let lights = [
-        H2PrtLight { direction: [-x, -y, -z], color: channels(DEFAULT_INDIRECT_COLOR) },
-        H2PrtLight { direction, color: channels(DEFAULT_DIRECT_COLOR) },
+        H2PrtLight {
+            direction: [-x, -y, -z],
+            color: channels(DEFAULT_INDIRECT_COLOR),
+        },
+        H2PrtLight {
+            direction,
+            color: channels(DEFAULT_DIRECT_COLOR),
+        },
     ];
     (lights, channels(DEFAULT_AMBIENT))
 }
@@ -64,6 +74,9 @@ pub(crate) fn h2_prt_lights() -> [H2PrtLight; 2] {
     H2_DEFAULT_LIGHTS.map(|light| {
         let [x, y, z] = light.position;
         let length = (x * x + y * y + z * z).sqrt();
-        H2PrtLight { direction: [x / length, y / length, z / length], color: light.color }
+        H2PrtLight {
+            direction: [x / length, y / length, z / length],
+            color: light.color,
+        }
     })
 }

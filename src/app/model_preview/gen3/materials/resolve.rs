@@ -6,7 +6,10 @@ use super::*;
 /// `shader` it loads: older tags' options and parameters as the game draws
 /// them. Old Spartan helmets keep a `misc` option that would otherwise turn
 /// every map on them by a radian.
-pub(in crate::app::model_preview) fn reach_version_update(method: &mut RenderMethod, definition: &RenderMethodDefinition) {
+pub(in crate::app::model_preview) fn reach_version_update(
+    method: &mut RenderMethod,
+    definition: &RenderMethodDefinition,
+) {
     if method.class == blam_tags::render_method::RenderMethodClass::Shader {
         method.version_update(definition);
     }
@@ -39,7 +42,10 @@ pub(in crate::app::model_preview) fn reach_reference(
 }
 
 /// A render method held inside another tag, resolved as the bake would.
-pub(in crate::app::model_preview) fn resolve_embedded_method(reader: &TagReader, shader: TagStruct<'_>) -> Option<ResolvedRenderMethod> {
+pub(in crate::app::model_preview) fn resolve_embedded_method(
+    reader: &TagReader,
+    shader: TagStruct<'_>,
+) -> Option<ResolvedRenderMethod> {
     let mut method = RenderMethod::from_struct(&shader).ok()?;
     let definition = reader.render_method_definition(&method.definition_path)?;
     if reader.source.game() == Some(GameId::HaloReach) {
@@ -47,7 +53,9 @@ pub(in crate::app::model_preview) fn resolve_embedded_method(reader: &TagReader,
         method.apply_reference_shader(&definition, reference.as_deref());
     }
     let resolved = ResolvedRenderMethod::resolve(&method, &definition, |option_path| {
-        reader.render_method_option(option_path).map(|option| (*option).clone())
+        reader
+            .render_method_option(option_path)
+            .map(|option| (*option).clone())
     });
     Some(resolved)
 }
@@ -59,10 +67,16 @@ pub(in crate::app::model_preview) fn read_resolved_map(
     resolved: &ResolvedRenderMethod,
     name: &str,
 ) -> Option<(Gen3Bitmap, Sampler)> {
-    let ParameterSource::Inline(ResolvedValue::Bitmap(binding)) = &resolved.find(name)?.source else {
+    let ParameterSource::Inline(ResolvedValue::Bitmap(binding)) = &resolved.find(name)?.source
+    else {
         return None;
     };
-    let bitmap = read_h3_bitmap(reader, &binding.bitmap_path, binding.bitmap_index, SamplerKind::Texture2D)?;
+    let bitmap = read_h3_bitmap(
+        reader,
+        &binding.bitmap_path,
+        binding.bitmap_index,
+        SamplerKind::Texture2D,
+    )?;
     let sampler = Sampler {
         address: [binding.address_mode_x, binding.address_mode_y],
         filter: binding.filter_mode,
@@ -73,20 +87,35 @@ pub(in crate::app::model_preview) fn read_resolved_map(
 /// Reach's cube maps are the rasterizer's own, not a shader's externs. With no
 /// level, `render_method_submit_dynamic_cubemap` (MCC `sub_140817F70`) binds
 /// `rasterizer_globals`' default bitmap 2 to both, clamped, trilinear.
-pub(super) fn reach_environment_maps(reader: &TagReader, pass: &Gen3Pass, material: &mut Gen3Material, caches: &mut ResolveCaches) {
+pub(super) fn reach_environment_maps(
+    reader: &TagReader,
+    pass: &Gen3Pass,
+    material: &mut Gen3Material,
+    caches: &mut ResolveCaches,
+) {
     const DEFAULT_CUBE: &str = "shaders\\default_bitmaps\\bitmaps\\default_dynamic_cube_map";
     for (uniform, _) in &pass.textures {
         let wanted = matches!(
             uniform.as_str(),
             "GlobalTexture_dynamic_environment_map_0" | "GlobalTexture_dynamic_environment_map_1"
         );
-        if !wanted || material.textures.iter().any(|known| known.uniform == *uniform) {
+        if !wanted
+            || material
+                .textures
+                .iter()
+                .any(|known| known.uniform == *uniform)
+        {
             continue;
         }
-        let Some((image, texels, mips)) = gen3_image(reader, DEFAULT_CUBE, 0, SamplerKind::Cube, caches) else {
+        let Some((image, texels, mips)) =
+            gen3_image(reader, DEFAULT_CUBE, 0, SamplerKind::Cube, caches)
+        else {
             continue;
         };
-        let sampler = Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Trilinear };
+        let sampler = Sampler {
+            address: [BitmapAddressMode::Clamp; 2],
+            filter: BitmapFilterMode::Trilinear,
+        };
         material.textures.push(Gen3Texture {
             uniform: uniform.clone(),
             image,

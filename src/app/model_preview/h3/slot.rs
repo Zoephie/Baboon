@@ -27,7 +27,11 @@ impl GameSlot for H3Slot {
 
 impl H3Slot {
     /// The leaves' maps, uploaded once per geometry.
-    pub(in crate::app::model_preview) unsafe fn sync_textures(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+    pub(in crate::app::model_preview) unsafe fn sync_textures(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+    ) {
         if self.textures_for == Some(frame.geometry_id) {
             return;
         }
@@ -35,7 +39,13 @@ impl H3Slot {
             for texture in self.leaf_textures.drain(..).flatten().flatten() {
                 gl.delete_texture(texture);
             }
-            self.leaf_textures = frame.preview.h3.leaves.iter().map(|leaves| sprite_maps(gl, leaves.shader())).collect();
+            self.leaf_textures = frame
+                .preview
+                .h3
+                .leaves
+                .iter()
+                .map(|leaves| sprite_maps(gl, leaves.shader()))
+                .collect();
         }
         self.textures_for = Some(frame.geometry_id);
     }
@@ -59,12 +69,24 @@ mod tests {
     #[test]
     fn visr_counts_on_while_time_goes_on_and_starts_over_when_it_goes_back() {
         let mut slot = H3Slot::default();
-        assert_eq!(slot.vision_on_for(2.0), 0.0, "it counts from its first frame");
+        assert_eq!(
+            slot.vision_on_for(2.0),
+            0.0,
+            "it counts from its first frame"
+        );
         assert_eq!(slot.vision_on_for(2.5), 0.5);
         assert_eq!(slot.vision_on_for(4.0), 2.0);
-        assert_eq!(slot.vision_on_for(1.0), 0.0, "time going back starts it over");
+        assert_eq!(
+            slot.vision_on_for(1.0),
+            0.0,
+            "time going back starts it over"
+        );
         assert_eq!(slot.vision_on_for(1.25), 0.25);
         slot.restart();
-        assert_eq!(slot.vision_on_for(3.0), 0.0, "the slot's next model starts it over");
+        assert_eq!(
+            slot.vision_on_for(3.0),
+            0.0,
+            "the slot's next model starts it over"
+        );
     }
 }

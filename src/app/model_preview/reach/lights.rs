@@ -8,22 +8,21 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction};
 
-use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::{has_flag, has_flag_labelled};
-use super::super::common::view::posed_on;
-use super::super::h3::lights::SHADOWS_AND_GELS;
-use super::super::functions::FunctionValues;
 use super::super::common::named_function::{NamedFunction, tag_function_at};
+use super::super::common::view::posed_on;
 use super::super::effects::part_markers;
+use super::super::functions::FunctionValues;
+use super::super::h3::lights::SHADOWS_AND_GELS;
 use super::super::*;
-use crate::app::model_preview::common::math::cross;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
+use crate::app::model_preview::common::marker::MarkerFrame;
+use crate::app::model_preview::common::math::cross;
 
 /// `light_update_state`'s range when no function names one.
 const DEFAULT_RANGE: f32 = 0.5;
 const SMALLEST: f32 = 1e-4;
-
 
 /// `default.performance_throttles`' `max gpu dynamic lights`, the inline
 /// lights `build_simple_light_draw_list` takes; `simple_lights` holds 8.
@@ -45,11 +44,17 @@ pub(crate) enum ReachLightMethod {
 
 /// `object_get_function_value_simple`: no name reads full, and a name the
 /// object does not answer, nothing.
-pub(in crate::app::model_preview) fn object_value(values: Option<&FunctionValues>, name: &str) -> f32 {
+pub(in crate::app::model_preview) fn object_value(
+    values: Option<&FunctionValues>,
+    name: &str,
+) -> f32 {
     if name.is_empty() || name == "one" {
         return 1.0;
     }
-    values.and_then(|values| values.get(name)).copied().unwrap_or(0.0)
+    values
+        .and_then(|values| values.get(name))
+        .copied()
+        .unwrap_or(0.0)
 }
 
 /// A `light` as the game has it after `light_definition_version_update` and
@@ -128,7 +133,9 @@ fn read_light_tag(reader: &TagReader, path: &str) -> Option<ReachLightTag> {
         method,
         first_person_only: flagged("render first person only"),
         specular: flagged("screenspace specular lighting"),
-        frustum: root.field("type").is_some_and(|kind| kind.enum_is("frustum")),
+        frustum: root
+            .field("type")
+            .is_some_and(|kind| kind.enum_is("frustum")),
         end,
         start,
         near_width: real("frustum near width"),
@@ -207,7 +214,6 @@ pub(crate) struct ReachLitLight {
     pub(crate) near_fading: f32,
 }
 
-
 /// `light_attenuation`'s cone terms: the cosine cutoff, and the falloff ratio.
 /// A sphere's cutoff of -2 leaves every direction full.
 fn cone(frustum: bool, field_of_view: f32, hotspot: f32) -> [f32; 2] {
@@ -216,15 +222,28 @@ fn cone(frustum: bool, field_of_view: f32, hotspot: f32) -> [f32; 2] {
     }
     let cutoff = (field_of_view * 0.5).cos();
     let spread = (hotspot * 0.5).cos() - cutoff;
-    [cutoff, if spread >= SMALLEST { 1.0 / spread } else { 1.0 }]
+    [
+        cutoff,
+        if spread >= SMALLEST {
+            1.0 / spread
+        } else {
+            1.0
+        },
+    ]
 }
 
 impl ReachLight {
     pub(crate) fn inputs(&self) -> impl Iterator<Item = &str> {
         let tag = &self.tag;
-        [&tag.color.input, &tag.color.range, &tag.intensity.input, &tag.intensity.range, &self.scale_by]
-            .into_iter()
-            .map(String::as_str)
+        [
+            &tag.color.input,
+            &tag.color.range,
+            &tag.intensity.input,
+            &tag.intensity.range,
+            &self.scale_by,
+        ]
+        .into_iter()
+        .map(String::as_str)
     }
 
     /// What turns it on, whose onset its age counts from.
@@ -256,12 +275,28 @@ impl ReachLight {
         if !self.force_on && !self.scale_by.is_empty() && scale <= 0.0 {
             return None;
         }
-        let range = |name: &str| if name.is_empty() { DEFAULT_RANGE } else { object_value(values, name) };
+        let range = |name: &str| {
+            if name.is_empty() {
+                DEFAULT_RANGE
+            } else {
+                object_value(values, name)
+            }
+        };
         let color_input = object_value(values, &tag.color.input);
-        let color = tag.color.function.evaluate_color(color_input, range(&tag.color.range));
-        let intensity_input = if tag.intensity.input.is_empty() { age } else { object_value(values, &tag.intensity.input) };
-        let mut intensity =
-            tag.intensity.function.evaluate(intensity_input, range(&tag.intensity.range)) * tag.intensity_scale;
+        let color = tag
+            .color
+            .function
+            .evaluate_color(color_input, range(&tag.color.range));
+        let intensity_input = if tag.intensity.input.is_empty() {
+            age
+        } else {
+            object_value(values, &tag.intensity.input)
+        };
+        let mut intensity = tag
+            .intensity
+            .function
+            .evaluate(intensity_input, range(&tag.intensity.range))
+            * tag.intensity_scale;
         let mut tint = [1.0; 3];
         if let Some(channel) = self.change_color {
             tint = change_colors.get(channel).copied().unwrap_or([1.0; 3]);
@@ -269,7 +304,12 @@ impl ReachLight {
                 intensity *= scale;
             }
         }
-        let color = [color.red * tint[0], color.green * tint[1], color.blue * tint[2]].map(|channel| channel * intensity);
+        let color = [
+            color.red * tint[0],
+            color.green * tint[1],
+            color.blue * tint[2],
+        ]
+        .map(|channel| channel * intensity);
         // `light_theoretically_produces_light`.
         if color.iter().all(|channel| *channel <= 0.01) || tag.end <= SMALLEST {
             return None;
@@ -280,7 +320,9 @@ impl ReachLight {
         let [cutoff, ratio] = cone(tag.frustum, tag.field_of_view, tag.hotspot);
         // `light_build_intermediate_geometry`: a frustum's apex sits behind it.
         let behind = if tag.frustum {
-            let wide = tag.field_of_view.clamp(0.005_555_6, std::f32::consts::PI - 0.005_555_6);
+            let wide = tag
+                .field_of_view
+                .clamp(0.005_555_6, std::f32::consts::PI - 0.005_555_6);
             (tag.near_width.max(SMALLEST) / (wide * 0.5).tan()) * 0.5
         } else {
             0.0
@@ -288,7 +330,9 @@ impl ReachLight {
         let origin = std::array::from_fn(|axis| position[axis] - forward[axis] * behind);
         let rotation = if tag.frustum {
             let cot = 1.0 / (tag.field_of_view * 0.5).tan();
-            let row = |side: [f32; 3], by: f32| std::array::from_fn(|axis| 0.5 * (forward[axis] - side[axis] * by));
+            let row = |side: [f32; 3], by: f32| {
+                std::array::from_fn(|axis| 0.5 * (forward[axis] - side[axis] * by))
+            };
             [row(up, cot / tag.height_scale), row(left, cot), forward]
         } else {
             [up, left, forward]
@@ -304,7 +348,12 @@ impl ReachLight {
             up,
             color,
             falloff_power: tag.falloff_speed,
-            attenuation: [tag.end + behind, 1.0 / (tag.end - tag.start).max(SMALLEST), cutoff, ratio],
+            attenuation: [
+                tag.end + behind,
+                1.0 / (tag.end - tag.start).max(SMALLEST),
+                cutoff,
+                ratio,
+            ],
             rotation,
             range: [tag.end, tag.start],
             cheap: false,
@@ -315,17 +364,27 @@ impl ReachLight {
 
 impl CheapLight {
     pub(crate) fn inputs(&self) -> impl Iterator<Item = &str> {
-        [&self.scale_by, &self.secondary_by].into_iter().map(String::as_str)
+        [&self.scale_by, &self.secondary_by]
+            .into_iter()
+            .map(String::as_str)
     }
 
     pub(crate) fn animates(&self) -> bool {
-        [&self.color, &self.intensity, &self.radius].iter().any(|function| function.as_constant().is_none())
+        [&self.color, &self.intensity, &self.radius]
+            .iter()
+            .any(|function| function.as_constant().is_none())
     }
 
     /// `render_object_attachments`' cheap light this frame. Its functions run
     /// on render time, not the object's; the attachment's scale only decides
     /// whether it draws.
-    pub(crate) fn lit(&self, values: Option<&FunctionValues>, change_colors: &[[f32; 3]; 4], bones: Option<&[[f32; 4]]>, time: f32) -> Option<ReachLitLight> {
+    pub(crate) fn lit(
+        &self,
+        values: Option<&FunctionValues>,
+        change_colors: &[[f32; 3]; 4],
+        bones: Option<&[[f32; 4]]>,
+        time: f32,
+    ) -> Option<ReachLitLight> {
         let scale = object_value(values, &self.scale_by) * object_value(values, &self.secondary_by);
         if scale <= 0.0 {
             return None;
@@ -333,8 +392,17 @@ impl CheapLight {
         let color = self.color.evaluate_color(time, 1.0);
         let intensity = self.intensity.evaluate(time, 1.0);
         let radius = self.radius.evaluate(time, 1.0);
-        let tint = self.change_color.and_then(|channel| change_colors.get(channel)).copied().unwrap_or([1.0; 3]);
-        let color = [color.red * tint[0], color.green * tint[1], color.blue * tint[2]].map(|channel| channel * intensity);
+        let tint = self
+            .change_color
+            .and_then(|channel| change_colors.get(channel))
+            .copied()
+            .unwrap_or([1.0; 3]);
+        let color = [
+            color.red * tint[0],
+            color.green * tint[1],
+            color.blue * tint[2],
+        ]
+        .map(|channel| channel * intensity);
         // `add_cheap_screenspace_light_to_draw_list`.
         if color.iter().all(|channel| *channel <= 0.0) || radius <= SMALLEST {
             return None;
@@ -396,9 +464,20 @@ pub(crate) fn read_reach_lights(
     let light_group = u32::from_be_bytes(*b"ligh");
     let cheap_group = u32::from_be_bytes(*b"gldf");
     for attachment in object_attachments(object, &[light_group, cheap_group]) {
-        let ObjectAttachment { group, path, marker: name, scale_by, secondary_by, change_color, force_on } = attachment;
+        let ObjectAttachment {
+            group,
+            path,
+            marker: name,
+            scale_by,
+            secondary_by,
+            change_color,
+            force_on,
+        } = attachment;
         if group == light_group {
-            let Some(tag) = read_light_tag(reader, &path).filter(|tag| !tag.first_person_only).map(Arc::new) else {
+            let Some(tag) = read_light_tag(reader, &path)
+                .filter(|tag| !tag.first_person_only)
+                .map(Arc::new)
+            else {
                 continue;
             };
             for marker in part_markers(markers, &name, false) {
@@ -438,7 +517,11 @@ pub(crate) fn read_reach_lights(
 fn read_cheap_light(reader: &TagReader, path: &str) -> Option<CheapLight> {
     let tag = reader.load(path, "cheap_light", b"gldf").ok()?;
     let root = tag.root();
-    let function = |name: &str| root.descend(name).and_then(|holder| tag_function_at(&holder, "Mapping")).map(Arc::new);
+    let function = |name: &str| {
+        root.descend(name)
+            .and_then(|holder| tag_function_at(&holder, "Mapping"))
+            .map(Arc::new)
+    };
     Some(CheapLight {
         object: 0,
         node: 0,

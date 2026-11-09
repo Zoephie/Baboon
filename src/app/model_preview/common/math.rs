@@ -12,7 +12,11 @@ pub(in crate::app::model_preview) fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
 }
 
 pub(in crate::app::model_preview) fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 pub(in crate::app::model_preview) fn plus(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
@@ -38,20 +42,32 @@ pub(in crate::app::model_preview) fn lerp(a: f32, b: f32, t: f32) -> f32 {
 /// Divided by its length, or as it is when it has none.
 pub(in crate::app::model_preview) fn unit_or_unchanged(a: [f32; 3]) -> [f32; 3] {
     let length = length(a);
-    if length > 0.0 { a.map(|axis| axis / length) } else { a }
+    if length > 0.0 {
+        a.map(|axis| axis / length)
+    } else {
+        a
+    }
 }
 
 /// As it is under a length of 1e-6, else divided by its length. Unlike
 /// [`unit_or_unchanged`], a NaN length divides.
 pub(in crate::app::model_preview) fn unit_unless_under_micro(a: [f32; 3]) -> [f32; 3] {
     let length = length(a);
-    if length < 1e-6 { a } else { a.map(|axis| axis / length) }
+    if length < 1e-6 {
+        a
+    } else {
+        a.map(|axis| axis / length)
+    }
 }
 
 /// Times the reciprocal of its length from 1e-4 on, or as it is below.
 pub(in crate::app::model_preview) fn unit_by_reciprocal(a: [f32; 3]) -> [f32; 3] {
     let length = length(a);
-    if length >= 0.0001 { scaled(a, 1.0 / length) } else { a }
+    if length >= 0.0001 {
+        scaled(a, 1.0 / length)
+    } else {
+        a
+    }
 }
 
 /// Divided by its length from 1e-4 on, or none below.
@@ -75,7 +91,11 @@ pub(in crate::app::model_preview) fn clamped_unit(a: [f32; 3]) -> [f32; 3] {
 /// Divided by its length above 1e-4, or straight up below.
 pub(in crate::app::model_preview) fn unit_or_up(a: [f32; 3]) -> [f32; 3] {
     let length = length(a);
-    if length > 0.0001 { a.map(|axis| axis / length) } else { [0.0, 0.0, 1.0] }
+    if length > 0.0001 {
+        a.map(|axis| axis / length)
+    } else {
+        [0.0, 0.0, 1.0]
+    }
 }
 
 pub(in crate::app::model_preview) const IDENTITY: Matrix4 = Matrix4 {
@@ -91,7 +111,11 @@ pub(in crate::app::model_preview) const IDENTITY: Matrix4 = Matrix4 {
 pub(in crate::app::model_preview) fn perpendicular(a: [f32; 3]) -> [f32; 3] {
     let [x, y, z] = a.map(f32::abs);
     if x > y || x > z {
-        if y > z { [a[1], -a[0], 0.0] } else { [-a[2], 0.0, a[0]] }
+        if y > z {
+            [a[1], -a[0], 0.0]
+        } else {
+            [-a[2], 0.0, a[0]]
+        }
     } else {
         [0.0, a[2], -a[1]]
     }
@@ -156,15 +180,25 @@ mod tests {
         let divided = LONG.map(|axis| axis / 13.0);
         assert_eq!(bits(unit_or_unchanged(ZERO)), bits(ZERO));
         assert_eq!(bits(unit_or_unchanged(TINY)), bits([1.0, 0.0, 0.0]));
-        assert_eq!(bits(unit_or_unchanged(NAN)), bits(NAN), "a NaN length leaves it as it is");
+        assert_eq!(
+            bits(unit_or_unchanged(NAN)),
+            bits(NAN),
+            "a NaN length leaves it as it is"
+        );
         assert_eq!(bits(unit_or_unchanged(LONG)), bits(divided));
 
         assert_eq!(bits(unit_unless_under_micro(TINY)), bits(TINY));
-        assert!(unit_unless_under_micro(NAN)[1].is_nan(), "a NaN length divides, NaN everywhere");
+        assert!(
+            unit_unless_under_micro(NAN)[1].is_nan(),
+            "a NaN length divides, NaN everywhere"
+        );
         assert_eq!(bits(unit_unless_under_micro(SHORT)), bits([1.0, 0.0, 0.0]));
 
         assert_eq!(bits(unit_by_reciprocal(SHORT)), bits(SHORT));
-        assert_eq!(bits(unit_by_reciprocal(LONG)), bits(scaled(LONG, 1.0 / 13.0)));
+        assert_eq!(
+            bits(unit_by_reciprocal(LONG)),
+            bits(scaled(LONG, 1.0 / 13.0))
+        );
 
         assert_eq!(checked_unit(SHORT), None);
         assert_eq!(bits_of(checked_unit(LONG)), Some(bits(divided)));
@@ -187,12 +221,21 @@ mod tests {
     /// Rules that look alike give different bits, which is why they are kept.
     #[test]
     fn rules_that_look_alike_disagree() {
-        assert_ne!(bits(unit_or_unchanged(SHORT)), bits(unit_by_reciprocal(SHORT)));
-        assert_ne!(bits(unit_or_unchanged(TINY)), bits(unit_unless_under_micro(TINY)));
+        assert_ne!(
+            bits(unit_or_unchanged(SHORT)),
+            bits(unit_by_reciprocal(SHORT))
+        );
+        assert_ne!(
+            bits(unit_or_unchanged(TINY)),
+            bits(unit_unless_under_micro(TINY))
+        );
         assert_ne!(bits(clamped_unit(TINY)), bits(unit_or_unchanged(TINY)));
         assert_ne!(bits(unit_or_up(SHORT)), bits(unit_or_unchanged(SHORT)));
         // Dividing and multiplying by the reciprocal part in the last bit.
         let skew = [0.1, 0.7, 0.3];
-        assert_ne!(bits(unit_or_unchanged(skew)), bits(unit_by_reciprocal(skew)));
+        assert_ne!(
+            bits(unit_or_unchanged(skew)),
+            bits(unit_by_reciprocal(skew))
+        );
     }
 }

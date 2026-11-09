@@ -16,7 +16,10 @@ pub(in crate::app::model_preview) trait Attached: Sized {
 
 /// `only_under`'s region as `merge_attached` renames the regions of what
 /// `name` brings.
-pub(in crate::app::model_preview) fn rename_region(only_under: &mut Option<(String, String)>, name: &str) {
+pub(in crate::app::model_preview) fn rename_region(
+    only_under: &mut Option<(String, String)>,
+    name: &str,
+) {
     if let Some((region, _)) = only_under {
         *region = format!("{name}: {region}");
     }
@@ -43,7 +46,9 @@ pub(in crate::app::model_preview) fn object_attachments(
     object: &blam_tags::TagFile,
     groups: &[u32],
 ) -> Vec<ObjectAttachment> {
-    use crate::app::model_preview::common::fields::{elements, function_slot_of, has_flag, object_block};
+    use crate::app::model_preview::common::fields::{
+        elements, function_slot_of, has_flag, object_block,
+    };
     use crate::app::model_preview::effects::marker_name;
     let Some(block) = object_block(object, "attachments") else {
         return Vec::new();
@@ -59,9 +64,17 @@ pub(in crate::app::model_preview) fn object_attachments(
             Some(ObjectAttachment {
                 group,
                 path,
-                marker: if marker.is_empty() { "root".to_owned() } else { marker },
-                scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
-                secondary_by: attachment.read_string_id("secondary scale").unwrap_or_default(),
+                marker: if marker.is_empty() {
+                    "root".to_owned()
+                } else {
+                    marker
+                },
+                scale_by: attachment
+                    .read_string_id("primary scale")
+                    .unwrap_or_default(),
+                secondary_by: attachment
+                    .read_string_id("secondary scale")
+                    .unwrap_or_default(),
                 change_color: function_slot_of(attachment, "change color"),
                 force_on: has_flag(attachment, "flags", "force always on"),
             })

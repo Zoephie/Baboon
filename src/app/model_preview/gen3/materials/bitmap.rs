@@ -33,18 +33,19 @@ fn gen3_stored_mips(tag: &TagFile, index: usize, image: &Image) -> Option<Vec<Im
     match image {
         Image::Flat(top) if top.width == width as usize && top.height == height as usize => levels
             .map(|level| {
-                let data = crate::app::editor::build_bitmap_preview(tag, index, level as usize).ok()?;
+                let data =
+                    crate::app::editor::build_bitmap_preview(tag, index, level as usize).ok()?;
                 let (width, height) = (side(width, level), side(height, level));
-                (data.width as usize == width && data.height as usize == height).then_some(Image::Flat(
-                    TextureImage {
+                (data.width as usize == width && data.height as usize == height).then_some(
+                    Image::Flat(TextureImage {
                         rgba: data.rgba,
                         width,
                         height,
                         repeat_x: top.repeat_x,
                         repeat_y: top.repeat_y,
                         scale: top.scale,
-                    },
-                ))
+                    }),
+                )
             })
             .collect(),
         Image::Cube { size, .. } if *size == width as usize => {
@@ -55,7 +56,14 @@ fn gen3_stored_mips(tag: &TagFile, index: usize, image: &Image) -> Option<Vec<Im
                     let face = |face: u32| {
                         let data = stored.cube_face_level_bytes(level, face).ok()?;
                         let palette = bitmap.p8_palette();
-                        blam_tags::bitmap::decode::decode_to_rgba8(format, edge as u32, edge as u32, data, palette).ok()
+                        blam_tags::bitmap::decode::decode_to_rgba8(
+                            format,
+                            edge as u32,
+                            edge as u32,
+                            data,
+                            palette,
+                        )
+                        .ok()
                     };
                     let faces = [face(0)?, face(1)?, face(2)?, face(3)?, face(4)?, face(5)?];
                     Some(Image::Cube { size: edge, faces })
@@ -71,7 +79,10 @@ fn gen3_stored_mips(tag: &TagFile, index: usize, image: &Image) -> Option<Vec<Im
 /// which reads black with its alpha. Reach's `color_black` change-color map is
 /// one, and two_change_color reads its red and green.
 fn alpha_only(image: &mut Image) {
-    let blacken = |rgba: &mut Vec<u8>| rgba.chunks_exact_mut(4).for_each(|texel| texel[..3].fill(0));
+    let blacken = |rgba: &mut Vec<u8>| {
+        rgba.chunks_exact_mut(4)
+            .for_each(|texel| texel[..3].fill(0))
+    };
     match image {
         Image::Flat(flat) => blacken(&mut flat.rgba),
         Image::Cube { faces, .. } => faces.iter_mut().for_each(blacken),
@@ -95,19 +106,32 @@ fn red_only(image: &mut Image) {
     }
 }
 
-pub(in crate::app::model_preview) fn read_h3_bitmap(reader: &TagReader, path: &str, index: i16, kind: SamplerKind) -> Option<Gen3Bitmap> {
+pub(in crate::app::model_preview) fn read_h3_bitmap(
+    reader: &TagReader,
+    path: &str,
+    index: i16,
+    kind: SamplerKind,
+) -> Option<Gen3Bitmap> {
     let tag = reader.load(path, "bitmap", b"bitm").ok();
     // `render_method_submit`: an index past the last image takes the last.
-    let images = tag.as_ref().map_or(1, |tag| elements(tag.root(), "bitmaps*").len());
+    let images = tag
+        .as_ref()
+        .map_or(1, |tag| elements(tag.root(), "bitmaps*").len());
     let index = (index.max(0) as usize).min(images.saturating_sub(1)) as i16;
     let image = decode_image(reader, path, kind, index as usize);
     image.map(|mut image| {
         // `c_rasterizer_texture_ref::allocate`: xRGB and sRGB curves.
         let curve = tag.as_ref().and_then(|tag| {
-            elements(tag.root(), "bitmaps*").get(index.max(0) as usize)?.read_int_any("curve")
+            elements(tag.root(), "bitmaps*")
+                .get(index.max(0) as usize)?
+                .read_int_any("curve")
         });
         let format = tag.as_ref().and_then(|tag| {
-            blam_tags::bitmap::Bitmap::new(tag).ok()?.image(index.max(0) as usize)?.format().ok()
+            blam_tags::bitmap::Bitmap::new(tag)
+                .ok()?
+                .image(index.max(0) as usize)?
+                .format()
+                .ok()
         });
         let halo4 = reader.source.game() == Some(crate::core::game::GameId::Halo4);
         let texels = format.map_or(ImageTexels::Linear, |format| {
@@ -121,14 +145,26 @@ pub(in crate::app::model_preview) fn read_h3_bitmap(reader: &TagReader, path: &s
             };
             ImageTexels::of(format, srgb)
         });
-        let mut mips = tag.as_ref().and_then(|tag| gen3_stored_mips(tag, index.max(0) as usize, &image)).unwrap_or_default();
+        let mut mips = tag
+            .as_ref()
+            .and_then(|tag| gen3_stored_mips(tag, index.max(0) as usize, &image))
+            .unwrap_or_default();
         if format == Some(blam_tags::bitmap::BitmapFormat::A8) {
-            std::iter::once(&mut image).chain(&mut mips).for_each(alpha_only);
+            std::iter::once(&mut image)
+                .chain(&mut mips)
+                .for_each(alpha_only);
         }
         // Halo 4 uploads `y8` and `ay8` as R8_UNORM (`halo4_tag_test`
         // 0x141B7E080), and DirectX 11 views have no swizzle.
-        if halo4 && matches!(format, Some(blam_tags::bitmap::BitmapFormat::Y8 | blam_tags::bitmap::BitmapFormat::Ay8)) {
-            std::iter::once(&mut image).chain(&mut mips).for_each(red_only);
+        if halo4
+            && matches!(
+                format,
+                Some(blam_tags::bitmap::BitmapFormat::Y8 | blam_tags::bitmap::BitmapFormat::Ay8)
+            )
+        {
+            std::iter::once(&mut image)
+                .chain(&mut mips)
+                .for_each(red_only);
         }
         (Arc::new(image), texels, Arc::new(mips))
     })

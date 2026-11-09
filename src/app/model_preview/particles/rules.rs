@@ -50,10 +50,12 @@ pub(in crate::app::model_preview) type SystemParts = (Arc<ParticleLook>, Vec<Arc
 pub(in crate::app::model_preview) struct OwnParticleSystem {
     /// The system's look and emitters, from the system and its particle's
     /// path.
-    pub(in crate::app::model_preview) read: fn(&TagReader, TagStruct<'_>, &str) -> Option<SystemParts>,
+    pub(in crate::app::model_preview) read:
+        fn(&TagReader, TagStruct<'_>, &str) -> Option<SystemParts>,
     /// The postprocess' LOD: the raw four, whether it ignores the camera
     /// mode, and the emitters' rates.
-    pub(in crate::app::model_preview) baked_lod: fn([f32; 4], bool, &mut dyn Iterator<Item = f32>) -> [f32; 4],
+    pub(in crate::app::model_preview) baked_lod:
+        fn([f32; 4], bool, &mut dyn Iterator<Item = f32>) -> [f32; 4],
 }
 
 /// `global_gravity_get`, in world units a second squared.
@@ -71,7 +73,11 @@ pub(super) const SYSTEM_SEEDS: usize = 4;
 /// from how fast it emits. Out and its feather default to 20 and 5 in both
 /// MCC tools (Halo 3 0x1407E4A30, ODST 0x140828DE0); the tag's "defaults to
 /// 30.0 / 10.0" is Halo 2's text, carried over.
-pub(super) fn baked_lod(raw: [f32; 4], any_camera: bool, rates: impl Iterator<Item = f32>) -> [f32; 4] {
+pub(super) fn baked_lod(
+    raw: [f32; 4],
+    any_camera: bool,
+    rates: impl Iterator<Item = f32>,
+) -> [f32; 4] {
     let empty = |value: f32| value.abs() < 0.0001;
     let [mut near, mut far, mut feather_in, mut feather_out] = raw;
     if empty(far) {
@@ -104,14 +110,24 @@ pub(super) const POSTPROCESS_EPSILON: f32 = 0.0001;
 /// raw one, and only multiplies by the inverse it bakes.
 pub(super) fn reach_baked_lod(raw: [f32; 4]) -> [f32; 4] {
     let [near, far, feather_in, feather_out] = raw;
-    let or = |value: f32, default: f32| if value.abs() < POSTPROCESS_EPSILON { default } else { value };
+    let or = |value: f32, default: f32| {
+        if value.abs() < POSTPROCESS_EPSILON {
+            default
+        } else {
+            value
+        }
+    };
     [near, or(far, 20.0), feather_in, or(feather_out, 5.0)]
 }
 
 /// `1 / near fade range`, as it comes out on the card. Reach's postprocess
 /// takes it of `max(range, ε)`, so a range of nothing fades over a hair.
 pub(super) fn near_fade_range(clamped: bool, range: f32) -> f32 {
-    if clamped { range.max(POSTPROCESS_EPSILON).recip() } else { range.recip() }
+    if clamped {
+        range.max(POSTPROCESS_EPSILON).recip()
+    } else {
+        range.recip()
+    }
 }
 
 /// Where MCC's Reach particle clock comes round, in seconds.
@@ -169,7 +185,8 @@ pub(super) fn particle_update(
     any_attachments: bool,
     movement_flagged: impl Fn(&str) -> bool,
 ) -> (ParticleUpdate, bool) {
-    let plain_movement = !(collides(&movement_flagged) || movement_flagged("swarm") || movement_flagged("wind"));
+    let plain_movement =
+        !(collides(&movement_flagged) || movement_flagged("swarm") || movement_flagged("wind"));
     if system_flagged("force cpu updating") {
         (ParticleUpdate::Cpu, false)
     } else if system_flagged("force gpu updating") {
@@ -233,7 +250,8 @@ pub(super) fn movement_parameter_or(
     default: f32,
     seeds: &mut SeedAllocator,
 ) -> Option<ParticleProperty> {
-    chained_parameter(reader, movement, kind, id, seeds, MOST_TEMPLATES).or_else(|| ParticleProperty::fixed(default))
+    chained_parameter(reader, movement, kind, id, seeds, MOST_TEMPLATES)
+        .or_else(|| ParticleProperty::fixed(default))
 }
 
 /// How deep a template chain is followed, against one that names itself.
@@ -249,11 +267,18 @@ fn chained_parameter(
 ) -> Option<ParticleProperty> {
     let of_kind = |entry: &TagStruct<'_>| entry.read_enum_option("type").as_deref() == Some(kind);
     let entry = elements(holder, "movements").into_iter().find(of_kind);
-    let parameters = entry.map(|entry| elements(entry, "parameters")).unwrap_or_default();
-    if let Some(found) = parameters.into_iter().find(|parameter| parameter.read_int_any("parameter id") == Some(id)) {
+    let parameters = entry
+        .map(|entry| elements(entry, "parameters"))
+        .unwrap_or_default();
+    if let Some(found) = parameters
+        .into_iter()
+        .find(|parameter| parameter.read_int_any("parameter id") == Some(id))
+    {
         return ParticleProperty::named(found, "property", seeds);
     }
-    let path = holder.read_tag_ref_path("template").filter(|path| !path.is_empty() && depth > 0)?;
+    let path = holder
+        .read_tag_ref_path("template")
+        .filter(|path| !path.is_empty() && depth > 0)?;
     let template = reader.load(&path, "particle_physics", b"pmov").ok()?;
     chained_parameter(reader, template.root(), kind, id, seeds, depth - 1)
 }
@@ -263,7 +288,11 @@ fn chained_parameter(
 /// vertically` (`c_particle_definition::initialize_particle`, the 360's
 /// 0x82AFA548; `particles.md` §1.3). Halo 4's shaders never read that flag,
 /// so this is its only quarter turn; Halo 3 and Reach turn at the draw instead.
-pub(super) fn starting_rotation(random_rotation: bool, halo4_vertical: bool, random: impl FnOnce() -> f32) -> f32 {
+pub(super) fn starting_rotation(
+    random_rotation: bool,
+    halo4_vertical: bool,
+    random: impl FnOnce() -> f32,
+) -> f32 {
     if random_rotation {
         random()
     } else if halo4_vertical {
@@ -279,5 +308,9 @@ pub(super) fn starting_rotation(random_rotation: bool, halo4_vertical: bool, ran
 pub(super) fn still_particles_move(game: Option<GameId>, billboard: Billboard) -> bool {
     use Billboard::{ScreenParallel, ScreenPerpendicular, VelocityHorizontal};
     let only_facing = matches!(game, Some(GameId::Halo3Odst | GameId::HaloReach));
-    !only_facing || matches!(billboard, ScreenParallel | ScreenPerpendicular | VelocityHorizontal)
+    !only_facing
+        || matches!(
+            billboard,
+            ScreenParallel | ScreenPerpendicular | VelocityHorizontal
+        )
 }

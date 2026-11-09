@@ -15,8 +15,11 @@ use crate::core::game::GameId;
 /// to a held weapon's.
 #[test]
 fn a_models_overlay_passes_stay_on_its_own_object() {
-    let material = |object, overlay, shield| {
-        RenderModelPreviewMaterial { object, overlay, shield, ..Default::default() }
+    let material = |object, overlay, shield| RenderModelPreviewMaterial {
+        object,
+        overlay,
+        shield,
+        ..Default::default()
     };
     let materials = [
         material(0, false, None),
@@ -31,7 +34,10 @@ fn a_models_overlay_passes_stay_on_its_own_object() {
     share_object_layers(&materials, &mut textures);
     let has = |index: usize, layer: Dx9Layer| !textures[index].h2_layers[layer as usize].is_empty();
     for layer in [Dx9Layer::Hologram, Dx9Layer::ShieldDamaged] {
-        assert!(has(0, layer) && has(1, layer) && has(2, layer), "{layer:?} on the model");
+        assert!(
+            has(0, layer) && has(1, layer) && has(2, layer),
+            "{layer:?} on the model"
+        );
         assert!(!has(3, layer), "{layer:?} on the weapon");
     }
 }
@@ -65,7 +71,8 @@ fn model_materials(source: &TagSource, rel: &str) -> Option<Vec<RenderModelPrevi
             .map(|material| RenderModelPreviewMaterial {
                 shader_path: material.render_method.clone(),
                 shader_group: material.render_method_group,
-                overlay: false, shield: None,
+                overlay: false,
+                shield: None,
                 permutation: 0,
                 object: 0,
             })
@@ -226,7 +233,8 @@ fn a_material_with_no_shader_reports_why() {
         &[RenderModelPreviewMaterial {
             shader_path: String::new(),
             shader_group: 0,
-            overlay: false, shield: None,
+            overlay: false,
+            shield: None,
             permutation: 0,
             object: 0,
         }],
@@ -291,7 +299,8 @@ fn detail_tiling_comes_from_the_shaders_animator() {
         &[RenderModelPreviewMaterial {
             shader_path: r"objects\characters\dervish\shaders\dervish_armor".to_owned(),
             shader_group: u32::from_be_bytes(*b"rmsh"),
-            overlay: false, shield: None,
+            overlay: false,
+            shield: None,
             permutation: 0,
             object: 0,
         }],
@@ -314,9 +323,12 @@ fn detail_tiling_comes_from_the_shaders_animator() {
     }
     // The base map is not a detail map and must not inherit its tiling.
     let base = material.get(TextureSlot::Base).expect("a base map");
-    assert!(base.scale.iter().all(|scale| (scale - 1.0).abs() < 0.01), "base scale {:?}", base.scale);
+    assert!(
+        base.scale.iter().all(|scale| (scale - 1.0).abs() < 0.01),
+        "base scale {:?}",
+        base.scale
+    );
 }
-
 
 /// One classic shader, resolved the way the preview resolves a material.
 fn resolve_classic(source: &TagSource, path: &str, group: &[u8; 4]) -> MaterialTextures {
@@ -325,7 +337,8 @@ fn resolve_classic(source: &TagSource, path: &str, group: &[u8; 4]) -> MaterialT
         &[RenderModelPreviewMaterial {
             shader_path: path.to_owned(),
             shader_group: u32::from_be_bytes(*group),
-            overlay: false, shield: None,
+            overlay: false,
+            shield: None,
             permutation: 0,
             object: 0,
         }],
@@ -338,14 +351,20 @@ fn resolve_classic(source: &TagSource, path: &str, group: &[u8; 4]) -> MaterialT
 /// ignored the flag fails one of them.
 #[test]
 fn halo_ce_shaders_resolve_as_the_engine_composes_them() {
-    let Some(tags) = kit_root(GameId::HaloCe) else { return };
+    let Some(tags) = kit_root(GameId::HaloCe) else {
+        return;
+    };
     let source = loose_source(tags, "haloce_mcc");
 
     // The cyborg's armor: every map, its detail masked by the reflection
     // channel in Xbox order, tiled ten times, alpha tested on the base.
     let armor = resolve_classic(&source, r"characters\cyborg\shaders\armor", b"soso");
     assert_eq!(armor.error, None);
-    for slot in [TextureSlot::Base, TextureSlot::Detail, TextureSlot::Multipurpose] {
+    for slot in [
+        TextureSlot::Base,
+        TextureSlot::Detail,
+        TextureSlot::Multipurpose,
+    ] {
         assert!(armor.get(slot).is_some(), "armor lacks {slot:?}");
     }
     assert_eq!(
@@ -358,13 +377,19 @@ fn halo_ce_shaders_resolve_as_the_engine_composes_them() {
     );
     // `detail map v scale` ships 0, which can only mean 1.
     assert_eq!(armor.get(TextureSlot::Detail).unwrap().scale, [10.0, 10.0]);
-    assert!(armor.get(TextureSlot::AlphaTest).is_some(), "armor is alpha tested");
+    assert!(
+        armor.get(TextureSlot::AlphaTest).is_some(),
+        "armor is alpha tested"
+    );
     assert!(armor.get(TextureSlot::Bump).is_none());
 
     // `not alpha tested`: the same resolver must leave the alpha slot empty.
     let metal = resolve_classic(&source, r"scenery\c_metalwide\shaders\c_metal", b"soso");
     assert!(metal.get(TextureSlot::Base).is_some());
-    assert!(metal.get(TextureSlot::AlphaTest).is_none(), "c_metal is not alpha tested");
+    assert!(
+        metal.get(TextureSlot::AlphaTest).is_none(),
+        "c_metal is not alpha tested"
+    );
 
     // An alpha-tested environment shader tests on its bump map's alpha, and
     // never shades the bump: on a model, CE bump is lightmap-only.
@@ -379,11 +404,7 @@ fn halo_ce_shaders_resolve_as_the_engine_composes_them() {
     assert_eq!(teleporter.detail.mask, 0);
 
     // A chicago shader draws through its pass, not through the slots.
-    let shield = resolve_classic(
-        &source,
-        r"characters\cyborg\shaders\light shield",
-        b"schi",
-    );
+    let shield = resolve_classic(&source, r"characters\cyborg\shaders\light shield", b"schi");
     assert!(shield.error.is_none());
     assert!(shield.slots.iter().all(Option::is_none));
     assert_eq!(shield.h2_layers[Dx9Layer::Transparent as usize].len(), 1);
@@ -399,13 +420,16 @@ fn halo_ce_shaders_resolve_as_the_engine_composes_them() {
 /// in both drawing paths, and past the last one wraps.
 #[test]
 fn a_halo_ce_permutation_picks_the_image_and_wraps() {
-    let Some(source) = kit_source(GameId::HaloCe) else { return };
+    let Some(source) = kit_source(GameId::HaloCe) else {
+        return;
+    };
     let path = r"characters\grunt\shaders\grunt torso";
     let resolve = |permutation| {
         let material = RenderModelPreviewMaterial {
             shader_path: path.to_owned(),
             shader_group: u32::from_be_bytes(*b"soso"),
-            overlay: false, shield: None,
+            overlay: false,
+            shield: None,
             permutation,
             object: 0,
         };
@@ -417,11 +441,14 @@ fn a_halo_ce_permutation_picks_the_image_and_wraps() {
     let count = blam_tags::bitmap::Bitmap::new(&tag).unwrap().len();
     assert!(count > 1, "{base} holds {count}");
     let slot = |textures: &MaterialTextures| {
-        textures.get(TextureSlot::Base).map(|image| image.rgba.clone()).unwrap()
+        textures
+            .get(TextureSlot::Base)
+            .map(|image| image.rgba.clone())
+            .unwrap()
     };
-    let pass = |textures: &MaterialTextures| match textures.h2_layers
-        [Dx9Layer::Lightmap as usize][0]
-        .textures[0]
+    let pass = |textures: &MaterialTextures| match textures.h2_layers[Dx9Layer::Lightmap as usize]
+        [0]
+    .textures[0]
         .image
         .as_deref()
     {
@@ -438,22 +465,34 @@ fn a_halo_ce_permutation_picks_the_image_and_wraps() {
 /// Halo 2, against `BLAM_TEST_H2EK` (the kit's `tags`).
 #[test]
 fn halo_2_shaders_resolve_parameters_over_template_defaults() {
-    let Some(tags) = kit_root(GameId::Halo2) else { return };
+    let Some(tags) = kit_root(GameId::Halo2) else {
+        return;
+    };
     let source = loose_source(tags, "halo2_mcc");
 
     // The chief authors his maps, and his detail tiling as a `bitmap scale
     // x`/`y` pair of 9 with no uniform; reading only the uniform fell back to
     // the template's 16.
-    let chief = resolve_classic(&source, r"objects\characters\masterchief\shaders\masterchief", b"shad");
+    let chief = resolve_classic(
+        &source,
+        r"objects\characters\masterchief\shaders\masterchief",
+        b"shad",
+    );
     assert_eq!(chief.error, None);
-    assert!(!chief.used_shader_parameters_only, "the template should load");
+    assert!(
+        !chief.used_shader_parameters_only,
+        "the template should load"
+    );
     for slot in [TextureSlot::Base, TextureSlot::Detail, TextureSlot::Bump] {
         assert!(chief.get(slot).is_some(), "masterchief lacks {slot:?}");
     }
     assert_eq!(chief.get(TextureSlot::Detail).unwrap().scale, [9.0, 9.0]);
     assert_eq!(chief.get(TextureSlot::Base).unwrap().scale, [1.0, 1.0]);
     assert_eq!(chief.detail.function, DetailFunction::BiasedMultiply);
-    assert!(chief.get(TextureSlot::AlphaTest).is_none(), "tex_bump does not alpha test");
+    assert!(
+        chief.get(TextureSlot::AlphaTest).is_none(),
+        "tex_bump does not alpha test"
+    );
 
     // brute_shoulder_armor names no detail_map at all: its template supplies
     // both the bitmap (`default_detail`) and the tiling (16).
@@ -462,12 +501,25 @@ fn halo_2_shaders_resolve_parameters_over_template_defaults() {
         r"objects\characters\brute\shaders\brute_shoulder_armor",
         b"shad",
     );
-    assert_eq!(shoulder.get(TextureSlot::Detail).expect("template default detail").scale, [16.0, 16.0]);
+    assert_eq!(
+        shoulder
+            .get(TextureSlot::Detail)
+            .expect("template default detail")
+            .scale,
+        [16.0, 16.0]
+    );
 
     // A base-alpha alpha-test template with no alpha_test_map cuts out on the
     // base map.
-    let shotgun = resolve_classic(&source, r"objects\weapons\rifle\shotgun\shaders\shotgun_primary", b"shad");
-    assert!(shotgun.get(TextureSlot::AlphaTest).is_some(), "shotgun_primary alpha tests");
+    let shotgun = resolve_classic(
+        &source,
+        r"objects\weapons\rifle\shotgun\shaders\shotgun_primary",
+        b"shad",
+    );
+    assert!(
+        shotgun.get(TextureSlot::AlphaTest).is_some(),
+        "shotgun_primary alpha tests"
+    );
 }
 
 /// Passes draw a material with no slots only while Game Shaders are on.
@@ -483,7 +535,10 @@ fn a_material_of_passes_alone_is_bare_only_without_game_shaders() {
     }];
     assert_eq!(texture_resolve_note(&textures, &materials, true), None);
     let (summary, detail) = texture_resolve_note(&textures, &materials, false).unwrap();
-    assert!(summary.starts_with("1 of 1 materials untextured"), "{summary}");
+    assert!(
+        summary.starts_with("1 of 1 materials untextured"),
+        "{summary}"
+    );
     assert!(detail.contains("shaders/emblem: no maps"), "{detail}");
 }
 
@@ -519,7 +574,10 @@ fn untextured_materials_say_why() {
     assert!(detail.contains("shaders/a: shader tag not found"));
     assert!(detail.contains("shaders/b"));
     assert!(!detail.contains("shaders/c"));
-    assert_eq!(texture_resolve_note(&textures[2..], &materials[2..], true), None);
+    assert_eq!(
+        texture_resolve_note(&textures[2..], &materials[2..], true),
+        None
+    );
 }
 
 /// With `BLAM_TEST_H2EK`: `+X`'s top row is `+Y`'s right column reversed,
@@ -527,10 +585,16 @@ fn untextured_materials_say_why() {
 /// `+X` and `-X`, which share no edge at all.
 #[test]
 fn h2_cube_faces_join_at_their_edges() {
-    let Some(source) = kit_source(GameId::Halo2) else { return };
+    let Some(source) = kit_source(GameId::Halo2) else {
+        return;
+    };
     let path = "objects\\bitmaps\\reflection_maps\\vehicle_glass";
-    let Some(Image::Cube { size, faces }) = decode_image(&crate::app::model_preview::load::TagReader::new(&source), path, SamplerKind::Cube, 0)
-    else {
+    let Some(Image::Cube { size, faces }) = decode_image(
+        &crate::app::model_preview::load::TagReader::new(&source),
+        path,
+        SamplerKind::Cube,
+        0,
+    ) else {
         panic!("{path} should decode as a cube");
     };
     let texel = |face: usize, x: usize, y: usize| -> [u8; 3] {
@@ -556,11 +620,14 @@ fn h2_cube_faces_join_at_their_edges() {
 /// the global one, with its own shader's bump.
 #[test]
 fn every_h2_shader_takes_the_global_active_camo() {
-    let Some(source) = kit_source(GameId::Halo2) else { return };
+    let Some(source) = kit_source(GameId::Halo2) else {
+        return;
+    };
     let material = |path: &str| RenderModelPreviewMaterial {
         shader_path: path.to_owned(),
         shader_group: u32::from_be_bytes(*b"shad"),
-        overlay: false, shield: None,
+        overlay: false,
+        shield: None,
         permutation: 0,
         object: 0,
     };
@@ -576,15 +643,30 @@ fn every_h2_shader_takes_the_global_active_camo() {
         Some(Image::Flat(image)) => image.rgba.clone(),
         other => panic!("the bump should be a flat map: {other:?}"),
     };
-    assert_ne!(bump(&chief), bump(&brute), "each shader brings its own bump");
+    assert_ne!(
+        bump(&chief),
+        bump(&brute),
+        "each shader brings its own bump"
+    );
 }
 
 /// With `BLAM_TEST_H2EK`: a volume's slices all decode.
 #[test]
 fn h2_volumes_decode_every_slice() {
-    let Some(source) = kit_source(GameId::Halo2) else { return };
-    let Some(Image::Volume { width, height, depth, rgba }) =
-        decode_image(&crate::app::model_preview::load::TagReader::new(&source), "rasterizer\\plasma_shield_noise", SamplerKind::Volume, 0)
+    let Some(source) = kit_source(GameId::Halo2) else {
+        return;
+    };
+    let Some(Image::Volume {
+        width,
+        height,
+        depth,
+        rgba,
+    }) = decode_image(
+        &crate::app::model_preview::load::TagReader::new(&source),
+        "rasterizer\\plasma_shield_noise",
+        SamplerKind::Volume,
+        0,
+    )
     else {
         panic!("the plasma noise should decode as a volume");
     };
@@ -599,9 +681,21 @@ fn h2_volumes_decode_every_slice() {
 /// in, not a level's 16384 in as a volume's would.
 #[test]
 fn kit_an_arrays_layers_are_whole_chains_apart() {
-    let Some(source) = kit_source(GameId::HaloReach) else { return };
+    let Some(source) = kit_source(GameId::HaloReach) else {
+        return;
+    };
     let path = "globals\\global_render_texture";
-    let Some(Image::Volume { width, height, depth, rgba }) = decode_image(&crate::app::model_preview::load::TagReader::new(&source), path, SamplerKind::Volume, 0)
+    let Some(Image::Volume {
+        width,
+        height,
+        depth,
+        rgba,
+    }) = decode_image(
+        &crate::app::model_preview::load::TagReader::new(&source),
+        path,
+        SamplerKind::Volume,
+        0,
+    )
     else {
         panic!("the render texture should decode as layers");
     };
@@ -613,11 +707,22 @@ fn kit_an_arrays_layers_are_whole_chains_apart() {
     assert_eq!(pixels.len(), 14 * 21844);
     let decode = |bytes: &[u8]| {
         let format = image.format().unwrap();
-        blam_tags::bitmap::decode::decode_to_rgba8(format, 64, 64, bytes, bitmap.p8_palette()).unwrap()
+        blam_tags::bitmap::decode::decode_to_rgba8(format, 64, 64, bytes, bitmap.p8_palette())
+            .unwrap()
     };
     let second = &rgba[64 * 64 * 4..2 * 64 * 64 * 4];
     assert_eq!(second, decode(&pixels[21844..21844 + 16384]).as_slice());
-    assert_ne!(second, decode(&pixels[16384..2 * 16384]).as_slice(), "a volume's layout reads the first layer's mips");
-    assert_eq!(array_layer_bytes(&image, 1, 1).map(<[u8]>::len), Some(32 * 32 * 4));
-    assert_eq!(array_layer_bytes(&image, 1, 1).map(<[u8]>::as_ptr), Some(pixels[21844 + 16384..].as_ptr()));
+    assert_ne!(
+        second,
+        decode(&pixels[16384..2 * 16384]).as_slice(),
+        "a volume's layout reads the first layer's mips"
+    );
+    assert_eq!(
+        array_layer_bytes(&image, 1, 1).map(<[u8]>::len),
+        Some(32 * 32 * 4)
+    );
+    assert_eq!(
+        array_layer_bytes(&image, 1, 1).map(<[u8]>::as_ptr),
+        Some(pixels[21844 + 16384..].as_ptr())
+    );
 }

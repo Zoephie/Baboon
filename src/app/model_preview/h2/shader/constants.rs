@@ -16,9 +16,12 @@ pub(super) fn extern_value(name: &str, specular_brightness: f32) -> [f32; 4] {
             let luminance = 0.299 * (r + ambient) + 0.587 * (g + ambient) + 0.114 * (b + ambient);
             [luminance.clamp(0.0, 1.0); 4]
         }
-        "LIGHTMAP object specular color" => {
-            [r * specular_brightness, g * specular_brightness, b * specular_brightness, a]
-        }
+        "LIGHTMAP object specular color" => [
+            r * specular_brightness,
+            g * specular_brightness,
+            b * specular_brightness,
+            a,
+        ],
         "LIGHTMAP object specular color times one half" => {
             let half = specular_brightness * 0.5;
             [r * half, g * half, b * half, a]
@@ -72,7 +75,10 @@ pub(super) fn read_custom_channels(implementation: TagStruct<'_>) -> Option<[boo
         return None;
     }
     let state = implementation.descend("channels state[0]");
-    Some(["R", "G", "B", "A"].map(|channel| state.is_some_and(|state| has_flag(state, "flags", channel))))
+    Some(
+        ["R", "G", "B", "A"]
+            .map(|channel| state.is_some_and(|state| has_flag(state, "flags", channel))),
+    )
 }
 
 /// Turn a resolved pass into what the renderer draws. `bitmap` decodes a map
@@ -87,7 +93,10 @@ pub(in crate::app) fn prepare_draw_pass(
 ) -> Result<Dx9DrawPass, String> {
     let stage = Dx9VertexStage::from_path(&pass.vertex_shader)
         .ok_or_else(|| format!("No vertex stage for {}", pass.vertex_shader))?;
-    let options = PixelShaderOptions { cases, alpha_test: pass.alpha_test };
+    let options = PixelShaderOptions {
+        cases,
+        alpha_test: pass.alpha_test,
+    };
     let translated = translate(psh, H2_GLSL_VERSION, &options)?;
     let pixel = pixel_constants(pass, &translated.constants, specular_brightness);
     let textures = draw_textures(pass, &translated.samplers, &mut bitmap);
@@ -101,7 +110,9 @@ pub(in crate::app) fn prepare_draw_pass(
         cull: Dx9Cull::Frame,
         hidden_by_camo: false,
         numeric: None,
-        channels: pass.custom_channels.unwrap_or_else(|| channel_mask(&pass.channels)),
+        channels: pass
+            .custom_channels
+            .unwrap_or_else(|| channel_mask(&pass.channels)),
         textures,
         constants: pixel.constants,
         texture_rows: vertex.texture_rows,
@@ -123,7 +134,10 @@ pub(in crate::app) fn prepare_draw_pass(
 
 /// `pass`'s value for the parameter `name`, if it has one.
 fn parameter_of<'a>(pass: &'a Dx9Pass, name: &str) -> Option<&'a Dx9ParameterValue> {
-    pass.parameters.iter().find(|(parameter, _)| parameter == name).map(|(_, value)| value)
+    pass.parameters
+        .iter()
+        .find(|(parameter, _)| parameter == name)
+        .map(|(_, value)| value)
 }
 
 /// The animations `pass` runs on the parameter `name`.
@@ -143,7 +157,11 @@ struct PixelConstants {
 
 /// The translated pixel shader's constant bindings, filled from `pass`'s
 /// parameters component by component.
-fn pixel_constants(pass: &Dx9Pass, bindings: &[ConstantBinding], specular_brightness: f32) -> PixelConstants {
+fn pixel_constants(
+    pass: &Dx9Pass,
+    bindings: &[ConstantBinding],
+    specular_brightness: f32,
+) -> PixelConstants {
     let lookup = |name: &str| parameter_of(pass, name);
     let mut constants: Vec<(u32, [f32; 4])> = Vec::new();
     let mut animated_constants = Vec::new();
@@ -151,9 +169,12 @@ fn pixel_constants(pass: &Dx9Pass, bindings: &[ConstantBinding], specular_bright
     let mut light_colors = Vec::new();
     let mut camo_amounts = Vec::new();
     for binding in bindings {
-        let value = lookup(&binding.source)
-            .map_or([0.0, 0.0, 0.0, 1.0], |value| parameter_vector(value, specular_brightness));
-        let at = constants.iter().position(|(register, _)| *register == binding.register);
+        let value = lookup(&binding.source).map_or([0.0, 0.0, 0.0, 1.0], |value| {
+            parameter_vector(value, specular_brightness)
+        });
+        let at = constants
+            .iter()
+            .position(|(register, _)| *register == binding.register);
         let at = at.unwrap_or_else(|| {
             constants.push((binding.register, [0.0; 4]));
             constants.len() - 1
@@ -196,7 +217,13 @@ fn pixel_constants(pass: &Dx9Pass, bindings: &[ConstantBinding], specular_bright
             }
         }
     }
-    PixelConstants { constants, animated_constants, change_colors, light_colors, camo_amounts }
+    PixelConstants {
+        constants,
+        animated_constants,
+        change_colors,
+        light_colors,
+        camo_amounts,
+    }
 }
 
 /// Each sampler's map: a bitmap decoded by `bitmap`, a black feed for the
@@ -210,7 +237,10 @@ fn draw_textures(
     samplers
         .iter()
         .map(|sampler| {
-            let value = pass.textures.get(sampler.slot as usize).map(|texture| &texture.value);
+            let value = pass
+                .textures
+                .get(sampler.slot as usize)
+                .map(|texture| &texture.value);
             let image = match value {
                 Some(Dx9ParameterValue::Bitmap(path)) => bitmap(path.as_str(), sampler.kind),
                 Some(Dx9ParameterValue::Extern(name)) if CAMERA_FEEDS.contains(&name.as_str()) => {
@@ -225,7 +255,9 @@ fn draw_textures(
                 }
                 Some(Dx9ParameterValue::Extern(name)) if name == ACTIVE_CAMO_BUMP => {
                     match parameter_of(pass, "bump_map") {
-                        Some(Dx9ParameterValue::Bitmap(path)) => bitmap(path.as_str(), sampler.kind),
+                        Some(Dx9ParameterValue::Bitmap(path)) => {
+                            bitmap(path.as_str(), sampler.kind)
+                        }
                         _ => None,
                     }
                 }
@@ -281,7 +313,8 @@ struct VertexConstants {
 fn default_texture_rows(stage: Dx9VertexStage) -> [[f32; 4]; H2_TEXTURE_ROWS] {
     if stage.uses_scale_rows() {
         std::array::from_fn(|row| {
-            if (row == 3 && stage.is_lightmap()) || (row == 2 && stage == Dx9VertexStage::Texaccum) {
+            if (row == 3 && stage.is_lightmap()) || (row == 2 && stage == Dx9VertexStage::Texaccum)
+            {
                 [1.0; 4]
             } else {
                 [1.0, 1.0, 0.0, 0.0]
@@ -312,15 +345,19 @@ fn vertex_constants(
     let mut light_indirect = [x, y, z];
     for constant in &pass.vertex_constants {
         if stage.is_lightmap()
-            && matches!(constant.register, LIGHT_DIRECT_REGISTER | LIGHT_INDIRECT_REGISTER)
+            && matches!(
+                constant.register,
+                LIGHT_DIRECT_REGISTER | LIGHT_INDIRECT_REGISTER
+            )
         {
             let vector = if constant.register == LIGHT_DIRECT_REGISTER {
                 &mut light_direct
             } else {
                 &mut light_indirect
             };
-            let value = lookup(&constant.parameter)
-                .map_or([0.0; 4], |value| parameter_vector(value, specular_brightness));
+            let value = lookup(&constant.parameter).map_or([0.0; 4], |value| {
+                parameter_vector(value, specular_brightness)
+            });
             match constant.components.as_str() {
                 "x (value)" => vector[0] = value[0],
                 "y (value)" => vector[1] = value[1],
@@ -330,8 +367,9 @@ fn vertex_constants(
             continue;
         }
         if constant.bank.starts_with("Vn") {
-            let value = lookup(&constant.parameter)
-                .map_or([1.0; 4], |value| parameter_vector(value, specular_brightness));
+            let value = lookup(&constant.parameter).map_or([1.0; 4], |value| {
+                parameter_vector(value, specular_brightness)
+            });
             let mask = component_mask(&constant.components);
             let (tint, animated) = match constant.register {
                 10 => (&mut tint_facing, &mut animated_tint_facing),
@@ -350,12 +388,17 @@ fn vertex_constants(
                 .iter()
                 .position(|name| constant.components == *name);
             if let Some(channel) = channel {
-                let value = lookup(&constant.parameter)
-                    .map_or(0.0, |value| parameter_vector(value, specular_brightness)[channel]);
+                let value = lookup(&constant.parameter).map_or(0.0, |value| {
+                    parameter_vector(value, specular_brightness)[channel]
+                });
                 row[channel] = value;
                 let animations = animations_of(pass, &constant.parameter);
                 if animations.iter().any(|animation| !animation.is_transform()) {
-                    animated_row_values.push((constant.register.max(0) as usize, channel, animations));
+                    animated_row_values.push((
+                        constant.register.max(0) as usize,
+                        channel,
+                        animations,
+                    ));
                 }
                 continue;
             }

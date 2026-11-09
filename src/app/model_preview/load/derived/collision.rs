@@ -105,7 +105,11 @@ pub(super) fn append_collision_jms(
         if vertices.is_empty() {
             continue;
         }
-        let Some(vertex_base) = VertexBase::of(preview.vertices.len(), vertices.len(), Overflow::RefusesAppend) else {
+        let Some(vertex_base) = VertexBase::of(
+            preview.vertices.len(),
+            vertices.len(),
+            Overflow::RefusesAppend,
+        ) else {
             continue;
         };
         let index_start = preview.indices.len() as u32;

@@ -4,9 +4,12 @@
 
 use blam_tags::math::Matrix4;
 
-use super::super::super::*;
 use super::super::super::common::marker::{MarkerFrame, attach_point, attach_vector};
-use super::super::super::common::math::{axis_of, cross, dot, matrix_of, minus, place_of, plus, rigid_inverse, scaled, unit_by_reciprocal};
+use super::super::super::common::math::{
+    axis_of, cross, dot, matrix_of, minus, place_of, plus, rigid_inverse, scaled,
+    unit_by_reciprocal,
+};
+use super::super::super::*;
 
 /// Clips the game runs without weapon IK, by the last word of their names.
 /// `unit_animation_weapon_ik` turns it off for an action, a soft ping, and
@@ -99,15 +102,22 @@ impl CeWeaponIk {
 
     /// Whether a clip is one of the held weapon's, played with IK on.
     pub(in crate::app::model_preview) fn runs_through(&self, clip: &str) -> bool {
-        clip.split(' ').any(|word| word.eq_ignore_ascii_case(&self.scope)) && clip_runs_weapon_ik(clip)
+        clip.split(' ')
+            .any(|word| word.eq_ignore_ascii_case(&self.scope))
+            && clip_runs_weapon_ik(clip)
     }
 
     /// Pose the arm. `worlds` holds each node's posed transform, and
     /// `inverse_binds` what `skin` undoes of it.
-    pub(in crate::app::model_preview) fn apply(&self, worlds: &mut [Matrix4], inverse_binds: &[Matrix4]) {
-        let (Some(weapon), Some(inverse)) =
-            (worlds.get(self.weapon_node).copied(), inverse_binds.get(self.weapon_node).copied())
-        else {
+    pub(in crate::app::model_preview) fn apply(
+        &self,
+        worlds: &mut [Matrix4],
+        inverse_binds: &[Matrix4],
+    ) {
+        let (Some(weapon), Some(inverse)) = (
+            worlds.get(self.weapon_node).copied(),
+            inverse_binds.get(self.weapon_node).copied(),
+        ) else {
             return;
         };
         let desired = weapon * inverse * self.grip * self.hand_from_marker;
@@ -150,7 +160,10 @@ pub(in crate::app::model_preview) fn weapon_ik(
     attach_to: &str,
 ) -> Option<CeWeaponIk> {
     let named = |model: &RenderModelPreview, name: &str| {
-        let found = model.markers.iter().any(|marker| marker.name.eq_ignore_ascii_case(name));
+        let found = model
+            .markers
+            .iter()
+            .any(|marker| marker.name.eq_ignore_ascii_case(name));
         found.then(|| MarkerFrame::find(model, name))
     };
     let on_hand = named(preview, marker)?;
@@ -159,15 +172,21 @@ pub(in crate::app::model_preview) fn weapon_ik(
     let elbow = usize::try_from(preview.nodes.get(hand)?.parent).ok()?;
     let shoulder = usize::try_from(preview.nodes.get(elbow)?.parent).ok()?;
     let rows = preview.nodes.get(hand)?.inverse_bind;
-    let inverse_bind = Matrix4 { m: [rows[0], rows[1], rows[2], [0.0, 0.0, 0.0, 1.0]] };
-    let moved = on_weapon.axes.map(|axis| attach_vector(&parent, &child, axis));
+    let inverse_bind = Matrix4 {
+        m: [rows[0], rows[1], rows[2], [0.0, 0.0, 0.0, 1.0]],
+    };
+    let moved = on_weapon
+        .axes
+        .map(|axis| attach_vector(&parent, &child, axis));
     let position = attach_point(&parent, &child, on_weapon.position);
     Some(CeWeaponIk {
         scope: scope.to_owned(),
         hand,
         elbow,
         shoulder,
-        hand_from_marker: rigid_inverse(&(inverse_bind * matrix_of(on_hand.axes, on_hand.position))),
+        hand_from_marker: rigid_inverse(
+            &(inverse_bind * matrix_of(on_hand.axes, on_hand.position)),
+        ),
         weapon_node: parent.node.max(0) as usize,
         grip: matrix_of(moved, position),
         carried: Vec::new(),
@@ -179,7 +198,12 @@ pub(in crate::app::model_preview) const LONGEST_REACH: f32 = 0.98;
 
 /// `inverse_kinematics_adjust_matrices`: bend at the elbow, on the side it
 /// already bends, so the hand reaches `desired`.
-pub(in crate::app::model_preview) fn reach_with_arm(desired: Matrix4, shoulder: &mut Matrix4, elbow: &mut Matrix4, hand: &mut Matrix4) {
+pub(in crate::app::model_preview) fn reach_with_arm(
+    desired: Matrix4,
+    shoulder: &mut Matrix4,
+    elbow: &mut Matrix4,
+    hand: &mut Matrix4,
+) {
     let start = place_of(shoulder);
     let joint = place_of(elbow);
     let upper = dot(minus(joint, start), minus(joint, start)).sqrt();

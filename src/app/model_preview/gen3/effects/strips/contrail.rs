@@ -44,7 +44,11 @@ impl RunningContrail {
         direction: [f32; 3],
         distance: f32,
     ) {
-        if self.profiles.last().is_some_and(|profile| profile.temporary) {
+        if self
+            .profiles
+            .last()
+            .is_some_and(|profile| profile.temporary)
+        {
             self.profiles.pop();
         }
         if self.profiles.len() >= MOST_PROFILES {
@@ -52,8 +56,15 @@ impl RunningContrail {
         }
         let seeds: [f32; PROFILE_SEEDS] = std::array::from_fn(|_| self.next_seed());
         let place = std::array::from_fn(|axis| self.previous[axis] + direction[axis] * distance);
-        let length = if self.initialized { distance + self.length } else { 0.0 };
-        let lifespan = contrail.lifespan.scalar(&StripState { profile_seeds: seeds, ..*state });
+        let length = if self.initialized {
+            distance + self.length
+        } else {
+            0.0
+        };
+        let lifespan = contrail.lifespan.scalar(&StripState {
+            profile_seeds: seeds,
+            ..*state
+        });
         self.profiles.push(ContrailProfile {
             place,
             velocity: [0.0; 3],
@@ -61,7 +72,11 @@ impl RunningContrail {
             lifespan,
             length,
             seeds,
-            alpha: if contrail.opacity_from_a { state.effect_a } else { 1.0 },
+            alpha: if contrail.opacity_from_a {
+                state.effect_a
+            } else {
+                1.0
+            },
             temporary,
         });
         if !temporary {
@@ -95,12 +110,22 @@ impl RunningContrail {
     }
 
     /// `c_contrail::pulse`.
-    pub(super) fn pulse(&mut self, contrail: &ContrailDefinition, look: &StripLook, state: &StripState, at: [f32; 3], dt: f32) {
+    pub(super) fn pulse(
+        &mut self,
+        contrail: &ContrailDefinition,
+        look: &StripLook,
+        state: &StripState,
+        at: [f32; 3],
+        dt: f32,
+    ) {
         let moved = minus(at, self.previous);
         let total = dot(moved, moved).sqrt();
         // `normalize3d`: what is too short to have a direction has no length.
-        let (total, direction) =
-            if total < EPSILON { (0.0, [0.0; 3]) } else { (total, moved.map(|axis| axis / total)) };
+        let (total, direction) = if total < EPSILON {
+            (0.0, [0.0; 3])
+        } else {
+            (total, moved.map(|axis| axis / total))
+        };
         // `event_initialize_contrail_system` (Halo 3 X360 0x829F9BA0, Reach's
         // by name) pulses a new system once with no time and its flag set,
         // which `c_contrail::pulse` turns into a permanent profile where it
@@ -114,7 +139,11 @@ impl RunningContrail {
         }
         let mut remaining = total;
         let rate = contrail.emission_rate.scalar(state);
-        let rate = if look.reach { rate.min(REACH_MOST_EMISSION_RATE) } else { rate };
+        let rate = if look.reach {
+            rate.min(REACH_MOST_EMISSION_RATE)
+        } else {
+            rate
+        };
         self.accumulator += rate * dt;
         if self.accumulator >= 1.0 {
             let each = total / self.accumulator;
@@ -132,7 +161,11 @@ impl RunningContrail {
     /// `contrail_main`.
     pub(super) fn update(&mut self, contrail: &ContrailDefinition, state: &StripState, dt: f32) {
         self.profiles.retain_mut(|profile| {
-            let state = StripState { profile_age: profile.age, profile_seeds: profile.seeds, ..*state };
+            let state = StripState {
+                profile_age: profile.age,
+                profile_seeds: profile.seeds,
+                ..*state
+            };
             profile.age += dt / profile.lifespan.max(1e-4);
             if profile.age >= 1.0 {
                 return false;

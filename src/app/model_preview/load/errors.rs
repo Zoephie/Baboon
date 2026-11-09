@@ -1,7 +1,7 @@
 //! Import-tool error report extraction for model preview overlays.
 
-use super::*;
 use super::super::common::fields::field_name_matches;
+use super::*;
 
 /// Attach every drawable error-report primitive in `tag` to `preview`.
 ///
@@ -381,10 +381,12 @@ mod tests {
 
     fn read_h2_tag(path: &Path, definition: &str) -> TagFile {
         let bytes = std::fs::read(path).expect("read shipped Halo 2 tag");
-        let layout =
-            blam_tags::layout::TagLayout::from_json(definitions_root().join(H2_GAME).join(definition))
-                .expect("load Halo 2 classic layout");
-        blam_tags::classic::read_classic_tag_file(&bytes, layout).expect("decode shipped Halo 2 tag")
+        let layout = blam_tags::layout::TagLayout::from_json(
+            definitions_root().join(H2_GAME).join(definition),
+        )
+        .expect("load Halo 2 classic layout");
+        blam_tags::classic::read_classic_tag_file(&bytes, layout)
+            .expect("decode shipped Halo 2 tag")
     }
 
     fn read_h2r_tag(path: &Path, group_tag: &[u8; 4]) -> TagFile {
@@ -417,8 +419,9 @@ mod tests {
 
     #[test]
     fn shipped_h3_render_errors_have_drawable_primitives() {
-        let path =
-            h3_tags_root().join(crate::core::tag_path::to_relative(r"levels\ui\mainmenu\objects\spartan_cheap\spartan_cheap.render_model"));
+        let path = h3_tags_root().join(crate::core::tag_path::to_relative(
+            r"levels\ui\mainmenu\objects\spartan_cheap\spartan_cheap.render_model",
+        ));
         if !path.is_file() {
             eprintln!("skipping: no shipped H3 render model at {}", path.display());
             return;
@@ -437,8 +440,9 @@ mod tests {
 
     #[test]
     fn shipped_h3_collision_open_edge_is_a_hoverable_line() {
-        let path = h3_tags_root()
-            .join(crate::core::tag_path::to_relative(r"objects\levels\solo\120_halo\plates\half_girder\half_girder.collision_model"));
+        let path = h3_tags_root().join(crate::core::tag_path::to_relative(
+            r"objects\levels\solo\120_halo\plates\half_girder\half_girder.collision_model",
+        ));
         if !path.is_file() {
             eprintln!(
                 "skipping: no shipped H3 collision model at {}",
@@ -457,7 +461,9 @@ mod tests {
 
     #[test]
     fn shipped_h2_render_errors_have_drawable_faces() {
-        let path = h2_tags_root().join(crate::core::tag_path::to_relative(r"objects\cinematics\human\cairo\cairo.render_model"));
+        let path = h2_tags_root().join(crate::core::tag_path::to_relative(
+            r"objects\cinematics\human\cairo\cairo.render_model",
+        ));
         if !path.is_file() {
             eprintln!("skipping: no shipped H2 render model at {}", path.display());
             return;
@@ -473,14 +479,16 @@ mod tests {
     #[test]
     fn shipped_h2_model_wrapper_keeps_referenced_render_errors() {
         let root = h2_tags_root();
-        let path = root.join(crate::core::tag_path::to_relative(r"objects\cinematics\human\cairo\cairo.model"));
+        let path = root.join(crate::core::tag_path::to_relative(
+            r"objects\cinematics\human\cairo\cairo.model",
+        ));
         if !path.is_file() {
             eprintln!("skipping: no shipped H2 model at {}", path.display());
             return;
         }
         let tag = read_h2_tag(&path, "model.json");
-        let names =
-            TagNameIndex::load_game(&definitions_root(), GameId::from_id(H2_GAME).unwrap()).expect("load Halo 2 tag names");
+        let names = TagNameIndex::load_game(&definitions_root(), GameId::from_id(H2_GAME).unwrap())
+            .expect("load Halo 2 tag names");
         let source = h2_source(root);
         let entry = model_entry(path, "objects/cinematics/human/cairo/cairo.model");
         let data = load_model_preview(
@@ -499,8 +507,9 @@ mod tests {
 
     #[test]
     fn shipped_h2_collision_open_edge_is_a_hoverable_line() {
-        let path = h2_tags_root()
-            .join(crate::core::tag_path::to_relative(r"scenarios\objects\multi\triplicate\kiosk_monitor\kiosk_monitor.collision_model"));
+        let path = h2_tags_root().join(crate::core::tag_path::to_relative(
+            r"scenarios\objects\multi\triplicate\kiosk_monitor\kiosk_monitor.collision_model",
+        ));
         if !path.is_file() {
             eprintln!(
                 "skipping: no shipped H2 collision model at {}",
@@ -519,14 +528,19 @@ mod tests {
     #[test]
     fn shipped_h2_model_wrapper_resolves_collision_errors() {
         let root = h2_tags_root();
-        let path = root.join(crate::core::tag_path::to_relative(r"scenarios\objects\multi\triplicate\kiosk_monitor\kiosk_monitor.model"));
+        let path = root.join(crate::core::tag_path::to_relative(
+            r"scenarios\objects\multi\triplicate\kiosk_monitor\kiosk_monitor.model",
+        ));
         if !path.is_file() {
             eprintln!("skipping: no shipped H2 model at {}", path.display());
             return;
         }
-        let preview = hlmt_collision_overlay(&read_h2_tag(&path, "model.json"), &crate::app::model_preview::load::TagReader::new(&h2_source(root)))
-            .unwrap()
-            .expect("resolve collision preview through the Halo 2 model wrapper");
+        let preview = hlmt_collision_overlay(
+            &read_h2_tag(&path, "model.json"),
+            &crate::app::model_preview::load::TagReader::new(&h2_source(root)),
+        )
+        .unwrap()
+        .expect("resolve collision preview through the Halo 2 model wrapper");
         assert!(preview.errors.iter().any(|error| {
             error.label.eq_ignore_ascii_case("open edge")
                 && matches!(error.shape, ModelErrorShape::Polyline(_))
@@ -535,7 +549,9 @@ mod tests {
 
     #[test]
     fn shipped_h2_physics_model_builds_with_the_shared_error_schema() {
-        let path = h2_tags_root().join(crate::core::tag_path::to_relative(r"objects\characters\brute\brute.physics_model"));
+        let path = h2_tags_root().join(crate::core::tag_path::to_relative(
+            r"objects\characters\brute\brute.physics_model",
+        ));
         if !path.is_file() {
             eprintln!(
                 "skipping: no shipped H2 physics model at {}",
@@ -551,7 +567,9 @@ mod tests {
 
     #[test]
     fn shipped_h2r_non_critical_flag_is_preserved() {
-        let path = h2r_tags_root().join(crate::core::tag_path::to_relative(r"!extracted\branding_iron\branding_iron.render_model"));
+        let path = h2r_tags_root().join(crate::core::tag_path::to_relative(
+            r"!extracted\branding_iron\branding_iron.render_model",
+        ));
         if !path.is_file() {
             eprintln!(
                 "skipping: no shipped H2R non-critical example at {}",
@@ -567,8 +585,9 @@ mod tests {
 
     #[test]
     fn shipped_h2r_structure_bsp_reports_reach_the_preview() {
-        let path = h2r_tags_root()
-            .join(crate::core::tag_path::to_relative(r"digsite\scenarios\multi\03_ascension\03_ascension.scenario_structure_bsp"));
+        let path = h2r_tags_root().join(crate::core::tag_path::to_relative(
+            r"digsite\scenarios\multi\03_ascension\03_ascension.scenario_structure_bsp",
+        ));
         if !path.is_file() {
             eprintln!(
                 "skipping: no shipped H2R structure BSP example at {}",
@@ -589,7 +608,9 @@ mod tests {
     #[test]
     fn shipped_h2r_cov_barrier_duplicate_triangle_is_a_drawable_face() {
         let root = h2r_tags_root();
-        let path = root.join(crate::core::tag_path::to_relative(r"objects\gear\covenant\military\cov_barrier\cov_barrier.render_model"));
+        let path = root.join(crate::core::tag_path::to_relative(
+            r"objects\gear\covenant\military\cov_barrier\cov_barrier.render_model",
+        ));
         if !path.is_file() {
             eprintln!(
                 "skipping: no shipped H2R render model at {}",
@@ -605,10 +626,12 @@ mod tests {
                 && matches!(error.shape, ModelErrorShape::Face(_))
         }));
 
-        let model_path = root.join(crate::core::tag_path::to_relative(r"objects\gear\covenant\military\cov_barrier\cov_barrier.model"));
+        let model_path = root.join(crate::core::tag_path::to_relative(
+            r"objects\gear\covenant\military\cov_barrier\cov_barrier.model",
+        ));
         let model = read_h2r_tag(&model_path, b"hlmt");
-        let names =
-            TagNameIndex::load_game(&definitions_root(), GameId::from_id(H2_GAME).unwrap()).expect("load Halo 2 tag names");
+        let names = TagNameIndex::load_game(&definitions_root(), GameId::from_id(H2_GAME).unwrap())
+            .expect("load Halo 2 tag names");
         let source = h2_source(root);
         let entry = model_entry(
             model_path,

@@ -43,8 +43,12 @@ impl ParticleInput {
             "particle correlation 2" | "particle random 2" => Self::Seed(1),
             "particle correlation 3" | "particle random 3" => Self::Seed(2),
             "particle correlation 4" | "particle random 4" => Self::Seed(3),
-            "system correlation 1" | "emitter correlation 1" | "emitter random 1" => Self::SystemSeed(0),
-            "system correlation 2" | "emitter correlation 2" | "emitter random 2" => Self::SystemSeed(1),
+            "system correlation 1" | "emitter correlation 1" | "emitter random 1" => {
+                Self::SystemSeed(0)
+            }
+            "system correlation 2" | "emitter correlation 2" | "emitter random 2" => {
+                Self::SystemSeed(1)
+            }
             "particle emission time" | "emitter time" | "particle emit time" => Self::EmissionTime,
             "location lod" | "system lod" => Self::Lod,
             "game time" => Self::GameTime,
@@ -58,7 +62,9 @@ impl ParticleInput {
             // or jetwash emitter, which the preview does not run; the card's
             // upload mask 0xFC217B02 leaves all three out, so the game reads
             // whatever the slot held. 0 is the preview's choice.
-            "distance from emitter" | "particle simulation a" | "particle simulation b" => Self::Other,
+            "distance from emitter" | "particle simulation a" | "particle simulation b" => {
+                Self::Other
+            }
             _ => Self::Other,
         }
     }
@@ -170,7 +176,9 @@ impl ParticleProperty {
     /// A property with its randoms not yet given seeds, for Reach, which
     /// gathers what a definition's properties read before allocating any.
     pub(super) fn unallocated(property: TagStruct<'_>) -> Option<Self> {
-        let input = |field: &str| ParticleInput::named(&property.read_enum_option(field).unwrap_or_default());
+        let input = |field: &str| {
+            ParticleInput::named(&property.read_enum_option(field).unwrap_or_default())
+        };
         let adds = match property.read_enum_option("Output Modifier").as_deref() {
             Some("Plus") => Some(true),
             Some("Times") => Some(false),
@@ -210,8 +218,16 @@ impl ParticleProperty {
     /// Reach tool's `used_states`: its input's state, its range's when the
     /// function is ranged, and its modifier's when it has one.
     pub(super) fn used_states(&self) -> u32 {
-        let range = if self.function.is_ranged() { self.range.state_bit() } else { 0 };
-        let modifier = if self.adds.is_some() { self.modifier.state_bit() } else { 0 };
+        let range = if self.function.is_ranged() {
+            self.range.state_bit()
+        } else {
+            0
+        };
+        let modifier = if self.adds.is_some() {
+            self.modifier.state_bit()
+        } else {
+            0
+        };
         self.input.state_bit() | range | modifier
     }
 
@@ -225,21 +241,30 @@ impl ParticleProperty {
             range: ParticleInput::Other,
             adds: None,
             modifier: ParticleInput::Other,
-            function: Arc::new(TagFunction::parse_encoded(FunctionEncoding::H2, &function.to_bytes()).ok()?),
+            function: Arc::new(
+                TagFunction::parse_encoded(FunctionEncoding::H2, &function.to_bytes()).ok()?,
+            ),
             ends: [[0.0; 3]; 2],
             scale: 1.0,
         })
     }
 
     pub(in crate::app::model_preview) fn fixed_vector(vector: [f32; 3]) -> Option<Self> {
-        Some(Self { ends: [vector; 2], ..Self::fixed(1.0)? })
+        Some(Self {
+            ends: [vector; 2],
+            ..Self::fixed(1.0)?
+        })
     }
 
     pub(in crate::app::model_preview) fn scaled(self, scale: f32) -> Self {
         Self { scale, ..self }
     }
 
-    pub(in crate::app::model_preview) fn named(holder: TagStruct<'_>, name: &str, seeds: &mut SeedAllocator) -> Option<Self> {
+    pub(in crate::app::model_preview) fn named(
+        holder: TagStruct<'_>,
+        name: &str,
+        seeds: &mut SeedAllocator,
+    ) -> Option<Self> {
         Self::read(holder.descend(name)?, seeds)
     }
 
@@ -248,7 +273,9 @@ impl ParticleProperty {
     }
 
     fn unscaled(&self, state: &ParticleState) -> f32 {
-        let value = self.function.evaluate(self.input.of(state), self.range.of(state));
+        let value = self
+            .function
+            .evaluate(self.input.of(state), self.range.of(state));
         match self.adds {
             Some(true) => value + self.modifier.of(state),
             Some(false) => value * self.modifier.of(state),
@@ -257,13 +284,17 @@ impl ParticleProperty {
     }
 
     pub(super) fn color(&self, state: &ParticleState) -> [f32; 3] {
-        let color = self.function.evaluate_color(self.input.of(state), self.range.of(state));
+        let color = self
+            .function
+            .evaluate_color(self.input.of(state), self.range.of(state));
         [color.red, color.green, color.blue]
     }
 
     pub(super) fn vector(&self, state: &ParticleState) -> [f32; 3] {
         let t = self.scalar(state);
-        std::array::from_fn(|axis| self.ends[0][axis] + (self.ends[1][axis] - self.ends[0][axis]) * t)
+        std::array::from_fn(|axis| {
+            self.ends[0][axis] + (self.ends[1][axis] - self.ends[0][axis]) * t
+        })
     }
 
     /// `get_interpolated_value` for what a direction is: around, not across.
@@ -275,7 +306,10 @@ impl ParticleProperty {
     pub(super) fn most(&self) -> f32 {
         let sample = |at: usize| {
             let t = at as f32 / 16.0;
-            [self.function.evaluate(t, 0.0), self.function.evaluate(t, 1.0)]
+            [
+                self.function.evaluate(t, 0.0),
+                self.function.evaluate(t, 1.0),
+            ]
         };
         (0..=16).flat_map(sample).fold(f32::MIN, f32::max)
     }

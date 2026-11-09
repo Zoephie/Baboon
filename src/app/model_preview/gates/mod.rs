@@ -11,11 +11,11 @@
 //! - `pixels`: G-px, G-sim, G-gl and G-calls, from one set of shots.
 //! - `field_lines`: the streaming `Debug` splitter the snapshots share.
 
+use super::data::ModelPreviewData;
+use super::harness::kit::kit_preview;
+use crate::core::game::GameId;
 use std::fmt::Write as _;
 use std::path::PathBuf;
-use super::harness::kit::kit_preview;
-use super::data::ModelPreviewData;
-use crate::core::game::GameId;
 
 mod field_lines;
 mod load;
@@ -23,8 +23,8 @@ mod options;
 #[cfg(target_os = "macos")]
 mod pixels;
 
-use field_lines::{debug_text, inline_field_lines, line};
 pub(super) use field_lines::field_lines;
+use field_lines::{debug_text, inline_field_lines, line};
 pub(super) use load::LOAD_SET;
 
 fn gate_dir() -> Option<PathBuf> {

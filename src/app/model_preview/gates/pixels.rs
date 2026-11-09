@@ -177,7 +177,12 @@ fn gate_pixels() {
         eprintln!("skipping: BABOON_GATE_DIR is not set");
         return;
     };
-    let (sim_dir, gl_dir, calls_dir, dir) = (dir.join("sim"), dir.join("gl"), dir.join("glcalls"), dir.join("px"));
+    let (sim_dir, gl_dir, calls_dir, dir) = (
+        dir.join("sim"),
+        dir.join("gl"),
+        dir.join("glcalls"),
+        dir.join("px"),
+    );
     let bless = std::env::var_os("BABOON_GATE_BLESS").is_some();
     let mut failures = Vec::new();
     for (variable, game, objects) in PIXEL_SET {
@@ -221,13 +226,21 @@ fn gate_pixels() {
         let mut loops = std::collections::BTreeMap::new();
         for (name, shown) in names.iter().zip(&images) {
             for line in &shown.feedback_loops {
-                loops.entry(line.clone()).or_insert_with(Vec::new).push(name.clone());
+                loops
+                    .entry(line.clone())
+                    .or_insert_with(Vec::new)
+                    .push(name.clone());
             }
         }
         if !loops.is_empty() {
             let mut report = format!("{game:?} draws sample what they draw into:\n");
             for (line, shots) in &loops {
-                let _ = writeln!(report, "  {line} ({} draws, first in {})", shots.len(), shots[0]);
+                let _ = writeln!(
+                    report,
+                    "  {line} ({} draws, first in {})",
+                    shots.len(),
+                    shots[0]
+                );
             }
             failures.push(report);
         }
@@ -266,13 +279,14 @@ fn gate_pixels() {
         // G-calls: every GL state call, uniform and draw each shot made, in
         // order. A shot that differs keeps its whole log under `changed/`, to
         // set against the one blessing keeps beside the hashes.
-        let save_log = |folder: &std::path::Path, name: &str, shown: &super::super::harness::shot::Shown| {
-            let path = folder.join(format!("{game:?}")).join(format!("{name}.log"));
-            if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let _ = std::fs::write(&path, shown.gl_calls.join("\n"));
-        };
+        let save_log =
+            |folder: &std::path::Path, name: &str, shown: &super::super::harness::shot::Shown| {
+                let path = folder.join(format!("{game:?}")).join(format!("{name}.log"));
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::write(&path, shown.gl_calls.join("\n"));
+            };
         if bless {
             for (name, shown) in names.iter().zip(&images) {
                 save_log(&calls_dir, name, shown);

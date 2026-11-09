@@ -4,11 +4,11 @@
 //! `light_volume` pass with `SetMaterialState`'s overall state
 //! (X360 0x82B96320) and a strip of rows in order.
 
-use eframe::glow::{self, HasContext};
-use super::light_volumes::H4VolumeDraw;
-use super::super::effects::gl::{H4EffectCx, material_functions};
 use super::super::super::h4::materials::H4EffectMaterial;
+use super::super::effects::gl::{H4EffectCx, material_functions};
+use super::light_volumes::H4VolumeDraw;
 use crate::core::hlsl::parse::Type;
+use eframe::glow::{self, HasContext};
 
 /// `k_maxRowsPerStrip`.
 const ROWS_PER_STRIP: usize = 8;
@@ -56,7 +56,15 @@ pub(in crate::app::model_preview) unsafe fn draw_h4_light_volume(
     material: &H4EffectMaterial,
     draw: &H4VolumeDraw,
 ) {
-    let H4EffectCx { gl, ref mut state, frame, depth, size, placeholder, object } = *cx;
+    let H4EffectCx {
+        gl,
+        ref mut state,
+        frame,
+        depth,
+        size,
+        placeholder,
+        object,
+    } = *cx;
     let pass = &*material.pass;
     // `profile_layout` holds a volume to a strip's 128.
     let count = draw.states.len();

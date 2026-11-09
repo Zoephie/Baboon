@@ -2,11 +2,17 @@
 
 use super::*;
 
-pub(in crate::app::model_preview) fn animation_frame_position(playback: &PreviewAnimationPlayback, pose_frames: usize) -> f32 {
+pub(in crate::app::model_preview) fn animation_frame_position(
+    playback: &PreviewAnimationPlayback,
+    pose_frames: usize,
+) -> f32 {
     super::super::animation::playback_frame_position(playback, pose_frames)
 }
 
-pub(in crate::app::model_preview) fn animation_frame_label(position: f32, pose_frames: usize) -> String {
+pub(in crate::app::model_preview) fn animation_frame_label(
+    position: f32,
+    pose_frames: usize,
+) -> String {
     let frame = if pose_frames > 0 {
         position.floor() as usize + 1
     } else {
@@ -20,7 +26,12 @@ pub(in crate::app::model_preview) fn animation_frame_label(position: f32, pose_f
 /// rect by the handle's radius at each end. Ticks closer than 3 points would
 /// merge into a bar, so a long animation is ticked every 5th, 10th, 30th…
 /// frame instead.
-pub(in crate::app::model_preview) fn frame_tick_xs(rect: egui::Rect, handle_shape: egui::style::HandleShape, range_end: f32, pose_frames: usize) -> Vec<f32> {
+pub(in crate::app::model_preview) fn frame_tick_xs(
+    rect: egui::Rect,
+    handle_shape: egui::style::HandleShape,
+    range_end: f32,
+    pose_frames: usize,
+) -> Vec<f32> {
     if pose_frames < 2 || range_end <= 0.0 {
         return Vec::new();
     }
@@ -43,7 +54,11 @@ pub(in crate::app::model_preview) fn frame_tick_xs(rect: egui::Rect, handle_shap
         .collect()
 }
 
-pub(in crate::app::model_preview) fn animation_header_group(ui: &mut Ui, width: f32, add_contents: impl FnOnce(&mut Ui)) {
+pub(in crate::app::model_preview) fn animation_header_group(
+    ui: &mut Ui,
+    width: f32,
+    add_contents: impl FnOnce(&mut Ui),
+) {
     ui.allocate_ui_with_layout(
         Vec2::new(width, BUTTON_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
@@ -140,10 +155,18 @@ pub(in crate::app::model_preview) struct ClipFrames {
 
 /// The Animation Player card, under the viewport and setup row so the player
 /// can use the full page width, matching the layout in the design reference.
-pub(in crate::app::model_preview) fn draw_animation_player(ui: &mut Ui, panel: &PreviewPanel<'_>, state: &mut ModelPreviewState) {
+pub(in crate::app::model_preview) fn draw_animation_player(
+    ui: &mut Ui,
+    panel: &PreviewPanel<'_>,
+    state: &mut ModelPreviewState,
+) {
     ui.add_space(8.0);
     draw_model_preview_section(ui, "Animation Player", None, |ui, part| {
-        let animations = panel.data.animations.as_deref().map_or(&[][..], Vec::as_slice);
+        let animations = panel
+            .data
+            .animations
+            .as_deref()
+            .map_or(&[][..], Vec::as_slice);
         let pose_frames = state
             .animation
             .pose
@@ -153,7 +176,12 @@ pub(in crate::app::model_preview) fn draw_animation_player(ui: &mut Ui, panel: &
         let controls_enabled = state.animation.selected.is_some() && pose_frames > 0;
         let duration = pose_frames as f32 / ANIMATION_FRAME_RATE;
         let last_frame = pose_frames.saturating_sub(1) as f32;
-        let frames = ClipFrames { pose_frames, controls_enabled, duration, last_frame };
+        let frames = ClipFrames {
+            pose_frames,
+            controls_enabled,
+            duration,
+            last_frame,
+        };
         if part == ModelPreviewSectionPart::Header {
             draw_animation_header(ui, panel, animations, state, &frames);
         } else {
@@ -171,7 +199,12 @@ pub(in crate::app::model_preview) fn draw_animation_header(
     state: &mut ModelPreviewState,
     frames: &ClipFrames,
 ) {
-    let ClipFrames { pose_frames, controls_enabled, last_frame, .. } = *frames;
+    let ClipFrames {
+        pose_frames,
+        controls_enabled,
+        last_frame,
+        ..
+    } = *frames;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 16.0;
         let loading = state.animation.selected.is_some()
@@ -192,7 +225,13 @@ pub(in crate::app::model_preview) fn draw_animation_header(
                     .ce_weapons
                     .as_ref()
                     .map(|weapons| &weapons.hidden_clips)
-                    .or_else(|| panel.data.weapons.as_ref().map(|weapons| &weapons.hidden_clips))
+                    .or_else(|| {
+                        panel
+                            .data
+                            .weapons
+                            .as_ref()
+                            .map(|weapons| &weapons.hidden_clips)
+                    })
                     .unwrap_or(&no_clips);
                 draw_animation_combo(
                     ui,
@@ -299,8 +338,7 @@ pub(in crate::app::model_preview) fn draw_animation_header(
                 );
             });
         });
-        let frame_position =
-            animation_frame_position(&state.animation, pose_frames);
+        let frame_position = animation_frame_position(&state.animation, pose_frames);
         ui.add(
             egui::Label::new(
                 RichText::new(animation_frame_label(frame_position, pose_frames))
@@ -313,15 +351,23 @@ pub(in crate::app::model_preview) fn draw_animation_header(
 
 /// The Animation Player's body: the frame scrubber with its ticks, the
 /// playback clock, and the clip's error.
-pub(in crate::app::model_preview) fn draw_animation_scrubber(ui: &mut Ui, state: &mut ModelPreviewState, frames: &ClipFrames) {
-    let ClipFrames { pose_frames, controls_enabled, duration, last_frame } = *frames;
+pub(in crate::app::model_preview) fn draw_animation_scrubber(
+    ui: &mut Ui,
+    state: &mut ModelPreviewState,
+    frames: &ClipFrames,
+) {
+    let ClipFrames {
+        pose_frames,
+        controls_enabled,
+        duration,
+        last_frame,
+    } = *frames;
     ui.scope(|ui| {
         let mut scrub = animation_frame_position(&state.animation, pose_frames);
         ui.spacing_mut().slider_width = (ui.available_width() - 2.0).max(1.0);
         // Reserved before the slider so the ticks lie under its handle.
         let ticks = ui.painter().add(egui::Shape::Noop);
-        let mut slider = egui::Slider::new(&mut scrub, 0.0..=last_frame.max(1.0))
-            .show_value(false);
+        let mut slider = egui::Slider::new(&mut scrub, 0.0..=last_frame.max(1.0)).show_value(false);
         if !state.animation.interpolate {
             slider = slider.step_by(1.0);
         }
@@ -356,13 +402,7 @@ pub(in crate::app::model_preview) fn draw_animation_scrubber(ui: &mut Ui, state:
         if controls_enabled && state.animation.playing {
             let pass = ui.ctx().cumulative_pass_nr();
             let dt = ui.input(|input| input.stable_dt).min(0.1);
-            advance_playback_clock(
-                &mut state.animation,
-                pass,
-                dt,
-                duration,
-                last_frame,
-            );
+            advance_playback_clock(&mut state.animation, pass, dt, duration, last_frame);
             ui.ctx().request_repaint();
         }
     });
@@ -390,7 +430,8 @@ pub(in crate::app::model_preview) fn advance_playback_clock(
             let frames = (duration * ANIMATION_FRAME_RATE).round() as usize;
             let position = playback.time * ANIMATION_FRAME_RATE;
             playback.time =
-                super::super::animation::looped_frame_position(playback, position, frames) / ANIMATION_FRAME_RATE;
+                super::super::animation::looped_frame_position(playback, position, frames)
+                    / ANIMATION_FRAME_RATE;
         }
     } else if playback.time * ANIMATION_FRAME_RATE >= last_frame {
         playback.time = last_frame / ANIMATION_FRAME_RATE;

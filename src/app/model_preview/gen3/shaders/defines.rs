@@ -27,13 +27,19 @@ pub(in crate::app::model_preview) fn base_defines(
     if dialect == RenderMethodDialect::Reach {
         defines.extend([("_standard_vs", "1"), ("disable_register_reorder", "1")]);
     }
-    defines.into_iter().map(|(name, value)| (name.to_owned(), value.to_owned())).collect()
+    defines
+        .into_iter()
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .collect()
 }
 
 /// `sub_140C589E0`: each category's function, as its option's. Reach's
 /// `build_options_macro` (0x141171D10) also takes no option at all, which
 /// writes no function and no choice but still names every option.
-pub(super) fn option_defines(definition: &Gen3Definition, options: &[Option<usize>]) -> Vec<(String, String)> {
+pub(super) fn option_defines(
+    definition: &Gen3Definition,
+    options: &[Option<usize>],
+) -> Vec<(String, String)> {
     let mut defines = Vec::new();
     for (index, category) in definition.categories.iter().enumerate() {
         let chosen = options.get(index).copied().unwrap_or(Some(0));
@@ -43,8 +49,14 @@ pub(super) fn option_defines(definition: &Gen3Definition, options: &[Option<usiz
             continue;
         }
         for (name, value) in [
-            (&category.vertex_function, option.and_then(|option| option.vertex_function.as_ref())),
-            (&category.pixel_function, option.and_then(|option| option.pixel_function.as_ref())),
+            (
+                &category.vertex_function,
+                option.and_then(|option| option.vertex_function.as_ref()),
+            ),
+            (
+                &category.pixel_function,
+                option.and_then(|option| option.pixel_function.as_ref()),
+            ),
         ] {
             if let (Some(name), Some(value)) = (name, value) {
                 defines.push((name.clone(), value.clone()));
@@ -56,7 +68,10 @@ pub(super) fn option_defines(definition: &Gen3Definition, options: &[Option<usiz
                 defines.push((prefix.clone(), format!("{prefix}_option_{}", option.name)));
             }
             for (index, option) in category.options.iter().enumerate() {
-                defines.push((format!("{prefix}_option_{}", option.name), index.to_string()));
+                defines.push((
+                    format!("{prefix}_option_{}", option.name),
+                    index.to_string(),
+                ));
             }
         }
     }

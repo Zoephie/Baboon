@@ -52,32 +52,50 @@ pub(super) struct ParticleSystemParts {
 }
 
 /// A system's `lod always 1.0`, and what older layouts label it.
-const LOD_ALWAYS_ONE: [&str; 3] = ["lod always 1.0", "ignore lod (render always)", "lod always 1"];
+const LOD_ALWAYS_ONE: [&str; 3] = [
+    "lod always 1.0",
+    "ignore lod (render always)",
+    "lod always 1",
+];
 
 /// A system's `particles die when effect ends`, and its older label.
 const DIE_WITH_EFFECT: [&str; 2] = ["particles die when effect ends", "die when orphaned"];
 
-pub(super) fn read_system_parts(reader: &TagReader, system: TagStruct<'_>) -> Option<ParticleSystemParts> {
+pub(super) fn read_system_parts(
+    reader: &TagReader,
+    system: TagStruct<'_>,
+) -> Option<ParticleSystemParts> {
     let flagged = |wanted: &str| has_flag(system, "flags", wanted);
     if !part_runs_by(system, "environment", "disposition") {
         return None;
     }
-    let path = system.read_tag_ref_path("particle").filter(|path| !path.is_empty())?;
+    let path = system
+        .read_tag_ref_path("particle")
+        .filter(|path| !path.is_empty())?;
     let own = ParticleRules::of(reader.source.game()).own_system;
     let (look, emitters): (Arc<ParticleLook>, Vec<_>) = if let Some(own) = own {
         (own.read)(reader, system, &path)?
     } else {
         let look = read_look(reader, &path).map(Arc::new)?;
         let size_scale = system.read_real("size scale").unwrap_or(1.0);
-        let read = |emitter: &TagStruct<'_>| read_emitter(reader, *emitter, flagged, &look, size_scale).map(Arc::new);
-        let emitters = elements(system, "emitters").iter().filter_map(read).collect();
+        let read = |emitter: &TagStruct<'_>| {
+            read_emitter(reader, *emitter, flagged, &look, size_scale).map(Arc::new)
+        };
+        let emitters = elements(system, "emitters")
+            .iter()
+            .filter_map(read)
+            .collect();
         (look, emitters)
     };
     if emitters.is_empty() {
         return None;
     }
     let real = |field: &str| system.read_real(field).unwrap_or(0.0);
-    let cutoff = if flagged("override near fade (use with caution)") { real("near fade override") } else { real("near fade cutoff") };
+    let cutoff = if flagged("override near fade (use with caution)") {
+        real("near fade override")
+    } else {
+        real("near fade cutoff")
+    };
     Some(ParticleSystemParts {
         hidden: flagged("don't render system"),
         die_with_effect: has_flag_labelled(system, "flags", &DIE_WITH_EFFECT),
@@ -88,12 +106,18 @@ pub(super) fn read_system_parts(reader: &TagReader, system: TagStruct<'_>) -> Op
                 real("LOD feather in delta"),
                 real("LOD feather out delta"),
             ];
-            let any_camera = system.field("camera mode").is_some_and(|field| field.enum_is("independent of camera mode"));
+            let any_camera = system
+                .field("camera mode")
+                .is_some_and(|field| field.enum_is("independent of camera mode"));
             let mut rates = emitters.iter().map(|emitter| emitter.rate.most());
             if let Some(own) = own {
                 Some((own.baked_lod)(raw, any_camera, &mut rates))
             } else if !has_flag_labelled(system, "flags", &LOD_ALWAYS_ONE) {
-                Some(if look.reach { reach_baked_lod(raw) } else { baked_lod(raw, any_camera, rates) })
+                Some(if look.reach {
+                    reach_baked_lod(raw)
+                } else {
+                    baked_lod(raw, any_camera, rates)
+                })
             } else {
                 None
             }
@@ -111,7 +135,12 @@ pub(super) fn read_system_parts(reader: &TagReader, system: TagStruct<'_>) -> Op
 fn read_attached_parts(
     reader: &TagReader,
     look: &ParticleLook,
-) -> Vec<(ParticleTrigger, ParticleSystemParts, Arc<EffectTimes>, usize)> {
+) -> Vec<(
+    ParticleTrigger,
+    ParticleSystemParts,
+    Arc<EffectTimes>,
+    usize,
+)> {
     let mut parts = Vec::new();
     for (trigger, path) in &look.attachments {
         let Ok(effect) = reader.load(path, "effect", b"effe") else {
@@ -140,7 +169,9 @@ fn read_attached_parts(
 
 /// The contrails these systems' particles start, each once: a system at many
 /// markers shares its own.
-pub(in crate::app::model_preview) fn carried_strips(systems: &[Arc<ParticleSystem>]) -> Vec<Arc<Gen3StripAt>> {
+pub(in crate::app::model_preview) fn carried_strips(
+    systems: &[Arc<ParticleSystem>],
+) -> Vec<Arc<Gen3StripAt>> {
     let mut strips: Vec<Arc<Gen3StripAt>> = Vec::new();
     for strip in systems.iter().flat_map(|system| &system.carried) {
         if !strips.iter().any(|known| Arc::ptr_eq(known, strip)) {
@@ -158,7 +189,6 @@ impl ParticleSystem {
     pub(crate) fn scale_names(&self) -> [&str; 2] {
         [&self.scale_by, &self.secondary_by]
     }
-
 }
 
 /// The systems of an object's attached effects, one at each marker of a location.
@@ -198,7 +228,11 @@ pub(in crate::app::model_preview) fn read_h3_particles(
                     .collect();
                 for marker in &object_effect.locations(markers, &name, &frame) {
                     let (place, node) = frame(marker);
-                    let attached = children.iter().enumerate().map(|(at, child)| (child.0, at + 1)).collect();
+                    let attached = children
+                        .iter()
+                        .enumerate()
+                        .map(|(at, child)| (child.0, at + 1))
+                        .collect();
                     let parts = parts.clone();
                     systems.push(ParticleSystem {
                         node,
@@ -267,7 +301,6 @@ impl ParticleSystem {
         let eye: [f32; 3] = std::array::from_fn(|axis| origin[axis] - view.eye[axis]);
         dot(view.forward, eye) - self.sort_bias * 0.05
     }
-
 }
 
 attached!(ParticleSystem);

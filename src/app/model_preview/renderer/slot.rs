@@ -1,10 +1,10 @@
 //! The GPU slots a preview's buffers and textures live in, least recently drawn first out.
 
-use super::*;
+use super::super::dx9::passes::{Dx9DrawPass, H2_LAYER_COUNT};
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::texture::{upload_image, upload_texture};
 use super::super::particles::{sprite_maps, upload_cheap_render_texture};
-use super::super::dx9::passes::{Dx9DrawPass, H2_LAYER_COUNT};
+use super::*;
 use crate::app::model_preview::common::image::Sampler;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use eframe::glow;
@@ -140,7 +140,10 @@ pub(in crate::app::model_preview) struct ModelGpuSlot {
 }
 
 impl ModelGpuSlot {
-    pub(super) unsafe fn new(gl: &glow::Context, program: glow::NativeProgram) -> Result<Self, String> {
+    pub(super) unsafe fn new(
+        gl: &glow::Context,
+        program: glow::NativeProgram,
+    ) -> Result<Self, String> {
         unsafe {
             let vertex_array = gl
                 .create_vertex_array()
@@ -274,14 +277,26 @@ impl ModelGpuSlot {
             match &frame.preview.gen3.prt {
                 Some(prt) => {
                     gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.prt_buffer));
-                    gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&prt.vertices), glow::STATIC_DRAW);
+                    gl.buffer_data_u8_slice(
+                        glow::ARRAY_BUFFER,
+                        slice_bytes(&prt.vertices),
+                        glow::STATIC_DRAW,
+                    );
                     let stride = std::mem::size_of::<[f32; gen3::prt::COEFFICIENTS]>() as i32;
-                    for (index, attribute) in gen3::pipeline::PRT_ATTRIBUTES.into_iter().enumerate() {
+                    for (index, attribute) in gen3::pipeline::PRT_ATTRIBUTES.into_iter().enumerate()
+                    {
                         gl.enable_vertex_attrib_array(attribute);
                         // The first holds a fourth for the linear shader, in the
                         // second's first place.
                         let size = if index == 0 { 4 } else { 3 };
-                        gl.vertex_attrib_pointer_f32(attribute, size, glow::FLOAT, false, stride, index as i32 * 12);
+                        gl.vertex_attrib_pointer_f32(
+                            attribute,
+                            size,
+                            glow::FLOAT,
+                            false,
+                            stride,
+                            index as i32 * 12,
+                        );
                     }
                 }
                 None => {
@@ -297,7 +312,11 @@ impl ModelGpuSlot {
 
     /// Upload the maps of the sprites, flares, antennas and effects the
     /// slot's geometry draws, once per geometry.
-    pub(in crate::app::model_preview) unsafe fn sync_sprite_textures(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+    pub(in crate::app::model_preview) unsafe fn sync_sprite_textures(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+    ) {
         if self.flare_geometry == Some(frame.geometry_id) {
             return;
         }
@@ -310,24 +329,43 @@ impl ModelGpuSlot {
                 gl.delete_texture(texture);
             }
             let maps = |look: &particles::SpriteShader| sprite_maps(gl, look);
-            self.particle_textures =
-                frame.preview.particles.iter().map(|system| maps(&system.look.shader)).collect();
-            self.strip_textures = frame.preview.gen3.strips.iter().map(|strip| maps(strip.shader())).collect();
+            self.particle_textures = frame
+                .preview
+                .particles
+                .iter()
+                .map(|system| maps(&system.look.shader))
+                .collect();
+            self.strip_textures = frame
+                .preview
+                .gen3
+                .strips
+                .iter()
+                .map(|strip| maps(strip.shader()))
+                .collect();
             if let Some(texture) = self.reach_cheap_texture.take() {
                 gl.delete_texture(texture);
             }
-            let render = frame.preview.gen3.cheap_emitters.first().and_then(|at| at.library().render_texture());
-            self.reach_cheap_texture = render.and_then(|render| upload_cheap_render_texture(gl, render));
+            let render = frame
+                .preview
+                .gen3
+                .cheap_emitters
+                .first()
+                .and_then(|at| at.library().render_texture());
+            self.reach_cheap_texture =
+                render.and_then(|render| upload_cheap_render_texture(gl, render));
             for texture in self.flare_textures.drain(..).flatten().flatten() {
                 gl.delete_texture(texture);
             }
             self.flare_textures = frame
                 .preview
-                .gen3.flares
+                .gen3
+                .flares
                 .iter()
                 .map(|at| {
                     let (image, texels, mips) = at.bitmap();
-                    vec![crate::app::model_preview::gl::texture::upload_image_linear(gl, image, *texels, mips, None)]
+                    vec![crate::app::model_preview::gl::texture::upload_image_linear(
+                        gl, image, *texels, mips, None,
+                    )]
                 })
                 .chain(super::game::game_flare_images(gl, frame))
                 .collect();
@@ -343,10 +381,22 @@ impl ModelGpuSlot {
                     // sets address mode 1 and filter mode 2, taken to be
                     // clamped and trilinear. [inferred]
                     Some((image, texels, mips)) => {
-                        let filter =
-                            if antenna.is_reach() { BitmapFilterMode::Trilinear } else { BitmapFilterMode::Bilinear };
-                        let sampler = Sampler { address: [BitmapAddressMode::Clamp; 2], filter };
-                        crate::app::model_preview::gl::texture::upload_image_linear(gl, image, *texels, mips, Some(sampler))
+                        let filter = if antenna.is_reach() {
+                            BitmapFilterMode::Trilinear
+                        } else {
+                            BitmapFilterMode::Bilinear
+                        };
+                        let sampler = Sampler {
+                            address: [BitmapAddressMode::Clamp; 2],
+                            filter,
+                        };
+                        crate::app::model_preview::gl::texture::upload_image_linear(
+                            gl,
+                            image,
+                            *texels,
+                            mips,
+                            Some(sampler),
+                        )
                     }
                     None => upload_image(gl, &antenna.image),
                 })
@@ -356,11 +406,18 @@ impl ModelGpuSlot {
             }
             self.volume_textures = frame
                 .preview
-                .gen3.light_volumes
+                .gen3
+                .light_volumes
                 .iter()
                 .map(|at| {
                     let (image, texels, mips) = at.bitmap()?;
-                    crate::app::model_preview::gl::texture::upload_image_linear(gl, image, *texels, mips, at.sampler())
+                    crate::app::model_preview::gl::texture::upload_image_linear(
+                        gl,
+                        image,
+                        *texels,
+                        mips,
+                        at.sampler(),
+                    )
                 })
                 .collect();
             self.flare_geometry = Some(frame.geometry_id);
@@ -446,7 +503,8 @@ impl ModelGpuSlot {
                         })
                         .collect()
                 };
-                uploaded.h2_textures = std::array::from_fn(|layer| upload(&material.h2_layers[layer]));
+                uploaded.h2_textures =
+                    std::array::from_fn(|layer| upload(&material.h2_layers[layer]));
                 uploaded
             })
             .collect();
@@ -454,7 +512,12 @@ impl ModelGpuSlot {
 
     pub(super) unsafe fn release_textures(&mut self, gl: &glow::Context) {
         for material in self.materials.drain(..) {
-            let passes = material.h2_textures.into_iter().flatten().flatten().flatten();
+            let passes = material
+                .h2_textures
+                .into_iter()
+                .flatten()
+                .flatten()
+                .flatten();
             for texture in material.textures.into_iter().flatten().chain(passes) {
                 unsafe { gl.delete_texture(texture) };
             }
@@ -466,7 +529,8 @@ impl ModelGpuSlot {
 pub(in crate::app::model_preview) struct MaterialGlTextures {
     pub(in crate::app::model_preview) textures: [Option<glow::NativeTexture>; SLOT_COUNT],
     /// By `Dx9Layer` and pass, one texture per entry of its `textures`.
-    pub(in crate::app::model_preview) h2_textures: [Vec<Vec<Option<glow::NativeTexture>>>; H2_LAYER_COUNT],
+    pub(in crate::app::model_preview) h2_textures:
+        [Vec<Vec<Option<glow::NativeTexture>>>; H2_LAYER_COUNT],
     pub(super) uv_scales: [[f32; 2]; SLOT_COUNT],
     pub(in crate::app::model_preview) detail: DetailComposition,
 }

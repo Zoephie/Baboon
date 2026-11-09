@@ -16,8 +16,8 @@ use super::super::common::fields::elements;
 use super::super::functions::FunctionValues;
 use super::super::gen3::shaders::{Gen3Pass, Gen3Texture};
 use super::super::gen3::shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
-use crate::core::hlsl::emit::Stage;
 use crate::app::model_preview::h4::materials::shaders::rewire_depth_fade;
+use crate::core::hlsl::emit::Stage;
 
 /// `rasterizer_globals`' explicit shader 61, `shield_impact`.
 const SHIELD_IMPACT: usize = 61;
@@ -90,11 +90,9 @@ pub(crate) fn read_h4_shield(reader: &TagReader, model: &TagFile) -> Option<Arc<
 /// the preview's depth: `ComputeDepthFade`'s `psDepthConstants` decode is
 /// the game's reversed depth, here the preview's window depth to world units.
 pub(crate) fn h4_shield_pass(reader: &TagReader, technique: usize) -> Result<Gen3Pass, String> {
-    let globals = reader.load("globals\\rasterizer_globals",
-        "rasterizer_globals",
-        b"rasg",
-    )
-    .map_err(|error| error.to_string())?;
+    let globals = reader
+        .load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg")
+        .map_err(|error| error.to_string())?;
     let explicit = elements(globals.root(), "explicit shaders");
     let entry = explicit.get(SHIELD_IMPACT).ok_or("no explicit shader 61")?;
     let path = entry
@@ -103,10 +101,18 @@ pub(crate) fn h4_shield_pass(reader: &TagReader, technique: usize) -> Result<Gen
         .ok_or("no pixel shader")?;
     let program = super::materials::shaders::H4ShaderSource::read(reader, &path)?
         .program(&super::materials::shaders::H4_DEFINES)?;
-    let vertex =
-        super::materials::shaders::translate_technique(&program, technique, "skinned", Stage::Vertex)?;
-    let pixel =
-        super::materials::shaders::translate_technique(&program, technique, "_default", Stage::Pixel)?;
+    let vertex = super::materials::shaders::translate_technique(
+        &program,
+        technique,
+        "skinned",
+        Stage::Vertex,
+    )?;
+    let pixel = super::materials::shaders::translate_technique(
+        &program,
+        technique,
+        "_default",
+        Stage::Pixel,
+    )?;
     let mut pass = super::super::gen3::shaders::pass_of(vertex, pixel);
     rewire_depth_fade(&mut pass)?;
     Ok(pass)
@@ -114,11 +120,11 @@ pub(crate) fn h4_shield_pass(reader: &TagReader, technique: usize) -> Result<Gen
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::app::export::load_referenced_tag_from_source;
     use crate::app::model_preview::harness::kit::kit_source;
     use crate::core::game::GameId;
     use crate::core::source::TagSource;
-    use crate::app::export::load_referenced_tag_from_source;
-    use super::*;
 
     fn model(source: &TagSource, path: &str) -> TagFile {
         load_referenced_tag_from_source(source, path, "model", b"hlmt").unwrap()
@@ -130,7 +136,9 @@ mod tests {
     /// no shield.
     #[test]
     fn the_kits_bipeds_take_their_live_shield() {
-        let Some(source) = kit_source(GameId::Halo4) else { return };
+        let Some(source) = kit_source(GameId::Halo4) else {
+            return;
+        };
         let chief = model(
             &source,
             "objects\\characters\\storm_masterchief\\storm_masterchief",
@@ -149,7 +157,11 @@ mod tests {
         );
         let grunt = model(&source, "objects\\characters\\storm_grunt\\storm_grunt");
         assert_eq!(shield_impact_path(&grunt), None);
-        let shield = read_h4_shield(&crate::app::model_preview::load::TagReader::new(&source), &chief).expect("the Chief's shield");
+        let shield = read_h4_shield(
+            &crate::app::model_preview::load::TagReader::new(&source),
+            &chief,
+        )
+        .expect("the Chief's shield");
         assert!(!shield.settings.showing(0.0));
         assert!(shield.settings.showing(0.5));
         assert_eq!(shield.textures.len(), 4);

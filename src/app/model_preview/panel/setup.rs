@@ -26,7 +26,11 @@ pub(in crate::app::model_preview) fn draw_setup_header_actions(
 
 /// The Model Setup card's body: a scenario's BSPs, the variants and regions,
 /// and the object's functions.
-pub(in crate::app::model_preview) fn draw_setup_body(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
+pub(in crate::app::model_preview) fn draw_setup_body(
+    ui: &mut Ui,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+) {
     draw_scenario_setup(ui, data, state);
     draw_variant_controls(ui, data, state);
     draw_object_functions(ui, data, state);
@@ -35,7 +39,11 @@ pub(in crate::app::model_preview) fn draw_setup_body(ui: &mut Ui, data: &ModelPr
 /// A scenario's per-BSP toggle list. Region toggles cannot serve here: a
 /// region only exists once its BSP is loaded, and the point of this list is
 /// choosing what to load in the first place.
-pub(in crate::app::model_preview) fn draw_scenario_setup(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
+pub(in crate::app::model_preview) fn draw_scenario_setup(
+    ui: &mut Ui,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+) {
     if !data.scenario_bsps.is_empty() {
         ui.label(RichText::new("Structure BSPs").strong().color(text_dark()));
         ui.horizontal_wrapped(|ui| {
@@ -59,8 +67,7 @@ pub(in crate::app::model_preview) fn draw_scenario_setup(ui: &mut Ui, data: &Mod
         });
         if state.scenario_bsp_selection.is_empty() {
             ui.label(
-                RichText::new("Check a structure BSP to load its geometry.")
-                    .color(subtle_dark()),
+                RichText::new("Check a structure BSP to load its geometry.").color(subtle_dark()),
             );
         }
         ui.separator();

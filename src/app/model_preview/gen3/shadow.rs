@@ -2,12 +2,12 @@
 //! and applies: the casters, `render_shadow_generate`'s biased depth, the
 //! scene's depth, and an apply blended by its least into the mask.
 
-use eframe::glow::{self, HasContext as _};
-use super::state::Gen3State;
-use super::super::*;
-use super::shaders::{Gen3Material, Gen3Pass};
 use super::super::dx9::shadow::ShadowStyle;
 use super::super::gl::pass_state::PassState;
+use super::super::*;
+use super::shaders::{Gen3Material, Gen3Pass};
+use super::state::Gen3State;
+use eframe::glow::{self, HasContext as _};
 
 /// Where Halo 3's and ODST's shadow apply reads the albedo pass's normals.
 pub(in crate::app::model_preview) const H3_NORMAL_TARGET_UNIT: u32 = 9;
@@ -23,11 +23,17 @@ pub(in crate::app::model_preview) const H3_SHADOW_DEPTH_BIAS: f32 = 0.003;
 /// Halo 3's and ODST's self shadow through the dx9 passes: a smaller map,
 /// biased, from the dominant probe light, and applied after the opaque pass
 /// rather than masked in the stencil.
-pub(in crate::app::model_preview) fn h3_shadow_style(frame: &ModelGpuFrame, targets: Option<&gen3::pipeline::Gen3Targets>) -> ShadowStyle {
+pub(in crate::app::model_preview) fn h3_shadow_style(
+    frame: &ModelGpuFrame,
+    targets: Option<&gen3::pipeline::Gen3Targets>,
+) -> ShadowStyle {
     let (toward, alpha) = gen3::pipeline::h3_shadow_light(frame);
     ShadowStyle {
         map_size: H3_SHADOW_MAP_SIZE,
-        bias: Some((H3_SHADOW_SLOPE_BIAS, H3_SHADOW_DEPTH_BIAS * (1 << 24) as f32)),
+        bias: Some((
+            H3_SHADOW_SLOPE_BIAS,
+            H3_SHADOW_DEPTH_BIAS * (1 << 24) as f32,
+        )),
         stencil_mask: false,
         toward,
         alpha,
@@ -40,14 +46,28 @@ pub(in crate::app::model_preview) fn h3_shadow_style(frame: &ModelGpuFrame, targ
 }
 
 /// A batch that casts, its material, and that material's `shadow_generate`.
-pub(in crate::app::model_preview) type ShadowCaster<'a> = (&'a RenderModelPreviewBatch, &'a Arc<Gen3Material>, Arc<Gen3Pass>);
+pub(in crate::app::model_preview) type ShadowCaster<'a> = (
+    &'a RenderModelPreviewBatch,
+    &'a Arc<Gen3Material>,
+    Arc<Gen3Pass>,
+);
 
 /// The batches that cast: opaque, no decal, and with a `shadow_generate`.
-pub(in crate::app::model_preview) fn shadow_casters(batches: &[(RenderModelPreviewBatch, Arc<Gen3Material>)]) -> Vec<ShadowCaster<'_>> {
+pub(in crate::app::model_preview) fn shadow_casters(
+    batches: &[(RenderModelPreviewBatch, Arc<Gen3Material>)],
+) -> Vec<ShadowCaster<'_>> {
     batches
         .iter()
-        .filter(|(_, material)| material.blend == gen3::shaders::Gen3Blend::Opaque && !material.decal)
-        .filter_map(|(batch, material)| Some((batch, material, Arc::clone(material.shadow_generate.as_ref()?))))
+        .filter(|(_, material)| {
+            material.blend == gen3::shaders::Gen3Blend::Opaque && !material.decal
+        })
+        .filter_map(|(batch, material)| {
+            Some((
+                batch,
+                material,
+                Arc::clone(material.shadow_generate.as_ref()?),
+            ))
+        })
         .collect()
 }
 
@@ -92,7 +112,10 @@ impl Gen3State {
                 self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
             }
             self.shadow_view_projection = None;
-            PassState::new().disable(glow::POLYGON_OFFSET_FILL).color_mask([true; 4]).apply(gl);
+            PassState::new()
+                .disable(glow::POLYGON_OFFSET_FILL)
+                .color_mask([true; 4])
+                .apply(gl);
         }
     }
 
@@ -130,21 +153,41 @@ impl Gen3State {
             gl.clear_color(clear[0], clear[1], clear[2], clear[3]);
             gl.clear(glow::COLOR_BUFFER_BIT);
             let at = |name: &str| gl.get_uniform_location(program, name);
-            let samplers = textures.into_iter().enumerate().fold(PassState::new().use_program(program), |state, (unit, (name, texture))| {
-                state.sampler(unit as u32, glow::TEXTURE_2D, Some(texture), at(name))
-            });
+            let samplers = textures.into_iter().enumerate().fold(
+                PassState::new().use_program(program),
+                |state, (unit, (name, texture))| {
+                    state.sampler(unit as u32, glow::TEXTURE_2D, Some(texture), at(name))
+                },
+            );
             samplers.active_texture(glow::TEXTURE0).apply(gl);
-            let screen_to_world =
-                super::screen_lights::screen_to_relative_world(&super::pipeline::view_projection(&frame.camera), size, [0.0; 3])?;
-            gl.uniform_matrix_4_f32_slice(at("screen_to_world").as_ref(), true, screen_to_world.as_flattened());
-            gl.uniform_matrix_4_f32_slice(at("shadow_view_projection").as_ref(), false, view_projection);
+            let screen_to_world = super::screen_lights::screen_to_relative_world(
+                &super::pipeline::view_projection(&frame.camera),
+                size,
+                [0.0; 3],
+            )?;
+            gl.uniform_matrix_4_f32_slice(
+                at("screen_to_world").as_ref(),
+                true,
+                screen_to_world.as_flattened(),
+            );
+            gl.uniform_matrix_4_f32_slice(
+                at("shadow_view_projection").as_ref(),
+                false,
+                view_projection,
+            );
             Some(())
         }
     }
 
     /// The apply's triangle, kept to `channels` and the least of each, then
     /// the state the scene draws with again and the slot's vertex array.
-    pub(in crate::app::model_preview) unsafe fn draw_shadow_apply(&mut self, core: &mut RenderCore, gl: &glow::Context, slot: usize, [red, green, blue, alpha]: [bool; 4]) {
+    pub(in crate::app::model_preview) unsafe fn draw_shadow_apply(
+        &mut self,
+        core: &mut RenderCore,
+        gl: &glow::Context,
+        slot: usize,
+        [red, green, blue, alpha]: [bool; 4],
+    ) {
         unsafe {
             PassState::new()
                 .disable(glow::DEPTH_TEST)
@@ -172,4 +215,5 @@ pub(in crate::app::model_preview) const H3_SHADOW_APPLY_BIAS: f32 = -0.00002;
 /// `shadow_apply_bilinear`'s pixel shader in the preview's box: one object
 /// filling the map. `FASTER_SHADOWS` at `DX_VERSION` 11 leaves no slope to bias
 /// by, that being the shadow generate's own.
-pub(in crate::app::model_preview) const H3_SHADOW_APPLY: &str = include_str!("shaders/shadow_apply.glsl");
+pub(in crate::app::model_preview) const H3_SHADOW_APPLY: &str =
+    include_str!("shaders/shadow_apply.glsl");

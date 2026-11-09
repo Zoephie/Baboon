@@ -10,7 +10,9 @@ use blam_tags::{
 /// used to come back as no overlay at all.
 #[test]
 fn an_overlay_that_will_not_load_says_why() {
-    let Some(tags) = kit_root(GameId::Halo3) else { return };
+    let Some(tags) = kit_root(GameId::Halo3) else {
+        return;
+    };
     let rel = "objects/vehicles/warthog/warthog.model";
     if !tags.join(rel).is_file() {
         eprintln!("skipping: BLAM_TEST_H3EK has no {rel}");
@@ -26,7 +28,10 @@ fn an_overlay_that_will_not_load_says_why() {
         game: Some(crate::core::game::GameId::Halo3),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
-    let overlay = hlmt_collision_overlay(&model, &crate::app::model_preview::load::TagReader::new(&source));
+    let overlay = hlmt_collision_overlay(
+        &model,
+        &crate::app::model_preview::load::TagReader::new(&source),
+    );
     std::fs::remove_dir_all(&root).ok();
     let error = overlay.expect_err("a missing collision model is an error, not no overlay");
     assert!(error.starts_with("Could not load"), "{error}");
@@ -36,17 +41,37 @@ fn an_overlay_that_will_not_load_says_why() {
 /// 32767: every surface still closes its ring of edges into triangles.
 #[test]
 fn a_collision_bsp_past_32767_edges_keeps_every_surface() {
-    let Some(root) = kit_root(GameId::Halo3) else { return };
-    let path = std::path::Path::new(&root).join("levels/dlc/sidewinder/sidewinder.scenario_structure_bsp");
+    let Some(root) = kit_root(GameId::Halo3) else {
+        return;
+    };
+    let path =
+        std::path::Path::new(&root).join("levels/dlc/sidewinder/sidewinder.scenario_structure_bsp");
     let tag = blam_tags::TagFile::read(&path).unwrap();
-    let block = tag.root().field_path("resource interface/raw_resources[0]/raw_items/collision bsp");
-    let bsp = block.and_then(|field| field.as_block()).and_then(|block| block.element(0)).unwrap();
-    let edges = bsp.field_path("edges").and_then(|field| field.as_block()).unwrap().len();
-    let surfaces = bsp.field_path("surfaces").and_then(|field| field.as_block()).unwrap().len();
+    let block = tag
+        .root()
+        .field_path("resource interface/raw_resources[0]/raw_items/collision bsp");
+    let bsp = block
+        .and_then(|field| field.as_block())
+        .and_then(|block| block.element(0))
+        .unwrap();
+    let edges = bsp
+        .field_path("edges")
+        .and_then(|field| field.as_block())
+        .unwrap()
+        .len();
+    let surfaces = bsp
+        .field_path("surfaces")
+        .and_then(|field| field.as_block())
+        .unwrap()
+        .len();
     assert!(edges > 32768, "{edges} edges");
     let mut triples = Vec::new();
     append_collision_bsp_triangles(&bsp, &mut triples);
-    assert!(triples.len() / 3 >= surfaces, "{} triangles for {surfaces} surfaces", triples.len() / 3);
+    assert!(
+        triples.len() / 3 >= surfaces,
+        "{} triangles for {surfaces} surfaces",
+        triples.len() / 3
+    );
 }
 
 // The derived-preview builders' non-drawing halves: JMS/ASS scenes into
@@ -940,9 +965,14 @@ fn an_overlay_merge_keeps_the_texture_resolve_in_flight() {
         materials: vec![Default::default()],
         ..Default::default()
     };
-    let data = super::super::super::model_preview_data(key.clone(), key.clone(), preview, Vec::new());
+    let data =
+        super::super::super::model_preview_data(key.clone(), key.clone(), preview, Vec::new());
     let (geometry_id, textures_id) = (data.geometry_id, data.textures_id);
-    let state = app.views[app.model.kits[0].id].caches.model_previews.entry(key.clone()).or_default();
+    let state = app.views[app.model.kits[0].id]
+        .caches
+        .model_previews
+        .entry(key.clone())
+        .or_default();
     state.data = Some(Ok(data));
     state.textures_pending = true;
 
@@ -950,7 +980,14 @@ fn an_overlay_merge_keeps_the_texture_resolve_in_flight() {
         materials: vec![Default::default()],
         ..Default::default()
     };
-    app.handle_model_overlays_built(stamp, key.clone(), geometry_id, Some(overlay), None, Vec::new());
+    app.handle_model_overlays_built(
+        stamp,
+        key.clone(),
+        geometry_id,
+        Some(overlay),
+        None,
+        Vec::new(),
+    );
     let state = &app.views[app.model.kits[0].id].caches.model_previews[&key];
     assert!(
         state.textures_pending,
@@ -960,15 +997,16 @@ fn an_overlay_merge_keeps_the_texture_resolve_in_flight() {
         panic!("preview data");
     };
     assert_ne!(data.mesh_id, geometry_id, "the mesh did change");
-    assert_eq!(data.geometry_id, geometry_id, "the effects and inputs keep theirs");
-
-    app.handle_model_textures_resolved(
-        stamp,
-        key.clone(),
-        textures_id,
-        vec![Default::default()],
+    assert_eq!(
+        data.geometry_id, geometry_id,
+        "the effects and inputs keep theirs"
     );
-    let Some(Ok(data)) = app.views[app.model.kits[0].id].caches.model_previews[&key].data.as_ref() else {
+
+    app.handle_model_textures_resolved(stamp, key.clone(), textures_id, vec![Default::default()]);
+    let Some(Ok(data)) = app.views[app.model.kits[0].id].caches.model_previews[&key]
+        .data
+        .as_ref()
+    else {
         panic!("preview data");
     };
     assert!(data.textures.is_some(), "and its result is kept");

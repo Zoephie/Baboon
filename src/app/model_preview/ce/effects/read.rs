@@ -55,7 +55,10 @@ impl EffectParticleFlags {
             stay_attached: set("stay attached to marker"),
             random_initial_angle: set("random initial angle"),
             tint_from_object: set("tint from object color"),
-            tint_interpolation: ce_color_interpolation(set("interpolate tint as HSV"), set("... across the long hue path")),
+            tint_interpolation: ce_color_interpolation(
+                set("interpolate tint as HSV"),
+                set("... across the long hue path"),
+            ),
         }
     }
 }
@@ -129,14 +132,19 @@ pub(crate) struct CeParticleDef {
 
 /// The path of the `n`th field named `name` that has one.
 fn nth_field_path(holder: TagStruct<'_>, name: &str, n: usize) -> Option<String> {
-    let field = holder.fields().filter(|field| field.name() == name).nth(n)?;
+    let field = holder
+        .fields()
+        .filter(|field| field.name() == name)
+        .nth(n)?;
     Some(format!("{name}#{}", field.ordinal()))
 }
 
 /// Effects read so far, by path; none while one is being read, so an effect
 /// whose particles lead back to it stops there.
 #[derive(Default)]
-pub(in crate::app::model_preview) struct CeEffectCache(std::collections::HashMap<String, Option<Arc<CeEffectDef>>>);
+pub(in crate::app::model_preview) struct CeEffectCache(
+    std::collections::HashMap<String, Option<Arc<CeEffectDef>>>,
+);
 
 impl CeEffectCache {
     pub(super) fn effect(&mut self, reader: &TagReader, path: &str) -> Option<Arc<CeEffectDef>> {
@@ -165,49 +173,97 @@ impl CeParticleDef {
     }
 
     pub(super) fn sprites_in(&self, sequence: i32) -> usize {
-        usize::try_from(sequence).ok().and_then(|at| self.sequences.get(at)).map_or(0, Vec::len)
+        usize::try_from(sequence)
+            .ok()
+            .and_then(|at| self.sequences.get(at))
+            .map_or(0, Vec::len)
     }
 }
 
-fn read_particle_def(reader: &TagReader, path: &str, cache: &mut CeEffectCache) -> Option<CeParticleDef> {
+fn read_particle_def(
+    reader: &TagReader,
+    path: &str,
+    cache: &mut CeEffectCache,
+) -> Option<CeParticleDef> {
     let tag = reader.load(path, "particle", b"part").ok()?;
     let root = tag.root();
     let flags = ParticleFlags::read(root);
-    let bitmap_path = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
-    let CeSpriteSheet { sizes, sequences, images } = read_sprite_sheet(reader, &bitmap_path)?;
+    let bitmap_path = root
+        .read_tag_ref_path("bitmap")
+        .filter(|path| !path.is_empty())?;
+    let CeSpriteSheet {
+        sizes,
+        sequences,
+        images,
+    } = read_sprite_sheet(reader, &bitmap_path)?;
     let short = |name: &str| root.read_int_any(name).unwrap_or(0) as i32;
     let first_sequence = short("first sequence index");
-    let sequence_counts = [short("initial sequence count"), short("looping sequence count"), short("final sequence count")];
+    let sequence_counts = [
+        short("initial sequence count"),
+        short("looping sequence count"),
+        short("final sequence count"),
+    ];
     let bounds = |name: &str| bounds_of(root, name);
     // Tool's postprocess (`sub_524C80`) fills these in for the game.
     let mut radius_animation = bounds("radius animation");
-    radius_animation.iter_mut().filter(|scale| **scale <= 0.0).for_each(|scale| *scale = 1.0);
+    radius_animation
+        .iter_mut()
+        .filter(|scale| **scale <= 0.0)
+        .for_each(|scale| *scale = 1.0);
     let rate = bounds("animation rate");
     let rate_upper_raw = rate[1];
     let rate_lower = rate[0].clamp(0.0, 90.0);
-    let animation_rate = [rate_lower, if rate_lower <= rate[1] { rate[1].min(90.0) } else { rate_lower }];
-    let frame_step = if flags.animate_once_per_frame { 0.04 } else { rate_upper_raw };
+    let animation_rate = [
+        rate_lower,
+        if rate_lower <= rate[1] {
+            rate[1].min(90.0)
+        } else {
+            rate_lower
+        },
+    ];
+    let frame_step = if flags.animate_once_per_frame {
+        0.04
+    } else {
+        rate_upper_raw
+    };
     let [_, looping, last] = sequence_counts;
     let final_frames = (0..last)
-        .filter_map(|at| sequences.get((first_sequence + sequence_counts[0] + looping + at) as usize))
+        .filter_map(|at| {
+            sequences.get((first_sequence + sequence_counts[0] + looping + at) as usize)
+        })
         .map(Vec::len)
         .max()
         .unwrap_or(0) as f32;
     let mut lifespan = bounds("lifespan");
-    lifespan.iter_mut().for_each(|end| *end -= final_frames * frame_step);
+    lifespan
+        .iter_mut()
+        .for_each(|end| *end -= final_frames * frame_step);
     let mut widest = 0.0f32;
     let shown = sequence_counts.iter().sum::<i32>();
     for at in 0..shown {
-        for sprite in sequences.get((first_sequence + at) as usize).into_iter().flatten() {
+        for sprite in sequences
+            .get((first_sequence + at) as usize)
+            .into_iter()
+            .flatten()
+        {
             let [width, height] = sizes.get(sprite.image).copied().unwrap_or([1.0, 1.0]);
             let [left, right, top, bottom] = sprite.rect;
-            widest = widest.max(((right - left) * width).max((bottom - top) * height)).floor();
+            widest = widest
+                .max(((right - left) * width).max((bottom - top) * height))
+                .floor();
         }
     }
     // Either size unset, and both take their defaults (start 5, end 4); only
     // the end size is drawn by.
-    let (fade_start, fade_end) = (root.read_real("fade start size").unwrap_or(0.0), root.read_real("fade end size").unwrap_or(0.0));
-    let fade_end = if fade_end <= 0.0 || fade_start <= 0.0 { 4.0 } else { fade_end };
+    let (fade_start, fade_end) = (
+        root.read_real("fade start size").unwrap_or(0.0),
+        root.read_real("fade end size").unwrap_or(0.0),
+    );
+    let fade_end = if fade_end <= 0.0 || fade_start <= 0.0 {
+        4.0
+    } else {
+        fade_end
+    };
     let physics = root
         .read_tag_ref_path("physics")
         .filter(|path| !path.is_empty())
@@ -222,7 +278,10 @@ fn read_particle_def(reader: &TagReader, path: &str, cache: &mut CeEffectCache) 
         minimum_size: root.read_real("minimum size").unwrap_or(0.0),
         radius_animation,
         animation_rate,
-        contact_deterioration: root.read_real("contact deterioration").unwrap_or(0.0).max(0.0),
+        contact_deterioration: root
+            .read_real("contact deterioration")
+            .unwrap_or(0.0)
+            .max(0.0),
         fade_end_size: fade_end,
         first_sequence,
         sequence_counts,
@@ -232,7 +291,8 @@ fn read_particle_def(reader: &TagReader, path: &str, cache: &mut CeEffectCache) 
         nonlinear_tint: has_flag(root, "shader flags", "nonlinear tint"),
         sort_bias: has_flag(root, "shader flags", "sort bias"),
         sprite_scale: if widest > 0.0 { 1.0 / widest } else { 1.0 },
-        secondary: nth_field_path(root, "bitmap", 1).and_then(|field| read_secondary_map(reader, root, &field)),
+        secondary: nth_field_path(root, "bitmap", 1)
+            .and_then(|field| read_secondary_map(reader, root, &field)),
         collision_effect: spawned_effect(reader, root, "collision effect", cache),
         death_effect: spawned_effect(reader, root, "death effect", cache),
         sequences,
@@ -319,10 +379,14 @@ pub(crate) struct CeEffectDef {
 
 fn bounds_of(holder: TagStruct<'_>, name: &str) -> [f32; 2] {
     match holder.field(name).and_then(|field| field.value()) {
-        Some(TagFieldData::RealBounds(bounds) | TagFieldData::AngleBounds(bounds) | TagFieldData::FractionBounds(bounds)) => {
-            [bounds.lower, bounds.upper]
+        Some(
+            TagFieldData::RealBounds(bounds)
+            | TagFieldData::AngleBounds(bounds)
+            | TagFieldData::FractionBounds(bounds),
+        ) => [bounds.lower, bounds.upper],
+        Some(TagFieldData::ShortIntegerBounds(bounds)) => {
+            [f32::from(bounds.lower), f32::from(bounds.upper)]
         }
-        Some(TagFieldData::ShortIntegerBounds(bounds)) => [f32::from(bounds.lower), f32::from(bounds.upper)],
         _ => [0.0; 2],
     }
 }
@@ -333,16 +397,31 @@ fn direction_of(holder: TagStruct<'_>, name: &str) -> [f32; 3] {
         Some(TagFieldData::RealEulerAngles2d(angles)) => (angles.yaw, angles.pitch),
         _ => (0.0, 0.0),
     };
-    [yaw.cos() * pitch.cos(), yaw.sin() * pitch.cos(), pitch.sin()]
+    [
+        yaw.cos() * pitch.cos(),
+        yaw.sin() * pitch.cos(),
+        pitch.sin(),
+    ]
 }
 
 /// A particle's effect reference, where it names an effect.
-fn spawned_effect(reader: &TagReader, root: TagStruct<'_>, name: &str, cache: &mut CeEffectCache) -> Option<Arc<CeEffectDef>> {
+fn spawned_effect(
+    reader: &TagReader,
+    root: TagStruct<'_>,
+    name: &str,
+    cache: &mut CeEffectCache,
+) -> Option<Arc<CeEffectDef>> {
     let (group, path) = root.read_tag_ref_with_group(name)?;
-    (group == u32::from_be_bytes(*b"effe") && !path.is_empty()).then(|| cache.effect(reader, &path)).flatten()
+    (group == u32::from_be_bytes(*b"effe") && !path.is_empty())
+        .then(|| cache.effect(reader, &path))
+        .flatten()
 }
 
-fn read_effect_def(reader: &TagReader, path: &str, cache: &mut CeEffectCache) -> Option<CeEffectDef> {
+fn read_effect_def(
+    reader: &TagReader,
+    path: &str,
+    cache: &mut CeEffectCache,
+) -> Option<CeEffectDef> {
     let tag = reader.load(path, "effect", b"effe").ok()?;
     let root = tag.root();
     let index = |name: &str| usize::try_from(root.read_int_any(name).unwrap_or(-1)).ok();
@@ -417,7 +496,10 @@ fn read_effect_def(reader: &TagReader, path: &str, cache: &mut CeEffectCache) ->
         }
         let mut entries = Vec::new();
         for entry in elements(event, "particles") {
-            let Some(path) = entry.read_tag_ref_path("particle type").filter(|path| !path.is_empty()) else {
+            let Some(path) = entry
+                .read_tag_ref_path("particle type")
+                .filter(|path| !path.is_empty())
+            else {
                 continue;
             };
             let def = match paths.iter().position(|known| *known == path) {
@@ -434,10 +516,15 @@ fn read_effect_def(reader: &TagReader, path: &str, cache: &mut CeEffectCache) ->
             let tint = |name: &str| argb(entry, name);
             entries.push(CeEffectParticle {
                 location: entry.read_int_any("location").unwrap_or(0).max(0) as usize,
-                first_person_only: entry.field("create").is_some_and(|create| create.enum_is("only in first person")),
+                first_person_only: entry
+                    .field("create")
+                    .is_some_and(|create| create.enum_is("only in first person")),
                 created: created_here(entry),
                 direction: direction_of(entry, "relative direction"),
-                offset: match entry.field("relative offset").and_then(|field| field.value()) {
+                offset: match entry
+                    .field("relative offset")
+                    .and_then(|field| field.value())
+                {
                     Some(TagFieldData::RealVector3d(vector)) => [vector.i, vector.j, vector.k],
                     _ => [0.0; 3],
                 },

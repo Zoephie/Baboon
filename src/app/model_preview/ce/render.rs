@@ -6,10 +6,13 @@ use super::super::dx9::passes::Dx9Layer;
 use super::super::dx9::pipeline::Dx9Game;
 use super::super::dx9::sprites::Dx9Sprites;
 use super::super::renderer::FrameCx;
-use super::draw::{CeEffectGl, CE_EVENTS_RUNNING, advance_ce_effects, ce_groups, ce_has_groups, ce_sorts_transparents, draw_ce_group, draw_ce_transparents};
 use super::super::*;
-use crate::app::model_preview::common::sprite_gl::{ce_flare_occlusion, draw_flare_sprites};
+use super::draw::{
+    CE_EVENTS_RUNNING, CeEffectGl, advance_ce_effects, ce_groups, ce_has_groups,
+    ce_sorts_transparents, draw_ce_group, draw_ce_transparents,
+};
 use super::slot::CeSlot;
+use crate::app::model_preview::common::sprite_gl::{ce_flare_occlusion, draw_flare_sprites};
 use eframe::glow::{self, HasContext as _};
 
 /// Halo CE's own part of the dx9 shading: its flags and effects, its
@@ -41,8 +44,13 @@ impl Dx9Game for CeGame {
             if !frame.preview.ce.effects.is_empty() {
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                 advance_ce_effects(ce, frame, bones);
-                let made: Vec<super::lights::CeLight> =
-                    ce.simulations.particles.lights(&frame.preview.ce.effects).into_iter().map(|(_, _, light)| light).collect();
+                let made: Vec<super::lights::CeLight> = ce
+                    .simulations
+                    .particles
+                    .lights(&frame.preview.ce.effects)
+                    .into_iter()
+                    .map(|(_, _, light)| light)
+                    .collect();
                 if !made.is_empty() {
                     cx.core.dx9.ce_points_now = Some(frame.ce_point_lights_with(&made));
                 }
@@ -66,21 +74,46 @@ impl Dx9Game for CeGame {
                 let ce = self.slots.of(cx.slot, cx.core.slot_uploads(cx.slot));
                 draw_ce_transparents(cx.core, cx.gl, cx.frame, cx.slot, ce, &mut self.effect_gl);
             } else {
-                cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, Dx9Layer::Transparent, None);
+                cx.core.draw_h2_passes(
+                    cx.gl,
+                    cx.frame,
+                    cx.slot,
+                    order,
+                    Dx9Layer::Transparent,
+                    None,
+                );
             }
         }
     }
 
     /// The effects' groups, when the transparents did not sort them in.
     unsafe fn draw_own_sprites(&mut self, cx: &mut Dx9Sprites<'_>) {
-        let Dx9Sprites { gl, frame, flares, view, bones, program, slot, uploads, .. } = *cx;
+        let Dx9Sprites {
+            gl,
+            frame,
+            flares,
+            view,
+            bones,
+            program,
+            slot,
+            uploads,
+            ..
+        } = *cx;
         if !ce_has_groups(&frame.preview) || ce_sorts_transparents(frame) {
             return;
         }
         let ce = self.slots.of(slot, uploads);
         unsafe {
             for group in ce_groups(gl, ce, frame, bones, view) {
-                draw_ce_group(gl, &mut self.effect_gl, program, flares, ce, &frame.camera, group);
+                draw_ce_group(
+                    gl,
+                    &mut self.effect_gl,
+                    program,
+                    flares,
+                    ce,
+                    &frame.camera,
+                    group,
+                );
             }
             gl.use_program(Some(flares.program));
             gl.bind_vertex_array(Some(flares.vertex_array));
@@ -92,7 +125,16 @@ impl Dx9Game for CeGame {
 
     /// The lights' flares, and those of the lights the effects make.
     unsafe fn draw_flares(&mut self, cx: &mut Dx9Sprites<'_>) {
-        let Dx9Sprites { gl, frame, flares, view, bones, slot, uploads, .. } = *cx;
+        let Dx9Sprites {
+            gl,
+            frame,
+            flares,
+            view,
+            bones,
+            slot,
+            uploads,
+            ..
+        } = *cx;
         let view: &ViewFrame = view;
         let camera = &frame.camera;
         let ce = self.slots.of(slot, uploads);
@@ -124,7 +166,12 @@ impl Dx9Game for CeGame {
                     continue;
                 };
                 let sprites = light.sprites(&outputs, &colors, bones, view, frame.time, occlusion);
-                let Some(textures) = ce.textures.effect_flares.get(&effect).and_then(|lights| lights.get(def)) else {
+                let Some(textures) = ce
+                    .textures
+                    .effect_flares
+                    .get(&effect)
+                    .and_then(|lights| lights.get(def))
+                else {
                     continue;
                 };
                 draw_flare_sprites(gl, flares, camera, view, &sprites, textures);
@@ -133,7 +180,12 @@ impl Dx9Game for CeGame {
     }
 
     #[cfg(test)]
-    fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
+    fn each_simulation(
+        &self,
+        slot: usize,
+        uploads: u64,
+        visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug),
+    ) {
         if let Some(ce) = self.slots.current(slot, uploads) {
             ce.simulations.each(visit);
         }
@@ -150,11 +202,20 @@ pub(in crate::app::model_preview) unsafe fn move_ce_flags(
 ) {
     let uploaded = &mut core.slots[slot];
     let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-    let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
+    let lowest = frame
+        .preview
+        .vertices
+        .iter()
+        .map(|vertex| vertex.position[2]);
     let ground = lowest.fold(0.0, f32::min);
-    let written = ce.simulations.flags.advance(&frame.preview.ce.flags, bones, ground, frame.time);
+    let written = ce
+        .simulations
+        .flags
+        .advance(&frame.preview.ce.flags, bones, ground, frame.time);
     for (first, moved) in written {
-        let moved = moved.into_iter().map(|(position, normal)| (position, normal, None));
+        let moved = moved
+            .into_iter()
+            .map(|(position, normal)| (position, normal, None));
         unsafe { uploaded.rewrite_vertices(gl, frame, first, moved) };
     }
 }

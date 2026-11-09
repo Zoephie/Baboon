@@ -5,8 +5,15 @@ use super::*;
 /// Append every region of `src` into `dst`, offsetting vertex, index, and
 /// material references. Regions with a name `dst` already lists are merged
 /// into the existing entry.
-pub(in crate::app::model_preview) fn merge_preview_append(dst: &mut RenderModelPreview, src: &RenderModelPreview) {
-    let Some(vertex_base) = VertexBase::of(dst.vertices.len(), src.vertices.len(), Overflow::RefusesAppend) else {
+pub(in crate::app::model_preview) fn merge_preview_append(
+    dst: &mut RenderModelPreview,
+    src: &RenderModelPreview,
+) {
+    let Some(vertex_base) = VertexBase::of(
+        dst.vertices.len(),
+        src.vertices.len(),
+        Overflow::RefusesAppend,
+    ) else {
         return;
     };
     let material_base = dst.materials.len();
@@ -53,7 +60,11 @@ pub(in crate::app::model_preview) fn merge_preview_append(dst: &mut RenderModelP
     // show as choices that hide the render geometry, and its batches fall back
     // to their first permutation when the chosen one is not theirs.
     for region in &src.regions {
-        if !dst.regions.iter().any(|existing| existing.name == region.name) {
+        if !dst
+            .regions
+            .iter()
+            .any(|existing| existing.name == region.name)
+        {
             dst.regions.push(region.clone());
         }
     }
@@ -68,7 +79,11 @@ pub(in crate::app::model_preview) fn merge_attached(
     owner: u8,
     name: &str,
 ) {
-    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), other.vertices.len(), Overflow::RefusesAppend) else {
+    let Some(vertex_base) = VertexBase::of(
+        preview.vertices.len(),
+        other.vertices.len(),
+        Overflow::RefusesAppend,
+    ) else {
         return;
     };
     let index_base = preview.indices.len() as u32;
@@ -87,7 +102,9 @@ pub(in crate::app::model_preview) fn merge_attached(
         }
     }
     preview.vertices.append(&mut other.vertices);
-    preview.indices.extend(other.indices.iter().map(|&index| vertex_base.offset(index)));
+    preview
+        .indices
+        .extend(other.indices.iter().map(|&index| vertex_base.offset(index)));
     for material in &mut other.materials {
         material.object = owner;
     }
@@ -99,7 +116,9 @@ pub(in crate::app::model_preview) fn merge_attached(
         batch.material_index += material_base;
         batch.region_name = label(&batch.region_name);
         // Moved and bound as its vertices are.
-        batch.sort_position = batch.sort_position.map(|(point, _)| (attach_point(&parent, &child, point), node));
+        batch.sort_position = batch
+            .sort_position
+            .map(|(point, _)| (attach_point(&parent, &child, point), node));
         preview.batches.push(batch);
     }
     for mut region in other.regions {

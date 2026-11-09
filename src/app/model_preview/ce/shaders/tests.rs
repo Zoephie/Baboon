@@ -1,7 +1,7 @@
+use super::*;
+use crate::app::export::load_referenced_tag_from_source;
 use crate::app::model_preview::harness::kit::{kit_root, kit_source};
 use crate::core::game::GameId;
-use crate::app::export::load_referenced_tag_from_source;
-use super::*;
 
 const SINGLE_GROUPS: [(&str, &[u8; 4]); 4] = [
     ("shader_transparent_glass", b"sgla"),
@@ -14,8 +14,14 @@ const SINGLE_GROUPS: [(&str, &[u8; 4]); 4] = [
 /// with its stage.
 #[test]
 fn every_model_shader_links_with_its_stage() {
-    let Some(root) = kit_root(GameId::HaloCe) else { return };
-    if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
+    let Some(root) = kit_root(GameId::HaloCe) else {
+        return;
+    };
+    if std::process::Command::new("glslangValidator")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
         eprintln!("skipping: glslangValidator is not on PATH");
         return;
     }
@@ -24,7 +30,8 @@ fn every_model_shader_links_with_its_stage() {
         game: Some(crate::core::game::GameId::HaloCe),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
-    let common = read_common(&crate::app::model_preview::load::TagReader::new(&source)).expect("the kit's model shader translates");
+    let common = read_common(&crate::app::model_preview::load::TagReader::new(&source))
+        .expect("the kit's model shader translates");
     let dir = crate::core::test_kits::unique_temp_dir("ce_model_shaders");
     let (vertex, pixel) = (dir.join("pass.vert"), dir.join("pass.frag"));
     std::fs::write(&vertex, Dx9VertexStage::CeModel.source(H2_GLSL_VERSION)).unwrap();
@@ -54,8 +61,14 @@ fn every_model_shader_links_with_its_stage() {
 /// With `BLAM_TEST_HCEEK`: the kit's camouflage reads and links.
 #[test]
 fn active_camo_links_with_its_stage() {
-    let Some(root) = kit_root(GameId::HaloCe) else { return };
-    if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
+    let Some(root) = kit_root(GameId::HaloCe) else {
+        return;
+    };
+    if std::process::Command::new("glslangValidator")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
         eprintln!("skipping: glslangValidator is not on PATH");
         return;
     }
@@ -64,7 +77,8 @@ fn active_camo_links_with_its_stage() {
         game: Some(crate::core::game::GameId::HaloCe),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
-    let settings = read_ce_camo_settings(&crate::app::model_preview::load::TagReader::new(&source)).expect("the kit's camo reads");
+    let settings = read_ce_camo_settings(&crate::app::model_preview::load::TagReader::new(&source))
+        .expect("the kit's camo reads");
     assert!(settings.refraction > 0.0);
     assert!(settings.distortion.is_some());
     let pass = ce_camo_pass(&settings, false, &mut |_, _| None);
@@ -78,15 +92,25 @@ fn active_camo_links_with_its_stage() {
         .arg(&pixel)
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
 }
 
 /// With `BLAM_TEST_HCEEK`: every transparent shader in the kit translates
 /// and links with its stage.
 #[test]
 fn every_transparent_shader_links_with_its_stage() {
-    let Some(root) = kit_root(GameId::HaloCe) else { return };
-    if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
+    let Some(root) = kit_root(GameId::HaloCe) else {
+        return;
+    };
+    if std::process::Command::new("glslangValidator")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
         eprintln!("skipping: glslangValidator is not on PATH");
         return;
     }
@@ -108,7 +132,10 @@ fn every_transparent_shader_links_with_its_stage() {
                 folders.push(path);
                 continue;
             }
-            let extension = path.extension().and_then(|name| name.to_str()).unwrap_or("");
+            let extension = path
+                .extension()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
             let Some((_, group)) = LAYER_GROUPS
                 .iter()
                 .chain(&SINGLE_GROUPS)
@@ -118,18 +145,22 @@ fn every_transparent_shader_links_with_its_stage() {
             };
             let relative = path.strip_prefix(&tags).unwrap().with_extension("");
             let relative = relative.to_string_lossy().replace('/', "\\");
-            let tag = load_referenced_tag_from_source(&source, &relative, extension, group).unwrap();
+            let tag =
+                load_referenced_tag_from_source(&source, &relative, extension, group).unwrap();
             shaders += 1;
-            let passes = ce_transparent_passes(&crate::app::model_preview::load::TagReader::new(&source), tag.root(), group, &mut |_, kind| {
-                match kind {
+            let passes = ce_transparent_passes(
+                &crate::app::model_preview::load::TagReader::new(&source),
+                tag.root(),
+                group,
+                &mut |_, kind| match kind {
                     SamplerKind::Cube => Some(Arc::new(Image::Cube {
                         size: 1,
                         faces: std::array::from_fn(|_| vec![0; 4]),
                     })),
                     SamplerKind::Volume => None,
                     SamplerKind::Texture2D => Some(flat(WHITE)),
-                }
-            });
+                },
+            );
             assert!(!passes.is_empty(), "{} has no passes", path.display());
             for pass in passes {
                 if !drawn.insert((pass.stage, pass.fragment.clone())) {
@@ -185,8 +216,18 @@ fn map(waves: [TextureWave; 3], sources: [Option<usize>; 3]) -> CeMapAnimation {
 
 #[test]
 fn a_full_turn_of_rotation_leaves_the_rows_square() {
-    let still = TextureWave { function: PERIODIC_ONE, period: 1.0, phase: 0.0, scale: 360.0 };
-    let idle = TextureWave { function: PERIODIC_ZERO, period: 1.0, phase: 0.0, scale: 1.0 };
+    let still = TextureWave {
+        function: PERIODIC_ONE,
+        period: 1.0,
+        phase: 0.0,
+        scale: 360.0,
+    };
+    let idle = TextureWave {
+        function: PERIODIC_ZERO,
+        period: 1.0,
+        phase: 0.0,
+        scale: 1.0,
+    };
     let animation = map([idle.clone(), idle, still], [None; 3]);
     let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
     animation.apply(&mut rows, 1.0, &[0.0; 4]);
@@ -197,8 +238,18 @@ fn a_full_turn_of_rotation_leaves_the_rows_square() {
 
 #[test]
 fn scrolling_moves_and_an_input_that_rests_does_not() {
-    let scroll = TextureWave { function: 6, period: 2.0, phase: 0.0, scale: 1.0 };
-    let idle = TextureWave { function: PERIODIC_ONE, period: 1.0, phase: 0.0, scale: 1.0 };
+    let scroll = TextureWave {
+        function: 6,
+        period: 2.0,
+        phase: 0.0,
+        scale: 1.0,
+    };
+    let idle = TextureWave {
+        function: PERIODIC_ONE,
+        period: 1.0,
+        phase: 0.0,
+        scale: 1.0,
+    };
     let mut animation = map([scroll, idle.clone(), idle], [None; 3]);
     assert!(animation.moves(&[0.0; 4]));
     animation.sources[0] = Some(0);
@@ -210,7 +261,9 @@ fn scrolling_moves_and_an_input_that_rests_does_not() {
 /// behind them stay open and its output shuts them.
 #[test]
 fn an_eye_shader_reads_its_blink_from_an_object_function() {
-    let Some(source) = kit_source(GameId::HaloCe) else { return };
+    let Some(source) = kit_source(GameId::HaloCe) else {
+        return;
+    };
     let tag = load_referenced_tag_from_source(
         &source,
         "characters\\marine\\shaders\\eyes_charles",
@@ -249,7 +302,11 @@ fn a_meter_follows_its_sources_and_an_unset_one_reads_one() {
 
 #[test]
 fn plasma_rests_unseen_and_its_output_brings_it_up() {
-    let noise = CePlasmaNoise { period: 2.0, direction: [1.0, 0.0, 0.0], scale: 3.0 };
+    let noise = CePlasmaNoise {
+        period: 2.0,
+        direction: [1.0, 0.0, 0.0],
+        scale: 3.0,
+    };
     let plasma = CePlasma {
         intensity_source: Some(1),
         intensity_exponent: 1.0,
@@ -261,7 +318,10 @@ fn plasma_rests_unseen_and_its_output_brings_it_up() {
         primary: noise.clone(),
         secondary: noise,
     };
-    let animation = CeModelAnimation { plasma: Some(plasma), ..Default::default() };
+    let animation = CeModelAnimation {
+        plasma: Some(plasma),
+        ..Default::default()
+    };
     let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
     animation.apply_rows(&mut rows, 4.0, &[0.0; 4]);
     assert_eq!(rows[7][3], 0.0);
@@ -276,9 +336,18 @@ fn plasma_rests_unseen_and_its_output_brings_it_up() {
 
 #[test]
 fn a_pass_says_which_outputs_it_reads() {
-    let idle = TextureWave { function: PERIODIC_ONE, period: 1.0, phase: 0.0, scale: 1.0 };
+    let idle = TextureWave {
+        function: PERIODIC_ONE,
+        period: 1.0,
+        phase: 0.0,
+        scale: 1.0,
+    };
     let map = map([idle.clone(), idle.clone(), idle], [None, Some(2), None]);
-    let animation = CeModelAnimation { maps: vec![map], fade_source: Some(1), ..Default::default() };
+    let animation = CeModelAnimation {
+        maps: vec![map],
+        fade_source: Some(1),
+        ..Default::default()
+    };
     assert_eq!(animation.outputs_read(), [false, true, true, false]);
     assert_eq!(CeModelAnimation::default().outputs_read(), [false; 4]);
 }
@@ -310,11 +379,17 @@ fn a_numeric_pass_shows_its_digit_of_its_place() {
     assert!(!digit(3, 0).shows(&outputs));
     assert!(digit(0, 2).shows(&outputs));
     // Eight images read the fourth output instead.
-    let octal = CeNumeric { count: 8, ..digit(1, 0) };
+    let octal = CeNumeric {
+        count: 8,
+        ..digit(1, 0)
+    };
     assert!(octal.shows(&[0.0, 0.0, 0.0, 1.0 / 60.0]));
     assert!(!octal.shows(&[1.0 / 60.0, 0.0, 0.0, 0.0]));
     // A countdown ignores the object, and with no script stays at zero.
-    let timer = |digit| CeNumeric { timer: true, ..digit_at(digit) };
+    let timer = |digit| CeNumeric {
+        timer: true,
+        ..digit_at(digit)
+    };
     assert!(timer(0).shows(&outputs));
     assert!(!timer(3).shows(&outputs));
 }
@@ -335,9 +410,21 @@ fn a_chicago_stage_reads_the_engine_tables() {
 fn the_fade_stage_follows_the_blend_function() {
     let blend = |index| generic_fade_stage(index, 0, 3);
     // Alpha blend fades the alpha alone: a stage with no color output.
-    assert!(blend(0).contains(",0,0,0,0,0,0,0,0,false,0,0,0,0,0,0,11,0,9,0,"), "{}", blend(0));
+    assert!(
+        blend(0).contains(",0,0,0,0,0,0,0,0,false,0,0,0,0,0,0,11,0,9,0,"),
+        "{}",
+        blend(0)
+    );
     // Multiply fades toward white.
-    assert!(blend(1).contains(",11,0,19,0,1,0,19,1,false,"), "{}", blend(1));
+    assert!(
+        blend(1).contains(",11,0,19,0,1,0,19,1,false,"),
+        "{}",
+        blend(1)
+    );
     // Double multiply fades toward grey.
-    assert!(blend(2).contains(",11,0,19,0,2,0,19,1,false,"), "{}", blend(2));
+    assert!(
+        blend(2).contains(",11,0,19,0,2,0,19,1,false,"),
+        "{}",
+        blend(2)
+    );
 }

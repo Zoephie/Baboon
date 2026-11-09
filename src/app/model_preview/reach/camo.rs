@@ -2,8 +2,6 @@
 //! `c_render_active_camo::render_object_callback` draws an object with. See
 //! `docs/reach-preview-research/shield.md`, part B.
 
-
-
 use crate::app::model_preview::load::TagReader;
 use blam_tags::TagFunction;
 
@@ -31,9 +29,14 @@ impl ReachCamo {
     pub(crate) fn read(reader: &TagReader) -> Option<Self> {
         let globals = reader.load("globals\\globals", "globals", b"matg").ok()?;
         let root = globals.root();
-        let camo = super::super::common::fields::elements(root, "active camo").into_iter().next()?;
+        let camo = super::super::common::fields::elements(root, "active camo")
+            .into_iter()
+            .next()?;
         let curve = |name: &str| tag_function_at(&camo.descend(name)?, "function");
-        Some(Self { distortion: curve("camo value to distortion")?, transparency: curve("camo value to transparency")? })
+        Some(Self {
+            distortion: curve("camo value to distortion")?,
+            transparency: curve("camo value to transparency")?,
+        })
     }
 
     /// The draw at camo `amount` (the unit's 0 to 1, a byte in the game):
@@ -42,7 +45,10 @@ impl ReachCamo {
     /// over for a picture that runs up.
     pub(crate) fn draw(&self, amount: f32) -> ReachCamoDraw {
         let t = curve_input(amount);
-        draw_of(self.distortion.evaluate(t, 0.0), self.transparency.evaluate(t, 0.0))
+        draw_of(
+            self.distortion.evaluate(t, 0.0),
+            self.transparency.evaluate(t, 0.0),
+        )
     }
 }
 
@@ -55,7 +61,12 @@ fn curve_input(amount: f32) -> f32 {
 
 fn draw_of(distortion: f32, transparency: f32) -> ReachCamoDraw {
     ReachCamoDraw {
-        factor: [transparency.clamp(0.0, 1.0), distortion / 64.0, -distortion / 36.0, 0.0],
+        factor: [
+            transparency.clamp(0.0, 1.0),
+            distortion / 64.0,
+            -distortion / 36.0,
+            0.0,
+        ],
         opaque: transparency >= 1.0,
     }
 }
@@ -86,16 +97,19 @@ return vec4(l_camo_encoded * l_camo_encoded / {REACH_DARK_MULTIPLIER:?}, g_k_ps_
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::app::model_preview::harness::kit::kit_source;
     use crate::core::game::GameId;
-    use super::*;
 
     #[test]
     fn camo_below_a_fifth_reads_the_curves_at_zero() {
         assert_eq!(curve_input(0.2), 0.0);
         assert_eq!(curve_input(1.0), 1.0);
         let half = curve_input(0.6);
-        assert!((half - (1.25 * (153.0 / 255.0) - 0.25)).abs() < 1e-6, "{half}");
+        assert!(
+            (half - (1.25 * (153.0 / 255.0) - 0.25)).abs() < 1e-6,
+            "{half}"
+        );
     }
 
     #[test]
@@ -112,8 +126,11 @@ mod tests {
     /// With `BLAM_TEST_HREK`: the kit's curves read, and full camo draws.
     #[test]
     fn the_kits_camo_curves_read() {
-        let Some(source) = kit_source(GameId::HaloReach) else { return };
-        let camo = ReachCamo::read(&crate::app::model_preview::load::TagReader::new(&source)).expect("globals' active camo");
+        let Some(source) = kit_source(GameId::HaloReach) else {
+            return;
+        };
+        let camo = ReachCamo::read(&crate::app::model_preview::load::TagReader::new(&source))
+            .expect("globals' active camo");
         let full = camo.draw(1.0);
         eprintln!("NOTE full camo {full:?}, half {:?}", camo.draw(0.5));
         assert!(full.factor[1] > 0.0, "it distorts");

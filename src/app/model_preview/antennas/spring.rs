@@ -3,11 +3,11 @@
 //! its marker, once a game tick, under its point physics. The near end is the
 //! marker itself; [`super::Antenna`] draws the curve between.
 
-use super::super::common::view::posed_on;
-use crate::app::model_preview::common::point_physics::CePointPhysics;
-use super::Antenna;
 use super::super::cloth::REACH_TICK_RATE;
+use super::super::common::view::posed_on;
+use super::Antenna;
 use crate::app::model_preview::common::math::{minus, plus, scaled};
+use crate::app::model_preview::common::point_physics::CePointPhysics;
 
 /// The step `antennas_update` hands every antenna, whatever the tick's length:
 /// the 360's constant `flt_85251DE4`; MCC's `min(tick, 0.0333)` (0x140E52D1B)
@@ -43,15 +43,17 @@ struct RunningAntenna {
     velocity: [f32; 3],
 }
 
-
-
-
 impl RunningAntenna {
     /// Both ends where the spring rests them. The game starts the far end
     /// straight up from the world's origin and lets it fall into place; that
     /// first transient is not something to reproduce. \[inferred\]
     fn at_rest(marker: [f32; 3], forward: [f32; 3], spring: &ReachAntennaSpring) -> Self {
-        Self { attach: marker, near: marker, far: plus(marker, scaled(forward, spring.length)), velocity: [0.0; 3] }
+        Self {
+            attach: marker,
+            near: marker,
+            far: plus(marker, scaled(forward, spring.length)),
+            velocity: [0.0; 3],
+        }
     }
 
     /// One tick of `antenna_update`, with the marker at `marker` facing the
@@ -72,7 +74,13 @@ impl RunningAntenna {
         let mut place = self.far;
         if let Some(physics) = &spring.physics {
             // In air alone: a preview has no structure to collide with.
-            physics.step(&mut place, &mut self.velocity, POINT_RADIUS, f32::NEG_INFINITY, STEP);
+            physics.step(
+                &mut place,
+                &mut self.velocity,
+                POINT_RADIUS,
+                f32::NEG_INFINITY,
+                STEP,
+            );
         }
         // Held at its length from the near end, then eased toward its rest.
         let out = minus(place, marker);
@@ -80,7 +88,10 @@ impl RunningAntenna {
         if distance > 0.0 {
             place = plus(marker, scaled(out, spring.length / distance));
         }
-        place = plus(scaled(place, 1.0 - spring.strength), scaled(rest, spring.strength));
+        place = plus(
+            scaled(place, 1.0 - spring.strength),
+            scaled(rest, spring.strength),
+        );
         self.velocity = scaled(minus(place, self.far), 1.0 / STEP);
         self.far = place;
     }
@@ -130,7 +141,10 @@ impl ReachAntennaField {
                 }
             }
         }
-        self.running.iter().map(|running| running.map(|running| running.far)).collect()
+        self.running
+            .iter()
+            .map(|running| running.map(|running| running.far))
+            .collect()
     }
 }
 
@@ -143,7 +157,14 @@ pub(in crate::app::model_preview) fn posed_marker(
 ) -> ([f32; 3], [f32; 3]) {
     let (place, forward) = posed_on(node, position, forward, bones);
     let length = forward.iter().map(|axis| axis * axis).sum::<f32>().sqrt();
-    (place, if length > 0.0 { scaled(forward, 1.0 / length) } else { forward })
+    (
+        place,
+        if length > 0.0 {
+            scaled(forward, 1.0 / length)
+        } else {
+            forward
+        },
+    )
 }
 
 #[cfg(test)]
@@ -156,7 +177,11 @@ mod tests {
     }
 
     fn warthog(physics: Option<CePointPhysics>) -> ReachAntennaSpring {
-        ReachAntennaSpring { strength: 0.1, length: 0.4, physics }
+        ReachAntennaSpring {
+            strength: 0.1,
+            length: 0.4,
+            physics,
+        }
     }
 
     fn settled(spring: &ReachAntennaSpring, forward: [f32; 3], ticks: usize) -> [f32; 3] {
@@ -174,9 +199,17 @@ mod tests {
     #[test]
     fn an_antenna_stands_straight_and_one_lying_flat_sags_under_its_weight() {
         let up = settled(&warthog(Some(steel())), [0.0, 0.0, 1.0], 600);
-        assert!(up[0].abs() < 1e-6 && up[1].abs() < 1e-6 && (up[2] - 0.4).abs() < 1e-5, "{up:?}");
+        assert!(
+            up[0].abs() < 1e-6 && up[1].abs() < 1e-6 && (up[2] - 0.4).abs() < 1e-5,
+            "{up:?}"
+        );
         let flat = settled(&warthog(Some(steel())), [1.0, 0.0, 0.0], 600);
-        assert!((flat[0] - 0.3976).abs() < 2e-4 && flat[1].abs() < 1e-6 && (flat[2] + 0.041).abs() < 5e-4, "{flat:?}");
+        assert!(
+            (flat[0] - 0.3976).abs() < 2e-4
+                && flat[1].abs() < 1e-6
+                && (flat[2] + 0.041).abs() < 5e-4,
+            "{flat:?}"
+        );
         let weightless = settled(&warthog(None), [1.0, 0.0, 0.0], 600);
         assert_eq!(weightless, [0.4, 0.0, 0.0]);
     }
@@ -188,10 +221,18 @@ mod tests {
         let spring = warthog(None);
         let mut running = RunningAntenna::at_rest([0.0; 3], [0.0, 0.0, 1.0], &spring);
         running.step([0.5, 0.0, 0.0], [0.0, 0.0, 1.0], &spring);
-        assert!(running.far[0] < 0.5 - 1e-3, "trailing behind: {:?}", running.far);
+        assert!(
+            running.far[0] < 0.5 - 1e-3,
+            "trailing behind: {:?}",
+            running.far
+        );
         let mut jumped = RunningAntenna::at_rest([0.0; 3], [0.0, 0.0, 1.0], &spring);
         jumped.step([2.0, 0.0, 0.0], [0.0, 0.0, 1.0], &spring);
-        assert!((jumped.far[0] - 2.0).abs() < 1e-6 && (jumped.far[2] - 0.4).abs() < 1e-6, "{:?}", jumped.far);
+        assert!(
+            (jumped.far[0] - 2.0).abs() < 1e-6 && (jumped.far[2] - 0.4).abs() < 1e-6,
+            "{:?}",
+            jumped.far
+        );
     }
 
     /// `antennas_update` runs at most once a tick, at Reach's rate, however
@@ -201,7 +242,9 @@ mod tests {
         let ticks_over_a_second = |frames: usize| {
             let mut field = ReachAntennaField::default();
             field.advance(&[], None, 10.0);
-            (1..=frames).for_each(|frame| _ = field.advance(&[], None, 10.0 + frame as f32 / frames as f32));
+            (1..=frames).for_each(|frame| {
+                _ = field.advance(&[], None, 10.0 + frame as f32 / frames as f32)
+            });
             field.ticks
         };
         assert_eq!(ticks_over_a_second(60), REACH_TICK_RATE as u64);

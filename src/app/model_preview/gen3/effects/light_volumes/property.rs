@@ -88,7 +88,9 @@ pub(in crate::app::model_preview) struct Gen3VolumeProperty {
 impl Gen3VolumeProperty {
     fn read(holder: TagStruct<'_>, name: &str) -> Option<Self> {
         let property = holder.descend(name)?;
-        let input = |field: &str| Gen3VolumeInput::named(&property.read_enum_option(field).unwrap_or_default());
+        let input = |field: &str| {
+            Gen3VolumeInput::named(&property.read_enum_option(field).unwrap_or_default())
+        };
         let adds = match property.read_enum_option("Output Modifier").as_deref() {
             Some("Plus") => Some(true),
             Some("Times") => Some(false),
@@ -120,7 +122,13 @@ impl Gen3VolumeProperty {
             return false;
         }
         let range = self.function.is_ranged().then_some(self.range);
-        let mut inputs = [Some(self.input), range, self.adds.map(|_| self.modifier_input)].into_iter().flatten();
+        let mut inputs = [
+            Some(self.input),
+            range,
+            self.adds.map(|_| self.modifier_input),
+        ]
+        .into_iter()
+        .flatten();
         inputs.any(|input| input != Gen3VolumeInput::Percentile)
     }
 
@@ -128,10 +136,16 @@ impl Gen3VolumeProperty {
     /// its low end alone for a constant.
     pub(super) fn most(&self) -> f32 {
         let (low, high) = match &*self.function {
-            TagFunction::Blob(blob) => (blob.header().clamp_range_min, blob.header().clamp_range_max),
+            TagFunction::Blob(blob) => {
+                (blob.header().clamp_range_min, blob.header().clamp_range_max)
+            }
             TagFunction::H2(h2) => (h2.clamp_range_min(), h2.clamp_range_max()),
         };
-        low.max(if self.function.is_constant() { low } else { high })
+        low.max(if self.function.is_constant() {
+            low
+        } else {
+            high
+        })
     }
 
     pub(super) fn inputs(&self) -> impl Iterator<Item = Gen3VolumeInput> {
@@ -155,7 +169,9 @@ impl Gen3VolumeProperty {
     }
 
     pub(in crate::app::model_preview) fn scalar(&self, state: &Gen3VolumeState) -> f32 {
-        let value = self.function.evaluate(self.input.of(state), self.range.of(state));
+        let value = self
+            .function
+            .evaluate(self.input.of(state), self.range.of(state));
         let modifier = self.modifier_input.of(state);
         match self.adds {
             Some(true) => value + modifier,
@@ -168,7 +184,10 @@ impl Gen3VolumeProperty {
     pub(super) fn peak_over_mean(&self) -> f32 {
         let sample = |at: usize| {
             let t = at as f32 / 16.0;
-            [self.function.evaluate(t, 0.0), self.function.evaluate(t, 1.0)]
+            [
+                self.function.evaluate(t, 0.0),
+                self.function.evaluate(t, 1.0),
+            ]
         };
         let (mut least, mut most) = (f32::MAX, f32::MIN);
         for value in (0..=16).flat_map(sample) {
@@ -179,7 +198,9 @@ impl Gen3VolumeProperty {
     }
 
     pub(in crate::app::model_preview) fn color(&self, state: &Gen3VolumeState) -> [f32; 3] {
-        let color = self.function.evaluate_color(self.input.of(state), self.range.of(state));
+        let color = self
+            .function
+            .evaluate_color(self.input.of(state), self.range.of(state));
         [color.red, color.green, color.blue]
     }
 }
@@ -194,7 +215,16 @@ pub(super) fn allocate_seed(input: &mut Gen3VolumeInput, next: &mut usize) {
 /// The first seed free: past the highest a tag named for itself.
 pub(super) fn first_free_seed(properties: &[&Gen3VolumeProperty]) -> usize {
     let named = properties.iter().flat_map(|property| property.inputs());
-    named.filter_map(|input| if let Gen3VolumeInput::Seed(seed) = input { Some(seed + 1) } else { None }).max().unwrap_or(0)
+    named
+        .filter_map(|input| {
+            if let Gen3VolumeInput::Seed(seed) = input {
+                Some(seed + 1)
+            } else {
+                None
+            }
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 /// `real_internal_random_range`'s generator, for a volume's own seeds.
@@ -232,8 +262,14 @@ impl VolumeProperties {
 
     pub(super) fn all(&self) -> [&Gen3VolumeProperty; 8] {
         [
-            &self.length, &self.offset, &self.density, &self.profile_length,
-            &self.thickness, &self.color, &self.alpha, &self.intensity,
+            &self.length,
+            &self.offset,
+            &self.density,
+            &self.profile_length,
+            &self.thickness,
+            &self.color,
+            &self.alpha,
+            &self.intensity,
         ]
     }
 
@@ -244,7 +280,16 @@ impl VolumeProperties {
         element: TagStruct<'_>,
         rest: impl FnOnce(Gen3VolumeDefinition) -> Gen3VolumeDefinition,
     ) -> Gen3VolumeDefinition {
-        let Self { length, offset, density, profile_length, mut thickness, mut color, mut alpha, mut intensity } = self;
+        let Self {
+            length,
+            offset,
+            density,
+            profile_length,
+            mut thickness,
+            mut color,
+            mut alpha,
+            mut intensity,
+        } = self;
         // With none given, what the functions themselves make of it. A tag
         // older than the field has none either.
         let brightness_ratio = element
@@ -253,8 +298,16 @@ impl VolumeProperties {
             .unwrap_or_else(|| alpha.peak_over_mean() * intensity.peak_over_mean());
         let [length, offset, density, profile_length] =
             [length, offset, density, profile_length].map(Gen3VolumeProperty::per_volume);
-        let mut next =
-            first_free_seed(&[&length, &offset, &density, &profile_length, &thickness, &color, &alpha, &intensity]);
+        let mut next = first_free_seed(&[
+            &length,
+            &offset,
+            &density,
+            &profile_length,
+            &thickness,
+            &color,
+            &alpha,
+            &intensity,
+        ]);
         for property in [&mut thickness, &mut color, &mut alpha, &mut intensity] {
             property.allocate_seeds(&mut next);
         }

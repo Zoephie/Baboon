@@ -151,7 +151,13 @@ fn randomize(state: &CeParticleState, random: &mut CeRandom) -> ParticleVariable
 /// `particle_system_next_type_state_index` and
 /// `particle_system_next_particle_state_index`: the next state, round again
 /// or back again if the flags say, else none.
-pub(super) fn next_state(state: usize, forward: &mut bool, count: usize, looping: bool, bounce: bool) -> Option<usize> {
+pub(super) fn next_state(
+    state: usize,
+    forward: &mut bool,
+    count: usize,
+    looping: bool,
+    bounce: bool,
+) -> Option<usize> {
     let step: isize = if *forward { 1 } else { -1 };
     let next = state as isize + step;
     if next >= 0 && (next as usize) < count {
@@ -163,7 +169,11 @@ pub(super) fn next_state(state: usize, forward: &mut bool, count: usize, looping
     if bounce {
         *forward = !*forward;
         let back = state as isize - step;
-        return Some(if back >= 0 { (back as usize).min(count - 1) } else { 0 });
+        return Some(if back >= 0 {
+            (back as usize).min(count - 1)
+        } else {
+            0
+        });
     }
     Some(0)
 }
@@ -171,7 +181,10 @@ pub(super) fn next_state(state: usize, forward: &mut bool, count: usize, looping
 impl CeParticleSystemField {
     /// How many particles its systems hold.
     pub(crate) fn particle_count(&self) -> usize {
-        self.systems.iter().map(CeRunningSystem::particle_count).sum()
+        self.systems
+            .iter()
+            .map(CeRunningSystem::particle_count)
+            .sum()
     }
 
     /// Step every system to `time`, a frame at a time as `game_frame` runs
@@ -189,7 +202,10 @@ impl CeParticleSystemField {
     ) {
         if self.systems.len() != systems.len() || self.time.is_none_or(|last| time < last) {
             let mut random = CeRandom(0x5eed_1234);
-            self.systems = systems.iter().map(|system| new_system(&system.def, true, &mut random)).collect();
+            self.systems = systems
+                .iter()
+                .map(|system| new_system(&system.def, true, &mut random))
+                .collect();
             self.random = Some(random);
             self.time = Some(time - PRE_ROLL);
         }
@@ -204,7 +220,16 @@ impl CeParticleSystemField {
                 let (outputs, active, change_colors) = inputs(system.object);
                 let dt = if running.first { 0.001 } else { step };
                 let inputs = (&outputs, &active, &change_colors);
-                update_system(system, running, inputs, bones, ground, dt, &mut random, &mut room);
+                update_system(
+                    system,
+                    running,
+                    inputs,
+                    bones,
+                    ground,
+                    dt,
+                    &mut random,
+                    &mut room,
+                );
                 running.first = false;
             }
         }
@@ -227,7 +252,16 @@ impl CeParticleSystemField {
         let mut random = self.random.take().unwrap_or(CeRandom(1));
         let time = self.time.unwrap_or(0.0);
         for (index, (system, running)) in systems.iter().zip(&mut self.systems).enumerate() {
-            system_quads(&system.def, running, index, view, &pixel, &mut random, time, &mut quads);
+            system_quads(
+                &system.def,
+                running,
+                index,
+                view,
+                &pixel,
+                &mut random,
+                time,
+                &mut quads,
+            );
         }
         self.random = Some(random);
         quads
@@ -243,7 +277,13 @@ fn new_system(def: &CePctlDef, attached: bool, random: &mut CeRandom) -> CeRunni
         .map(|kind| {
             let first = &kind.states[0];
             let length = random.range(first.duration[0], first.duration[1]);
-            RunningType { state: Some(0), time_left: length, length, forward: true, ..RunningType::default() }
+            RunningType {
+                state: Some(0),
+                time_left: length,
+                length,
+                forward: true,
+                ..RunningType::default()
+            }
         })
         .collect();
     CeRunningSystem {
@@ -300,7 +340,13 @@ pub(crate) fn update_unattached(
 ) -> bool {
     // `particle_system_update_default`, which explosion uses too.
     if let Some(physics) = def.physics {
-        physics.step(&mut running.position, &mut running.velocity, 1.0, ground, dt);
+        physics.step(
+            &mut running.position,
+            &mut running.velocity,
+            1.0,
+            ground,
+            dt,
+        );
     }
     let markers = [(running.position, [0.0; 3])];
     step_types(def, running, &markers, ground, dt, random, room)
@@ -327,7 +373,12 @@ fn update_system(
         None => (1.0, true),
     };
     running.color = match system.change_color {
-        Some(slot) => [1.0, change_colors[slot][0], change_colors[slot][1], change_colors[slot][2]],
+        Some(slot) => [
+            1.0,
+            change_colors[slot][0],
+            change_colors[slot][1],
+            change_colors[slot][2],
+        ],
         None => [1.0; 4],
     };
     let markers: Vec<([f32; 3], [f32; 3])> = system
@@ -395,8 +446,15 @@ fn step_types(
         run.variables = match run.transition {
             None => kind.states[state].variables,
             Some(next) => {
-                let t = if run.length != 0.0 { (run.time_left / run.length).clamp(0.0, 1.0) } else { 0.0 };
-                std::array::from_fn(|at| kind.states[state].variables[at] * t + kind.states[next].variables[at] * (1.0 - t))
+                let t = if run.length != 0.0 {
+                    (run.time_left / run.length).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                std::array::from_fn(|at| {
+                    kind.states[state].variables[at] * t
+                        + kind.states[next].variables[at] * (1.0 - t)
+                })
             }
         };
         if kind.flags.tint_by_effect_color {
@@ -418,7 +476,17 @@ fn step_types(
             }
         }
         if running.on {
-            new_particles(kind, run, running.first, scale, markers, velocity, dt, random, room);
+            new_particles(
+                kind,
+                run,
+                running.first,
+                scale,
+                markers,
+                velocity,
+                dt,
+                random,
+                room,
+            );
         }
         update_particles(kind, run, ground, dt, random);
         active = true;
@@ -461,9 +529,17 @@ fn new_particles(
         }
         wanted
     };
-    let physics = if first { kind.initial_physics } else { kind.states[state].creation_physics };
+    let physics = if first {
+        kind.initial_physics
+    } else {
+        kind.states[state].creation_physics
+    };
     let mut made = 0;
-    while (run.particles.len() as i32) < wanted && !markers.is_empty() && made < MOST_A_CALL && *room > 0 {
+    while (run.particles.len() as i32) < wanted
+        && !markers.is_empty()
+        && made < MOST_A_CALL
+        && *room > 0
+    {
         made += 1;
         *room -= 1;
         let rotation = random.range(0.0, std::f32::consts::TAU);
@@ -500,10 +576,18 @@ fn new_particles(
 /// `particle_system_new_particle_explosion`: out from the marker at random,
 /// spread across by the first constant and up by the second, going at the
 /// third times that; the axis lies flat, square to the way out.
-fn explosion(kind: &ParticleType, marker: [f32; 3], random: &mut CeRandom) -> ([f32; 3], [f32; 3], [f32; 3]) {
+fn explosion(
+    kind: &ParticleType,
+    marker: [f32; 3],
+    random: &mut CeRandom,
+) -> ([f32; 3], [f32; 3], [f32; 3]) {
     let [across, up, speed] = kind.constants;
     let direction = random.direction();
-    let out = [direction[0] * across, direction[1] * across, direction[2] * up];
+    let out = [
+        direction[0] * across,
+        direction[1] * across,
+        direction[2] * up,
+    ];
     let position = std::array::from_fn(|axis| marker[axis] + out[axis]);
     let velocity = out.map(|axis| axis * speed);
     // `rotate_vector_about_axis` by a quarter turn about up.
@@ -515,20 +599,36 @@ fn explosion(kind: &ParticleType, marker: [f32; 3], random: &mut CeRandom) -> ([
 /// first constant per tick, a share (the second) of it at random; the axis
 /// is square to the way it goes and the forward, or to up when the third
 /// constant is set.
-fn jet(kind: &ParticleType, marker: [f32; 3], forward: [f32; 3], random: &mut CeRandom) -> ([f32; 3], [f32; 3], [f32; 3]) {
+fn jet(
+    kind: &ParticleType,
+    marker: [f32; 3],
+    forward: [f32; 3],
+    random: &mut CeRandom,
+) -> ([f32; 3], [f32; 3], [f32; 3]) {
     let [speed, spread, upright] = kind.constants;
     let per_tick = speed * 0.033_333_335;
     let scattered = spread * per_tick;
     let straight = (1.0 - spread) * per_tick;
     let direction = random.direction();
-    let velocity: [f32; 3] = std::array::from_fn(|axis| direction[axis] * scattered + forward[axis] * straight);
-    let axis = if upright == 0.0 { cross(forward, velocity) } else { cross(velocity, [0.0, 0.0, 1.0]) };
+    let velocity: [f32; 3] =
+        std::array::from_fn(|axis| direction[axis] * scattered + forward[axis] * straight);
+    let axis = if upright == 0.0 {
+        cross(forward, velocity)
+    } else {
+        cross(velocity, [0.0, 0.0, 1.0])
+    };
     (marker, velocity, axis)
 }
 
 /// The particles of one type through their states, turned, animated and
 /// moved; those out of states, or killed where the flags say, go.
-fn update_particles(kind: &ParticleType, run: &mut RunningType, ground: f32, dt: f32, random: &mut CeRandom) {
+fn update_particles(
+    kind: &ParticleType,
+    run: &mut RunningType,
+    ground: f32,
+    dt: f32,
+    random: &mut CeRandom,
+) {
     let multipliers = run.variables;
     let states = &kind.particle_states;
     run.particles.retain_mut(|particle| {
@@ -582,7 +682,11 @@ fn update_particles(kind: &ParticleType, run: &mut RunningType, ground: f32, dt:
         let Some(state) = particle.state else {
             return false;
         };
-        let t = if particle.length != 0.0 { (particle.time_left / particle.length).clamp(0.0, 1.0) } else { 0.0 };
+        let t = if particle.length != 0.0 {
+            (particle.time_left / particle.length).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let rate = |at: usize| match particle.transition {
             None => particle.variables[at],
             Some(_) => particle.transition_variables[at] * (1.0 - t) + particle.variables[at] * t,
@@ -592,19 +696,33 @@ fn update_particles(kind: &ParticleType, run: &mut RunningType, ground: f32, dt:
         // `particle_system_update_particle_default`.
         let current = &states[state];
         let (physics, radius) = match particle.transition.map(|next| &states[next]) {
-            None => (current.physics, current.radius * multipliers[RADIUS] * kind.radius),
+            None => (
+                current.physics,
+                current.radius * multipliers[RADIUS] * kind.radius,
+            ),
             Some(next) => {
                 let physics = match (current.physics, next.physics) {
                     (Some(a), Some(b)) => Some(a.lerp(&b, t)),
                     (a, b) => a.or(b),
                 };
-                (physics, (current.radius * t + next.radius * (1.0 - t)) * multipliers[RADIUS] * kind.radius)
+                (
+                    physics,
+                    (current.radius * t + next.radius * (1.0 - t))
+                        * multipliers[RADIUS]
+                        * kind.radius,
+                )
             }
         };
         if let Some(physics) = physics {
             // Always in air: the preview has no water. Touching the floor is
             // touching structure.
-            let grounded = physics.step(&mut particle.position, &mut particle.velocity, radius, ground, dt);
+            let grounded = physics.step(
+                &mut particle.position,
+                &mut particle.velocity,
+                radius,
+                ground,
+                dt,
+            );
             if kind.flags.die_in_air || (grounded && kind.flags.die_on_ground) {
                 particle.valid = false;
             }

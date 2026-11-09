@@ -48,13 +48,21 @@ fn read_frame(frame: TagStruct<'_>) -> LightVolumeFrame {
         length: real("length"),
         radius: [real("radius hither"), real("radius yon")],
         radius_exponent: one_if_unset(real("radius exponent")),
-        colors: [argb(frame, "tint color hither"), argb(frame, "tint color yon")],
+        colors: [
+            argb(frame, "tint color hither"),
+            argb(frame, "tint color yon"),
+        ],
         color_exponent: one_if_unset(real("tint color exponent")),
         brightness_exponent: one_if_unset(real("brightness exponent")),
     }
 }
 
-fn read_light_volume(reader: &TagReader, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeLightVolume> {
+fn read_light_volume(
+    reader: &TagReader,
+    path: &str,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+) -> Option<CeLightVolume> {
     let tag = reader.load(path, "light_volume", b"mgs2").ok()?;
     let root = tag.root();
     let frame = read_frame(*elements(root, "frames").first()?);
@@ -65,19 +73,30 @@ fn read_light_volume(reader: &TagReader, path: &str, owner: u8, markers: &[Rende
     let name = root.read_string("attachment marker").unwrap_or_default();
     let (node, position, forward) = super::super::lights::marker_or_origin(markers, &name, owner)?;
     // `rasterizer_widget_set_texture`: no map is the globals' `glow`.
-    let image = match root.read_tag_ref_path("map").filter(|path| !path.is_empty()) {
+    let image = match root
+        .read_tag_ref_path("map")
+        .filter(|path| !path.is_empty())
+    {
         Some(map) => {
             let bitmap = reader.load(&map, "bitmap", b"bitm").ok()?;
             let sequence = root.read_int_any("sequence index").unwrap_or(0).max(0) as usize;
             let index = elements(bitmap.root(), "sequences")
                 .get(sequence)
-                .map_or(0, |sequence| sequence.read_int_any("first bitmap index").unwrap_or(0).max(0) as usize);
+                .map_or(0, |sequence| {
+                    sequence
+                        .read_int_any("first bitmap index")
+                        .unwrap_or(0)
+                        .max(0) as usize
+                });
             Arc::new(decode_image(reader, &map, SamplerKind::Texture2D, index)?)
         }
         None => super::super::super::h2::light_volumes::read_glow(reader)?,
     };
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
-    let mut brightness = [real("perpendicular brightness scale"), real("parallel brightness scale")];
+    let mut brightness = [
+        real("perpendicular brightness scale"),
+        real("parallel brightness scale"),
+    ];
     if brightness == [0.0; 2] {
         brightness = [1.0; 2];
     }
@@ -136,12 +155,21 @@ impl CeLightVolume {
 
     /// `light_volume_submit` and `light_volume_render`: sprites along the
     /// marker, brighter as it faces the camera the way the tag says.
-    pub(crate) fn quads(&self, outputs: &[f32; 4], active: &[bool; 4], bones: Option<&[[f32; 4]]>, view: &ViewFrame) -> Vec<AntennaQuad> {
+    pub(crate) fn quads(
+        &self,
+        outputs: &[f32; 4],
+        active: &[bool; 4],
+        bones: Option<&[[f32; 4]]>,
+        view: &ViewFrame,
+    ) -> Vec<AntennaQuad> {
         let (origin, forward) = posed_on(self.node, self.position, self.forward, bones);
         let length = dot(forward, forward).sqrt().max(0.0001);
         let forward = forward.map(|axis| axis / length);
         let value = self.source.map(|slot| outputs[slot]);
-        let depth = dot(view.forward, std::array::from_fn(|axis| origin[axis] - view.eye[axis]));
+        let depth = dot(
+            view.forward,
+            std::array::from_fn(|axis| origin[axis] - view.eye[axis]),
+        );
         let [near, far] = self.fade;
         let mut fade = 1.0;
         if far > 0.0 {
@@ -152,7 +180,8 @@ impl CeLightVolume {
         }
         let facing = dot(view.forward, forward).abs();
         let [perpendicular, parallel] = self.brightness;
-        let mut brightness = (perpendicular * (1.0 - facing) + parallel * facing).clamp(0.0, 1.0) * fade;
+        let mut brightness =
+            (perpendicular * (1.0 - facing) + parallel * facing).clamp(0.0, 1.0) * fade;
         // `light_volume_render` scales by the output only while it is on.
         if let (Some(value), Some(slot)) = (value, self.source)
             && active[slot]
@@ -161,7 +190,10 @@ impl CeLightVolume {
         }
         let frame = &self.frame;
         let [hither, yon] = frame.colors;
-        if brightness <= 0.0 || (hither[3] <= 0.0 && yon[3] <= 0.0) || (frame.radius[0] <= 0.0 && frame.radius[1] <= 0.0) {
+        if brightness <= 0.0
+            || (hither[3] <= 0.0 && yon[3] <= 0.0)
+            || (frame.radius[0] <= 0.0 && frame.radius[1] <= 0.0)
+        {
             return Vec::new();
         }
         let last = (self.count - 1).max(1) as f32;
@@ -171,27 +203,48 @@ impl CeLightVolume {
                 if frame.offset_exponent != 1.0 {
                     x = x.powf(frame.offset_exponent);
                 }
-                let radius_at = if frame.radius_exponent != 1.0 { x.powf(frame.radius_exponent) } else { x };
+                let radius_at = if frame.radius_exponent != 1.0 {
+                    x.powf(frame.radius_exponent)
+                } else {
+                    x
+                };
                 let radius = (1.0 - radius_at) * frame.radius[0] + frame.radius[1] * radius_at;
-                let color_at = if frame.color_exponent != 1.0 { x.powf(frame.color_exponent) } else { x };
-                let brightness_at = if frame.brightness_exponent != 1.0 { x.powf(frame.brightness_exponent) } else { x };
+                let color_at = if frame.color_exponent != 1.0 {
+                    x.powf(frame.color_exponent)
+                } else {
+                    x
+                };
+                let brightness_at = if frame.brightness_exponent != 1.0 {
+                    x.powf(frame.brightness_exponent)
+                } else {
+                    x
+                };
                 let rgb = ce_color_interpolate(
                     self.interpolation,
                     [hither[0], hither[1], hither[2]],
                     [yon[0], yon[1], yon[2]],
                     color_at,
                 );
-                let alpha = ((1.0 - brightness_at) * hither[3] + yon[3] * brightness_at) * brightness;
+                let alpha =
+                    ((1.0 - brightness_at) * hither[3] + yon[3] * brightness_at) * brightness;
                 let along = frame.length * x + frame.offset;
-                let center: [f32; 3] = std::array::from_fn(|axis| origin[axis] + forward[axis] * along);
+                let center: [f32; 3] =
+                    std::array::from_fn(|axis| origin[axis] + forward[axis] * along);
                 let corner = |u: f32, v: f32| {
                     let place: [f32; 3] = std::array::from_fn(|axis| {
-                        center[axis] + view.right[axis] * radius * (u * 2.0 - 1.0) + view.up[axis] * radius * (1.0 - v * 2.0)
+                        center[axis]
+                            + view.right[axis] * radius * (u * 2.0 - 1.0)
+                            + view.up[axis] * radius * (1.0 - v * 2.0)
                     });
                     [place[0], place[1], place[2], u, v]
                 };
                 AntennaQuad {
-                    corners: [corner(0.0, 1.0), corner(1.0, 1.0), corner(0.0, 0.0), corner(1.0, 0.0)],
+                    corners: [
+                        corner(0.0, 1.0),
+                        corner(1.0, 1.0),
+                        corner(0.0, 0.0),
+                        corner(1.0, 0.0),
+                    ],
                     color: [rgb[0], rgb[1], rgb[2], alpha.clamp(0.0, 1.0)],
                 }
             })

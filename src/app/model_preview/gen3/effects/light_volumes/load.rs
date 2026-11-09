@@ -50,10 +50,16 @@ impl Gen3VolumeDefinition {
         let place = |index: usize| index as f32 / ((most as f32 + 0.5) - 1.0);
         (0..most)
             .map(|index| {
-                let state = Gen3VolumeState { percentile: place(index), ..Default::default() };
+                let state = Gen3VolumeState {
+                    percentile: place(index),
+                    ..Default::default()
+                };
                 let intensity = self.intensity.scalar(&state);
                 let factor = intensity * intensity * self.alpha.scalar(&state);
-                (self.color.color(&state).map(|channel| channel * factor), self.thickness.scalar(&state))
+                (
+                    self.color.color(&state).map(|channel| channel * factor),
+                    self.thickness.scalar(&state),
+                )
             })
             .collect()
     }
@@ -74,13 +80,20 @@ impl Gen3VolumeDefinition {
         if !self.reach {
             // `light_volume_fx.hlsl`'s `STATE.m_color * STATE.m_intensity` is a
             // float4, so intensity scales alpha too (Halo 3 and ODST alike).
-            let color = self.color.color(state).map(|channel| channel.clamp(0.0, 1.0));
+            let color = self
+                .color
+                .color(state)
+                .map(|channel| channel.clamp(0.0, 1.0));
             let intensity = self.intensity.scalar(state);
             let [red, green, blue] = color.map(|channel| channel * intensity * H3_EXPOSURE);
             let alpha = self.alpha.scalar(state).clamp(0.0, 1.0) * intensity;
             return [red, green, blue, alpha * ratio / overdraw];
         }
-        let exposure = if self.blend == Gen3Blend::Multiply { 1.0 } else { reach_alt_exposure(stops)[1] };
+        let exposure = if self.blend == Gen3Blend::Multiply {
+            1.0
+        } else {
+            reach_alt_exposure(stops)[1]
+        };
         // TODO(reach-effects spec §3.4): Reach premultiplies and writes an
         // alpha of 1, which the flare program's `(rgb, a)` under SRC_ALPHA,
         // ONE matches; an alpha-blended volume (none in the kit) would not.
@@ -88,11 +101,19 @@ impl Gen3VolumeDefinition {
             Some(baked) => (baked, 1.0),
             None => {
                 let intensity = self.intensity.scalar(state);
-                let color = self.color.color(state).map(|channel| channel.clamp(0.0, 1.0) * intensity);
+                let color = self
+                    .color
+                    .color(state)
+                    .map(|channel| channel.clamp(0.0, 1.0) * intensity);
                 (color, self.alpha.scalar(state).clamp(0.0, 1.0) * intensity)
             }
         };
-        [red * exposure, green * exposure, blue * exposure, alpha * ratio / overdraw]
+        [
+            red * exposure,
+            green * exposure,
+            blue * exposure,
+            alpha * ratio / overdraw,
+        ]
     }
 }
 
@@ -115,24 +136,39 @@ pub(crate) struct Gen3LightVolumeAt {
     pub(crate) definition: Arc<Gen3VolumeDefinition>,
 }
 
-pub(super) fn read_definition(reader: &TagReader, element: TagStruct<'_>) -> Option<Gen3VolumeDefinition> {
+pub(super) fn read_definition(
+    reader: &TagReader,
+    element: TagStruct<'_>,
+) -> Option<Gen3VolumeDefinition> {
     if reader.source.game() == Some(GameId::Halo4) {
         return read_h4_definition(reader, element);
     }
     let reach = reader.source.game() == Some(GameId::HaloReach);
     let shader = element.descend("actual shader?")?;
-    let definition = shader.read_tag_ref_path("definition").filter(|path| !path.is_empty())?;
+    let definition = shader
+        .read_tag_ref_path("definition")
+        .filter(|path| !path.is_empty())?;
     let definition = read_h3_definition(reader, &definition)?;
     let options: Vec<usize> = elements(shader, "options")
         .iter()
         .map(|option| option.read_int_any("short").unwrap_or(0).max(0) as usize)
         .collect();
-    let chosen = |category: &str| definition.chosen(category, &options).unwrap_or_default().to_owned();
+    let chosen = |category: &str| {
+        definition
+            .chosen(category, &options)
+            .unwrap_or_default()
+            .to_owned()
+    };
     let resolved = resolve_embedded_method(reader, shader);
-    let resolved_real = |name: &str, default: f32| inline_real(resolved.as_ref(), name).unwrap_or(default);
+    let resolved_real =
+        |name: &str, default: f32| inline_real(resolved.as_ref(), name).unwrap_or(default);
     // `lights__light_volume.hlsl` l.288–296; `albedo_circular.render_method_option`'s defaults.
-    let circular = (reach && chosen("albedo") == "circular")
-        .then(|| [resolved_real("center_offset", 1.1), resolved_real("falloff", 2.0)]);
+    let circular = (reach && chosen("albedo") == "circular").then(|| {
+        [
+            resolved_real("center_offset", 1.1),
+            resolved_real("falloff", 2.0),
+        ]
+    });
     let (bitmap, sampler) = if circular.is_some() {
         (None, None)
     } else {
@@ -140,13 +176,20 @@ pub(super) fn read_definition(reader: &TagReader, element: TagStruct<'_>) -> Opt
         let base = parameters.iter().find(|parameter| {
             parameter.read_string_id("parameter name").as_deref() == Some("base_map")
         })?;
-        let map = base.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
-        let baked = resolved
-            .as_ref()
-            .and_then(|resolved| super::super::super::super::gen3::materials::read_resolved_map(reader, resolved, "base_map"));
+        let map = base
+            .read_tag_ref_path("bitmap")
+            .filter(|path| !path.is_empty())?;
+        let baked = resolved.as_ref().and_then(|resolved| {
+            super::super::super::super::gen3::materials::read_resolved_map(
+                reader, resolved, "base_map",
+            )
+        });
         match baked {
             Some((bitmap, sampler)) => (Some(bitmap), Some(sampler)),
-            None => (Some(read_h3_bitmap(reader, &map, 0, SamplerKind::Texture2D)?), None),
+            None => (
+                Some(read_h3_bitmap(reader, &map, 0, SamplerKind::Texture2D)?),
+                None,
+            ),
         }
     };
     let blend = definition.blend(&options);
@@ -155,7 +198,11 @@ pub(super) fn read_definition(reader: &TagReader, element: TagStruct<'_>) -> Opt
     let depth_fade = (reach && chosen("depth_fade") == "on" && blend != Gen3Blend::Opaque)
         .then(|| resolved_real("depth_fade_range", 0.1).max(1e-4));
     let flagged = |wanted: &str| has_flag(element, "flags", wanted);
-    let lod = if reach { ReachVolumeLod::read(element, flagged) } else { None };
+    let lod = if reach {
+        ReachVolumeLod::read(element, flagged)
+    } else {
+        None
+    };
     let properties = VolumeProperties::read(element)?;
     // The postprocess tests what the properties read before it narrows the
     // per-volume four's inputs.
@@ -185,7 +232,8 @@ pub(super) fn read_definition(reader: &TagReader, element: TagStruct<'_>) -> Opt
 /// precompiled, which MCC clears every time and could not draw ("not
 /// implemented for D3D11").
 fn read_h4_definition(reader: &TagReader, element: TagStruct<'_>) -> Option<Gen3VolumeDefinition> {
-    let material = blam_tags::material::Material::from_struct(&element.descend("actual material?")?);
+    let material =
+        blam_tags::material::Material::from_struct(&element.descend("actual material?")?);
     let resolved = resolve_h4_effect_material(reader, &material, "light_volume")
         .map_err(|error| eprintln!("h4 light volume material: {error}"))
         .ok()?;
@@ -193,20 +241,22 @@ fn read_h4_definition(reader: &TagReader, element: TagStruct<'_>) -> Option<Gen3
     let lod = ReachVolumeLod::read(element, flagged);
     let appearance = element.read_int_any("appearance flags").unwrap_or(0) as u32;
     let properties = VolumeProperties::read(element)?;
-    Some(properties.postprocessed(element, |properties| Gen3VolumeDefinition {
-        // The material blends; this only sorts.
-        blend: Gen3Blend::Additive,
-        sampler: None,
-        bitmap: None,
-        sort_layer: i32::from(material.sort_layer).clamp(1, 3),
-        reach: true,
-        circular: None,
-        depth_fade: None,
-        lod,
-        precompiled: None,
-        h4: Some((resolved, appearance)),
-        ..properties
-    }))
+    Some(
+        properties.postprocessed(element, |properties| Gen3VolumeDefinition {
+            // The material blends; this only sorts.
+            blend: Gen3Blend::Additive,
+            sampler: None,
+            bitmap: None,
+            sort_layer: i32::from(material.sort_layer).clamp(1, 3),
+            reach: true,
+            circular: None,
+            depth_fade: None,
+            lod,
+            precompiled: None,
+            h4: Some((resolved, appearance)),
+            ..properties
+        }),
+    )
 }
 
 /// The volumes an object's attached effects run, one at each marker of a

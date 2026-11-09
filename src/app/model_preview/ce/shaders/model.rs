@@ -68,7 +68,10 @@ fn build_passes(pass: ModelPass<'_>) -> Vec<Dx9DrawPass> {
         pass.detail_function,
         pass.detail_before_reflection,
     ));
-    let depth = Dx9Depth { compare: Some(Dx9Compare::LessOrEqual), write: !pass.decal };
+    let depth = Dx9Depth {
+        compare: Some(Dx9Compare::LessOrEqual),
+        write: !pass.decal,
+    };
     let mut draw = Dx9DrawPass::new(Dx9VertexStage::CeModel, fragment, depth);
     draw.channels = [true, true, true, false];
     if pass.decal {
@@ -81,17 +84,38 @@ fn build_passes(pass: ModelPass<'_>) -> Vec<Dx9DrawPass> {
         });
     }
     draw.textures = vec![
-        texture(0, SamplerKind::Texture2D, pass.base.or_else(|| Some(flat(WHITE)))),
-        texture(1, SamplerKind::Texture2D, pass.detail.or_else(|| Some(flat(GREY)))),
-        texture(2, SamplerKind::Texture2D, pass.multipurpose.or_else(|| Some(flat(WHITE)))),
+        texture(
+            0,
+            SamplerKind::Texture2D,
+            pass.base.or_else(|| Some(flat(WHITE))),
+        ),
+        texture(
+            1,
+            SamplerKind::Texture2D,
+            pass.detail.or_else(|| Some(flat(GREY))),
+        ),
+        texture(
+            2,
+            SamplerKind::Texture2D,
+            pass.multipurpose.or_else(|| Some(flat(WHITE))),
+        ),
         texture(3, SamplerKind::Cube, pass.reflection),
     ];
     let mut animation = pass.animation;
-    if let (Some(animation), Some(register)) = (&mut animation, common.register("c_self_illumination_color")) {
-        animation.colors.iter_mut().for_each(|color| color.register = register);
+    if let (Some(animation), Some(register)) =
+        (&mut animation, common.register("c_self_illumination_color"))
+    {
+        animation
+            .colors
+            .iter_mut()
+            .for_each(|color| color.register = register);
     }
-    if let (Some(channel), Some(register)) = (pass.change_color, common.register("c_primary_change_color")) {
-        draw.change_colors = (0..3).map(|component| (register, component, channel)).collect();
+    if let (Some(channel), Some(register)) =
+        (pass.change_color, common.register("c_primary_change_color"))
+    {
+        draw.change_colors = (0..3)
+            .map(|component| (register, component, channel))
+            .collect();
     }
     let mut constant = |name: &str, value: [f32; 4]| {
         if let Some(register) = common.register(name) {
@@ -104,7 +128,14 @@ fn build_passes(pass: ModelPass<'_>) -> Vec<Dx9DrawPass> {
     constant("c_fog_color_correction_E", [0.0; 4]);
     constant("c_fog_color_correction_1", [0.0; 4]);
     constant("c_self_illumination_color", pass.self_illumination);
-    constant("c_alpha_ref", [if pass.alpha_test { ALPHA_REFERENCE } else { 0.0 }; 4]);
+    constant(
+        "c_alpha_ref",
+        [if pass.alpha_test {
+            ALPHA_REFERENCE
+        } else {
+            0.0
+        }; 4],
+    );
     constant("c_fog_color", [0.0; 4]);
 
     let vector = |[x, y, z]: [f32; 3]| [x, y, z, 0.0];
@@ -173,14 +204,22 @@ pub(in crate::app::model_preview) fn ce_model_passes(
         [color.red, color.green, color.blue]
     };
     let pass = if group == b"soso" {
-        let detail_mask = option_index(root, "detail mask", &super::super::super::ce::shaders::resolve::CE_DETAIL_MASKS);
+        let detail_mask = option_index(
+            root,
+            "detail mask",
+            &super::super::super::ce::shaders::resolve::CE_DETAIL_MASKS,
+        );
         let decal = has("alpha-blended decal");
         let scale = factor(root.read_real("detail map scale"));
         let base_scale = [
             factor(root.read_real("map u-scale")),
             factor(root.read_real("map v-scale")),
         ];
-        let xbox_order = if has("multipurpose map uses OG Xbox channel order") { 1.0 } else { 0.0 };
+        let xbox_order = if has("multipurpose map uses OG Xbox channel order") {
+            1.0
+        } else {
+            0.0
+        };
         ModelPass {
             environment: false,
             detail_mask,

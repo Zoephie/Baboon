@@ -37,15 +37,25 @@ pub(in crate::app::model_preview) struct H2Bloom {
 }
 
 impl H2Bloom {
-    pub(in crate::app::model_preview) unsafe fn new(gl: &glow::Context, version: &str) -> Option<Self> {
+    pub(in crate::app::model_preview) unsafe fn new(
+        gl: &glow::Context,
+        version: &str,
+    ) -> Option<Self> {
         unsafe {
             let (vertex, fragment) = (format!("{version}{VERTEX}"), format!("{version}{FRAGMENT}"));
-            let stages = [(glow::VERTEX_SHADER, vertex.as_str()), (glow::FRAGMENT_SHADER, fragment.as_str())];
+            let stages = [
+                (glow::VERTEX_SHADER, vertex.as_str()),
+                (glow::FRAGMENT_SHADER, fragment.as_str()),
+            ];
             let program = super::super::gl::link::link(gl, &stages, &[])
                 .map_err(|error| eprintln!("model preview: bloom: {error}"))
                 .ok()?;
             let vertex_array = gl.create_vertex_array().ok()?;
-            Some(Self { program, vertex_array, surfaces: None })
+            Some(Self {
+                program,
+                vertex_array,
+                surfaces: None,
+            })
         }
     }
 
@@ -61,12 +71,17 @@ impl H2Bloom {
     ) {
         let small = [(size[0] / DOWNSAMPLE).max(1), (size[1] / DOWNSAMPLE).max(1)];
         unsafe {
-            if self.surfaces.as_ref().is_none_or(|(_, current)| *current != small) {
+            if self
+                .surfaces
+                .as_ref()
+                .is_none_or(|(_, current)| *current != small)
+            {
                 if let Some((old, _)) = self.surfaces.take() {
                     old.iter().for_each(|surface| surface.delete(gl));
                 }
                 let mut made = Made::new(gl);
-                let both = [(); 2].map(|_| made.color(small, Texels::RGBA8, Sampling::LINEAR_CLAMPED));
+                let both =
+                    [(); 2].map(|_| made.color(small, Texels::RGBA8, Sampling::LINEAR_CLAMPED));
                 let [Some(first), Some(second)] = both else {
                     drop(made);
                     gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene_framebuffer));

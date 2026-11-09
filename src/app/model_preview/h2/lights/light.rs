@@ -82,7 +82,9 @@ pub(in crate::app::model_preview) fn light_can_shine(root: TagStruct<'_>) -> boo
     // `default lightmap setting`'s `lightmaps only`: the game makes no such light.
     !flag("no illumination")
         && !flag("only render in first person")
-        && !root.field("default lightmap setting").is_some_and(|field| field.enum_is("lightmaps only"))
+        && !root
+            .field("default lightmap setting")
+            .is_some_and(|field| field.enum_is("lightmaps only"))
 }
 
 /// `sub_8EB720`, and what tool's postprocess gives a tag for the game: the
@@ -98,8 +100,12 @@ pub(super) fn read_h2_light(
     if !light_can_shine(root) {
         return None;
     }
-    let flare = root.read_tag_ref_path("lens flare").filter(|path| !path.is_empty());
-    let flare = flare.and_then(|path| read_h2_flare(reader, &path)).map(Arc::new);
+    let flare = root
+        .read_tag_ref_path("lens flare")
+        .filter(|path| !path.is_empty());
+    let flare = flare
+        .and_then(|path| read_h2_flare(reader, &path))
+        .map(Arc::new);
     let rgb = |name: &str| {
         let color = root.read_rgb(name);
         [color.red, color.green, color.blue]
@@ -128,7 +134,9 @@ pub(super) fn read_h2_light(
         [brightness.lower, brightness.upper]
     };
     let radius = root.read_real("radius").unwrap_or(0.0);
-    let specular_radius = root.read_real("specular radius").filter(|radius| *radius != 0.0);
+    let specular_radius = root
+        .read_real("specular radius")
+        .filter(|radius| *radius != 0.0);
     let saturate = |colors: [[f32; 3]; 2]| colors.map(|color| color.map(|c| c.clamp(0.0, 1.0)));
     let light = H2Light {
         interpolation: ce_color_interpolation(
@@ -141,17 +149,24 @@ pub(super) fn read_h2_light(
         brightness,
         color_animation: scale_function(root, "color animation"),
         brightness_animation: scale_function(root, "brightness animation"),
-        diffuse_layer: Dx9Layer::diffuse_with_contrast(root.read_enum_option("diffuse contrast").as_deref()),
+        diffuse_layer: Dx9Layer::diffuse_with_contrast(
+            root.read_enum_option("diffuse contrast").as_deref(),
+        ),
         radius,
         specular_radius: specular_radius.unwrap_or(radius),
         effect_duration: root.read_real("duration").unwrap_or(0.0),
-        effect_falloff: second_field_int(root, "falloff function").and_then(|index| u8::try_from(index).ok()).unwrap_or(0),
+        effect_falloff: second_field_int(root, "falloff function")
+            .and_then(|index| u8::try_from(index).ok())
+            .unwrap_or(0),
     };
     // `sub_6BA660` leaves the object unlit only with both.
     let lit = !(flag("ignore parent object") && flag("ignore all parents"));
     // Implementation 1 has no gel to read, so a sphere's own never shows.
     // A sphere is the only type that takes the sphere path.
-    let kind = |option: &str| root.field("type").is_some_and(|field| field.enum_is(option));
+    let kind = |option: &str| {
+        root.field("type")
+            .is_some_and(|field| field.enum_is(option))
+    };
     let lights_model = kind("sphere") && lit;
     let frustum = lit.then(|| read_h2_frustum(reader, root)).flatten();
     Some((light, lights_model, frustum, flare))
@@ -161,7 +176,8 @@ pub(super) fn read_h2_light(
 /// tool's postprocess applied. A shadow's pass needs a map of the level from
 /// the light, which a preview has none of, so it lights without one.
 fn read_h2_frustum(reader: &TagReader, root: TagStruct<'_>) -> Option<H2Frustum> {
-    let is = |field: &str, option: &str| root.field(field).is_some_and(|field| field.enum_is(option));
+    let is =
+        |field: &str, option: &str| root.field(field).is_some_and(|field| field.enum_is(option));
     // Orthogonal lights assert in `sub_946960`, so these are the frustums;
     // tool's postprocess makes `directional` of a frustum's default falloff.
     let (projective, pyramid) = (is("type", "projective"), is("type", "pyramid"));
@@ -169,7 +185,9 @@ fn read_h2_frustum(reader: &TagReader, root: TagStruct<'_>) -> Option<H2Frustum>
     if !(projective || pyramid) || !falloff {
         return None;
     }
-    let gel = root.read_tag_ref_path("gel map").filter(|gel| !gel.is_empty());
+    let gel = root
+        .read_tag_ref_path("gel map")
+        .filter(|gel| !gel.is_empty());
     let gel = gel
         .and_then(|gel| decode_image(reader, &gel, SamplerKind::Texture2D, 0))
         .map(Arc::new);
@@ -177,11 +195,21 @@ fn read_h2_frustum(reader: &TagReader, root: TagStruct<'_>) -> Option<H2Frustum>
         Image::Flat(image) => image.height as f32 / image.width as f32,
         _ => 1.0,
     });
-    let stretch = root.read_real("height stretch").filter(|stretch| *stretch != 0.0).unwrap_or(1.0);
+    let stretch = root
+        .read_real("height stretch")
+        .filter(|stretch| *stretch != 0.0)
+        .unwrap_or(1.0);
     let [narrowest, widest] = FIELD_OF_VIEW;
-    let view = root.read_real("field of view").unwrap_or(0.0).clamp(narrowest, widest);
+    let view = root
+        .read_real("field of view")
+        .unwrap_or(0.0)
+        .clamp(narrowest, widest);
     Some(H2Frustum {
-        near_width: if pyramid { 0.0 } else { root.read_real("near width").unwrap_or(0.0) },
+        near_width: if pyramid {
+            0.0
+        } else {
+            root.read_real("near width").unwrap_or(0.0)
+        },
         stretch: stretch * aspect,
         half_view: view.to_radians() * 0.5,
         falloff: root.read_real("falloff distance").unwrap_or(0.0),
@@ -206,7 +234,10 @@ impl H2Light {
         let diffuse = diffuse.map(|channel| channel.clamp(0.0, 1.0));
         let specular = specular.map(|channel| channel.clamp(0.0, 1.0));
         let size = (1.0 - value) * self.size[0] + value * self.size[1];
-        let lit = diffuse.iter().chain(&specular).any(|channel| *channel != 0.0);
+        let lit = diffuse
+            .iter()
+            .chain(&specular)
+            .any(|channel| *channel != 0.0);
         (size > 0.0 && lit).then_some(diffuse)
     }
 
@@ -246,11 +277,22 @@ impl H2PointLight {
         time: f32,
         onset: f32,
     ) -> Option<H2DefaultLight> {
-        let value = light_value(&self.light, self.effect.as_ref(), &self.scale_by, values, time, onset)?;
+        let value = light_value(
+            &self.light,
+            self.effect.as_ref(),
+            &self.scale_by,
+            values,
+            time,
+            onset,
+        )?;
         let light = &self.light;
         let diffuse = light.diffuse_at(value, time)?;
-        let specular =
-            ce_color_interpolate(light.interpolation, light.specular[0], light.specular[1], value);
+        let specular = ce_color_interpolate(
+            light.interpolation,
+            light.specular[0],
+            light.specular[1],
+            value,
+        );
         let brightness = light.shining(value, time);
         let size = (1.0 - value) * light.size[0] + value * light.size[1];
         let radius = (light.radius * size).max(light.specular_radius * size);
@@ -270,7 +312,13 @@ impl H2PointLight {
 impl H2Frustum {
     /// `sub_8E84F0` and `sub_946960` at `size`, for a marker's `position`.
     /// `falloff geometry` directional; gel animation rests at no offset.
-    pub(super) fn rows(&self, position: [f32; 3], forward: [f32; 3], up: [f32; 3], size: f32) -> H2GelRows {
+    pub(super) fn rows(
+        &self,
+        position: [f32; 3],
+        forward: [f32; 3],
+        up: [f32; 3],
+        size: f32,
+    ) -> H2GelRows {
         let tan_x = self.half_view.tan();
         let tan_y = tan_x * self.stretch;
         let (falloff, cutoff) = (self.falloff * size, self.cutoff * size);
@@ -320,7 +368,14 @@ impl H2GelLight {
         time: f32,
         onset: f32,
     ) -> Option<(H2DefaultLight, H2GelRows)> {
-        let value = light_value(&self.light, self.effect.as_ref(), &self.scale_by, values, time, onset)?;
+        let value = light_value(
+            &self.light,
+            self.effect.as_ref(),
+            &self.scale_by,
+            values,
+            time,
+            onset,
+        )?;
         let light = &self.light;
         let diffuse = light.diffuse_at(value, time)?;
         let size = (1.0 - value) * light.size[0] + value * light.size[1];
@@ -329,9 +384,22 @@ impl H2GelLight {
         let (_, up) = posed_on(self.node, self.position, self.up, bones);
         let rows = self.frustum.rows(position, forward, up, size);
         let color = diffuse.map(|channel| (channel * brightness).min(BRIGHTEST));
-        let specular = ce_color_interpolate(light.interpolation, light.specular[0], light.specular[1], value);
+        let specular = ce_color_interpolate(
+            light.interpolation,
+            light.specular[0],
+            light.specular[1],
+            value,
+        );
         let specular = specular.map(|channel| (channel * brightness).min(BRIGHTEST));
-        Some((H2DefaultLight { position: rows.apex, color, specular, radius: 1.0 }, rows))
+        Some((
+            H2DefaultLight {
+                position: rows.apex,
+                color,
+                specular,
+                radius: 1.0,
+            },
+            rows,
+        ))
     }
 }
 
@@ -344,7 +412,12 @@ pub(crate) fn has_specular(light: &H2DefaultLight) -> bool {
 /// variant that scales its output back up, as passes saturate on the way. The
 /// preview keeps the first variant: the same pass drawn again is the same sum.
 pub(crate) fn overbrighten(light: &H2DefaultLight) -> (H2DefaultLight, usize) {
-    let brightest = light.color.iter().chain(&light.specular).copied().fold(0.0, f32::max);
+    let brightest = light
+        .color
+        .iter()
+        .chain(&light.specular)
+        .copied()
+        .fold(0.0, f32::max);
     let (scale, draws) = match brightest {
         value if value <= 1.0 => (1.0, 1),
         value if value <= 2.0 => (0.5, 2),

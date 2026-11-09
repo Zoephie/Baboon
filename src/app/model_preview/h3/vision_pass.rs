@@ -26,33 +26,72 @@ const VISION_FRAGMENT: &str = include_str!("shaders/vision.frag");
 
 impl H3Game {
     /// Whether the frame draws VISR or the suck over its picture.
-    pub(super) fn draws_picture_effects(frame: &ModelGpuFrame, screen: &Gen3ScreenSettings) -> bool {
+    pub(super) fn draws_picture_effects(
+        frame: &ModelGpuFrame,
+        screen: &Gen3ScreenSettings,
+    ) -> bool {
         let vision = frame.preview.h3.vision.is_some() && screen.vision() > 0.0;
         let suck = frame.preview.h3.motion_blur.is_some() && screen.suck().is_some();
         vision || suck
     }
 
     /// `distortion_apply` comes before everything else over the picture.
-    pub(super) unsafe fn draw_picture_suck(&mut self, cx: &mut Gen3Cx<'_>, screen: &Gen3ScreenSettings, copies: &PictureCopies) {
+    pub(super) unsafe fn draw_picture_suck(
+        &mut self,
+        cx: &mut Gen3Cx<'_>,
+        screen: &Gen3ScreenSettings,
+        copies: &PictureCopies,
+    ) {
         let Some((blur, moved)) = cx.frame.preview.h3.motion_blur.zip(screen.suck()) else {
             return;
         };
         unsafe {
             copies.copy_depth(cx.gl);
             copies.screen_copy(cx.gl, true);
-            self.draw_suck(cx.gl, cx.state, cx.frame, &blur, moved, copies.behind, copies.depth_copy);
+            self.draw_suck(
+                cx.gl,
+                cx.state,
+                cx.frame,
+                &blur,
+                moved,
+                copies.behind,
+                copies.depth_copy,
+            );
         }
     }
 
     /// VISR, after the blur.
-    pub(super) unsafe fn draw_picture_vision(&mut self, cx: &mut Gen3Cx<'_>, screen: &Gen3ScreenSettings, copies: &PictureCopies) {
-        let Some(vision) = cx.frame.preview.h3.vision.clone().filter(|_| screen.vision() > 0.0) else {
+    pub(super) unsafe fn draw_picture_vision(
+        &mut self,
+        cx: &mut Gen3Cx<'_>,
+        screen: &Gen3ScreenSettings,
+        copies: &PictureCopies,
+    ) {
+        let Some(vision) = cx
+            .frame
+            .preview
+            .h3
+            .vision
+            .clone()
+            .filter(|_| screen.vision() > 0.0)
+        else {
             return;
         };
         unsafe {
             copies.copy_depth(cx.gl);
-            let on_for = self.slots.of(cx.slot, cx.core.slot_uploads(cx.slot)).vision_on_for(cx.frame.time);
-            self.draw_vision(cx.gl, cx.state, cx.frame, &vision, screen.vision(), on_for, copies.depth_copy);
+            let on_for = self
+                .slots
+                .of(cx.slot, cx.core.slot_uploads(cx.slot))
+                .vision_on_for(cx.frame.time);
+            self.draw_vision(
+                cx.gl,
+                cx.state,
+                cx.frame,
+                &vision,
+                screen.vision(),
+                on_for,
+                copies.depth_copy,
+            );
         }
     }
 
@@ -162,14 +201,29 @@ mod tests {
     use super::super::super::gen3::render::Gen3Game;
     use super::super::super::reach::render::ReachGame;
     use super::*;
-    use crate::app::model_preview::{ModelPreviewState, RenderModelPreview, frame::build_frame, model_preview_data};
+    use crate::app::model_preview::{
+        ModelPreviewState, RenderModelPreview, frame::build_frame, model_preview_data,
+    };
 
     fn frame_with(motion_blur: Option<H3MotionBlur>) -> ModelGpuFrame {
-        let mut preview = RenderModelPreview { game: Some(crate::core::game::GameId::Halo3Odst), ..Default::default() };
+        let mut preview = RenderModelPreview {
+            game: Some(crate::core::game::GameId::Halo3Odst),
+            ..Default::default()
+        };
         preview.h3.motion_blur = motion_blur;
         let data = model_preview_data(String::new(), String::new(), preview, Vec::new());
-        let rect = eframe::egui::Rect::from_min_size(eframe::egui::Pos2::ZERO, eframe::egui::vec2(64.0, 64.0));
-        build_frame(&data, &ModelPreviewState::default(), rect, 0.0, [0.0; 3], &[])
+        let rect = eframe::egui::Rect::from_min_size(
+            eframe::egui::Pos2::ZERO,
+            eframe::egui::vec2(64.0, 64.0),
+        );
+        build_frame(
+            &data,
+            &ModelPreviewState::default(),
+            rect,
+            0.0,
+            [0.0; 3],
+            &[],
+        )
     }
 
     /// The gen3 pipeline finishes a picture with ODST's motion suck only
@@ -177,14 +231,27 @@ mod tests {
     /// screen effects move the view; no other gen3 game's hooks draw it.
     #[test]
     fn only_halo_3s_hooks_draw_the_motion_suck_over_the_picture() {
-        let blur = H3MotionBlur { most_pixels: 4.0, step: 0.5, center_falloff: [1.0, 1.0] };
+        let blur = H3MotionBlur {
+            most_pixels: 4.0,
+            step: 0.5,
+            center_falloff: [1.0, 1.0],
+        };
         let (with, without) = (frame_with(Some(blur)), frame_with(None));
         let moving = Gen3ScreenSettings::seeing(0.0, [0.0, 0.0, 1.0]);
         let still = Gen3ScreenSettings::default();
         let h3 = H3Game::default();
         assert!(Gen3Game::picture_effects(&h3, &with, &moving));
-        assert!(!Gen3Game::picture_effects(&h3, &with, &still), "the view does not move");
-        assert!(!Gen3Game::picture_effects(&h3, &without, &moving), "the object brings no motion blur");
-        assert!(!Gen3Game::picture_effects(&ReachGame::default(), &with, &moving), "Reach draws none");
+        assert!(
+            !Gen3Game::picture_effects(&h3, &with, &still),
+            "the view does not move"
+        );
+        assert!(
+            !Gen3Game::picture_effects(&h3, &without, &moving),
+            "the object brings no motion blur"
+        );
+        assert!(
+            !Gen3Game::picture_effects(&ReachGame::default(), &with, &moving),
+            "Reach draws none"
+        );
     }
 }

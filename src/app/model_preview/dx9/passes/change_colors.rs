@@ -45,7 +45,9 @@ pub(in crate::app) fn read_change_colors(object: &TagFile) -> ChangeColors {
                 weight: permutation.read_real("weight").unwrap_or(0.0),
                 lower: rgb(permutation, "color lower bound"),
                 upper: rgb(permutation, "color upper bound"),
-                variant: permutation.read_string_id("variant name").unwrap_or_default(),
+                variant: permutation
+                    .read_string_id("variant name")
+                    .unwrap_or_default(),
             })
             .collect();
     }
@@ -100,8 +102,11 @@ pub(super) fn hsv_to_rgb([hue, saturation, value]: [f32; 3]) -> [f32; 3] {
     let sector = hue.rem_euclid(1.0) * 6.0;
     let whole = sector.floor();
     let part = sector - whole;
-    let (low, falling, rising) =
-        (value * (1.0 - saturation), value * (1.0 - saturation * part), value * (1.0 - saturation * (1.0 - part)));
+    let (low, falling, rising) = (
+        value * (1.0 - saturation),
+        value * (1.0 - saturation * part),
+        value * (1.0 - saturation * (1.0 - part)),
+    );
     match whole as u8 {
         0 => [value, rising, low],
         1 => [falling, value, low],
@@ -114,7 +119,12 @@ pub(super) fn hsv_to_rgb([hue, saturation, value]: [f32; 3]) -> [f32; 3] {
 
 /// `rgb_colors_interpolate` with its HSV flag: the short way round the hue,
 /// or the long way with its `...more colors` flag.
-pub(super) fn hsv_interpolate(lower: [f32; 3], upper: [f32; 3], u: f32, long_way: bool) -> [f32; 3] {
+pub(super) fn hsv_interpolate(
+    lower: [f32; 3],
+    upper: [f32; 3],
+    u: f32,
+    long_way: bool,
+) -> [f32; 3] {
     let (mut from, mut to) = (rgb_to_hsv(lower), rgb_to_hsv(upper));
     if ((from[0] - to[0]).abs() > 0.5) != long_way {
         if from[0] >= to[0] {
@@ -123,7 +133,9 @@ pub(super) fn hsv_interpolate(lower: [f32; 3], upper: [f32; 3], u: f32, long_way
             from[0] += 1.0;
         }
     }
-    hsv_to_rgb(std::array::from_fn(|channel| from[channel] * (1.0 - u) + to[channel] * u))
+    hsv_to_rgb(std::array::from_fn(|channel| {
+        from[channel] * (1.0 - u) + to[channel] * u
+    }))
 }
 
 /// `object_choose_random_change_colors` for an object at the world's origin,
@@ -141,7 +153,8 @@ pub(super) fn ce_change_color(permutations: &[ChangePermutation], channel: usize
     for entry in permutations {
         running += weight(entry) / total;
         if pick <= running {
-            return hsv_interpolate(entry.lower, entry.upper, u, false).map(|value| value.clamp(0.0, 1.0));
+            return hsv_interpolate(entry.lower, entry.upper, u, false)
+                .map(|value| value.clamp(0.0, 1.0));
         }
     }
     [1.0; 3]
@@ -154,7 +167,12 @@ pub(crate) fn ce_color_interpolation(hsv: bool, long_way: bool) -> i128 {
 }
 
 /// `rgb_colors_interpolate`: bit 0 of `flags` blends in HSV, bit 1 the long way.
-pub(crate) fn ce_color_interpolate(flags: i128, lower: [f32; 3], upper: [f32; 3], u: f32) -> [f32; 3] {
+pub(crate) fn ce_color_interpolate(
+    flags: i128,
+    lower: [f32; 3],
+    upper: [f32; 3],
+    u: f32,
+) -> [f32; 3] {
     if flags & 1 != 0 {
         hsv_interpolate(lower, upper, u, flags & 2 != 0)
     } else {

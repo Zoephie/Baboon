@@ -1,13 +1,17 @@
 //! Halo 2's shaders resolved over their templates' defaults to the passes and
 //! textures the preview draws.
 
-use super::super::super::*;
 use super::super::super::common::fields::has_flag;
-use super::super::super::dx9::passes::{Dx9DrawPass, Dx9Layer, Dx9ParameterValue, animation_function};
-use super::super::shader::{h2_pass_needs_frame_texture, prepare_draw_pass, resolve_h2_layer_passes};
-use std::sync::Arc;
-use std::collections::HashMap;
+use super::super::super::dx9::passes::{
+    Dx9DrawPass, Dx9Layer, Dx9ParameterValue, animation_function,
+};
 use super::super::super::materials::*;
+use super::super::super::*;
+use super::super::shader::{
+    h2_pass_needs_frame_texture, prepare_draw_pass, resolve_h2_layer_passes,
+};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// One Halo 2 template parameter's defaults: what a shader that does not
 /// override the parameter draws with.
@@ -54,7 +58,9 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
     };
     for (slot, name) in SLOT_PARAMETERS {
         let authored = parameters.get(name);
-        let defaults = template.as_ref().and_then(|template| template.parameters.get(name));
+        let defaults = template
+            .as_ref()
+            .and_then(|template| template.parameters.get(name));
         let path = authored
             .and_then(|parameter| parameter.read_tag_ref_path("bitmap"))
             .filter(|path| !path.is_empty())
@@ -78,7 +84,9 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
     // `*alpha_test*` templates that declare no `alpha_test_map`
     // (`tex_alpha_test`, `tex_bump_alpha_test_single_pass`, ...) can only be
     // cutting out on the base map's alpha.
-    if template.as_ref().is_some_and(|template| template.alpha_tested)
+    if template
+        .as_ref()
+        .is_some_and(|template| template.alpha_tested)
         && textures.slots[TextureSlot::AlphaTest as usize].is_none()
     {
         textures.slots[TextureSlot::AlphaTest as usize] =
@@ -88,7 +96,9 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
     // lost is the defaults, the same as a render method without its definition.
     textures.used_shader_parameters_only = template.is_none();
     // The game skips the specular pass for a shader with no specular type.
-    let has_specular = !root.field("specular type").is_some_and(|field| field.enum_is("none"));
+    let has_specular = !root
+        .field("specular type")
+        .is_some_and(|field| field.enum_is("none"));
     for layer in Dx9Layer::ALL {
         if (layer == Dx9Layer::LightSpecular && !has_specular) || layer.tag_name().is_empty() {
             continue;
@@ -162,10 +172,11 @@ fn prepare_h2_camo_passes(
     let shader = caches
         .h2_camo_shader
         .get_or_insert_with(|| {
-            let globals =
-                reader.load("globals\\globals", "globals", b"matg").ok()?;
+            let globals = reader.load("globals\\globals", "globals", b"matg").ok()?;
             let root = globals.root();
-            let path = root.descend("rasterizer data[0]")?.read_tag_ref_path("global shader")?;
+            let path = root
+                .descend("rasterizer data[0]")?
+                .read_tag_ref_path("global shader")?;
             reader.load(&path, "shader", b"shad").ok()
         })
         .clone();
@@ -195,10 +206,17 @@ fn h2_bitmap_scale(
     defaults: Option<&H2TemplateParameter>,
 ) -> [f32; 2] {
     let positive = |scale: f32| (scale.is_finite() && scale > 0.0).then_some(scale);
-    let inherited = defaults.and_then(|defaults| positive(defaults.bitmap_scale)).unwrap_or(1.0);
+    let inherited = defaults
+        .and_then(|defaults| positive(defaults.bitmap_scale))
+        .unwrap_or(1.0);
     authored
         .and_then(|parameter| h2_scale_animation(parameter))
-        .map(|[x, y]| [x.and_then(positive).unwrap_or(inherited), y.and_then(positive).unwrap_or(inherited)])
+        .map(|[x, y]| {
+            [
+                x.and_then(positive).unwrap_or(inherited),
+                y.and_then(positive).unwrap_or(inherited),
+            ]
+        })
         .unwrap_or([inherited, inherited])
 }
 
@@ -218,32 +236,43 @@ fn prepare_h2_passes(
     let TagSource::LooseFolder { root, .. } = &reader.source else {
         return Vec::new();
     };
-    let load = |path: &str, extension: &str, group: &[u8; 4]| {
-        reader.load(path, extension, group).ok()
-    };
-    let mut passes = match resolve_h2_layer_passes(shader, load, layer.tag_name(), layer.implementation()) {
-        Ok(passes) => passes,
-        Err(error) => {
-            eprintln!("model preview: {error}");
-            return Vec::new();
-        }
-    };
+    let load =
+        |path: &str, extension: &str, group: &[u8; 4]| reader.load(path, extension, group).ok();
+    let mut passes =
+        match resolve_h2_layer_passes(shader, load, layer.tag_name(), layer.implementation()) {
+            Ok(passes) => passes,
+            Err(error) => {
+                eprintln!("model preview: {error}");
+                return Vec::new();
+            }
+        };
     if let Some(path) = camo_bump {
         for pass in &mut passes {
             pass.parameters.retain(|(name, _)| name != "bump_map");
-            pass.parameters.push(("bump_map".to_owned(), Dx9ParameterValue::Bitmap(path.clone())));
+            pass.parameters.push((
+                "bump_map".to_owned(),
+                Dx9ParameterValue::Bitmap(path.clone()),
+            ));
         }
     }
     let mut cases = HashMap::from(["specular", "lightmap"].map(|name| {
-        let value = shader.root().read_int_any(&format!("{name} type")).unwrap_or(0) as i32;
+        let value = shader
+            .root()
+            .read_int_any(&format!("{name} type"))
+            .unwrap_or(0) as i32;
         (format!("{name}_type"), value)
     }));
     // A default light's definition has specular on; see `rasterizer_get_switch_extern`.
     cases.insert("light_definition_specular_enabled".to_owned(), 1);
-    cases.insert("light_diffuse_contrast".to_owned(), layer.diffuse_contrast());
+    cases.insert(
+        "light_diffuse_contrast".to_owned(),
+        layer.diffuse_contrast(),
+    );
     let directory = root.join("rasterizer").join("pixel_shaders_dx9");
-    let specular_brightness =
-        shader.root().read_real("lightmap specular brightness").unwrap_or(1.0);
+    let specular_brightness = shader
+        .root()
+        .read_real("lightmap specular brightness")
+        .unwrap_or(1.0);
     let mut prepared = Vec::with_capacity(passes.len());
     for pass in &passes {
         // The texaccum target and friends need a frame this preview does not
@@ -323,13 +352,19 @@ fn cached_h2_template(
     if let Some(cached) = cache.get(path) {
         return cached.clone();
     }
-    let loaded = reader.load(path, "shader_template", b"stem")
+    let loaded = reader
+        .load(path, "shader_template", b"stem")
         .ok()
         .map(|template| {
             let mut parameters = HashMap::new();
-            if let Some(categories) = template.root().field("categories").and_then(|f| f.as_block()) {
+            if let Some(categories) = template
+                .root()
+                .field("categories")
+                .and_then(|f| f.as_block())
+            {
                 for category in categories.iter() {
-                    let Some(block) = category.field("parameters").and_then(|f| f.as_block()) else {
+                    let Some(block) = category.field("parameters").and_then(|f| f.as_block())
+                    else {
                         continue;
                     };
                     for parameter in block.iter() {

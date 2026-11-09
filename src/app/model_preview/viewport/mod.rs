@@ -1,8 +1,8 @@
 //! The egui widget over the GL picture: input, the camera it moves, and the
 //! overlays drawn on top (error reports, markers, the armature).
 
-use super::*;
 use super::ce::draw::ce_events_running;
+use super::*;
 
 mod errors;
 pub(in crate::app::model_preview) use errors::*;
@@ -55,8 +55,7 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
     if let Some(scroll) = viewport_wheel_zoom(ui, &response) {
         let least = min_preview_scale(&data.preview);
         let old_scale = state.scale.clamp(least, MAX_PREVIEW_SCALE);
-        let new_scale =
-            (old_scale * (scroll / 450.0).exp()).clamp(least, MAX_PREVIEW_SCALE);
+        let new_scale = (old_scale * (scroll / 450.0).exp()).clamp(least, MAX_PREVIEW_SCALE);
         // Zoom toward the cursor: shift the orbit point so the geometry
         // under the pointer stays put. Without this, zooming into a BSP
         // always dives at its center and the doorway drifts offscreen.
@@ -76,14 +75,27 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
     }
 
     let time = preview_clock(ui);
-    let frame = build_frame(data, state, rect, time, preview_background(ui.visuals()), &[]);
+    let frame = build_frame(
+        data,
+        state,
+        rect,
+        time,
+        preview_background(ui.visuals()),
+        &[],
+    );
     // The overlays below draw over the same view and pose.
     let camera = PreviewCamera::new(data, state, rect);
     let bones = frame.bones.clone();
     let skinning_rows = bones.as_deref().map(Vec::as_slice);
-    let firing = ce::firing::shots_moving(&data.preview.ce.firing, &state.ce_shots, data.geometry_id, time);
+    let firing = ce::firing::shots_moving(
+        &data.preview.ce.firing,
+        &state.ce_shots,
+        data.geometry_id,
+        time,
+    );
     if frame.moves() || ce_events_running(data.geometry_id) || firing {
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(33));
     }
     painter.add(egui::PaintCallback {
         rect,
@@ -100,7 +112,13 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
     if let Some(message) = model_gl_failure(data.geometry_id) {
         let note = format!("Drawing this crashed: {message}");
         let color = ui.visuals().error_fg_color;
-        painter.text(rect.center(), Align2::CENTER_CENTER, note, FontId::proportional(12.0), color);
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            note,
+            FontId::proportional(12.0),
+            color,
+        );
     }
 
     if state.show_errors {
@@ -155,7 +173,12 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
         if let Some((index, position, _)) = hovered
             && let Some(node) = data.preview.nodes.get(index)
         {
-            draw_preview_hover_label(&painter, position + Vec2::new(7.0, -7.0), &node.name, ARMATURE_COLOR);
+            draw_preview_hover_label(
+                &painter,
+                position + Vec2::new(7.0, -7.0),
+                &node.name,
+                ARMATURE_COLOR,
+            );
         }
     }
 

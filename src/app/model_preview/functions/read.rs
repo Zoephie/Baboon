@@ -52,7 +52,10 @@ pub(super) struct Clock {
 
 impl Clock {
     pub(super) fn of(time: f32, owner: u8) -> Self {
-        Self { time, offset: high16_over_65535(lcg_step(u32::from(owner))) }
+        Self {
+            time,
+            offset: high16_over_65535(lcg_step(u32::from(owner))),
+        }
     }
 }
 
@@ -111,7 +114,10 @@ impl FunctionSwitch {
         depth: usize,
     ) -> (f32, bool) {
         let (switch, _) = owner.value(&self.switch, inputs, scripted, clock, depth + 1);
-        let picked = self.cases.iter().find(|([lower, upper], _)| *lower <= switch && switch <= *upper);
+        let picked = self
+            .cases
+            .iter()
+            .find(|([lower, upper], _)| *lower <= switch && switch <= *upper);
         match picked {
             Some((_, function)) => owner.value(function, inputs, scripted, clock, depth + 1),
             None => (0.0, false),
@@ -134,7 +140,10 @@ pub(crate) struct ObjectFunctions {
 /// An object's functions, or none on a tag with no such block. An empty block
 /// still counts: its shaders can read what the object's type exports. `model`
 /// is the object's, whose damage info and variants some exports report.
-pub(crate) fn read_object_functions(object: &TagFile, model: Option<&TagFile>) -> Option<ObjectFunctions> {
+pub(crate) fn read_object_functions(
+    object: &TagFile,
+    model: Option<&TagFile>,
+) -> Option<ObjectFunctions> {
     let block = object_block(object, "functions")?;
     let name = |entry: TagStruct<'_>, field: &str| entry.read_string_id(field).unwrap_or_default();
     let functions: Vec<_> = elements(block, "functions")
@@ -160,13 +169,21 @@ pub(crate) fn read_object_functions(object: &TagFile, model: Option<&TagFile>) -
     let switches = object_block(object, "function switches")
         .map(|block| read_function_switches(block, &name))
         .unwrap_or_default();
-    Some(ObjectFunctions { functions, switches, rules, exports: TypeExports::of(object, model) })
+    Some(ObjectFunctions {
+        functions,
+        switches,
+        rules,
+        exports: TypeExports::of(object, model),
+    })
 }
 
 /// Halo 4's `function switches`. A case that picks its own switch's export is
 /// a loop the game turns to `zero` as it loads (the 360's
 /// `ObjectFunctionSwitchDefinition::Postprocess` 0x84af07a8).
-fn read_function_switches(block: TagStruct<'_>, name: &impl Fn(TagStruct<'_>, &str) -> String) -> Vec<FunctionSwitch> {
+fn read_function_switches(
+    block: TagStruct<'_>,
+    name: &impl Fn(TagStruct<'_>, &str) -> String,
+) -> Vec<FunctionSwitch> {
     elements(block, "function switches")
         .iter()
         .map(|entry| {
@@ -174,15 +191,31 @@ fn read_function_switches(block: TagStruct<'_>, name: &impl Fn(TagStruct<'_>, &s
             let cases = elements(*entry, "switched functions")
                 .iter()
                 .map(|case| {
-                    let bounds = match case.field("selection bounds").and_then(|field| field.value()) {
-                        Some(blam_tags::TagFieldData::RealBounds(bounds)) => [bounds.lower, bounds.upper],
+                    let bounds = match case
+                        .field("selection bounds")
+                        .and_then(|field| field.value())
+                    {
+                        Some(blam_tags::TagFieldData::RealBounds(bounds)) => {
+                            [bounds.lower, bounds.upper]
+                        }
                         _ => [0.0; 2],
                     };
                     let function = name(*case, "function name");
-                    (bounds, if function == export { "zero".to_owned() } else { function })
+                    (
+                        bounds,
+                        if function == export {
+                            "zero".to_owned()
+                        } else {
+                            function
+                        },
+                    )
                 })
                 .collect();
-            FunctionSwitch { switch: name(*entry, "switch function name"), export, cases }
+            FunctionSwitch {
+                switch: name(*entry, "switch function name"),
+                export,
+                cases,
+            }
         })
         .collect()
 }

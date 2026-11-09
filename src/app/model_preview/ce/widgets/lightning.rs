@@ -8,7 +8,14 @@ impl super::super::functions::ReadsOutputs for CeLightning {
     }
     /// Its tint source names a change color, not an output.
     fn outputs_read(&self) -> Vec<usize> {
-        [self.jitter_source, self.thickness_source, self.brightness_source].into_iter().flatten().collect()
+        [
+            self.jitter_source,
+            self.thickness_source,
+            self.brightness_source,
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
     }
 }
 
@@ -56,13 +63,25 @@ pub(crate) struct CeLightningQuad {
     pub(crate) colors: [[f32; 4]; 4],
 }
 
-fn read_lightning(reader: &TagReader, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeLightning> {
+fn read_lightning(
+    reader: &TagReader,
+    path: &str,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+) -> Option<CeLightning> {
     let tag = reader.load(path, "lightning", b"elec").ok()?;
     let root = tag.root();
     // `lightning_submit` draws nothing unless the first marker is found; an
     // empty name counts, as the object's origin.
-    let first = elements(root, "markers").first()?.read_string("attachment marker").unwrap_or_default();
-    if !first.is_empty() && !markers.iter().any(|marker| marker.name.eq_ignore_ascii_case(&first)) {
+    let first = elements(root, "markers")
+        .first()?
+        .read_string("attachment marker")
+        .unwrap_or_default();
+    if !first.is_empty()
+        && !markers
+            .iter()
+            .any(|marker| marker.name.eq_ignore_ascii_case(&first))
+    {
         return None;
     }
     let found = elements(root, "markers")
@@ -73,11 +92,27 @@ fn read_lightning(reader: &TagReader, path: &str, owner: u8, markers: &[RenderMo
             let (node, position, axes) = markers
                 .iter()
                 .find(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(&name))
-                .map_or((0, [0.0; 3], [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]), |marker| {
-                    (marker.node_index.max(0) as usize, marker.position, marker.axes)
-                });
-            let bounds = match entry.field("random position bounds").and_then(|field| field.value()) {
-                Some(blam_tags::TagFieldData::RealVector3d(vector)) => [vector.i, vector.j, vector.k],
+                .map_or(
+                    (
+                        0,
+                        [0.0; 3],
+                        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    ),
+                    |marker| {
+                        (
+                            marker.node_index.max(0) as usize,
+                            marker.position,
+                            marker.axes,
+                        )
+                    },
+                );
+            let bounds = match entry
+                .field("random position bounds")
+                .and_then(|field| field.value())
+            {
+                Some(blam_tags::TagFieldData::RealVector3d(vector)) => {
+                    [vector.i, vector.j, vector.k]
+                }
                 _ => [0.0; 3],
             };
             let [red, green, blue, alpha] = argb(*entry, "tint");
@@ -86,7 +121,10 @@ fn read_lightning(reader: &TagReader, path: &str, owner: u8, markers: &[RenderMo
                 position,
                 axes,
                 ends: has_flag(*entry, "flags", "not connected to next marker"),
-                octaves: entry.read_int_any("octaves to next marker").unwrap_or(0).clamp(0, 8) as u32,
+                octaves: entry
+                    .read_int_any("octaves to next marker")
+                    .unwrap_or(0)
+                    .clamp(0, 8) as u32,
                 bounds,
                 jitter: entry.read_real("random jitter").unwrap_or(0.0),
                 thickness: entry.read_real("thickness").unwrap_or(0.0),
@@ -97,7 +135,9 @@ fn read_lightning(reader: &TagReader, path: &str, owner: u8, markers: &[RenderMo
     if found.is_empty() {
         return None;
     }
-    let bitmap = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
+    let bitmap = root
+        .read_tag_ref_path("bitmap")
+        .filter(|path| !path.is_empty())?;
     let image = Arc::new(decode_image(reader, &bitmap, SamplerKind::Texture2D, 0)?);
     let shader = elements(root, "shader").first().copied();
     let (blend, nonlinear_tint, sort_bias) = match shader {
@@ -176,12 +216,18 @@ impl CeLightning {
         let jitter_scale = value(self.jitter_source);
         let thickness_scale = value(self.thickness_source);
         let brightness_scale = value(self.brightness_source);
-        let tint = self.tint_source.map_or([1.0; 3], |slot| change_colors[slot]);
+        let tint = self
+            .tint_source
+            .map_or([1.0; 3], |slot| change_colors[slot]);
         // `lightning_offset_marker_position`, within the marker's bounds.
         let placed = |marker: &LightningMarker, random: &mut Lcg| -> [f32; 3] {
-            let random: [f32; 3] = std::array::from_fn(|axis| (random.next() * 2.0 - 1.0) * marker.bounds[axis]);
+            let random: [f32; 3] =
+                std::array::from_fn(|axis| (random.next() * 2.0 - 1.0) * marker.bounds[axis]);
             let local: [f32; 3] = std::array::from_fn(|axis| {
-                marker.position[axis] + (0..3).map(|row| marker.axes[row][axis] * random[row]).sum::<f32>()
+                marker.position[axis]
+                    + (0..3)
+                        .map(|row| marker.axes[row][axis] * random[row])
+                        .sum::<f32>()
             });
             posed_on(marker.node, local, [0.0; 3], bones).0
         };
@@ -192,37 +238,61 @@ impl CeLightning {
             for (at, marker) in self.markers.iter().enumerate() {
                 if fresh {
                     points.clear();
-                    points.push(BoltPoint { place: placed(marker, &mut random), thickness: marker.thickness, tint: marker.tint });
+                    points.push(BoltPoint {
+                        place: placed(marker, &mut random),
+                        thickness: marker.thickness,
+                        tint: marker.tint,
+                    });
                     fresh = false;
                 }
                 if marker.ends || at + 1 == self.markers.len() {
                     if points.len() > 2 {
-                        self.strip(&points, thickness_scale, brightness_scale, tint, view, random.next(), &mut quads);
+                        self.strip(
+                            &points,
+                            thickness_scale,
+                            brightness_scale,
+                            tint,
+                            view,
+                            random.next(),
+                            &mut quads,
+                        );
                     }
                     fresh = true;
                     continue;
                 }
                 // To the next marker, `1 << octaves` steps, by halves.
                 let to = &self.markers[at + 1];
-                let end = BoltPoint { place: placed(to, &mut random), thickness: to.thickness, tint: to.tint };
+                let end = BoltPoint {
+                    place: placed(to, &mut random),
+                    thickness: to.thickness,
+                    tint: to.tint,
+                };
                 let start = points.len() - 1;
                 let steps = 1usize << marker.octaves;
                 points.resize(start + steps + 1, end);
-                let along: [f32; 3] = std::array::from_fn(|axis| end.place[axis] - points[start].place[axis]);
+                let along: [f32; 3] =
+                    std::array::from_fn(|axis| end.place[axis] - points[start].place[axis]);
                 let across = nonzero_unit(cross(along, view.forward)).unwrap_or([0.0, 0.0, 1.0]);
                 let mut amplitude = 1.0;
                 for level in 1..=marker.octaves {
                     let half = 1usize << (marker.octaves - level);
                     let mut middle = half;
                     while middle < steps {
-                        let (low, high) = (points[start + middle - half], points[start + middle + half]);
+                        let (low, high) =
+                            (points[start + middle - half], points[start + middle + half]);
                         let t = middle as f32 / steps as f32;
-                        let reach = ((to.jitter - marker.jitter) * t + marker.jitter) * amplitude * jitter_scale;
+                        let reach = ((to.jitter - marker.jitter) * t + marker.jitter)
+                            * amplitude
+                            * jitter_scale;
                         let push = (random.next() * 2.0 - 1.0) * reach;
                         points[start + middle] = BoltPoint {
-                            place: std::array::from_fn(|axis| (low.place[axis] + high.place[axis]) * 0.5 + across[axis] * push),
+                            place: std::array::from_fn(|axis| {
+                                (low.place[axis] + high.place[axis]) * 0.5 + across[axis] * push
+                            }),
                             thickness: (low.thickness + high.thickness) * 0.5,
-                            tint: std::array::from_fn(|channel| (low.tint[channel] + high.tint[channel]) * 0.5),
+                            tint: std::array::from_fn(|channel| {
+                                (low.tint[channel] + high.tint[channel]) * 0.5
+                            }),
                         };
                         middle += half * 2;
                     }
@@ -256,17 +326,30 @@ impl CeLightning {
             let width = point.thickness * thickness_scale;
             let u = at as f32 * step + start_u;
             let side = |sign: f32, v: f32| -> [f32; 5] {
-                let [x, y, z] = std::array::from_fn(|axis| point.place[axis] + across[axis] * width * sign);
+                let [x, y, z] =
+                    std::array::from_fn(|axis| point.place[axis] + across[axis] * width * sign);
                 [x, y, z, u, v]
             };
             let [alpha, red, green, blue] = point.tint;
-            (side(1.0, 0.0), side(-1.0, 1.0), [red * tint[0], green * tint[1], blue * tint[2], alpha * brightness_scale])
+            (
+                side(1.0, 0.0),
+                side(-1.0, 1.0),
+                [
+                    red * tint[0],
+                    green * tint[1],
+                    blue * tint[2],
+                    alpha * brightness_scale,
+                ],
+            )
         };
         for at in 0..last {
             let (top, bottom, near) = vertex(at);
             let (next_top, next_bottom, far) = vertex(at + 1);
             let [near, far] = [near, far].map(|color| color.map(|channel| channel.clamp(0.0, 1.0)));
-            quads.push(CeLightningQuad { corners: [top, next_top, bottom, next_bottom], colors: [near, far, near, far] });
+            quads.push(CeLightningQuad {
+                corners: [top, next_top, bottom, next_bottom],
+                colors: [near, far, near, far],
+            });
         }
     }
 }

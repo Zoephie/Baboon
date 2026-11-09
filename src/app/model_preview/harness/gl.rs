@@ -6,7 +6,11 @@ use std::ffi::{CString, c_char, c_void};
 
 #[link(name = "OpenGL", kind = "framework")]
 unsafe extern "C" {
-    fn CGLChoosePixelFormat(attributes: *const i32, format: *mut *mut c_void, count: *mut i32) -> i32;
+    fn CGLChoosePixelFormat(
+        attributes: *const i32,
+        format: *mut *mut c_void,
+        count: *mut i32,
+    ) -> i32;
     fn CGLCreateContext(format: *mut c_void, share: *mut c_void, context: *mut *mut c_void) -> i32;
     fn CGLSetCurrentContext(context: *mut c_void) -> i32;
 }
@@ -32,8 +36,14 @@ fn headless_gl_loading(recording: bool) -> glow::Context {
     unsafe {
         let attributes = [PROFILE, GL4_CORE, COLOR_SIZE, 24, DEPTH_SIZE, 24, 0];
         let (mut format, mut count, mut context) = (std::ptr::null_mut(), 0, std::ptr::null_mut());
-        assert_eq!(CGLChoosePixelFormat(attributes.as_ptr(), &mut format, &mut count), 0);
-        assert_eq!(CGLCreateContext(format, std::ptr::null_mut(), &mut context), 0);
+        assert_eq!(
+            CGLChoosePixelFormat(attributes.as_ptr(), &mut format, &mut count),
+            0
+        );
+        assert_eq!(
+            CGLCreateContext(format, std::ptr::null_mut(), &mut context),
+            0
+        );
         assert_eq!(CGLSetCurrentContext(context), 0);
         glow::Context::from_loader_function(|name| {
             if recording && let Some(shim) = gl_log::checked_shim(name) {
@@ -85,15 +95,27 @@ mod gl_log {
         static UNIFORM_IV: OnceLock<usize> = OnceLock::new();
         static ACTIVE_TEXTURE: OnceLock<usize> = OnceLock::new();
         unsafe {
-            let get_integer: extern "system" fn(u32, *mut i32) = std::mem::transmute(real("glGetIntegerv", &GET_INTEGER));
+            let get_integer: extern "system" fn(u32, *mut i32) =
+                std::mem::transmute(real("glGetIntegerv", &GET_INTEGER));
             let attachment: extern "system" fn(u32, u32, u32, *mut i32) =
                 std::mem::transmute(real("glGetFramebufferAttachmentParameteriv", &ATTACHMENT));
-            let program_iv: extern "system" fn(u32, u32, *mut i32) = std::mem::transmute(real("glGetProgramiv", &PROGRAM_IV));
-            let active_uniform: extern "system" fn(u32, u32, i32, *mut i32, *mut i32, *mut u32, *mut u8) =
-                std::mem::transmute(real("glGetActiveUniform", &ACTIVE_UNIFORM));
-            let location: extern "system" fn(u32, *const u8) -> i32 = std::mem::transmute(real("glGetUniformLocation", &LOCATION));
-            let uniform_iv: extern "system" fn(u32, i32, *mut i32) = std::mem::transmute(real("glGetUniformiv", &UNIFORM_IV));
-            let active_texture: extern "system" fn(u32) = std::mem::transmute(real("glActiveTexture", &ACTIVE_TEXTURE));
+            let program_iv: extern "system" fn(u32, u32, *mut i32) =
+                std::mem::transmute(real("glGetProgramiv", &PROGRAM_IV));
+            let active_uniform: extern "system" fn(
+                u32,
+                u32,
+                i32,
+                *mut i32,
+                *mut i32,
+                *mut u32,
+                *mut u8,
+            ) = std::mem::transmute(real("glGetActiveUniform", &ACTIVE_UNIFORM));
+            let location: extern "system" fn(u32, *const u8) -> i32 =
+                std::mem::transmute(real("glGetUniformLocation", &LOCATION));
+            let uniform_iv: extern "system" fn(u32, i32, *mut i32) =
+                std::mem::transmute(real("glGetUniformiv", &UNIFORM_IV));
+            let active_texture: extern "system" fn(u32) =
+                std::mem::transmute(real("glActiveTexture", &ACTIVE_TEXTURE));
             let integer = |parameter: u32| {
                 let mut value = 0;
                 get_integer(parameter, &mut value);
@@ -128,7 +150,15 @@ mod gl_log {
             for index in 0..count.max(0) as u32 {
                 let (mut length, mut size, mut kind) = (0, 0, 0u32);
                 let mut text = [0u8; 128];
-                active_uniform(program, index, text.len() as i32, &mut length, &mut size, &mut kind, text.as_mut_ptr());
+                active_uniform(
+                    program,
+                    index,
+                    text.len() as i32,
+                    &mut length,
+                    &mut size,
+                    &mut kind,
+                    text.as_mut_ptr(),
+                );
                 let binding = match kind {
                     0x8B5E | 0x8B62 | 0x8DCA => 0x8069,
                     0x8B60 => 0x8514,
@@ -144,8 +174,13 @@ mod gl_log {
                 active_texture(0x84C0 + unit as u32);
                 let bound = integer(binding);
                 let uniform = String::from_utf8_lossy(&text[..length.max(0) as usize]).into_owned();
-                if let Some((point, _)) = attached.iter().find(|(_, texture)| *texture == bound && bound != 0) {
-                    let line = format!("{name}: {uniform} (unit {unit}) samples texture {bound}, attached at {point:#x} of framebuffer {framebuffer}");
+                if let Some((point, _)) = attached
+                    .iter()
+                    .find(|(_, texture)| *texture == bound && bound != 0)
+                {
+                    let line = format!(
+                        "{name}: {uniform} (unit {unit}) samples texture {bound}, attached at {point:#x} of framebuffer {framebuffer}"
+                    );
                     LOOPS.with(|loops| loops.borrow_mut().push(line));
                 }
             }
@@ -156,7 +191,8 @@ mod gl_log {
     extern "system" fn draw_arrays_instanced(mode: u32, first: i32, count: i32, instances: i32) {
         static REAL: OnceLock<usize> = OnceLock::new();
         check_feedback("glDrawArraysInstanced");
-        let real: extern "system" fn(u32, i32, i32, i32) = unsafe { std::mem::transmute(real("glDrawArraysInstanced", &REAL)) };
+        let real: extern "system" fn(u32, i32, i32, i32) =
+            unsafe { std::mem::transmute(real("glDrawArraysInstanced", &REAL)) };
         real(mode, first, count, instances)
     }
 
@@ -247,17 +283,39 @@ mod tests {
             let texture = |gl: &glow::Context| {
                 let texture = gl.create_texture().unwrap();
                 gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-                gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, 4, 4, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None));
+                gl.tex_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    glow::RGBA8 as i32,
+                    4,
+                    4,
+                    0,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(None),
+                );
                 texture
             };
             let target = texture(&gl);
             let other = texture(&gl);
             let framebuffer = gl.create_framebuffer().unwrap();
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(target), 0);
+            gl.framebuffer_texture_2d(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::TEXTURE_2D,
+                Some(target),
+                0,
+            );
             let stages = [
-                (glow::VERTEX_SHADER, "#version 330 core\nvoid main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }"),
-                (glow::FRAGMENT_SHADER, "#version 330 core\nuniform sampler2D u_map;\nout vec4 color;\nvoid main() { color = texture(u_map, vec2(0.5)); }"),
+                (
+                    glow::VERTEX_SHADER,
+                    "#version 330 core\nvoid main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }",
+                ),
+                (
+                    glow::FRAGMENT_SHADER,
+                    "#version 330 core\nuniform sampler2D u_map;\nout vec4 color;\nvoid main() { color = texture(u_map, vec2(0.5)); }",
+                ),
             ];
             let program = crate::app::model_preview::gl::link::link(&gl, &stages, &[]).unwrap();
             gl.use_program(Some(program));
@@ -268,7 +326,10 @@ mod tests {
             gl.active_texture(glow::TEXTURE2);
             gl.bind_texture(glow::TEXTURE_2D, Some(other));
             gl.draw_arrays(glow::POINTS, 0, 1);
-            assert!(take_feedback_loops().is_empty(), "another texture is no loop");
+            assert!(
+                take_feedback_loops().is_empty(),
+                "another texture is no loop"
+            );
             gl.bind_texture(glow::TEXTURE_2D, Some(target));
             gl.draw_arrays(glow::POINTS, 0, 1);
             let loops = take_feedback_loops();

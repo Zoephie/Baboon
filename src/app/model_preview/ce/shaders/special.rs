@@ -45,13 +45,19 @@ pub(super) fn meter_pass(
         two_sided: has("two-sided"),
         write_depth: false,
         channels: [true, true, true, false],
-        textures: vec![texture(0, SamplerKind::Texture2D, image.or_else(|| Some(flat(WHITE))))],
+        textures: vec![texture(
+            0,
+            SamplerKind::Texture2D,
+            image.or_else(|| Some(flat(WHITE))),
+        )],
         constants: (0..6).map(|register| (register, [0.0; 4])).collect(),
         rows: [[0.0; 4]; H2_TEXTURE_ROWS],
     }
     .build();
-    pass.ce_animation =
-        Some(Arc::new(CeModelAnimation { meter: Some(meter), ..Default::default() }));
+    pass.ce_animation = Some(Arc::new(CeModelAnimation {
+        meter: Some(meter),
+        ..Default::default()
+    }));
     Ok(pass)
 }
 
@@ -70,7 +76,9 @@ pub(super) fn water_passes(
         .and_then(|path| bitmap(&path, SamplerKind::Texture2D))
         .or_else(|| Some(flat(WHITE)));
     let reflection = path("reflection map").and_then(|path| bitmap(&path, SamplerKind::Cube));
-    let perpendicular = root.read_real("view perpendicular brightness").unwrap_or(0.0);
+    let perpendicular = root
+        .read_real("view perpendicular brightness")
+        .unwrap_or(0.0);
     let parallel = nonzero(root.read_real("view parallel brightness"), 1.0);
     let modulates_reflection = has("base map alpha modulates reflection");
     let opacity = translate_fx(WATER_OPACITY_FILE, H2_GLSL_VERSION, &[], read)?;
@@ -95,7 +103,10 @@ pub(super) fn water_passes(
             "main_T0_P0(i)",
             plain_blend(Dx9BlendFactor::One, Dx9BlendFactor::Zero),
             [false, false, false, true],
-            vec![texture(0, SamplerKind::Texture2D, base.clone()), normalization(1)],
+            vec![
+                texture(0, SamplerKind::Texture2D, base.clone()),
+                normalization(1),
+            ],
             constants.clone(),
         ));
     }
@@ -109,7 +120,11 @@ pub(super) fn water_passes(
         ));
     }
     let shader = translate_fx(WATER_REFLECTION_FILE, H2_GLSL_VERSION, &[], read)?;
-    let source = if modulates_reflection { Dx9BlendFactor::DstAlpha } else { Dx9BlendFactor::One };
+    let source = if modulates_reflection {
+        Dx9BlendFactor::DstAlpha
+    } else {
+        Dx9BlendFactor::One
+    };
     passes.push(
         SimplePass {
             stage: Dx9VertexStage::Bumped,
@@ -169,7 +184,10 @@ pub(super) fn plasma_pass(
             .and_then(|path| bitmap(&path, SamplerKind::Volume));
         texture(slot, SamplerKind::Volume, image)
     };
-    let textures = vec![volume(0, "primary noise map"), volume(1, "secondary noise map")];
+    let textures = vec![
+        volume(0, "primary noise map"),
+        volume(1, "secondary noise map"),
+    ];
     let read = |name: &str| read_shader_source(directory, name);
     let shader = translate_fx(PLASMA_FILE, H2_GLSL_VERSION, &[], read)?;
     let mut pass = SimplePass {
@@ -184,8 +202,10 @@ pub(super) fn plasma_pass(
         rows: [[0.0; 4]; H2_TEXTURE_ROWS],
     }
     .build();
-    pass.ce_animation =
-        Some(Arc::new(CeModelAnimation { plasma: Some(plasma), ..Default::default() }));
+    pass.ce_animation = Some(Arc::new(CeModelAnimation {
+        plasma: Some(plasma),
+        ..Default::default()
+    }));
     Ok(pass)
 }
 
@@ -194,7 +214,10 @@ pub(super) fn unseen_pass() -> Dx9DrawPass {
     let fragment = format!(
         "{H2_GLSL_VERSION}in vec4 v_color0;\nout vec4 out_color;\nvoid main() {{ discard; }}\n"
     );
-    let depth = Dx9Depth { compare: Some(Dx9Compare::LessOrEqual), write: false };
+    let depth = Dx9Depth {
+        compare: Some(Dx9Compare::LessOrEqual),
+        write: false,
+    };
     let mut pass = Dx9DrawPass::new(Dx9VertexStage::CeMeter, fragment, depth);
     pass.channels = [false; 4];
     pass

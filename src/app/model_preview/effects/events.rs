@@ -11,12 +11,17 @@ pub(super) const WORLD_ORIENTATION: &str = "use parent position but world orient
 
 /// Whether a function is one the preview made to start an event's effect.
 pub(in crate::app::model_preview) fn is_event_function(name: &str) -> bool {
-    name.rsplit_once(": ").is_some_and(|(field, _)| field.contains("effect") || field.contains("detonation"))
+    name.rsplit_once(": ")
+        .is_some_and(|(field, _)| field.contains("effect") || field.contains("detonation"))
 }
 
 /// Hand an attached object's event effect to the object it is on, under its
 /// name, so that one panel plays them all.
-pub(in crate::app::model_preview) fn adopt_event_function(name: &str, function: &mut String, object: &mut u8) {
+pub(in crate::app::model_preview) fn adopt_event_function(
+    name: &str,
+    function: &mut String,
+    object: &mut u8,
+) {
     if is_event_function(function) {
         *function = format!("{name}: {function}");
         *object = 0;
@@ -28,7 +33,10 @@ const MOST_NESTING: usize = 3;
 
 /// Each effect, then those its parts name, at those parts' locations. A part's
 /// effect is played by its event, once, under the same function.
-pub(super) fn with_nested_effects(reader: &TagReader, mut effects: Vec<ObjectEffect>) -> Vec<ObjectEffect> {
+pub(super) fn with_nested_effects(
+    reader: &TagReader,
+    mut effects: Vec<ObjectEffect>,
+) -> Vec<ObjectEffect> {
     let effect_group = u32::from_be_bytes(*b"effe");
     let mut level = 0..effects.len();
     for _ in 0..MOST_NESTING {
@@ -38,16 +46,26 @@ pub(super) fn with_nested_effects(reader: &TagReader, mut effects: Vec<ObjectEff
                 continue;
             };
             let locations = elements(tag.root(), "locations");
-            let parts = elements(tag.root(), "events").into_iter().flat_map(|event| elements(event, "parts"));
+            let parts = elements(tag.root(), "events")
+                .into_iter()
+                .flat_map(|event| elements(event, "parts"));
             for part in parts {
                 let Some((group, path)) = part.read_tag_ref_with_group("type") else {
                     continue;
                 };
                 let location = usize::try_from(part.read_block_index("location")).ok();
                 let location = location.and_then(|location| locations.get(location));
-                if let (true, false, Some(location)) = (group == effect_group, path.is_empty(), location) {
+                if let (true, false, Some(location)) =
+                    (group == effect_group, path.is_empty(), location)
+                {
                     let marker = outer.marker_of(*location);
-                    nested.push(ObjectEffect { path, marker, once: true, vectors: false, ..outer.clone() });
+                    nested.push(ObjectEffect {
+                        path,
+                        marker,
+                        once: true,
+                        vectors: false,
+                        ..outer.clone()
+                    });
                 }
             }
         }
@@ -69,7 +87,10 @@ pub(in crate::app::model_preview) fn event_function_name(field: &str, path: &str
 
 /// Every effect reference under `holder`, by the field that names it, leaving
 /// out `attachments`, which run on their own.
-pub(in crate::app::model_preview) fn collect_event_effects(holder: TagStruct<'_>, found: &mut Vec<(String, String)>) {
+pub(in crate::app::model_preview) fn collect_event_effects(
+    holder: TagStruct<'_>,
+    found: &mut Vec<(String, String)>,
+) {
     let effect_group = u32::from_be_bytes(*b"effe");
     for field in holder.fields() {
         let name = field.name();
@@ -86,9 +107,13 @@ pub(in crate::app::model_preview) fn collect_event_effects(holder: TagStruct<'_>
         } else if let Some(child) = field.as_struct() {
             collect_event_effects(child, found);
         } else if let Some(block) = field.as_block() {
-            block.iter().for_each(|element| collect_event_effects(element, found));
+            block
+                .iter()
+                .for_each(|element| collect_event_effects(element, found));
         } else if let Some(array) = field.as_array() {
-            array.iter().for_each(|element| collect_event_effects(element, found));
+            array
+                .iter()
+                .for_each(|element| collect_event_effects(element, found));
         }
     }
 }

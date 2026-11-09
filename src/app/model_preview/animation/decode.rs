@@ -37,7 +37,12 @@ pub(super) fn ce_rest_pose(skeleton: &Skeleton, gbxmodel: Option<&TagFile>) -> V
     skeleton
         .nodes
         .iter()
-        .map(|node| by_name.get(&node.name).copied().unwrap_or(NodeTransform::IDENTITY))
+        .map(|node| {
+            by_name
+                .get(&node.name)
+                .copied()
+                .unwrap_or(NodeTransform::IDENTITY)
+        })
         .collect()
 }
 
@@ -101,7 +106,8 @@ pub(super) fn decode_held_animation(
     animation_index: usize,
     layers: &[super::super::weapons::PoseLayer],
 ) -> Result<DecodedAnimationPose, String> {
-    let model = crate::core::source::read_entry(source, entry).map_err(|error| error.to_string())?;
+    let model =
+        crate::core::source::read_entry(source, entry).map_err(|error| error.to_string())?;
     if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1 {
         return decode_ce_animation(source, &model, animation_index);
     }
@@ -193,7 +199,13 @@ pub(super) fn decode_held_animation(
     // Reach's data-driven board lays the state's blend screens over an
     // action: at rest, aiming and looking ahead.
     if !matches!(kind, JmaKind::Jmo | JmaKind::Jmr) {
-        super::super::animation::blend_screens::lay_blend_screens(jmad, animation, &skeleton, animation_index, &mut pose);
+        super::super::animation::blend_screens::lay_blend_screens(
+            jmad,
+            animation,
+            &skeleton,
+            animation_index,
+            &mut pose,
+        );
     }
     if !layers.is_empty() {
         let left_arm = super::super::weapons::left_arm_nodes(jmad);
@@ -206,7 +218,9 @@ pub(super) fn decode_held_animation(
     let graphs: Vec<&TagFile> = chain[graph..].iter().collect();
     Ok(DecodedAnimationPose {
         reach_ik: super::super::animation::ik::reach::read_reach_ik_tracks(&graphs, group),
-        h4_ik_set: graphs.first().map_or_else(Vec::new, |graph| super::super::animation::ik::h4::read_h4_ik_set(graph, group.index)),
+        h4_ik_set: graphs.first().map_or_else(Vec::new, |graph| {
+            super::super::animation::ik::h4::read_h4_ik_set(graph, group.index)
+        }),
         ..DecodedAnimationPose::new(&skeleton, &pose, loop_frame)
     })
 }
@@ -255,7 +269,8 @@ pub(super) fn decode_ce_animation(
     });
     // The extractor's skeleton: a graph that lists no nodes of its own
     // animates its gbxmodel's, when their node list checksums agree.
-    let skeleton = blam_tags::extract::animation::ce_skeleton(&animations, &antr, gbxmodel.as_ref());
+    let skeleton =
+        blam_tags::extract::animation::ce_skeleton(&animations, &antr, gbxmodel.as_ref());
     // CE rotations, rest pose and animation alike, are stored inverted
     // relative to the forward chaining the preview runs: the engine feeds
     // both into the same orientations (`model_get_node_orientations`, CE
@@ -278,9 +293,13 @@ pub(super) fn decode_ce_animation(
     let over = |compose: &dyn Fn(&[NodeTransform]) -> blam_tags::Pose| match &beneath {
         Some(idle) => {
             let frames = (0..clip.frame_count.max(1) as usize).map(|frame| {
-                compose(&idle.frames[frame % idle.frames.len()]).frames.swap_remove(frame)
+                compose(&idle.frames[frame % idle.frames.len()])
+                    .frames
+                    .swap_remove(frame)
             });
-            blam_tags::Pose { frames: frames.collect() }
+            blam_tags::Pose {
+                frames: frames.collect(),
+            }
         }
         None => compose(&rest),
     };
@@ -292,15 +311,25 @@ pub(super) fn decode_ce_animation(
     // Then the unit aims and looks straight ahead.
     let name = animation.name.as_deref().unwrap_or_default();
     for (index, frame) in super::super::ce::weapons::resting_aim(&antr, name) {
-        let Some(aim) = animations.get(index).filter(|aim| frame < aim.frame_count as usize) else {
+        let Some(aim) = animations
+            .get(index)
+            .filter(|aim| frame < aim.frame_count as usize)
+        else {
             continue;
         };
         let aim = ce_inverted_clip(aim);
         for row in &mut pose.frames {
-            *row = aim.runtime_overlay_pose(&skeleton, row).frames.swap_remove(frame);
+            *row = aim
+                .runtime_overlay_pose(&skeleton, row)
+                .frames
+                .swap_remove(frame);
         }
     }
-    Ok(DecodedAnimationPose::new(&skeleton, &pose, animation.loop_frame_index as usize))
+    Ok(DecodedAnimationPose::new(
+        &skeleton,
+        &pose,
+        animation.loop_frame_index as usize,
+    ))
 }
 
 #[cfg(test)]
@@ -313,29 +342,49 @@ mod ce_replacement_tests {
     /// nodes it leaves alone stand where the idle puts them, not at bind.
     #[test]
     fn a_ce_replacement_clip_leaves_its_unanimated_nodes_to_the_idle() {
-        let Some(source) = kit_source(GameId::HaloCe) else { return };
+        let Some(source) = kit_source(GameId::HaloCe) else {
+            return;
+        };
         let path = "characters\\cyborg\\cyborg";
         let object = load_referenced_tag_from_source(&source, path, "biped", b"bipd").unwrap();
         let antr = load_object_animations(&source, &object).unwrap();
         let animations = CeAnimations::new(&antr);
         let index = |name: &str| {
-            animations.iter().position(|clip| clip.name.as_deref() == Some(name)).unwrap()
+            animations
+                .iter()
+                .position(|clip| clip.name.as_deref() == Some(name))
+                .unwrap()
         };
         let pose = |name| decode_ce_animation(&source, &object, index(name)).unwrap();
         let melee = pose("stand pistol b melee");
         let idle = pose("stand pistol idle");
-        let flags = |name: &str| animations.get(index(name)).unwrap().decode().node_flags.unwrap();
-        let (clip, aim, look) =
-            (flags("stand pistol b melee"), flags("stand pistol aim-still"), flags("stand look"));
+        let flags = |name: &str| {
+            animations
+                .get(index(name))
+                .unwrap()
+                .decode()
+                .node_flags
+                .unwrap()
+        };
+        let (clip, aim, look) = (
+            flags("stand pistol b melee"),
+            flags("stand pistol aim-still"),
+            flags("stand look"),
+        );
         // The idle also takes the aiming screens, which an action shuts off.
         let left_alone: Vec<_> = (0..melee.skeleton_names.len())
             .filter(|node| {
-                ![&clip, &aim, &look].iter().any(|flags| flags.animated_rotation.bit(*node))
+                ![&clip, &aim, &look]
+                    .iter()
+                    .any(|flags| flags.animated_rotation.bit(*node))
             })
             .collect();
         assert!(!left_alone.is_empty());
         for node in left_alone {
-            assert_eq!(melee.frames[8][node].rotation, idle.frames[8][node].rotation);
+            assert_eq!(
+                melee.frames[8][node].rotation,
+                idle.frames[8][node].rotation
+            );
         }
     }
 }

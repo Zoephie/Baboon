@@ -6,13 +6,19 @@ pub(in crate::app::model_preview) const WEAPON_PICKER_HEIGHT: f32 = 300.0;
 
 /// Whether the weapon list overflows its popup: `None`, a heading per class,
 /// and a row per weapon.
-pub(in crate::app::model_preview) fn weapon_picker_scrolls(weapons: &[super::super::weapons::WeaponOption], row_height: f32) -> bool {
+pub(in crate::app::model_preview) fn weapon_picker_scrolls(
+    weapons: &[super::super::weapons::WeaponOption],
+    row_height: f32,
+) -> bool {
     let classes = weapons.chunk_by(|a, b| a.class == b.class).count();
     (1 + classes + weapons.len()) as f32 * row_height > WEAPON_PICKER_HEIGHT
 }
 
 /// A weapon's row survives a search by its own name or its class's.
-pub(in crate::app::model_preview) fn weapon_matches(weapon: &super::super::weapons::WeaponOption, query: &str) -> bool {
+pub(in crate::app::model_preview) fn weapon_matches(
+    weapon: &super::super::weapons::WeaponOption,
+    query: &str,
+) -> bool {
     weapon.name.to_lowercase().contains(query) || weapon.class.to_lowercase().contains(query)
 }
 
@@ -99,15 +105,25 @@ pub(in crate::app::model_preview) fn weapon_dropdown(
 }
 
 /// Note what should outlive the reload a weapon change makes.
-pub(in crate::app::model_preview) fn carry_through_weapon_change(data: &ModelPreviewData, state: &mut ModelPreviewState) {
+pub(in crate::app::model_preview) fn carry_through_weapon_change(
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+) {
     state.remember_selection();
     state.ce_weapon_carry = Some((data.geometry_id, state.region_selections.clone()));
 }
 
 /// Which weapon a Halo CE biped holds. Changing it reloads the preview, so
 /// what should outlive that goes along with the state.
-pub(in crate::app::model_preview) fn draw_ce_weapon_picker(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
-    let Some(weapons) = data.ce_weapons.as_ref().filter(|weapons| !weapons.equippable.is_empty())
+pub(in crate::app::model_preview) fn draw_ce_weapon_picker(
+    ui: &mut Ui,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+) {
+    let Some(weapons) = data
+        .ce_weapons
+        .as_ref()
+        .filter(|weapons| !weapons.equippable.is_empty())
     else {
         return;
     };
@@ -120,7 +136,9 @@ pub(in crate::app::model_preview) fn draw_ce_weapon_picker(ui: &mut Ui, data: &M
             class: weapon.class.clone(),
         })
         .collect();
-    let held = options.iter().find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
+    let held = options
+        .iter()
+        .find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
     let salt = ("ce_weapon_picker", data.render_model_path.as_str());
     let chosen = weapon_dropdown(ui, "Weapon", salt, &options, held);
     if let Some(choice) = chosen.filter(|choice| *choice != state.weapon) {
@@ -131,20 +149,32 @@ pub(in crate::app::model_preview) fn draw_ce_weapon_picker(ui: &mut Ui, data: &M
 
 /// A Halo 2 unit's two hands. The left only opens for what can pair, and
 /// a primary that cannot pair empties it.
-pub(in crate::app::model_preview) fn draw_h2_weapon_pickers(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
-    let Some(weapons) = data.weapons.as_ref().filter(|weapons| !weapons.equippable.is_empty())
+pub(in crate::app::model_preview) fn draw_h2_weapon_pickers(
+    ui: &mut Ui,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+) {
+    let Some(weapons) = data
+        .weapons
+        .as_ref()
+        .filter(|weapons| !weapons.equippable.is_empty())
     else {
         return;
     };
     let primaries = weapons.primaries();
-    let held = primaries.iter().find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
+    let held = primaries
+        .iter()
+        .find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
     let salt = ("h2_primary_picker", data.render_model_path.as_str());
     if let Some(choice) = weapon_dropdown(ui, "Primary", salt, &primaries, held)
         .filter(|choice| *choice != state.weapon)
     {
         carry_through_weapon_change(data, state);
         let pairs = weapons.secondaries(choice.as_deref());
-        if !pairs.iter().any(|weapon| Some(&weapon.path) == state.secondary_weapon.as_ref()) {
+        if !pairs
+            .iter()
+            .any(|weapon| Some(&weapon.path) == state.secondary_weapon.as_ref())
+        {
             state.secondary_weapon = None;
         }
         state.weapon = choice;
@@ -153,7 +183,9 @@ pub(in crate::app::model_preview) fn draw_h2_weapon_pickers(ui: &mut Ui, data: &
     if secondaries.is_empty() {
         return;
     }
-    let held = secondaries.iter().find(|weapon| Some(&weapon.path) == state.secondary_weapon.as_ref());
+    let held = secondaries
+        .iter()
+        .find(|weapon| Some(&weapon.path) == state.secondary_weapon.as_ref());
     let salt = ("h2_secondary_picker", data.render_model_path.as_str());
     if let Some(choice) = weapon_dropdown(ui, "Secondary", salt, &secondaries, held)
         .filter(|choice| *choice != state.secondary_weapon)

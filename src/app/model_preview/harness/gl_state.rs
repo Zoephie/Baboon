@@ -58,9 +58,29 @@ pub(super) fn gl_state(gl: &glow::Context, target: glow::NativeFramebuffer) -> S
         gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
         put("viewport", format!("{viewport:?}"));
         let framebuffer = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
-        put("draw_framebuffer", if framebuffer == Some(target) { "shot" } else if framebuffer.is_some() { "other" } else { "none" }.to_owned());
+        put(
+            "draw_framebuffer",
+            if framebuffer == Some(target) {
+                "shot"
+            } else if framebuffer.is_some() {
+                "other"
+            } else {
+                "none"
+            }
+            .to_owned(),
+        );
         let read = gl.get_parameter_framebuffer(glow::READ_FRAMEBUFFER_BINDING);
-        put("read_framebuffer", if read == Some(target) { "shot" } else if read.is_some() { "other" } else { "none" }.to_owned());
+        put(
+            "read_framebuffer",
+            if read == Some(target) {
+                "shot"
+            } else if read.is_some() {
+                "other"
+            } else {
+                "none"
+            }
+            .to_owned(),
+        );
         for (name, parameter) in [
             ("program", glow::CURRENT_PROGRAM),
             ("vertex_array", glow::VERTEX_ARRAY_BINDING),

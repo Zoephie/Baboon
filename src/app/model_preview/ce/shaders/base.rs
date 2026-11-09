@@ -73,12 +73,22 @@ pub(super) fn texture(slot: u32, kind: SamplerKind, image: Option<Arc<Image>>) -
 }
 
 /// A shader's option by name, with a list's position standing for its value.
-pub(in crate::app::model_preview) fn option_index(root: TagStruct<'_>, field: &str, options: &[&str]) -> i32 {
+pub(in crate::app::model_preview) fn option_index(
+    root: TagStruct<'_>,
+    field: &str,
+    options: &[&str],
+) -> i32 {
     let name = root.read_enum_option(field);
-    options.iter().position(|option| name.as_deref() == Some(*option)).unwrap_or(0) as i32
+    options
+        .iter()
+        .position(|option| name.as_deref() == Some(*option))
+        .unwrap_or(0) as i32
 }
 
-pub(super) fn read_shader_source(directory: &std::path::Path, name: &str) -> Result<String, String> {
+pub(super) fn read_shader_source(
+    directory: &std::path::Path,
+    name: &str,
+) -> Result<String, String> {
     let path = directory.join(name);
     let bytes = std::fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
@@ -123,10 +133,17 @@ pub(super) struct SimplePass {
 
 impl SimplePass {
     pub(super) fn build(self) -> Dx9DrawPass {
-        let depth = Dx9Depth { compare: Some(Dx9Compare::LessOrEqual), write: self.write_depth };
+        let depth = Dx9Depth {
+            compare: Some(Dx9Compare::LessOrEqual),
+            write: self.write_depth,
+        };
         let mut pass = Dx9DrawPass::new(self.stage, self.fragment, depth);
         pass.blend = Some(self.blend);
-        pass.cull = if self.two_sided { Dx9Cull::None } else { Dx9Cull::Back };
+        pass.cull = if self.two_sided {
+            Dx9Cull::None
+        } else {
+            Dx9Cull::Back
+        };
         pass.channels = self.channels;
         pass.textures = self.textures;
         pass.constants = self.constants;
@@ -137,7 +154,12 @@ impl SimplePass {
 }
 
 pub(super) fn plain_blend(source: Dx9BlendFactor, destination: Dx9BlendFactor) -> Dx9Blend {
-    Dx9Blend { equation: Dx9BlendEquation::Add, source, destination, constant: [0; 4] }
+    Dx9Blend {
+        equation: Dx9BlendEquation::Add,
+        source,
+        destination,
+        constant: [0; 4],
+    }
 }
 
 pub(super) fn normalization(slot: u32) -> Dx9DrawTexture {

@@ -34,7 +34,8 @@ impl Levels {
     unsafe fn new(gl: &glow::Context, frame: [i32; 2]) -> Option<Self> {
         let of = |level: i32| frame.map(|side| (side / DOWNSAMPLE.pow(level as u32)).max(1));
         let mut made = Made::new(gl);
-        let mut level = |size| unsafe { made.color(size, Texels::RGBA16F, Sampling::LINEAR_CLAMPED) };
+        let mut level =
+            |size| unsafe { made.color(size, Texels::RGBA16F, Sampling::LINEAR_CLAMPED) };
         let levels = Self {
             small: [level(of(1))?, level(of(1))?],
             tiny: [level(of(2))?, level(of(2))?],
@@ -58,8 +59,19 @@ pub(in crate::app::model_preview) struct H3Bloom {
 }
 
 impl H3Bloom {
-    pub(in crate::app::model_preview) unsafe fn new(gl: &glow::Context, nothing: Option<glow::NativeTexture>) -> Option<Self> {
-        unsafe { Some(Self { chain: ScreenChain { program: screen_program(gl, FRAGMENT)?, nothing }, levels: None }) }
+    pub(in crate::app::model_preview) unsafe fn new(
+        gl: &glow::Context,
+        nothing: Option<glow::NativeTexture>,
+    ) -> Option<Self> {
+        unsafe {
+            Some(Self {
+                chain: ScreenChain {
+                    program: screen_program(gl, FRAGMENT)?,
+                    nothing,
+                },
+                levels: None,
+            })
+        }
     }
 
     /// One step of the chain, drawing `source` through `mode` into `target`.
@@ -88,7 +100,14 @@ impl H3Bloom {
     unsafe fn blur(&self, gl: &glow::Context, pair: &[ColorTarget; 2], scale: f32) {
         unsafe {
             self.step(gl, &pair[1], 2, (pair[0].texture, pair[0].size), None, 1.0);
-            self.step(gl, &pair[0], 3, (pair[1].texture, pair[1].size), None, scale);
+            self.step(
+                gl,
+                &pair[0],
+                3,
+                (pair[1].texture, pair[1].size),
+                None,
+                scale,
+            );
         }
     }
 
@@ -103,7 +122,11 @@ impl H3Bloom {
         frame: [i32; 2],
     ) -> Option<glow::NativeTexture> {
         unsafe {
-            if self.levels.as_ref().is_none_or(|levels| levels.frame != frame) {
+            if self
+                .levels
+                .as_ref()
+                .is_none_or(|levels| levels.frame != frame)
+            {
                 if let Some(old) = self.levels.take() {
                     old.delete(gl);
                 }
@@ -112,7 +135,11 @@ impl H3Bloom {
             let levels = self.levels.as_ref()?;
             let run = self.chain.begin(gl, vertex_array, accumulation);
             let point = BLOOM_POINT_EXPOSURE * BLOOM_POINT;
-            gl.uniform_2_f32(self.chain.uniform(gl, "curve").as_ref(), point, BLOOM_INHERENT);
+            gl.uniform_2_f32(
+                self.chain.uniform(gl, "curve").as_ref(),
+                point,
+                BLOOM_INHERENT,
+            );
 
             let [small, _] = &levels.small;
             let ([tiny, _], [mini, _]) = (&levels.tiny, &levels.mini);
@@ -122,11 +149,25 @@ impl H3Bloom {
             self.blur(gl, &levels.mini, BLOOM_INTENSITY);
             // Into the scratch of each: the level below still reads its own.
             let tiny_sum = &levels.tiny[1];
-            self.step(gl, tiny_sum, 4, (tiny.texture, tiny.size), Some(mini.texture), BLOOM_INTENSITY);
+            self.step(
+                gl,
+                tiny_sum,
+                4,
+                (tiny.texture, tiny.size),
+                Some(mini.texture),
+                BLOOM_INTENSITY,
+            );
             self.step(gl, tiny, 2, (tiny_sum.texture, tiny_sum.size), None, 1.0);
             self.step(gl, tiny_sum, 3, (tiny.texture, tiny.size), None, 1.0);
             let small_sum = &levels.small[1];
-            self.step(gl, small_sum, 4, (small.texture, small.size), Some(tiny_sum.texture), BLOOM_INTENSITY);
+            self.step(
+                gl,
+                small_sum,
+                4,
+                (small.texture, small.size),
+                Some(tiny_sum.texture),
+                BLOOM_INTENSITY,
+            );
             self.step(gl, small, 2, (small_sum.texture, small_sum.size), None, 1.0);
             self.step(gl, small_sum, 3, (small.texture, small.size), None, 1.0);
 

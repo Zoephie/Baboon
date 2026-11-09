@@ -7,7 +7,10 @@ use super::*;
 /// materials, no nodes. Its objects are the entries of the JMI the
 /// artist imported, so each becomes a preview region and gets its own
 /// toggle in the region list.
-pub(super) fn load_particle_model(model_tag: &TagFile, entry: &TagEntry) -> Result<ModelPreviewData, String> {
+pub(super) fn load_particle_model(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+) -> Result<ModelPreviewData, String> {
     let stem = preview_tag_stem(entry);
     let preview = build_particle_model_preview(model_tag, &stem)?;
     if preview.batches.is_empty() {
@@ -24,7 +27,10 @@ pub(super) fn load_particle_model(model_tag: &TagFile, entry: &TagEntry) -> Resu
 /// Halo CE `gbxmodel` (mod2) and a bare `render_model` (mode) ARE the
 /// render geometry — there is no `.model` (hlmt) wrapper carrying a
 /// "render model" reference, so preview the tag itself.
-pub(super) fn load_render_tag(model_tag: &TagFile, entry: &TagEntry) -> Result<ModelPreviewData, String> {
+pub(super) fn load_render_tag(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+) -> Result<ModelPreviewData, String> {
     let preview = build_render_preview(model_tag)?;
     if preview.batches.is_empty() {
         return Err("This render tag has no previewable draw batches.".to_owned());
@@ -39,7 +45,10 @@ pub(super) fn load_render_tag(model_tag: &TagFile, entry: &TagEntry) -> Result<M
 
 /// The `.model` an object stands for. `None` for any other tag, which is its
 /// own model, and for a Halo CE object, which has no `.model` to name.
-pub(in crate::app::model_preview) fn preview_model_tag(source: &TagSource, tag: &TagFile) -> Result<Option<TagFile>, String> {
+pub(in crate::app::model_preview) fn preview_model_tag(
+    source: &TagSource,
+    tag: &TagFile,
+) -> Result<Option<TagFile>, String> {
     if !is_object_family_group(tag.header.group_tag, source.game())
         || blam_tags::game::Game::of(tag) == blam_tags::game::Game::Halo1
     {
@@ -84,9 +93,11 @@ pub(in crate::app::model_preview) fn build_particle_model_preview(
     };
 
     for mesh in &meshes {
-        let Some(vertex_base) =
-            VertexBase::of(preview.vertices.len(), mesh.vertices.len(), Overflow::RefusesAppend)
-        else {
+        let Some(vertex_base) = VertexBase::of(
+            preview.vertices.len(),
+            mesh.vertices.len(),
+            Overflow::RefusesAppend,
+        ) else {
             continue;
         };
 
@@ -162,7 +173,11 @@ pub(in crate::app) fn build_render_preview(
     // of what the tag stores, as it does a node, and `RenderModel` only turns
     // the nodes.
     if blam_tags::game::Game::of(render_tag) == blam_tags::game::Game::Halo1 {
-        for marker in render_model.marker_groups.iter_mut().flat_map(|group| &mut group.markers) {
+        for marker in render_model
+            .marker_groups
+            .iter_mut()
+            .flat_map(|group| &mut group.markers)
+        {
             marker.rotation = marker.rotation.conjugate();
         }
     }
@@ -170,12 +185,21 @@ pub(in crate::app) fn build_render_preview(
     // Only Halo CE's transparents sort by where their parts are; the later
     // games' sorting positions belong to a renderer the preview does not run.
     if blam_tags::game::Game::of(render_tag) != blam_tags::game::Game::Halo1 {
-        preview.batches.iter_mut().for_each(|batch| batch.sort_position = None);
+        preview
+            .batches
+            .iter_mut()
+            .for_each(|batch| batch.sort_position = None);
     }
     // A gbxmodel's `shaders` run parallel to its materials.
-    if let Some(shaders) = render_tag.root().field("shaders").and_then(|field| field.as_block()) {
+    if let Some(shaders) = render_tag
+        .root()
+        .field("shaders")
+        .and_then(|field| field.as_block())
+    {
         for (index, material) in preview.materials.iter_mut().enumerate() {
-            let permutation = shaders.element(index).and_then(|shader| shader.read_int_any("permutation"));
+            let permutation = shaders
+                .element(index)
+                .and_then(|shader| shader.read_int_any("permutation"));
             material.permutation = permutation.unwrap_or(0).max(0) as usize;
         }
     }
@@ -183,12 +207,13 @@ pub(in crate::app) fn build_render_preview(
         .filter(|prt| prt.vertices.len() == preview.vertices.len());
     // Instances draw `static_lighting_sh`, with no transfer of their own.
     let instance_vertices = preview.instances.vertex_count;
-    preview.gen3.prt = super::super::gen3::prt::read_h3_prt(render_tag, &render_model, &render_meshes)
-        .map(|mut prt| {
-            prt.pad(instance_vertices);
-            prt
-        })
-        .filter(|prt| prt.vertices.len() == preview.vertices.len());
+    preview.gen3.prt =
+        super::super::gen3::prt::read_h3_prt(render_tag, &render_model, &render_meshes)
+            .map(|mut prt| {
+                prt.pad(instance_vertices);
+                prt
+            })
+            .filter(|prt| prt.vertices.len() == preview.vertices.len());
     append_model_errors(render_tag, &mut preview, ModelPreviewLayer::Render);
     Ok(preview)
 }
@@ -222,7 +247,8 @@ pub(in crate::app::model_preview) fn render_model_to_preview(
             .map(|material| RenderModelPreviewMaterial {
                 shader_path: material.render_method.clone(),
                 shader_group: material.render_method_group,
-                overlay: false, shield: None,
+                overlay: false,
+                shield: None,
                 permutation: 0,
                 object: 0,
             })
@@ -234,8 +260,16 @@ pub(in crate::app::model_preview) fn render_model_to_preview(
     };
 
     for (region, permutation, mesh_index) in preview_mesh_order(model, render_meshes.len()) {
-        let (region, permutation) = (&model.regions[region], &model.regions[region].permutations[permutation]);
-        append_render_mesh_to_preview(&mut preview, &render_meshes[mesh_index], &region.name, &permutation.name);
+        let (region, permutation) = (
+            &model.regions[region],
+            &model.regions[region].permutations[permutation],
+        );
+        append_render_mesh_to_preview(
+            &mut preview,
+            &render_meshes[mesh_index],
+            &region.name,
+            &permutation.name,
+        );
     }
 
     append_instances_to_preview(&mut preview, model, render_meshes);
@@ -261,16 +295,26 @@ pub(in crate::app::model_preview) fn render_model_to_preview(
     preview
 }
 
-fn marker_permutation(model: &RenderModel, marker: &blam_tags::render_model::Marker) -> Option<(String, String)> {
-    let region = model.regions.get(usize::try_from(marker.region_index).ok()?)?;
-    let permutation = region.permutations.get(usize::try_from(marker.permutation_index).ok()?)?;
+fn marker_permutation(
+    model: &RenderModel,
+    marker: &blam_tags::render_model::Marker,
+) -> Option<(String, String)> {
+    let region = model
+        .regions
+        .get(usize::try_from(marker.region_index).ok()?)?;
+    let permutation = region
+        .permutations
+        .get(usize::try_from(marker.permutation_index).ok()?)?;
     Some((region.name.clone(), permutation.name.clone()))
 }
 
 /// The meshes a preview holds, in the order its vertices lie: by region and
 /// permutation, which is not the tag's. Anything parallel to the vertices has
 /// to walk this too. Each is a region, permutation and mesh index.
-pub(in crate::app::model_preview) fn preview_mesh_order(model: &RenderModel, mesh_count: usize) -> Vec<(usize, usize, usize)> {
+pub(in crate::app::model_preview) fn preview_mesh_order(
+    model: &RenderModel,
+    mesh_count: usize,
+) -> Vec<(usize, usize, usize)> {
     let mut order = Vec::new();
     for (region_index, region) in model.regions.iter().enumerate() {
         for (permutation_index, permutation) in region.permutations.iter().enumerate() {
@@ -301,26 +345,55 @@ fn append_instances_to_preview(
     instances.empty_regions = model
         .regions
         .iter()
-        .filter(|region| region.permutations.iter().all(|permutation| permutation.mesh_index < 0))
+        .filter(|region| {
+            region
+                .permutations
+                .iter()
+                .all(|permutation| permutation.mesh_index < 0)
+        })
         .map(|region| region.name.clone())
         .collect();
     for region in &model.regions {
         for permutation in &region.permutations {
-            let mask = permutation.instance_mask.iter().rev().fold(0u128, |mask, word| mask << 32 | *word as u128);
-            instances.masks.insert((region.name.clone(), permutation.name.clone()), mask);
+            let mask = permutation
+                .instance_mask
+                .iter()
+                .rev()
+                .fold(0u128, |mask, word| mask << 32 | *word as u128);
+            instances
+                .masks
+                .insert((region.name.clone(), permutation.name.clone()), mask);
         }
     }
-    instances.names = model.instance_placements.iter().map(|placement| placement.name.clone()).collect();
-    let Some(mesh) = model.instance_mesh_index.and_then(|mesh| render_meshes.get(mesh)) else {
+    instances.names = model
+        .instance_placements
+        .iter()
+        .map(|placement| placement.name.clone())
+        .collect();
+    let Some(mesh) = model
+        .instance_mesh_index
+        .and_then(|mesh| render_meshes.get(mesh))
+    else {
         return;
     };
     let first_vertex = preview.vertices.len();
-    for (instance, (placement, subpart)) in model.instance_placements.iter().zip(&mesh.subparts).enumerate() {
-        let (Some(part), Ok(node)) = (mesh.parts.get(subpart.part_index as usize), usize::try_from(placement.node_index)) else {
+    for (instance, (placement, subpart)) in model
+        .instance_placements
+        .iter()
+        .zip(&mesh.subparts)
+        .enumerate()
+    {
+        let (Some(part), Ok(node)) = (
+            mesh.parts.get(subpart.part_index as usize),
+            usize::try_from(placement.node_index),
+        ) else {
             continue;
         };
         let start = subpart.index_start as usize;
-        let Some(source) = mesh.indices.get(start..start + subpart.index_count as usize) else {
+        let Some(source) = mesh
+            .indices
+            .get(start..start + subpart.index_count as usize)
+        else {
             continue;
         };
         let scale = placement.scale;
@@ -334,13 +407,24 @@ fn append_instances_to_preview(
         // triangles after it keep their corners.
         let triangles: Vec<&[u32]> = source
             .chunks_exact(3)
-            .filter(|corners| corners.iter().all(|&index| (index as usize) < mesh.vertices.len()))
+            .filter(|corners| {
+                corners
+                    .iter()
+                    .all(|&index| (index as usize) < mesh.vertices.len())
+            })
             .collect();
         // Each vertex the triangles name is added once.
-        let adding = triangles.iter().copied().flatten().collect::<std::collections::HashSet<_>>().len();
-        let Some(vertex_base) =
-            common::geometry::VertexBase::of(preview.vertices.len(), adding, common::geometry::Overflow::RefusesAppend)
-        else {
+        let adding = triangles
+            .iter()
+            .copied()
+            .flatten()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        let Some(vertex_base) = common::geometry::VertexBase::of(
+            preview.vertices.len(),
+            adding,
+            common::geometry::Overflow::RefusesAppend,
+        ) else {
             continue;
         };
         let mut remapped = HashMap::new();
@@ -352,7 +436,11 @@ fn append_instances_to_preview(
                 let vertex = &mesh.vertices[index as usize];
                 let placed = turned(point3_to_array(vertex.position));
                 let position = std::array::from_fn(|axis| placed[axis] * scale + origin[axis]);
-                expand_preview_bounds_local(&mut preview.bounds_min, &mut preview.bounds_max, position);
+                expand_preview_bounds_local(
+                    &mut preview.bounds_min,
+                    &mut preview.bounds_max,
+                    position,
+                );
                 preview.vertices.push(RenderModelPreviewVertex {
                     position,
                     normal: direction(vector3_to_array(vertex.normal)),
@@ -366,11 +454,19 @@ fn append_instances_to_preview(
             indices.push(at);
         }
         if scale < 0.0 {
-            indices.chunks_exact_mut(3).for_each(|triangle| triangle.swap(1, 2));
+            indices
+                .chunks_exact_mut(3)
+                .for_each(|triangle| triangle.swap(1, 2));
         }
         let index_start = preview.indices.len() as u32;
         preview.indices.extend_from_slice(&indices);
-        instances_batch(preview, instance, part.material_index, index_start, indices.len() as u32);
+        instances_batch(
+            preview,
+            instance,
+            part.material_index,
+            index_start,
+            indices.len() as u32,
+        );
     }
     preview.instances.vertex_count = preview.vertices.len() - first_vertex;
 }
@@ -382,7 +478,10 @@ fn instances_batch(
     index_start: u32,
     index_count: u32,
 ) {
-    preview.instances.batches.insert(preview.batches.len(), instance);
+    preview
+        .instances
+        .batches
+        .insert(preview.batches.len(), instance);
     preview.batches.push(RenderModelPreviewBatch {
         region_name: String::new(),
         permutation_name: String::new(),
@@ -405,9 +504,11 @@ fn append_render_mesh_to_preview(
     region_name: &str,
     permutation_name: &str,
 ) {
-    let Some(vertex_base) =
-        common::geometry::VertexBase::of(preview.vertices.len(), mesh.vertices.len(), common::geometry::Overflow::DropsTriangle)
-    else {
+    let Some(vertex_base) = common::geometry::VertexBase::of(
+        preview.vertices.len(),
+        mesh.vertices.len(),
+        common::geometry::Overflow::DropsTriangle,
+    ) else {
         return;
     };
 
@@ -462,8 +563,12 @@ fn append_render_mesh_to_preview(
         };
         let index_count = index_end - index_start;
         if index_count > 0 {
-            let sort_position =
-                part.sort_position.map(|at| (point3_to_array(at.position), usize::from(at.node_indices[0])));
+            let sort_position = part.sort_position.map(|at| {
+                (
+                    point3_to_array(at.position),
+                    usize::from(at.node_indices[0]),
+                )
+            });
             preview.batches.push(RenderModelPreviewBatch {
                 region_name: region_name.to_owned(),
                 permutation_name: permutation_name.to_owned(),
@@ -480,7 +585,9 @@ fn append_render_mesh_to_preview(
 
 /// The preview's copy of the skeleton: parent-local bind pose plus the
 /// inverse of the accumulated bind world transform, ready for skinning.
-pub(in crate::app::model_preview) fn preview_skeleton_nodes(nodes: &[Node]) -> Vec<RenderModelPreviewNode> {
+pub(in crate::app::model_preview) fn preview_skeleton_nodes(
+    nodes: &[Node],
+) -> Vec<RenderModelPreviewNode> {
     let world = preview_node_world_transforms(nodes);
     nodes
         .iter()
@@ -500,7 +607,9 @@ pub(in crate::app::model_preview) fn preview_skeleton_nodes(nodes: &[Node]) -> V
         .collect()
 }
 
-pub(in crate::app::model_preview) fn preview_node_world_transforms(nodes: &[Node]) -> Vec<(RealQuaternion, RealPoint3d)> {
+pub(in crate::app::model_preview) fn preview_node_world_transforms(
+    nodes: &[Node],
+) -> Vec<(RealQuaternion, RealPoint3d)> {
     let mut world: Vec<(RealQuaternion, RealPoint3d)> = Vec::with_capacity(nodes.len());
     for node in nodes {
         let local_rot = node.default_rotation.normalized();
@@ -668,7 +777,10 @@ mod tests {
             mesh_count,
             instance_mask: [0; 4],
         };
-        let region = |permutations| blam_tags::Region { name: String::new(), permutations };
+        let region = |permutations| blam_tags::Region {
+            name: String::new(),
+            permutations,
+        };
         let model = RenderModel {
             regions: vec![
                 region(vec![permutation(0, 1)]),
@@ -677,6 +789,9 @@ mod tests {
             ],
             ..Default::default()
         };
-        assert_eq!(preview_mesh_order(&model, 3), [(0, 0, 0), (2, 0, 1), (2, 0, 2)]);
+        assert_eq!(
+            preview_mesh_order(&model, 3),
+            [(0, 0, 0), (2, 0, 1), (2, 0, 2)]
+        );
     }
 }

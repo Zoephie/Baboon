@@ -24,10 +24,16 @@ pub(in crate::app::model_preview) fn transition_evaluate(function: i32, value: f
         return value;
     }
     static TABLES: std::sync::OnceLock<[[u8; 1024]; 6]> = std::sync::OnceLock::new();
-    let table = &TABLES.get_or_init(|| std::array::from_fn(|function| transition_table(function as i32)))[function as usize];
+    let table = &TABLES
+        .get_or_init(|| std::array::from_fn(|function| transition_table(function as i32)))
+        [function as usize];
     let scaled = value * 1023.0;
     let index = (scaled - 0.5) as i32;
     let fraction = scaled % 1.0;
     let at = |index: i32| f32::from(table[index.clamp(0, 1023) as usize]) * 0.003_921_569;
-    if index == 1023 { at(1023) } else { at(index) * (1.0 - fraction) + at(index + 1) * fraction }
+    if index == 1023 {
+        at(1023)
+    } else {
+        at(index) * (1.0 - fraction) + at(index + 1) * fraction
+    }
 }

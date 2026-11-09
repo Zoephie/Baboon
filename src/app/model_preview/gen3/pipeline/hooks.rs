@@ -2,12 +2,14 @@
 //! hooks `draw_pass` asks as it binds a pass's uniforms and textures, which
 //! each game's pipeline keeps on its state.
 
-use super::*;
 use super::super::shaders::Gen3Values;
+use super::*;
 
 /// Where a game's passes differ inside [`Gen3State::draw_pass`]. Each
 /// default is Halo 3's and ODST's: nothing of their own.
-pub(in crate::app::model_preview) trait Gen3PassHooks: std::any::Any {
+pub(in crate::app::model_preview) trait Gen3PassHooks:
+    std::any::Any
+{
     /// The hooks as themselves, for the game's own stages to reach what
     /// they keep.
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
@@ -26,7 +28,11 @@ pub(in crate::app::model_preview) trait Gen3PassHooks: std::any::Any {
 
     /// `simple_lights` while no light of the pipeline's draws: the frame's
     /// inline rows, if the game's pass reads them.
-    fn inline_simple_lights<'a>(&self, _material: &Gen3Material, _inline: &'a [[[f32; 4]; 5]]) -> Option<&'a [f32]> {
+    fn inline_simple_lights<'a>(
+        &self,
+        _material: &Gen3Material,
+        _inline: &'a [[[f32; 4]; 5]],
+    ) -> Option<&'a [f32]> {
         None
     }
 
@@ -47,7 +53,12 @@ pub(in crate::app::model_preview) trait Gen3PassHooks: std::any::Any {
 
     /// A value of the game's lights for `name`, ahead of the engine's
     /// globals.
-    fn light_value(&self, _material: &Gen3Material, _name: &str, _inline: &[[[f32; 4]; 5]]) -> Option<Gen3Value> {
+    fn light_value(
+        &self,
+        _material: &Gen3Material,
+        _name: &str,
+        _inline: &[[[f32; 4]; 5]],
+    ) -> Option<Gen3Value> {
         None
     }
 
@@ -59,7 +70,12 @@ pub(in crate::app::model_preview) trait Gen3PassHooks: std::any::Any {
 
     /// Whether `pass` of `material`, of shader group `group`, draws both
     /// faces.
-    fn two_sided(&self, _material: &Gen3Material, _pass: &Arc<Gen3Pass>, _group: Option<u32>) -> bool {
+    fn two_sided(
+        &self,
+        _material: &Gen3Material,
+        _pass: &Arc<Gen3Pass>,
+        _group: Option<u32>,
+    ) -> bool {
         false
     }
 }

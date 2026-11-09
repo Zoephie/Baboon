@@ -65,7 +65,10 @@ mod tests {
         assert_eq!(slots.of(1, 1).0, 1, "the same model keeps it");
         assert_eq!(slots.of(0, 1).0, 1, "each slot keeps its own");
         assert_eq!(slots.of(1, 2).0, 2, "the slot's next model starts it over");
-        assert!(slots.current(1, 1).is_none(), "nothing is kept for a model the slot let go");
+        assert!(
+            slots.current(1, 1).is_none(),
+            "nothing is kept for a model the slot let go"
+        );
         assert_eq!(slots.current(1, 2).map(|state| state.0), Some(2));
         assert!(slots.current(5, 1).is_none());
     }

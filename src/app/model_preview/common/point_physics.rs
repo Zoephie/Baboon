@@ -52,7 +52,11 @@ impl CePointPhysics {
     ) -> Self {
         Self {
             mass_over_radius_cubed: density * MASS_OF_DENSITY,
-            air_buoyancy: if no_gravity { 0.0 } else { 1.0 - 2.0 * density / (density + 0.0011) },
+            air_buoyancy: if no_gravity {
+                0.0
+            } else {
+                1.0 - 2.0 * density / (density + 0.0011)
+            },
             air_friction: air_friction * 10_000.0,
             surface_friction,
             elasticity,
@@ -97,7 +101,8 @@ impl CePointPhysics {
         if dt == 0.0 {
             return false;
         }
-        let bulk = (AIR_MASS_OVER_RADIUS_CUBED + self.mass_over_radius_cubed) * radius * radius * radius;
+        let bulk =
+            (AIR_MASS_OVER_RADIUS_CUBED + self.mass_over_radius_cubed) * radius * radius * radius;
         if bulk != 0.0 {
             for (velocity, force) in velocity.iter_mut().zip(force) {
                 *velocity += force * (dt / bulk);
@@ -108,8 +113,16 @@ impl CePointPhysics {
 
     /// `point_physics_update` in still air over a flat floor at `ground`: true
     /// where it touched it, the only structure a preview has.
-    pub(in crate::app::model_preview) fn step(&self, place: &mut [f32; 3], velocity: &mut [f32; 3], radius: f32, ground: f32, dt: f32) -> bool {
-        let bulk = (AIR_MASS_OVER_RADIUS_CUBED + self.mass_over_radius_cubed) * radius * radius * radius;
+    pub(in crate::app::model_preview) fn step(
+        &self,
+        place: &mut [f32; 3],
+        velocity: &mut [f32; 3],
+        radius: f32,
+        ground: f32,
+        dt: f32,
+    ) -> bool {
+        let bulk =
+            (AIR_MASS_OVER_RADIUS_CUBED + self.mass_over_radius_cubed) * radius * radius * radius;
         let drag = self.air_friction * radius * radius;
         velocity[2] += GRAVITY * self.air_buoyancy * dt;
         let slowing = if bulk != 0.0 {
@@ -132,7 +145,8 @@ impl CePointPhysics {
             }
             touched = true;
             let t = ((place[2] - ground) / (place[2] - next[2])).clamp(0.0, 1.0);
-            let hit: [f32; 3] = std::array::from_fn(|axis| place[axis] + (next[axis] - place[axis]) * t);
+            let hit: [f32; 3] =
+                std::array::from_fn(|axis| place[axis] + (next[axis] - place[axis]) * t);
             // `component_vectors_from_normal3d`: along the floor, and into it.
             let into = velocity[2];
             velocity[0] *= 1.0 - self.surface_friction;

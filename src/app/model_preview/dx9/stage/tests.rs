@@ -59,29 +59,43 @@ fn every_transparent_vertex_shader_has_a_stage() {
     for (name, stage) in [
         ("transparent_generic_default", Dx9VertexStage::Default),
         ("transparent_generic_reflection", Dx9VertexStage::Reflection),
-        ("transparent_generic_reflection_sky", Dx9VertexStage::Reflection),
+        (
+            "transparent_generic_reflection_sky",
+            Dx9VertexStage::Reflection,
+        ),
         ("transparent_generic_offset", Dx9VertexStage::Offset),
         ("stencil_env_bumped_tangentspace", Dx9VertexStage::Bumped),
     ] {
-        assert_eq!(Dx9VertexStage::from_path(&format!("{dir}{name}")), Some(stage));
+        assert_eq!(
+            Dx9VertexStage::from_path(&format!("{dir}{name}")),
+            Some(stage)
+        );
     }
     assert_eq!(Dx9VertexStage::from_path("rasterizer\\unknown"), None);
-    assert_eq!(Dx9VertexStage::from_path("Rasterizer\\Hologram"), Some(Dx9VertexStage::Hologram));
+    assert_eq!(
+        Dx9VertexStage::from_path("Rasterizer\\Hologram"),
+        Some(Dx9VertexStage::Hologram)
+    );
 }
 
 /// Stages must link with what the translator produces, so a varying
 /// renamed on one side fails here rather than as a preview drawing nothing.
 #[test]
 fn every_stage_links_with_a_translated_pixel_shader() {
-    if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
+    if std::process::Command::new("glslangValidator")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
         eprintln!("skipping: glslangValidator is not on PATH");
         return;
     }
     let source = "float4 c1 : register(C1);\nfloat4 main(\n)\n{\n    float4 r0;\n    \
                       r0= color0 * color1 + tc0 + tc1 + tc2 + tc3 + tc7 + fog;\n    \
                       return r0 * c1;\n}\n";
-    let fragment =
-        translate(source, "#version 330\n", &PixelShaderOptions::default()).unwrap().glsl;
+    let fragment = translate(source, "#version 330\n", &PixelShaderOptions::default())
+        .unwrap()
+        .glsl;
     let dir = crate::core::test_kits::unique_temp_dir("h2_vertex_stages");
     let pixel = dir.join("pass.frag");
     std::fs::write(&pixel, fragment).unwrap();
@@ -105,8 +119,14 @@ fn every_stage_links_with_a_translated_pixel_shader() {
 /// With `BLAM_TEST_H2EK`: the texaccum shader links with its stage.
 #[test]
 fn the_texaccum_stage_links_with_the_kit_shader() {
-    let Some(root) = kit_root(GameId::Halo2) else { return };
-    if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
+    let Some(root) = kit_root(GameId::Halo2) else {
+        return;
+    };
+    if std::process::Command::new("glslangValidator")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
         eprintln!("skipping: glslangValidator is not on PATH");
         return;
     }
@@ -125,15 +145,25 @@ fn the_texaccum_stage_links_with_the_kit_shader() {
         .arg(&pixel)
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
 }
 
 /// With `BLAM_TEST_H2EK`: real object lightmap shaders link with their
 /// stages, in every specular variant.
 #[test]
 fn lightmap_stages_link_with_the_kit_shaders() {
-    let Some(root) = kit_root(GameId::Halo2) else { return };
-    if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
+    let Some(root) = kit_root(GameId::Halo2) else {
+        return;
+    };
+    if std::process::Command::new("glslangValidator")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
         eprintln!("skipping: glslangValidator is not on PATH");
         return;
     }
@@ -142,9 +172,18 @@ fn lightmap_stages_link_with_the_kit_shaders() {
     for (pass, stage) in [
         ("lightmap_tex_detail", Dx9VertexStage::Lightmap),
         ("lightmap_tex_env", Dx9VertexStage::LightmapEnv),
-        ("lightmap_tex_four_change_color", Dx9VertexStage::LightmapMark),
-        ("lightmap_tex_env_detail", Dx9VertexStage::LightmapEnvStencil),
-        ("lightmap_tex_detail_blend_specular", Dx9VertexStage::LightmapMarkStencil),
+        (
+            "lightmap_tex_four_change_color",
+            Dx9VertexStage::LightmapMark,
+        ),
+        (
+            "lightmap_tex_env_detail",
+            Dx9VertexStage::LightmapEnvStencil,
+        ),
+        (
+            "lightmap_tex_detail_blend_specular",
+            Dx9VertexStage::LightmapMarkStencil,
+        ),
         ("lightmap_honor_guard", Dx9VertexStage::LightmapStencil),
         ("lightmap_env", Dx9VertexStage::LightmapTarget),
     ] {

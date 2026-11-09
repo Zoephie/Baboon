@@ -18,7 +18,10 @@ pub(super) const VERTEX_TYPES: [(&str, &str); 3] = [
 
 /// Reach's `shared pixel shader compilation`, and what its tags' layouts
 /// label it.
-const SHARED_PIXEL: [&str; 2] = ["shared pixel shader compilation", "shared entry point compilation"];
+const SHARED_PIXEL: [&str; 2] = [
+    "shared pixel shader compilation",
+    "shared entry point compilation",
+];
 
 /// The `vertex type` options [`VERTEX_TYPES`] stand for.
 const VERTEX_TYPE_OPTIONS: [&str; 3] = ["world", "rigid", "skinned"];
@@ -75,9 +78,13 @@ pub(crate) struct Gen3Definition {
 
 pub(crate) fn read_h3_definition(reader: &TagReader, path: &str) -> Option<Gen3Definition> {
     let dialect = RenderMethodDialect::of(&reader.source);
-    let tag = reader.load(path, "render_method_definition", b"rmdf").ok()?;
+    let tag = reader
+        .load(path, "render_method_definition", b"rmdf")
+        .ok()?;
     let root = tag.root();
-    let function = |holder: TagStruct<'_>, name: &str| holder.read_string_id(name).filter(|name| !name.is_empty());
+    let function = |holder: TagStruct<'_>, name: &str| {
+        holder.read_string_id(name).filter(|name| !name.is_empty())
+    };
     let categories = elements(root, "categories")
         .into_iter()
         .map(|category| Gen3Category {
@@ -111,15 +118,24 @@ pub(crate) fn read_h3_definition(reader: &TagReader, path: &str) -> Option<Gen3D
             let first = passes[0];
             // `sub_140342850` asserts a stage depends on fewer than two.
             let category = |block: &str| {
-                elements(first, block).first().and_then(|dependency| dependency.read_int_any("category"))
+                elements(first, block)
+                    .first()
+                    .and_then(|dependency| dependency.read_int_any("category"))
                     .and_then(|category| usize::try_from(category).ok())
             };
-            shared.insert(name.clone(), Gen3SharedStages {
-                shared_pixel: has_flag_labelled(first, "flags", &SHARED_PIXEL),
-                vertex_two_options: has_flag(first, "flags", "shared VS only care non-default option of depended category"),
-                vertex_category: category("shared VS category dependencies"),
-                pixel_category: category("category dependencies"),
-            });
+            shared.insert(
+                name.clone(),
+                Gen3SharedStages {
+                    shared_pixel: has_flag_labelled(first, "flags", &SHARED_PIXEL),
+                    vertex_two_options: has_flag(
+                        first,
+                        "flags",
+                        "shared VS only care non-default option of depended category",
+                    ),
+                    vertex_category: category("shared VS category dependencies"),
+                    pixel_category: category("category dependencies"),
+                },
+            );
         }
         entry_points.push(name);
     }
@@ -136,9 +152,22 @@ pub(crate) fn read_h3_definition(reader: &TagReader, path: &str) -> Option<Gen3D
     let pixel_vertex_type = elements(root, "vertex_types")
         .first()
         .and_then(|first| first.read_enum_option("vertex type"))
-        .and_then(|kind| VERTEX_TYPE_OPTIONS.iter().position(|option| *option == kind))
+        .and_then(|kind| {
+            VERTEX_TYPE_OPTIONS
+                .iter()
+                .position(|option| *option == kind)
+        })
         .unwrap_or(0);
-    Some(Gen3Definition { name, dialect, source_file, automatic_macros, categories, entry_points, shared, pixel_vertex_type })
+    Some(Gen3Definition {
+        name,
+        dialect,
+        source_file,
+        automatic_macros,
+        categories,
+        entry_points,
+        shared,
+        pixel_vertex_type,
+    })
 }
 
 impl Gen3Definition {
@@ -148,7 +177,10 @@ impl Gen3Definition {
 
     /// The name of the option chosen in a category.
     pub(crate) fn chosen(&self, category: &str, options: &[usize]) -> Option<&str> {
-        let at = self.categories.iter().position(|known| known.name == category)?;
+        let at = self
+            .categories
+            .iter()
+            .position(|known| known.name == category)?;
         let option = options.get(at).copied().unwrap_or(0);
         Some(self.categories[at].options.get(option)?.name.as_str())
     }
@@ -168,13 +200,25 @@ impl Gen3Definition {
     /// family, compiled with each option at its default (none, under
     /// automatic macros) except the one category it depends on; a shared
     /// pixel shader the same.
-    pub(super) fn stage_options(&self, options: &[usize], entry: &str, stage: Stage) -> Vec<Option<usize>> {
+    pub(super) fn stage_options(
+        &self,
+        options: &[usize],
+        entry: &str,
+        stage: Stage,
+    ) -> Vec<Option<usize>> {
         let own = || options.iter().copied().map(Some).collect();
         let Some(rules) = self.shared.get(entry) else {
             return own();
         };
         let (category, most) = match stage {
-            Stage::Vertex => (rules.vertex_category, if rules.vertex_two_options { 2 } else { usize::MAX }),
+            Stage::Vertex => (
+                rules.vertex_category,
+                if rules.vertex_two_options {
+                    2
+                } else {
+                    usize::MAX
+                },
+            ),
             Stage::Pixel if rules.shared_pixel => (rules.pixel_category, usize::MAX),
             Stage::Pixel => return own(),
         };
@@ -199,7 +243,11 @@ impl Gen3Definition {
     /// category Reach blends `shader_glass` and nothing else.
     pub(crate) fn blend_of(&self, options: &[usize], glass: bool) -> Gen3Blend {
         let Some(name) = self.chosen("blend_mode", options) else {
-            return if glass && self.dialect == RenderMethodDialect::Reach { Gen3Blend::AlphaBlend } else { Gen3Blend::Opaque };
+            return if glass && self.dialect == RenderMethodDialect::Reach {
+                Gen3Blend::AlphaBlend
+            } else {
+                Gen3Blend::Opaque
+            };
         };
         let index = match self.dialect {
             RenderMethodDialect::Halo3 => {
@@ -208,7 +256,9 @@ impl Gen3Definition {
             }
             // Reach's entries past `motion_blur_inhibit` are its own; no
             // Reach definition offers them as options, so none reach here.
-            RenderMethodDialect::Reach => REACH_BLEND_MODES[..13].iter().position(|mode| name.starts_with(mode)),
+            RenderMethodDialect::Reach => REACH_BLEND_MODES[..13]
+                .iter()
+                .position(|mode| name.starts_with(mode)),
         };
         Gen3Blend::ALL[index.unwrap_or(0)]
     }
@@ -222,7 +272,9 @@ fn entry_name(dialect: RenderMethodDialect, option: &str) -> &str {
         (_, "water shading") => "water_shading",
         // Reach tool's `entry_point` table, `off_14290E110`.
         (RenderMethodDialect::Reach, "imposter_static_lighting_sh") => "imposter_static_sh",
-        (RenderMethodDialect::Reach, "imposter_static_lighting_prt_ambient") => "imposter_static_prt_ambient",
+        (RenderMethodDialect::Reach, "imposter_static_lighting_prt_ambient") => {
+            "imposter_static_prt_ambient"
+        }
         (_, other) => other,
     }
 }
@@ -235,14 +287,25 @@ pub(super) fn entry_functions(dialect: RenderMethodDialect, entry: &str) -> (Str
         (_, "static_prt_ambient" | "static_prt_linear" | "static_prt_quadratic") => {
             (format!("{entry}_vs"), "static_prt_ps".to_owned())
         }
-        (RenderMethodDialect::Halo3, "dynamic_light_cinematic") => pair("dynamic_light_cine_vs", "dynamic_light_cine_ps"),
-        (RenderMethodDialect::Reach, "dynamic_light") => pair("default_dynamic_light_vs", "dynamic_light_ps"),
-        (RenderMethodDialect::Reach, "dynamic_light_cinematic") => pair("default_dynamic_light_vs", "dynamic_light_cine_ps"),
-        (RenderMethodDialect::Reach, "dynamic_light_hq_shadows") => pair("default_dynamic_light_vs", "dynamic_light_hq_shadows_ps"),
-        (RenderMethodDialect::Reach, "dynamic_light_cinematic_hq_shadows") => {
-            pair("default_dynamic_light_vs", "dynamic_light_cine_hq_shadows_ps")
+        (RenderMethodDialect::Halo3, "dynamic_light_cinematic") => {
+            pair("dynamic_light_cine_vs", "dynamic_light_cine_ps")
         }
-        (RenderMethodDialect::Reach, "imposter_static_prt_ambient") => pair("imposter_static_prt_ambient_vs", "imposter_static_prt_ps"),
+        (RenderMethodDialect::Reach, "dynamic_light") => {
+            pair("default_dynamic_light_vs", "dynamic_light_ps")
+        }
+        (RenderMethodDialect::Reach, "dynamic_light_cinematic") => {
+            pair("default_dynamic_light_vs", "dynamic_light_cine_ps")
+        }
+        (RenderMethodDialect::Reach, "dynamic_light_hq_shadows") => {
+            pair("default_dynamic_light_vs", "dynamic_light_hq_shadows_ps")
+        }
+        (RenderMethodDialect::Reach, "dynamic_light_cinematic_hq_shadows") => pair(
+            "default_dynamic_light_vs",
+            "dynamic_light_cine_hq_shadows_ps",
+        ),
+        (RenderMethodDialect::Reach, "imposter_static_prt_ambient") => {
+            pair("imposter_static_prt_ambient_vs", "imposter_static_prt_ps")
+        }
         (_, other) => (format!("{other}_vs"), format!("{other}_ps")),
     }
 }
@@ -273,10 +336,19 @@ mod stage_option_tests {
             automatic_macros,
             categories: vec![
                 category("albedo", &["default", "detail", "constant"]),
-                category("blend_mode", &["opaque", "additive", "multiply", "alpha_blend"]),
+                category(
+                    "blend_mode",
+                    &["opaque", "additive", "multiply", "alpha_blend"],
+                ),
             ],
-            entry_points: shared.iter().map(|(entry, _)| (*entry).to_owned()).collect(),
-            shared: shared.iter().map(|(entry, rules)| ((*entry).to_owned(), *rules)).collect(),
+            entry_points: shared
+                .iter()
+                .map(|(entry, _)| (*entry).to_owned())
+                .collect(),
+            shared: shared
+                .iter()
+                .map(|(entry, rules)| ((*entry).to_owned(), *rules))
+                .collect(),
             pixel_vertex_type: 0,
         }
     }
@@ -286,7 +358,9 @@ mod stage_option_tests {
     #[test]
     fn only_a_decal_set_to_modulate_writes_the_specular_mask() {
         let mut decal = definition(false, &[]);
-        decal.categories.push(category("specular", &["leave", "modulate"]));
+        decal
+            .categories
+            .push(category("specular", &["leave", "modulate"]));
         assert!(!decal.decal_modulates_specular(&[0, 3, 0]));
         assert!(decal.decal_modulates_specular(&[0, 3, 1]));
         assert!(!definition(false, &[]).decal_modulates_specular(&[0, 3]));
@@ -312,27 +386,70 @@ mod stage_option_tests {
     #[test]
     fn halo_3_compiles_both_stages_with_the_materials_options() {
         let halo3 = definition(false, &[]);
-        assert_eq!(halo3.stage_options(&[2, 3], "static_sh", Stage::Vertex), [Some(2), Some(3)]);
-        assert_eq!(halo3.stage_options(&[2, 3], "static_sh", Stage::Pixel), [Some(2), Some(3)]);
+        assert_eq!(
+            halo3.stage_options(&[2, 3], "static_sh", Stage::Vertex),
+            [Some(2), Some(3)]
+        );
+        assert_eq!(
+            halo3.stage_options(&[2, 3], "static_sh", Stage::Pixel),
+            [Some(2), Some(3)]
+        );
     }
 
     #[test]
     fn a_reach_vertex_shader_keeps_only_its_category_and_only_two_of_its_options() {
-        let rules = Gen3SharedStages { vertex_two_options: true, vertex_category: Some(1), ..Default::default() };
+        let rules = Gen3SharedStages {
+            vertex_two_options: true,
+            vertex_category: Some(1),
+            ..Default::default()
+        };
         let reach = definition(false, &[("static_sh", rules)]);
-        assert_eq!(reach.stage_options(&[2, 3], "static_sh", Stage::Vertex), [Some(0), Some(1)], "alpha_blend shares additive's");
-        assert_eq!(reach.stage_options(&[2, 0], "static_sh", Stage::Vertex), [Some(0), Some(0)]);
-        assert_eq!(reach.stage_options(&[2, 3], "static_sh", Stage::Pixel), [Some(2), Some(3)], "the material's own pixel shader");
-        let uncapped = definition(false, &[("static_sh", Gen3SharedStages { vertex_two_options: false, ..rules })]);
-        assert_eq!(uncapped.stage_options(&[2, 3], "static_sh", Stage::Vertex), [Some(0), Some(3)]);
+        assert_eq!(
+            reach.stage_options(&[2, 3], "static_sh", Stage::Vertex),
+            [Some(0), Some(1)],
+            "alpha_blend shares additive's"
+        );
+        assert_eq!(
+            reach.stage_options(&[2, 0], "static_sh", Stage::Vertex),
+            [Some(0), Some(0)]
+        );
+        assert_eq!(
+            reach.stage_options(&[2, 3], "static_sh", Stage::Pixel),
+            [Some(2), Some(3)],
+            "the material's own pixel shader"
+        );
+        let uncapped = definition(
+            false,
+            &[(
+                "static_sh",
+                Gen3SharedStages {
+                    vertex_two_options: false,
+                    ..rules
+                },
+            )],
+        );
+        assert_eq!(
+            uncapped.stage_options(&[2, 3], "static_sh", Stage::Vertex),
+            [Some(0), Some(3)]
+        );
     }
 
     #[test]
     fn a_shared_pixel_shader_reads_only_its_category_and_automatic_macros_default_to_none() {
-        let rules = Gen3SharedStages { shared_pixel: true, pixel_category: Some(0), ..Default::default() };
+        let rules = Gen3SharedStages {
+            shared_pixel: true,
+            pixel_category: Some(0),
+            ..Default::default()
+        };
         let reach = definition(true, &[("shadow_generate", rules)]);
-        assert_eq!(reach.stage_options(&[2, 3], "shadow_generate", Stage::Pixel), [Some(2), None]);
-        assert_eq!(reach.stage_options(&[2, 3], "shadow_generate", Stage::Vertex), [None, None]);
+        assert_eq!(
+            reach.stage_options(&[2, 3], "shadow_generate", Stage::Pixel),
+            [Some(2), None]
+        );
+        assert_eq!(
+            reach.stage_options(&[2, 3], "shadow_generate", Stage::Vertex),
+            [None, None]
+        );
     }
 
     #[test]
@@ -340,10 +457,19 @@ mod stage_option_tests {
         let reach = definition(true, &[]);
         let defines = option_defines(&reach, &[None, Some(3)]);
         let has = |name: &str| defines.iter().any(|(known, _)| known == name);
-        assert!(!has("calc_albedo_ps"), "no function without an option: {defines:?}");
+        assert!(
+            !has("calc_albedo_ps"),
+            "no function without an option: {defines:?}"
+        );
         assert!(!has("category_albedo"), "{defines:?}");
         assert!(has("category_albedo_option_detail"), "{defines:?}");
-        assert!(defines.contains(&("calc_blend_mode_ps".to_owned(), "calc_alpha_blend".to_owned())));
-        assert!(defines.contains(&("category_blend_mode".to_owned(), "category_blend_mode_option_alpha_blend".to_owned())));
+        assert!(defines.contains(&(
+            "calc_blend_mode_ps".to_owned(),
+            "calc_alpha_blend".to_owned()
+        )));
+        assert!(defines.contains(&(
+            "category_blend_mode".to_owned(),
+            "category_blend_mode_option_alpha_blend".to_owned()
+        )));
     }
 }

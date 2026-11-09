@@ -5,12 +5,12 @@
 //! `SetMaterialRenderState`'s constants. See
 //! `docs/h4-preview-research/particles.md`.
 
-use eframe::glow::{self, HasContext};
-use super::super::super::particles::H4EmitterDraw;
 use super::super::super::gen3::shaders::{Gen3Pass, Gen3Value};
+use super::super::super::particles::H4EmitterDraw;
 use super::super::effects::gl::{H4EffectCx, H4EffectGl, material_functions};
 use super::super::effects::particles::{H4ParticleRender, custom_vert_registers};
 use crate::core::hlsl::parse::Type;
+use eframe::glow::{self, HasContext};
 
 /// `effect_lightprobe_setup_lighting_constants` with the default probe
 /// (`particles.md` §4): bright direction, bright and dark colours, ambient.
@@ -32,7 +32,15 @@ pub(in crate::app::model_preview) unsafe fn draw_h4_particles(
     render: &H4ParticleRender,
     draws: &[H4EmitterDraw],
 ) {
-    let H4EffectCx { gl, ref mut state, frame, depth, size, placeholder, object } = *cx;
+    let H4EffectCx {
+        gl,
+        ref mut state,
+        frame,
+        depth,
+        size,
+        placeholder,
+        object,
+    } = *cx;
     let material = &render.material;
     let pass = &*material.pass;
     unsafe {
@@ -79,9 +87,19 @@ pub(in crate::app::model_preview) unsafe fn draw_h4_particles(
                         if let Some(model) = model {
                             let [count_and_max, variants @ ..] = &model.variants;
                             let member = |name: &str| format!("vsMeshVariantList.{name}");
-                            state.set_floats(gl, pass, &member("m_meshVariantList_count_maxSize"), &count_and_max[..2]);
+                            state.set_floats(
+                                gl,
+                                pass,
+                                &member("m_meshVariantList_count_maxSize"),
+                                &count_and_max[..2],
+                            );
                             for (at, variant) in variants.iter().enumerate() {
-                                state.set_floats(gl, pass, &member(&format!("m_meshVariants[{at}].m_data")), variant);
+                                state.set_floats(
+                                    gl,
+                                    pass,
+                                    &member(&format!("m_meshVariants[{at}].m_data")),
+                                    variant,
+                                );
                             }
                         }
                         continue;
@@ -105,9 +123,15 @@ pub(in crate::app::model_preview) unsafe fn draw_h4_particles(
                 }
                 let value = match name.as_str() {
                     "vs_sprite_offset_and_scale" => floats(render.sprite),
-                    "vs_mesh_position_compression_scale" => model.map(|model| Gen3Value::Floats(model.position[0])),
-                    "vs_mesh_position_compression_offset" => model.map(|model| Gen3Value::Floats(model.position[1])),
-                    "vs_mesh_uv_compression_scale_offset" => model.map(|model| Gen3Value::Floats(model.texcoord)),
+                    "vs_mesh_position_compression_scale" => {
+                        model.map(|model| Gen3Value::Floats(model.position[0]))
+                    }
+                    "vs_mesh_position_compression_offset" => {
+                        model.map(|model| Gen3Value::Floats(model.position[1]))
+                    }
+                    "vs_mesh_uv_compression_scale_offset" => {
+                        model.map(|model| Gen3Value::Floats(model.texcoord))
+                    }
                     "vs_cameraVelocity" => floats([0.0; 4]),
                     "vs_sprite_list_count_and_max" => floats([render.sprite_count, 0.0, 0.0, 0.0]),
                     "vsLightingBrightDirection" | "psLightingBrightDirection" => floats(lit(0)),
@@ -126,13 +150,23 @@ pub(in crate::app::model_preview) unsafe fn draw_h4_particles(
                     _ => None,
                 };
                 match value {
-                    Some(value) => super::super::super::gen3::pipeline::set_value(gl, location.as_ref(), ty, &value),
+                    Some(value) => super::super::super::gen3::pipeline::set_value(
+                        gl,
+                        location.as_ref(),
+                        ty,
+                        &value,
+                    ),
                     None => {
                         state.set_shared_uniform(gl, frame, material, &functions, name, ty, size);
                     }
                 }
             }
-            gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, vertex_count as i32, draw.states.len() as i32);
+            gl.draw_arrays_instanced(
+                glow::TRIANGLE_STRIP,
+                0,
+                vertex_count as i32,
+                draw.states.len() as i32,
+            );
         }
         state.end(gl);
     }

@@ -5,9 +5,15 @@ use super::*;
 /// `c_geometry_sampler::m_default_lightprobe_sample`, the first nine terms of
 /// each channel: the light of an object with no level around it.
 pub(super) const DEFAULT_PROBE: [[f32; 9]; 3] = [
-    [1.89376, -1.44314, 0.19557, 0.51599, -0.30808, -0.04173, -0.46665, 0.29195, 0.10501],
-    [2.13512, -1.79217, 0.15439, 0.51479, -0.27409, 0.07048, -0.62705, 0.25751, -0.01816],
-    [2.25851, -2.07371, 0.05633, 0.44103, -0.19508, 0.23114, -0.7642, 0.18839, -0.22193],
+    [
+        1.89376, -1.44314, 0.19557, 0.51599, -0.30808, -0.04173, -0.46665, 0.29195, 0.10501,
+    ],
+    [
+        2.13512, -1.79217, 0.15439, 0.51479, -0.27409, 0.07048, -0.62705, 0.25751, -0.01816,
+    ],
+    [
+        2.25851, -2.07371, 0.05633, 0.44103, -0.19508, 0.23114, -0.7642, 0.18839, -0.22193,
+    ],
 ];
 
 /// `get_render_exposure` at no stops and a white point of one.
@@ -42,7 +48,12 @@ pub(super) fn dominant_light(probe: &[[f32; 9]; 3]) -> ([f32; 4], [f32; 4], f32)
     let [r, g, b] = probe;
     let weighted = |at: usize| 0.212_656 * r[at] + 0.715_158 * g[at] + 0.072_185_6 * b[at];
     let toward = [-weighted(3), -weighted(1), weighted(2)];
-    let length = toward.iter().map(|value| value * value).sum::<f32>().sqrt().max(1e-6);
+    let length = toward
+        .iter()
+        .map(|value| value * value)
+        .sum::<f32>()
+        .sqrt()
+        .max(1e-6);
     let [x, y, z] = toward.map(|value| value / length);
     // `sh_eval_direction`, in the probe's order.
     let (first, second) = (0.488_603, 0.546_274);
@@ -58,18 +69,33 @@ pub(super) fn dominant_light(probe: &[[f32; 9]; 3]) -> ([f32; 4], [f32; 4], f32)
         -second * 2.0 * x * z,
         second * (x * x - y * y),
     ];
-    let denominator = eval.iter().map(|value| value * value).sum::<f32>().max(0.0001);
+    let denominator = eval
+        .iter()
+        .map(|value| value * value)
+        .sum::<f32>()
+        .max(0.0001);
     let intensity = probe.map(|channel| {
         let sum: f32 = eval.iter().zip(&channel).map(|(a, b)| a * b).sum();
         sum.max(0.0) / denominator
     });
     // How much of the green the one light leaves unexplained.
-    let (error, most) = eval.iter().zip(&probe[1]).fold((0.0, 0.0), |(error, most), (a, b)| {
-        let difference = intensity[1] * a - b;
-        (error + difference * difference, most + b * b * 2.0)
-    });
-    let contrast = if most > 0.0001 { (1.0 - error / most).powi(4) * 10.0 } else { 10.0 };
-    ([x, y, z, 1.0], [intensity[0], intensity[1], intensity[2], 1.0], contrast)
+    let (error, most) = eval
+        .iter()
+        .zip(&probe[1])
+        .fold((0.0, 0.0), |(error, most), (a, b)| {
+            let difference = intensity[1] * a - b;
+            (error + difference * difference, most + b * b * 2.0)
+        });
+    let contrast = if most > 0.0001 {
+        (1.0 - error / most).powi(4) * 10.0
+    } else {
+        10.0
+    };
+    (
+        [x, y, z, 1.0],
+        [intensity[0], intensity[1], intensity[2], 1.0],
+        contrast,
+    )
 }
 
 /// Which way an object's shadow falls from and how dark it is: the dominant
@@ -115,7 +141,9 @@ pub(super) fn frame_probe(frame: &ModelGpuFrame) -> [[f32; 9]; 3] {
 }
 
 /// What a particle's `lighting` option reads.
-pub(in crate::app::model_preview) fn gen3_lighting_constants(frame: &ModelGpuFrame) -> [[f32; 4]; 10] {
+pub(in crate::app::model_preview) fn gen3_lighting_constants(
+    frame: &ModelGpuFrame,
+) -> [[f32; 4]; 10] {
     lighting_constants(&frame_probe(frame))
 }
 
@@ -130,7 +158,13 @@ impl Gen3State {
         game: &mut dyn Gen3Game,
         drawing: &'b Gen3Frame<'_>,
     ) -> Vec<&'b Gen3Batch> {
-        let Gen3Frame { gl, frame, slot, order, .. } = *drawing;
+        let Gen3Frame {
+            gl,
+            frame,
+            slot,
+            order,
+            ..
+        } = *drawing;
         unsafe {
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(drawing.accumulation_target));
             gl.disable(glow::BLEND);
@@ -142,35 +176,72 @@ impl Gen3State {
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear(glow::COLOR_BUFFER_BIT);
             // `build_simple_light_draw_list`, before the static pass reads it.
-            self.inline_lights = game.inline_lights(&mut Gen3Cx { gl, frame, core, slot, state: self });
-            let (opaque, blended): (Vec<_>, Vec<_>) =
-                drawing.batches
-                    .iter()
-                    .filter(|(_, material)| !material.decal || material.after_lighting)
-                    .partition(|(_, material)| material.blend == Gen3Blend::Opaque);
-            game.lit_values(&mut Gen3Cx { gl, frame, core, slot, state: self });
+            self.inline_lights = game.inline_lights(&mut Gen3Cx {
+                gl,
+                frame,
+                core,
+                slot,
+                state: self,
+            });
+            let (opaque, blended): (Vec<_>, Vec<_>) = drawing
+                .batches
+                .iter()
+                .filter(|(_, material)| !material.decal || material.after_lighting)
+                .partition(|(_, material)| material.blend == Gen3Blend::Opaque);
+            game.lit_values(&mut Gen3Cx {
+                gl,
+                frame,
+                core,
+                slot,
+                state: self,
+            });
             for (batch, material) in opaque {
                 let pass = gen3_lit_pass(frame, batch, material);
                 self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
             }
             self.shadow_mask = None;
             self.pass_values = None;
-            game.after_opaque(&mut Gen3Cx { gl, frame, core, slot, state: self }, order);
+            game.after_opaque(
+                &mut Gen3Cx {
+                    gl,
+                    frame,
+                    core,
+                    slot,
+                    state: self,
+                },
+                order,
+            );
             blended
         }
     }
 
     /// `submit_visibility_and_render`: the object's lights, additive, each
     /// on its own, which the game draws.
-    pub(super) unsafe fn dynamic_lights(&mut self, core: &mut RenderCore, game: &mut dyn Gen3Game, drawing: &Gen3Frame<'_>) {
-        let Gen3Frame { gl, frame, slot, .. } = *drawing;
+    pub(super) unsafe fn dynamic_lights(
+        &mut self,
+        core: &mut RenderCore,
+        game: &mut dyn Gen3Game,
+        drawing: &Gen3Frame<'_>,
+    ) {
+        let Gen3Frame {
+            gl, frame, slot, ..
+        } = *drawing;
         unsafe {
             gl.enable(glow::BLEND);
             gl.depth_mask(false);
             gl.blend_equation(glow::FUNC_ADD);
             gl.color_mask(true, true, true, true);
             gl.blend_func(glow::ONE, glow::ONE);
-            game.dynamic_lights(&mut Gen3Cx { gl, frame, core, slot, state: self }, &drawing.batches);
+            game.dynamic_lights(
+                &mut Gen3Cx {
+                    gl,
+                    frame,
+                    core,
+                    slot,
+                    state: self,
+                },
+                &drawing.batches,
+            );
         }
     }
 }

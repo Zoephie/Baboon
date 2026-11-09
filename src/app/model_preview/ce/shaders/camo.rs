@@ -15,7 +15,9 @@ pub(in crate::app::model_preview) struct CeCamoSettings {
 }
 
 /// `globals\globals`'s rasterizer data, and the kit's shader for it.
-pub(in crate::app::model_preview) fn read_ce_camo_settings(reader: &TagReader) -> Option<CeCamoSettings> {
+pub(in crate::app::model_preview) fn read_ce_camo_settings(
+    reader: &TagReader,
+) -> Option<CeCamoSettings> {
     let directory = shader_directory(reader)?;
     let globals = reader.load("globals\\globals", "globals", b"matg").ok()?;
     let root = globals.root();
@@ -50,8 +52,10 @@ pub(in crate::app::model_preview) fn ce_camo_pass(
 ) -> Dx9DrawPass {
     /// `refraction amount` is in pixels of the half-width the game draws at.
     const HALF_WIDTH: f32 = 320.0;
-    let distortion =
-        settings.distortion.as_deref().and_then(|path| bitmap(path, SamplerKind::Cube));
+    let distortion = settings
+        .distortion
+        .as_deref()
+        .and_then(|path| bitmap(path, SamplerKind::Cube));
     let mut frame = texture(2, SamplerKind::Texture2D, None);
     frame.frame_copy = true;
     let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];

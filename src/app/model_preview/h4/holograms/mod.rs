@@ -21,13 +21,13 @@ use eframe::glow::{self, HasContext};
 
 use super::super::gen3::pipeline::{gen3_set_cull, set_value};
 
-use crate::app::model_preview::gl::texture::upload_image_linear;
-use super::super::gl::target::{Made, Sampling, Texels};
+use super::super::common::view::ce_flare_view;
 use super::super::gen3::shaders::{Gen3Material, Gen3Pass, Gen3Value};
+use super::super::gl::target::{Made, Sampling, Texels};
+use super::super::*;
 use super::bloom::H4BloomSettings;
 use super::materials::submit::{DrawnObject, H4Draw, H4HologramPost, H4ScreenMaterial};
-use super::super::common::view::ce_flare_view;
-use super::super::*;
+use crate::app::model_preview::gl::texture::upload_image_linear;
 
 mod screen;
 pub(in crate::app::model_preview) use screen::*;

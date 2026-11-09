@@ -32,14 +32,25 @@ impl H4Holograms {
         let mut made = Made::new(gl);
         unsafe {
             let color = made.texture(size, Texels::float(glow::RGBA8), Sampling::LINEAR_CLAMPED)?;
-            let combined = made.texture(size, Texels::float(glow::RGBA8), Sampling::LINEAR_CLAMPED)?;
+            let combined =
+                made.texture(size, Texels::float(glow::RGBA8), Sampling::LINEAR_CLAMPED)?;
             // Only drawn into, never sampled.
             let depth = made.texture(size, Texels::DEPTH24_STENCIL8, Sampling::NEAREST)?;
-            let framebuffer =
-                made.framebuffer(&[(glow::COLOR_ATTACHMENT0, color), (glow::DEPTH_STENCIL_ATTACHMENT, depth)])?;
+            let framebuffer = made.framebuffer(&[
+                (glow::COLOR_ATTACHMENT0, color),
+                (glow::DEPTH_STENCIL_ATTACHMENT, depth),
+            ])?;
             let combined_framebuffer = made.framebuffer(&[(glow::COLOR_ATTACHMENT0, combined)])?;
             made.keep();
-            Some(Self { size, color, depth, framebuffer, combined, combined_framebuffer, uploaded: None })
+            Some(Self {
+                size,
+                color,
+                depth,
+                framebuffer,
+                combined,
+                combined_framebuffer,
+                uploaded: None,
+            })
         }
     }
 
@@ -50,7 +61,11 @@ impl H4Holograms {
             for texture in [self.color, self.depth, self.combined] {
                 gl.delete_texture(texture);
             }
-            for texture in self.uploaded.into_iter().flat_map(|(_, map)| map.into_values()) {
+            for texture in self
+                .uploaded
+                .into_iter()
+                .flat_map(|(_, map)| map.into_values())
+            {
                 gl.delete_texture(texture);
             }
         }
@@ -91,15 +106,37 @@ pub(in crate::app::model_preview) fn hologram_screen(
     // The world box of one sphere encloses both the last frame's sphere and
     // this one, which are the same here.
     let corners = (0..8).map(|corner: usize| {
-        std::array::from_fn(|axis| center[axis] + if corner >> axis & 1 == 1 { radius } else { -radius })
+        std::array::from_fn(|axis| {
+            center[axis]
+                + if corner >> axis & 1 == 1 {
+                    radius
+                } else {
+                    -radius
+                }
+        })
     });
-    let sphere = [along(right, radius), along(right, -radius), along(up, radius), along(up, -radius)];
+    let sphere = [
+        along(right, radius),
+        along(right, -radius),
+        along(up, radius),
+        along(up, -radius),
+    ];
     // A point behind the eye lands at the origin, as the game's does.
     let project = |point: [f32; 3]| window(point).unwrap_or(([0.0; 2], 0.0));
     let enclose = |points: &mut dyn Iterator<Item = ([f32; 2], f32)>| {
-        points.fold([f32::MAX, f32::MIN, f32::MAX, f32::MIN, f32::MAX, f32::MIN], |b, ([x, y], z)| {
-            [b[0].min(x), b[1].max(x), b[2].min(y), b[3].max(y), b[4].min(z), b[5].max(z)]
-        })
+        points.fold(
+            [f32::MAX, f32::MIN, f32::MAX, f32::MIN, f32::MAX, f32::MIN],
+            |b, ([x, y], z)| {
+                [
+                    b[0].min(x),
+                    b[1].max(x),
+                    b[2].min(y),
+                    b[3].max(y),
+                    b[4].min(z),
+                    b[5].max(z),
+                ]
+            },
+        )
     };
     let scale_rect = enclose(&mut sphere.iter().map(|point| project(*point)));
     let screen_rect = enclose(&mut corners.chain(sphere).map(project));
@@ -122,7 +159,12 @@ pub(in crate::app::model_preview) fn hologram_screen(
         if crop[2] <= crop[0] || crop[3] <= crop[1] {
             return None;
         }
-        let texcoords = [crop[0] as f32 / width, crop[2] as f32 / width, crop[1] as f32 / height, crop[3] as f32 / height];
+        let texcoords = [
+            crop[0] as f32 / width,
+            crop[2] as f32 / width,
+            crop[1] as f32 / height,
+            crop[3] as f32 / height,
+        ];
         (crop, texcoords)
     };
     // `render_camera_build_projection`: `projection+0xC0` is
@@ -130,7 +172,12 @@ pub(in crate::app::model_preview) fn hologram_screen(
     // depths of the sphere's four points.
     let per_depth = (vertical_fov / 0.86) * (720.0 / height);
     let bloom_scale = ((z0 * per_depth).max(1.0) + (z1 * per_depth).max(1.0)) / 2.0;
-    Some(HologramScreen { coverage, crop, texcoords, bloom_scale })
+    Some(HologramScreen {
+        coverage,
+        crop,
+        texcoords,
+        bloom_scale,
+    })
 }
 
 /// `GenerateHologramBipedBoundsCallback`'s sphere for the opened object:
@@ -144,13 +191,27 @@ pub(super) fn hologram_sphere(frame: &ModelGpuFrame) -> ([f32; 3], f32) {
     let Some((offset, radius)) = preview.h4.bounding_sphere else {
         let (low, high) = (preview.bounds_min, preview.bounds_max);
         let center: [f32; 3] = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
-        return (center, (0..3).map(|axis| (high[axis] - center[axis]).powi(2)).sum::<f32>().sqrt());
+        return (
+            center,
+            (0..3)
+                .map(|axis| (high[axis] - center[axis]).powi(2))
+                .sum::<f32>()
+                .sqrt(),
+        );
     };
     let bones = frame.bones.as_deref();
-    let skinning = |node: usize| -> Option<[[f32; 4]; 3]> { bones?.get(node * 3..node * 3 + 3)?.try_into().ok() };
+    let skinning = |node: usize| -> Option<[[f32; 4]; 3]> {
+        bones?.get(node * 3..node * 3 + 3)?.try_into().ok()
+    };
     let node_count = preview.nodes.len();
     let root_bind = preview.nodes.first().map(|node| node.inverse_bind);
-    scaled_sphere(offset, radius, root_bind, skinning(0), skinning(1.min(node_count.saturating_sub(1))))
+    scaled_sphere(
+        offset,
+        radius,
+        root_bind,
+        skinning(0),
+        skinning(1.min(node_count.saturating_sub(1))),
+    )
 }
 
 /// The sphere from the tag's offset and radius, node 0's inverse bind and
@@ -164,14 +225,28 @@ pub(super) fn scaled_sphere(
 ) -> ([f32; 3], f32) {
     use crate::app::model_preview::common::math::{IDENTITY, place_of, rigid_inverse};
     use blam_tags::math::Matrix4;
-    let rows = |rows: [[f32; 4]; 3]| Matrix4 { m: [rows[0], rows[1], rows[2], [0.0, 0.0, 0.0, 1.0]] };
+    let rows = |rows: [[f32; 4]; 3]| Matrix4 {
+        m: [rows[0], rows[1], rows[2], [0.0, 0.0, 0.0, 1.0]],
+    };
     // Node 0's world matrix is its skinning matrix times its bind pose.
     let bind = root_inverse_bind.map_or(IDENTITY, |inverse| rigid_inverse(&rows(inverse)));
     let world = root_skinning.map_or(bind, |skinning| rows(skinning) * bind);
-    let point = Matrix4 { m: [[1.0, 0.0, 0.0, offset[0]], [0.0, 1.0, 0.0, offset[1]], [0.0, 0.0, 1.0, offset[2]], [0.0, 0.0, 0.0, 1.0]] };
+    let point = Matrix4 {
+        m: [
+            [1.0, 0.0, 0.0, offset[0]],
+            [0.0, 1.0, 0.0, offset[1]],
+            [0.0, 0.0, 1.0, offset[2]],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    };
     let center = place_of(&(world * point));
     // `real_matrix4x3`'s scale: the length of an axis.
-    let scale = scaled_skinning.map_or(1.0, |rows| (0..3).map(|row| rows[row][0] * rows[row][0]).sum::<f32>().sqrt());
+    let scale = scaled_skinning.map_or(1.0, |rows| {
+        (0..3)
+            .map(|row| rows[row][0] * rows[row][0])
+            .sum::<f32>()
+            .sqrt()
+    });
     (center, radius * scale)
 }
 
@@ -190,7 +265,9 @@ pub(in crate::app::model_preview) struct HologramPicture {
 /// A hologram's material is drawn by `RenderHolograms` when its screen
 /// materials were read.
 pub(in crate::app::model_preview) fn draws_as_hologram(material: &Gen3Material) -> bool {
-    material.h4().is_some_and(|submit| submit.is_hologram() && submit.post().is_some())
+    material
+        .h4()
+        .is_some_and(|submit| submit.is_hologram() && submit.post().is_some())
 }
 
 /// `alpha_blend_max` (22), the blend pass's state: an alpha blend whose alpha
@@ -198,6 +275,11 @@ pub(in crate::app::model_preview) fn draws_as_hologram(material: &Gen3Material) 
 pub(super) unsafe fn set_alpha_blend_max(gl: &glow::Context) {
     unsafe {
         gl.blend_equation_separate(glow::FUNC_ADD, glow::MAX);
-        gl.blend_func_separate(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::ONE, glow::ONE);
+        gl.blend_func_separate(
+            glow::SRC_ALPHA,
+            glow::ONE_MINUS_SRC_ALPHA,
+            glow::ONE,
+            glow::ONE,
+        );
     }
 }

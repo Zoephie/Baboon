@@ -16,10 +16,11 @@ impl GameRender for PlainRender {
         // own game, so it keeps every game's rule for what passes replace.
         let frame = cx.frame;
         unsafe {
-            cx.core.draw_slot_batches(cx.gl, frame, cx.slot, &|core, material| {
-                (frame.game_shaders && core.gen3_material(frame, material).is_some())
-                    || core.h2_replaces_slots(frame, material)
-            })
+            cx.core
+                .draw_slot_batches(cx.gl, frame, cx.slot, &|core, material| {
+                    (frame.game_shaders && core.gen3_material(frame, material).is_some())
+                        || core.h2_replaces_slots(frame, material)
+                })
         }
     }
 

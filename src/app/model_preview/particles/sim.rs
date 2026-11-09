@@ -86,13 +86,23 @@ pub(super) fn emit(
             let place = [along, out * sin, out * cos];
             (place, volume_heading(volume_random, place, random))
         }
-        EmissionShape::Plane => ([(); 3].map(|_| random.range(-1.0, 1.0) * radius), [1.0, 0.0, 0.0]),
+        EmissionShape::Plane => (
+            [(); 3].map(|_| random.range(-1.0, 1.0) * radius),
+            [1.0, 0.0, 0.0],
+        ),
         // An attached effect has no impact, whose size is all that spreads these.
         EmissionShape::ImpactContour => {
             let cone = angle;
             let sign = if random.next() < 0.5 { -1.0 } else { 1.0 };
             let side = cone.sin() * sign;
-            ([0.0; 3], if random.next() < 0.5 { [cone.cos(), side, 0.0] } else { [cone.cos(), 0.0, side] })
+            (
+                [0.0; 3],
+                if random.next() < 0.5 {
+                    [cone.cos(), side, 0.0]
+                } else {
+                    [cone.cos(), 0.0, side]
+                },
+            )
         }
         EmissionShape::ImpactArea => {
             let cone = angle;
@@ -106,7 +116,11 @@ pub(super) fn emit(
 /// A Reach volume's heading, normalized later: out from its centre, or with
 /// `volume_random` any way at all.
 fn volume_heading(volume_random: bool, place: [f32; 3], random: &mut Random) -> [f32; 3] {
-    if volume_random { [(); 3].map(|_| random.range(-1.0, 1.0)) } else { place }
+    if volume_random {
+        [(); 3].map(|_| random.range(-1.0, 1.0))
+    } else {
+        place
+    }
 }
 
 /// Reach's emitter `axis scale`, which tool's postprocess makes ones when it
@@ -218,8 +232,16 @@ fn fresh_emitters(system: &ParticleSystem, seed: u32) -> Vec<RunningEmitter> {
 
 /// A location's axes, looking along what a particle was doing.
 pub(super) fn axes_along(forward: [f32; 3]) -> [[f32; 3]; 3] {
-    let forward = if dot(forward, forward) > 0.0 { clamped_unit(forward) } else { [1.0, 0.0, 0.0] };
-    let reference = if forward[2].abs() < 0.99 { [0.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0] };
+    let forward = if dot(forward, forward) > 0.0 {
+        clamped_unit(forward)
+    } else {
+        [1.0, 0.0, 0.0]
+    };
+    let reference = if forward[2].abs() < 0.99 {
+        [0.0, 0.0, 1.0]
+    } else {
+        [1.0, 0.0, 0.0]
+    };
     let left = clamped_unit(cross(reference, forward));
     [forward, left, cross(forward, left)]
 }
@@ -238,7 +260,11 @@ fn step_location(
     now: f32,
     dt: f32,
     ground: f32,
-    (births, deaths, hits): (&mut Vec<ParticleEvent>, &mut Vec<ParticleEvent>, &mut Vec<ParticleEvent>),
+    (births, deaths, hits): (
+        &mut Vec<ParticleEvent>,
+        &mut Vec<ParticleEvent>,
+        &mut Vec<ParticleEvent>,
+    ),
     tracks: &mut Vec<ParticleTrack>,
 ) {
     tracks.clear();
@@ -255,19 +281,47 @@ fn step_location(
         let plane = if system.world {
             ([0.0, 0.0, 1.0], -ground)
         } else {
-            (std::array::from_fn(|row| frame.1[row][2]), frame.0[2] - ground)
+            (
+                std::array::from_fn(|row| frame.1[row][2]),
+                frame.0[2] - ground,
+            )
         };
         if let Some(mut state) = state {
             state.system_seeds = running.system_seeds;
-            emitter.pulse(&system.look, state, running, dt, frame, system.world, births, at);
+            emitter.pulse(
+                &system.look,
+                state,
+                running,
+                dt,
+                frame,
+                system.world,
+                births,
+                at,
+            );
             let ground = Some((plane, system.look.dies_on_ground, &mut *hits));
-            emitter.step(state, &mut running.particles, dt, home, deaths, ground, system.look.dies_at_rest);
+            emitter.step(
+                state,
+                &mut running.particles,
+                dt,
+                home,
+                deaths,
+                ground,
+                system.look.dies_at_rest,
+            );
         } else {
             // The next run of its event is a new location's, with its burst.
             running.started = false;
             running.previous = None;
             let ground = Some((plane, system.look.dies_on_ground, &mut *hits));
-            emitter.step(rest, &mut running.particles, dt, home, deaths, ground, system.look.dies_at_rest);
+            emitter.step(
+                rest,
+                &mut running.particles,
+                dt,
+                home,
+                deaths,
+                ground,
+                system.look.dies_at_rest,
+            );
         }
         if !(system.attached.is_empty() && system.carried.is_empty()) {
             let (offset, turned) = frame;
@@ -279,9 +333,16 @@ fn step_location(
                     (particle.position, particle.velocity)
                 } else {
                     let moved = to_world(particle.position);
-                    (std::array::from_fn(|axis| offset[axis] + moved[axis]), to_world(particle.velocity))
+                    (
+                        std::array::from_fn(|axis| offset[axis] + moved[axis]),
+                        to_world(particle.velocity),
+                    )
                 };
-                ParticleTrack { id: particle.id, place, velocity }
+                ParticleTrack {
+                    id: particle.id,
+                    place,
+                    velocity,
+                }
             }));
         }
     }
@@ -295,7 +356,14 @@ pub(super) fn system_state(
     since: f32,
 ) -> Option<ParticleState> {
     let read = |name: &str| {
-        if name.is_empty() { 1.0 } else { values.and_then(|values| values.get(name)).copied().unwrap_or(0.0) }
+        if name.is_empty() {
+            1.0
+        } else {
+            values
+                .and_then(|values| values.get(name))
+                .copied()
+                .unwrap_or(0.0)
+        }
     };
     let effect_a = read(&system.scale_by);
     if effect_a <= 0.0 {
@@ -320,7 +388,9 @@ fn with_lod(
 ) -> Option<ParticleState> {
     let away = minus(origin, eye);
     let lod = lod_amount(system.lod, dot(away, away).sqrt());
-    state.filter(|_| lod > 0.0).map(|state| ParticleState { lod, ..state })
+    state
+        .filter(|_| lod > 0.0)
+        .map(|state| ParticleState { lod, ..state })
 }
 
 /// `system_state` for a step `dt` long ending at `time`, and for an event that
@@ -335,7 +405,9 @@ fn system_state_stepped(
 ) -> Option<ParticleState> {
     let since = time - onset;
     system_state(system, values, time, since).or_else(|| {
-        let inside = system.times.begins_within(system.event, since - dt, since)?;
+        let inside = system
+            .times
+            .begins_within(system.event, since - dt, since)?;
         system_state(system, values, time, inside)
     })
 }
@@ -343,13 +415,21 @@ fn system_state_stepped(
 impl Emitter {
     /// `initialize_particle`'s shape, then each axis of the place by `axis
     /// scale` (Reach's, after every shape; ones elsewhere).
-    pub(super) fn emitted(&self, radius: f32, angle: f32, random: &mut Random) -> ([f32; 3], [f32; 3]) {
+    pub(super) fn emitted(
+        &self,
+        radius: f32,
+        angle: f32,
+        random: &mut Random,
+    ) -> ([f32; 3], [f32; 3]) {
         let (position, velocity) = if self.shape == EmissionShape::CustomPoints {
             emit_from_points(&self.points, radius, angle, random)
         } else {
             emit(self.shape, radius, angle, self.volume_random, random)
         };
-        (std::array::from_fn(|axis| position[axis] * self.axis_scale[axis]), velocity)
+        (
+            std::array::from_fn(|axis| position[axis] * self.axis_scale[axis]),
+            velocity,
+        )
     }
 
     /// `c_particle_emitter::pulse` and `spawn_particle`.
@@ -375,13 +455,19 @@ impl Emitter {
         }
         let most = self.most.scalar(&state);
         if most > 0.0 {
-            running.accumulator = running.accumulator.min(most - running.particles.len() as f32);
+            running.accumulator = running
+                .accumulator
+                .min(most - running.particles.len() as f32);
         }
         let (offset, turned) = frame;
         let previous = running.previous.unwrap_or(offset);
         running.previous = Some(offset);
         let count = (running.accumulator + self.spawn_slack).max(0.0).floor();
-        let between = if count >= 1.0 { running.accumulator.recip() } else { 0.0 };
+        let between = if count >= 1.0 {
+            running.accumulator.recip()
+        } else {
+            0.0
+        };
         // Each one spent comes off what is owed, which can leave it a hair
         // under nothing for the next pulse.
         running.accumulator -= count;
@@ -389,23 +475,42 @@ impl Emitter {
             if running.particles.len() >= MOST_PARTICLES {
                 break;
             }
-            let along = if self.bunched { 1.0 } else { birth as f32 * between };
+            let along = if self.bunched {
+                1.0
+            } else {
+                birth as f32 * between
+            };
             let random = &mut running.random;
             let seeds: [f32; SEEDS] = std::array::from_fn(|_| random.next());
-            let mut particle_state = ParticleState { seeds, emission_time: state.system_age, ..state };
+            let mut particle_state = ParticleState {
+                seeds,
+                emission_time: state.system_age,
+                ..state
+            };
             particle_state.system_seeds = state.system_seeds;
-            let (radius, angle) = (self.radius.scalar(&particle_state), self.angle.scalar(&particle_state));
+            let (radius, angle) = (
+                self.radius.scalar(&particle_state),
+                self.angle.scalar(&particle_state),
+            );
             let (position, mut velocity) = self.emitted(radius, angle, random);
-            let length = (velocity[0].powi(2) + velocity[1].powi(2) + velocity[2].powi(2)).sqrt().max(1e-6);
+            let length = (velocity[0].powi(2) + velocity[1].powi(2) + velocity[2].powi(2))
+                .sqrt()
+                .max(1e-6);
             let speed = self.speed.scalar(&particle_state);
-            let speed = if speed == 0.0 && look.still_moves { 0.001 } else { speed };
+            let speed = if speed == 0.0 && look.still_moves {
+                0.001
+            } else {
+                speed
+            };
             velocity = velocity.map(|axis| axis / length * speed);
             let to_world = |vector: [f32; 3]| -> [f32; 3] {
                 std::array::from_fn(|axis| (0..3).map(|at| turned[at][axis] * vector[at]).sum())
             };
             let placed = {
                 let moved = to_world(position);
-                std::array::from_fn(|axis| previous[axis] + (offset[axis] - previous[axis]) * along + moved[axis])
+                std::array::from_fn(|axis| {
+                    previous[axis] + (offset[axis] - previous[axis]) * along + moved[axis]
+                })
             };
             running.made += 1;
             let id = running.made << 8 | at as u64;
@@ -414,10 +519,17 @@ impl Emitter {
             let (position, velocity) = if world {
                 (placed, to_world(velocity))
             } else {
-                (std::array::from_fn(|axis| position[axis] + velocity[axis] * ahead), velocity)
+                (
+                    std::array::from_fn(|axis| position[axis] + velocity[axis] * ahead),
+                    velocity,
+                )
             };
             let inverse_lifespan = 1.0 / self.lifespan.scalar(&particle_state).max(0.01);
-            let mut flip = [random.next() >= 0.5, random.next() >= 0.5, random.next() >= 0.5];
+            let mut flip = [
+                random.next() >= 0.5,
+                random.next() >= 0.5,
+                random.next() >= 0.5,
+            ];
             // One random word gives both: `& 1` mirrors v, `% count` the sequence.
             let sequence = if look.sequences.is_empty() {
                 0
@@ -426,7 +538,11 @@ impl Emitter {
                 flip[1] = word & 1 != 0;
                 word % look.sequences.len()
             };
-            let axis = self.axis.pick(self.reference_axis, self.axis_angle.scalar(&particle_state), random);
+            let axis = self.axis.pick(
+                self.reference_axis,
+                self.axis_angle.scalar(&particle_state),
+                random,
+            );
             running.particles.push(Particle {
                 id,
                 colliding: false,
@@ -435,11 +551,19 @@ impl Emitter {
                 spawned_this_frame: true,
                 on_card: false,
                 axis,
-                age: if self.bunched { 0.0 } else { along * dt * inverse_lifespan },
+                age: if self.bunched {
+                    0.0
+                } else {
+                    along * dt * inverse_lifespan
+                },
                 inverse_lifespan,
                 position,
                 velocity,
-                rotation: starting_rotation(look.random_rotation, look.h4.is_some() && look.vertical, || random.next()),
+                rotation: starting_rotation(
+                    look.random_rotation,
+                    look.h4.is_some() && look.vertical,
+                    || random.next(),
+                ),
                 rotation_rate: self.rotation_rate.scalar(&particle_state),
                 frame: 0.0,
                 frame_rate: look.rate.scalar(&particle_state),
@@ -475,7 +599,9 @@ impl Emitter {
                     }
                 }
                 ParticleController::Collider => {
-                    if let (Some(collider), Some((plane, dies, hits))) = (&self.collider, ground.as_mut()) {
+                    if let (Some(collider), Some((plane, dies, hits))) =
+                        (&self.collider, ground.as_mut())
+                    {
                         collider.update(particles, state, *plane, *dies, hits, dt);
                     }
                 }
@@ -489,7 +615,10 @@ impl Emitter {
         // `c_particle_emitter::frame_advance`. The processor's turbulence
         // (`update_particles_turbulence`, the 360's 0x82EE0D80) does nothing;
         // what is on the card has the card's.
-        let turbulence = self.turbulence.as_ref().map(|turbulence| turbulence.xform(&state));
+        let turbulence = self
+            .turbulence
+            .as_ref()
+            .map(|turbulence| turbulence.xform(&state));
         particles.retain_mut(|particle| {
             if particle.on_card {
                 // `set_shader_update_state` gives a processor emitter's no physics.
@@ -548,8 +677,13 @@ impl Emitter {
         let physical = self.controllers.contains(&ParticleController::Physics);
         let physics = self.physics.as_ref().filter(|_| physical);
         let constants = physics.map_or([0.0; 3], |physics| physics.on_card(&state));
-        let turbulence = self.turbulence.as_ref().map(|turbulence| turbulence.xform(&state));
-        particles.retain_mut(|particle| self.card_frame(particle, state, dt, constants, turbulence, ended));
+        let turbulence = self
+            .turbulence
+            .as_ref()
+            .map(|turbulence| turbulence.xform(&state));
+        particles.retain_mut(|particle| {
+            self.card_frame(particle, state, dt, constants, turbulence, ended)
+        });
     }
 
     /// One frame of `update_particle_state` for one particle, with the
@@ -564,7 +698,11 @@ impl Emitter {
         turbulence: Option<[f32; 4]>,
         ended: &mut Vec<ParticleEvent>,
     ) -> bool {
-        let dt = if std::mem::take(&mut particle.spawned_this_frame) { 0.0 } else { dt };
+        let dt = if std::mem::take(&mut particle.spawned_this_frame) {
+            0.0
+        } else {
+            dt
+        };
         particle.age += particle.inverse_lifespan * dt;
         if let Some(h4) = &self.h4 {
             particle.age = h4.age(particle.age);
@@ -579,11 +717,19 @@ impl Emitter {
         let state = particle.state(state);
         if let (Some(turbulence), Some(xform)) = (&self.turbulence, turbulence) {
             let strength = turbulence.strength.scalar(&state);
-            let push = turbulence_push(&turbulence.image, xform, [particle.emission_time, particle.seeds[4]], strength * dt);
+            let push = turbulence_push(
+                &turbulence.image,
+                xform,
+                [particle.emission_time, particle.seeds[4]],
+                strength * dt,
+            );
             particle.position = std::array::from_fn(|axis| particle.position[axis] + push[axis]);
         }
-        let acceleration =
-            if self.card_lerps { self.acceleration.vector(&state) } else { self.acceleration.around(&state) };
+        let acceleration = if self.card_lerps {
+            self.acceleration.vector(&state)
+        } else {
+            self.acceleration.around(&state)
+        };
         particle.velocity = std::array::from_fn(|axis| velocity[axis] + acceleration[axis] * dt);
         particle.velocity[2] -= gravity * dt;
         let air = (air_friction * dt).clamp(0.0, 1.0);
@@ -616,7 +762,11 @@ impl Particle {
     /// turning, and is queued afresh, so the card's next update moves nothing.
     fn move_to_card(&mut self) {
         let speed = dot(self.velocity, self.velocity).sqrt();
-        let way = if speed > 0.0 { self.velocity.map(|axis| axis / speed) } else { [0.0, 0.0, -1.0] };
+        let way = if speed > 0.0 {
+            self.velocity.map(|axis| axis / speed)
+        } else {
+            [0.0, 0.0, -1.0]
+        };
         self.velocity = way.map(|axis| axis * 0.001);
         self.rotation_rate = 0.0;
         self.on_card = true;
@@ -639,7 +789,11 @@ impl ParticleField {
         time: f32,
     ) {
         if self.running.len() != systems.len() || self.time.is_none_or(|last| time < last) {
-            self.running = systems.iter().enumerate().map(|(at, system)| fresh_emitters(system, at as u32)).collect();
+            self.running = systems
+                .iter()
+                .enumerate()
+                .map(|(at, system)| fresh_emitters(system, at as u32))
+                .collect();
             self.instances = vec![Vec::new(); systems.len()];
             self.tracks = vec![Vec::new(); systems.len()];
             self.time = Some(time - PRE_ROLL);
@@ -669,7 +823,8 @@ impl ParticleField {
                     runs.retain_mut(|run| {
                         let age = now - run.start;
                         if let Some(followed) = run.follows {
-                            let found = tracks[run.parent].iter().find(|track| track.id == followed);
+                            let found =
+                                tracks[run.parent].iter().find(|track| track.id == followed);
                             match found {
                                 Some(track) => {
                                     run.origin = track.place;
@@ -681,20 +836,46 @@ impl ParticleField {
                         // Its first step runs whatever its length: an event of a
                         // tick can be over before a frame ends.
                         let first = age <= dt * 1.5;
-                        let alive = first || run.lifetime.map_or(age < system.times.once(), |lifetime| age < lifetime);
+                        let alive = first
+                            || run
+                                .lifetime
+                                .map_or(age < system.times.once(), |lifetime| age < lifetime);
                         if system.die_with_effect && !alive {
-                            run.running.iter_mut().for_each(|running| running.particles.clear());
+                            run.running
+                                .iter_mut()
+                                .for_each(|running| running.particles.clear());
                         }
-                        let state = alive.then(|| system_state_stepped(system, None, now, dt, run.start)).flatten();
+                        let state = alive
+                            .then(|| system_state_stepped(system, None, now, dt, run.start))
+                            .flatten();
                         let state = state.map(|state| ParticleState {
                             effect_a: run.effect_a,
-                            system_age: run.lifetime.map_or(state.system_age, |lifetime| age / lifetime),
+                            system_age: run
+                                .lifetime
+                                .map_or(state.system_age, |lifetime| age / lifetime),
                             ..state
                         });
                         let state = with_lod(system, state, run.origin, eye);
-                        let (place, events) = ((run.origin, run.axes), (&mut births, &mut deaths, &mut hits));
-                        step_location(system, &mut run.running, state, place, now, dt, ground, events, &mut no_tracks);
-                        alive || run.running.iter().any(|running| !running.particles.is_empty())
+                        let (place, events) = (
+                            (run.origin, run.axes),
+                            (&mut births, &mut deaths, &mut hits),
+                        );
+                        step_location(
+                            system,
+                            &mut run.running,
+                            state,
+                            place,
+                            now,
+                            dt,
+                            ground,
+                            events,
+                            &mut no_tracks,
+                        );
+                        alive
+                            || run
+                                .running
+                                .iter()
+                                .any(|running| !running.particles.is_empty())
                     });
                     self.instances[index] = runs;
                     continue;
@@ -706,11 +887,26 @@ impl ParticleField {
                 let state = with_lod(system, state, origin, eye);
                 let (running, tracks) = (&mut self.running[index], &mut self.tracks[index]);
                 let events = (&mut births, &mut deaths, &mut hits);
-                step_location(system, running, state, (origin, axes), now, dt, ground, events, tracks);
+                step_location(
+                    system,
+                    running,
+                    state,
+                    (origin, axes),
+                    now,
+                    dt,
+                    ground,
+                    events,
+                    tracks,
+                );
                 let off = !system.scale_by.is_empty()
-                    && !scope.as_ref().and_then(|values| values.get(&system.scale_by)).is_some_and(|value| *value > 0.0);
+                    && !scope
+                        .as_ref()
+                        .and_then(|values| values.get(&system.scale_by))
+                        .is_some_and(|value| *value > 0.0);
                 if system.die_with_effect && (off || system.times.is_over(now - onset)) {
-                    self.running[index].iter_mut().for_each(|running| running.particles.clear());
+                    self.running[index]
+                        .iter_mut()
+                        .for_each(|running| running.particles.clear());
                 }
                 let effect_a = state.map_or(1.0, |state| state.effect_a);
                 for (trigger, offset) in &system.attached {
@@ -719,23 +915,45 @@ impl ParticleField {
                         ParticleTrigger::Death => &deaths,
                         ParticleTrigger::Collision => &hits,
                     };
-                    let follow = matches!(trigger, ParticleTrigger::Birth | ParticleTrigger::Carried);
+                    let follow =
+                        matches!(trigger, ParticleTrigger::Birth | ParticleTrigger::Carried);
                     spawned.extend(events.iter().map(|&(id, place, velocity)| {
                         let speed = dot(velocity, velocity).sqrt();
                         let (effect_a, lifetime) = match trigger {
                             // The game makes them under the same effect.
                             ParticleTrigger::Carried => (effect_a, self.lifespan_of(index, id)),
                             // A hit reports the velocity it bounced away with.
-                            ParticleTrigger::Death | ParticleTrigger::Collision if system.look.death_scaled_by_speed => {
+                            ParticleTrigger::Death | ParticleTrigger::Collision
+                                if system.look.death_scaled_by_speed =>
+                            {
                                 ((speed - 0.5).clamp(0.0, 1.0), None)
                             }
                             _ => (1.0, None),
                         };
-                        ((index + offset, index), follow.then_some(id), (place, velocity), system.world, origin, axes, effect_a, lifetime)
+                        (
+                            (index + offset, index),
+                            follow.then_some(id),
+                            (place, velocity),
+                            system.world,
+                            origin,
+                            axes,
+                            effect_a,
+                            lifetime,
+                        )
                     }));
                 }
             }
-            for ((index, parent), follows, (place, velocity), world, origin, axes, effect_a, lifetime) in spawned {
+            for (
+                (index, parent),
+                follows,
+                (place, velocity),
+                world,
+                origin,
+                axes,
+                effect_a,
+                lifetime,
+            ) in spawned
+            {
                 let Some(system) = systems.get(index) else {
                     continue;
                 };
@@ -750,9 +968,14 @@ impl ParticleField {
                 let (place, velocity) = if world {
                     (place, velocity)
                 } else {
-                    (std::array::from_fn(|axis| origin[axis] + turn(place)[axis]), turn(velocity))
+                    (
+                        std::array::from_fn(|axis| origin[axis] + turn(place)[axis]),
+                        turn(velocity),
+                    )
                 };
-                let seed = (runs.len() as u32 + 1).wrapping_mul(index as u32 + 1).wrapping_add((now * 30.0) as u32);
+                let seed = (runs.len() as u32 + 1)
+                    .wrapping_mul(index as u32 + 1)
+                    .wrapping_add((now * 30.0) as u32);
                 runs.push(ChildInstance {
                     follows,
                     parent,
@@ -770,8 +993,15 @@ impl ParticleField {
 
     /// The lifespan of a live particle of system `index`, by its id.
     fn lifespan_of(&self, index: usize, id: u64) -> Option<f32> {
-        let particles = self.running.get(index)?.iter().flat_map(|running| &running.particles);
-        particles.filter(|particle| particle.id == id).map(|particle| particle.inverse_lifespan.recip()).next()
+        let particles = self
+            .running
+            .get(index)?
+            .iter()
+            .flat_map(|running| &running.particles);
+        particles
+            .filter(|particle| particle.id == id)
+            .map(|particle| particle.inverse_lifespan.recip())
+            .next()
     }
 
     /// The quads of a system, in a world-space triangle list, at the area
@@ -795,7 +1025,16 @@ impl ParticleField {
         if system.child {
             for run in self.instances.get(index).into_iter().flatten() {
                 let at = (run.origin, run.axes, run.start);
-                system.vertices_at(&run.running, at, values, view, lighting, time, stops, &mut vertices);
+                system.vertices_at(
+                    &run.running,
+                    at,
+                    values,
+                    view,
+                    lighting,
+                    time,
+                    stops,
+                    &mut vertices,
+                );
             }
             return vertices;
         }
@@ -803,14 +1042,28 @@ impl ParticleField {
             return vertices;
         };
         let (origin, axes) = location(system, bones);
-        system.vertices_at(running, (origin, axes, onset), values, view, lighting, time, stops, &mut vertices);
+        system.vertices_at(
+            running,
+            (origin, axes, onset),
+            values,
+            view,
+            lighting,
+            time,
+            stops,
+            &mut vertices,
+        );
         vertices
     }
 
     /// Where the particles of `system` are, for a contrail that follows them.
-    pub(crate) fn tracks_of<'a>(&'a self, systems: &[Arc<ParticleSystem>], strip: &Arc<Gen3StripAt>) -> Vec<&'a ParticleTrack> {
+    pub(crate) fn tracks_of<'a>(
+        &'a self,
+        systems: &[Arc<ParticleSystem>],
+        strip: &Arc<Gen3StripAt>,
+    ) -> Vec<&'a ParticleTrack> {
         let carriers = systems.iter().zip(&self.tracks);
-        let carrying = carriers.filter(|(system, _)| system.carried.iter().any(|known| Arc::ptr_eq(known, strip)));
+        let carrying = carriers
+            .filter(|(system, _)| system.carried.iter().any(|known| Arc::ptr_eq(known, strip)));
         carrying.flat_map(|(_, tracks)| tracks).collect()
     }
 
@@ -831,7 +1084,10 @@ impl ParticleField {
 }
 
 /// Where a system stands: its marker, on its node's pose.
-pub(super) fn location(system: &ParticleSystem, bones: Option<&[[f32; 4]]>) -> ([f32; 3], [[f32; 3]; 3]) {
+pub(super) fn location(
+    system: &ParticleSystem,
+    bones: Option<&[[f32; 4]]>,
+) -> ([f32; 3], [[f32; 3]; 3]) {
     let Some(rows) = bones.and_then(|bones| bones.get(system.node * 3..system.node * 3 + 3)) else {
         return (system.position, system.axes);
     };
@@ -840,7 +1096,11 @@ pub(super) fn location(system: &ParticleSystem, bones: Option<&[[f32; 4]]>) -> (
     let turn = |[i, j, k]: [f32; 3]| -> [f32; 3] {
         std::array::from_fn(|row| rows[row][0] * i + rows[row][1] * j + rows[row][2] * k)
     };
-    let axes = if system.world_oriented { system.axes } else { system.axes.map(turn) };
+    let axes = if system.world_oriented {
+        system.axes
+    } else {
+        system.axes.map(turn)
+    };
     ([place(&rows[0]), place(&rows[1]), place(&rows[2])], axes)
 }
 
@@ -862,9 +1122,8 @@ pub(super) fn emitter_frame(
         [-cos_pitch * sin_yaw, cos_yaw, -sin_pitch * sin_yaw],
         [-sin_pitch, 0.0, cos_pitch],
     ];
-    let turned: [[f32; 3]; 3] = rotation.map(|row| {
-        std::array::from_fn(|axis| (0..3).map(|at| axes[at][axis] * row[at]).sum())
-    });
+    let turned: [[f32; 3]; 3] = rotation
+        .map(|row| std::array::from_fn(|axis| (0..3).map(|at| axes[at][axis] * row[at]).sum()));
     let offset = emitter.offset.vector(state);
     let moved: [f32; 3] = std::array::from_fn(|axis| {
         origin[axis] + (0..3).map(|at| turned[at][axis] * offset[at]).sum::<f32>()

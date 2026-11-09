@@ -5,11 +5,11 @@
 //! 0x829E14B0) and a strip of rows in order. See
 //! `docs/h4-preview-research/tracers.md` §4.
 
-use eframe::glow::{self, HasContext};
+use super::super::super::h4::materials::H4EffectMaterial;
 use super::super::effects::gl::{H4EffectCx, material_functions};
 use super::super::tracers::H4TracerDraw;
-use super::super::super::h4::materials::H4EffectMaterial;
 use crate::core::hlsl::parse::Type;
+use eframe::glow::{self, HasContext};
 
 /// `k_maxRowsPerInstance`.
 const ROWS_PER_STRIP: usize = 8;
@@ -63,7 +63,15 @@ pub(in crate::app::model_preview) unsafe fn draw_h4_tracer(
     material: &H4EffectMaterial,
     draw: &H4TracerDraw,
 ) {
-    let H4EffectCx { gl, ref mut state, frame, depth, size, placeholder, object } = *cx;
+    let H4EffectCx {
+        gl,
+        ref mut state,
+        frame,
+        depth,
+        size,
+        placeholder,
+        object,
+    } = *cx;
     let pass = &*material.pass;
     // `Render` skips one profile or fewer.
     let count = draw.states.len();

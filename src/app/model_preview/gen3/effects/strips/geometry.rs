@@ -118,12 +118,21 @@ fn strip_vertices(
 /// Reach's beam angle fade (`effects__beam.hlsl` l.296–305), at a corner
 /// `place` of `profile`: by how far from face on the corner's side is seen,
 /// across the beam's direction. Angle 0 faces the camera.
-pub(super) fn angle_fade(place: [f32; 3], profile: &Profile, eye: [f32; 3], range: f32, cutoff: f32) -> f32 {
+pub(super) fn angle_fade(
+    place: [f32; 3],
+    profile: &Profile,
+    eye: [f32; 3],
+    range: f32,
+    cutoff: f32,
+) -> f32 {
     let profile_normal = clamped_unit(minus(place, profile.place));
     let camera_to_vertex = clamped_unit(minus(place, eye));
     let profile_ortho = clamped_unit(cross(camera_to_vertex, profile.direction));
     let profile_camera_ortho = clamped_unit(cross(profile_ortho, profile.direction));
-    let angle = dot(profile_camera_ortho, profile_normal).abs().min(1.0).acos();
+    let angle = dot(profile_camera_ortho, profile_normal)
+        .abs()
+        .min(1.0)
+        .acos();
     // A range of 0 divides by nothing, as the game does: a step at the begin
     // angle, and a NaN on it.
     saturate(1.0 - (angle - cutoff) / range)
@@ -131,7 +140,13 @@ pub(super) fn angle_fade(place: [f32; 3], profile: &Profile, eye: [f32; 3], rang
 
 /// A profile's colour as `default_vs` exposes it, by `particle_exposure`'s
 /// rule, at the area screen effects' `stops`.
-pub(super) fn exposed(look: &StripLook, color: [f32; 3], alpha: f32, intensity: f32, stops: f32) -> [f32; 4] {
+pub(super) fn exposed(
+    look: &StripLook,
+    color: [f32; 3],
+    alpha: f32,
+    intensity: f32,
+    stops: f32,
+) -> [f32; 4] {
     let light = particle_exposure(look.shader.blend, true, look.reach, stops);
     let [red, green, blue] = color.map(|channel| channel.clamp(0.0, 1.0) * intensity * light);
     [red, green, blue, alpha.clamp(0.0, 1.0) * intensity]
@@ -139,14 +154,15 @@ pub(super) fn exposed(look: &StripLook, color: [f32; 3], alpha: f32, intensity: 
 
 /// `pulse`'s split of a beam: how far its `count` profiles reach.
 pub(super) fn beam_profiles(capped: f32, density: f32) -> usize {
-    (capped * density).ceil().clamp(FEWEST_PROFILES, MOST_PROFILES as f32) as usize
+    (capped * density)
+        .ceil()
+        .clamp(FEWEST_PROFILES, MOST_PROFILES as f32) as usize
 }
 
 impl Gen3StripAt {
     pub(crate) fn scale_names(&self) -> [&str; 2] {
         [&self.scale_by, &self.secondary_by]
     }
-
 
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
@@ -168,12 +184,20 @@ impl Gen3StripAt {
     }
 
     /// The states this frame, or none while its event is not running.
-    pub(super) fn state(&self, values: Option<&FunctionValues>, time: f32, onset: f32) -> Option<StripState> {
+    pub(super) fn state(
+        &self,
+        values: Option<&FunctionValues>,
+        time: f32,
+        onset: f32,
+    ) -> Option<StripState> {
         let read = |name: &str, none: f32| {
             if name.is_empty() {
                 return none;
             }
-            values.and_then(|values| values.get(name)).copied().unwrap_or(0.0)
+            values
+                .and_then(|values| values.get(name))
+                .copied()
+                .unwrap_or(0.0)
         };
         let effect_a = read(&self.scale_by, 1.0);
         if effect_a <= 0.0 {
@@ -203,24 +227,42 @@ impl Gen3StripAt {
             return Vec::new();
         };
         let (origin, turned) = posed_on(self.node, self.position, self.forward, bones);
-        let forward = if self.world_oriented { self.forward } else { turned };
+        let forward = if self.world_oriented {
+            self.forward
+        } else {
+            turned
+        };
         let uncapped = beam.length.scalar(&state);
-        let reach = self.end.map(|(node, end)| minus(posed_on(node, end, [1.0, 0.0, 0.0], bones).0, origin));
+        let reach = self
+            .end
+            .map(|(node, end)| minus(posed_on(node, end, [1.0, 0.0, 0.0], bones).0, origin));
         let (direction, cap) = match reach {
             Some(reach) => (clamped_unit(reach), dot(reach, reach).sqrt()),
             None => (clamped_unit(forward), 0.0),
         };
-        let capped = if cap != 0.0 && cap <= uncapped { cap } else { uncapped };
+        let capped = if cap != 0.0 && cap <= uncapped {
+            cap
+        } else {
+            uncapped
+        };
         state.length = capped;
         let density = beam.density.scalar(&state);
         let count = beam_profiles(capped, density);
         let step = (density * capped).max(1e-6).recip();
-        let cap_percentage = if uncapped != 0.0 { capped / uncapped } else { 1.0 };
+        let cap_percentage = if uncapped != 0.0 {
+            capped / uncapped
+        } else {
+            1.0
+        };
         let offset = beam.offset.scalar(&state);
         let look = &*self.look;
         let profiles: Vec<Profile> = (0..count)
             .map(|index| {
-                let percentile = if index == count - 1 { 1.0 } else { index as f32 * step };
+                let percentile = if index == count - 1 {
+                    1.0
+                } else {
+                    index as f32 * step
+                };
                 state.position = percentile;
                 state.uncapped_position = percentile * cap_percentage;
                 let along = offset + capped * percentile;
@@ -273,16 +315,29 @@ impl Gen3StripAt {
         }
         let base = StripState {
             speed: running.speed,
-            ..self.state(values, time, onset).unwrap_or(StripState { game_time: time.rem_euclid(1.0), age: 1.0, seeds: self.seeds, ..Default::default() })
+            ..self.state(values, time, onset).unwrap_or(StripState {
+                game_time: time.rem_euclid(1.0),
+                age: 1.0,
+                seeds: self.seeds,
+                ..Default::default()
+            })
         };
         let look = &*self.look;
-        let initial = if contrail.tint_from_lightmap { lightmap_tint(lighting) } else { [1.0; 3] };
+        let initial = if contrail.tint_from_lightmap {
+            lightmap_tint(lighting)
+        } else {
+            [1.0; 3]
+        };
         let live = &running.profiles;
         let profiles: Vec<Profile> = live
             .iter()
             .enumerate()
             .map(|(index, profile)| {
-                let state = StripState { profile_age: profile.age, profile_seeds: profile.seeds, ..base };
+                let state = StripState {
+                    profile_age: profile.age,
+                    profile_seeds: profile.seeds,
+                    ..base
+                };
                 let direction = match live.get(index + 1) {
                     Some(next) => minus(next.place, profile.place),
                     None => minus(profile.place, live[index - 1].place),
@@ -292,7 +347,8 @@ impl Gen3StripAt {
                     * profile.alpha;
                 let [x, y, _] = contrail.offset.vector(&state);
                 let intensity = contrail.intensity.scalar(&state);
-                let mut color = exposed(look, contrail.color.color(&state), alpha, intensity, stops);
+                let mut color =
+                    exposed(look, contrail.color.color(&state), alpha, intensity, stops);
                 (0..3).for_each(|channel| color[channel] *= initial[channel]);
                 Profile {
                     place: profile.place,
@@ -309,8 +365,16 @@ impl Gen3StripAt {
             .collect();
         let fade = look.origin_fade;
         let uv_offset = [
-            if contrail.random_u { self.seeds[0] } else { 0.0 },
-            if contrail.random_v { self.seeds[1] } else { 0.0 },
+            if contrail.random_u {
+                self.seeds[0]
+            } else {
+                0.0
+            },
+            if contrail.random_v {
+                self.seeds[1]
+            } else {
+                0.0
+            },
         ];
         let scroll_time = look.scroll_time(REACH_CONTRAIL_SCROLL_PERIOD, time);
         strip_vertices(
@@ -319,7 +383,11 @@ impl Gen3StripAt {
             view,
             scroll_time,
             uv_offset,
-            |profile, _| fade.map_or(1.0, |[range, cutoff]| look.fade(range * (profile.length - cutoff))),
+            |profile, _| {
+                fade.map_or(1.0, |[range, cutoff]| {
+                    look.fade(range * (profile.length - cutoff))
+                })
+            },
             |_| view.forward,
         )
     }

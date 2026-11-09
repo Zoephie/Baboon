@@ -1,8 +1,8 @@
 //! The hologram pass: the screen maps uploaded and the hologram drawn.
 
-use crate::app::model_preview::gl::blit::blit_depth;
 use super::super::lighting::h4_frame_values;
 use super::*;
+use crate::app::model_preview::gl::blit::blit_depth;
 
 impl H4Game {
     /// `RenderHolograms`' generate pass, after the albedo (`c_player_view::render`
@@ -22,21 +22,36 @@ impl H4Game {
     ) -> Option<HologramPicture> {
         let (first, material) = holograms.first()?;
         let post = Arc::clone(material.h4()?.post()?);
-        let owner = frame.preview.materials.get(first.material_index as usize).map_or(0, |material| material.object);
+        let owner = frame
+            .preview
+            .materials
+            .get(first.material_index as usize)
+            .map_or(0, |material| material.object);
         let (center, radius) = hologram_sphere(frame);
         let view = ce_flare_view(&frame.camera);
         let window = |point: [f32; 3]| {
             let clip = ce_flare_clip(&frame.camera, point);
-            let depth: f32 = (0..3).map(|axis| (point[axis] - view.eye[axis]) * view.forward[axis]).sum();
+            let depth: f32 = (0..3)
+                .map(|axis| (point[axis] - view.eye[axis]) * view.forward[axis])
+                .sum();
             (clip[3] > 1e-4 && depth > 1e-4).then(|| {
                 let ndc = [clip[0] / clip[3], clip[1] / clip[3]];
-                ([(ndc[0] * 0.5 + 0.5) * size[0] as f32, (ndc[1] * 0.5 + 0.5) * size[1] as f32], depth)
+                (
+                    [
+                        (ndc[0] * 0.5 + 0.5) * size[0] as f32,
+                        (ndc[1] * 0.5 + 0.5) * size[1] as f32,
+                    ],
+                    depth,
+                )
             })
         };
         // The lens, from how far one unit up the view at the centre's depth
         // reaches on the picture.
-        let depth: f32 = (0..3).map(|axis| (center[axis] - view.eye[axis]) * view.forward[axis]).sum();
-        let ahead: [f32; 3] = std::array::from_fn(|axis| view.eye[axis] + view.forward[axis] * depth.max(1e-3));
+        let depth: f32 = (0..3)
+            .map(|axis| (center[axis] - view.eye[axis]) * view.forward[axis])
+            .sum();
+        let ahead: [f32; 3] =
+            std::array::from_fn(|axis| view.eye[axis] + view.forward[axis] * depth.max(1e-3));
         let raised: [f32; 3] = std::array::from_fn(|axis| ahead[axis] + view.up[axis]);
         let reach = |point| {
             let clip = ce_flare_clip(&frame.camera, point);
@@ -45,9 +60,22 @@ impl H4Game {
         let ndc = (reach(raised) - reach(ahead)).abs().max(1e-6);
         let vertical_fov = 2.0 * (1.0 / (depth.max(1e-3) * ndc)).atan();
         let inside = (0..3).all(|axis| (view.eye[axis] - center[axis]).abs() <= radius);
-        let screen = hologram_screen(center, radius, window, view.right, view.up, inside, vertical_fov, size)?;
+        let screen = hologram_screen(
+            center,
+            radius,
+            window,
+            view.right,
+            view.up,
+            inside,
+            vertical_fov,
+            size,
+        )?;
         unsafe {
-            if self.surfaces.as_ref().is_none_or(|holograms| holograms.size != size) {
+            if self
+                .surfaces
+                .as_ref()
+                .is_none_or(|holograms| holograms.size != size)
+            {
                 if let Some(old) = self.surfaces.take() {
                     old.delete(gl);
                 }
@@ -55,7 +83,11 @@ impl H4Game {
             }
             let (color, framebuffer, combined_framebuffer) = {
                 let holograms = self.surfaces.as_ref()?;
-                (holograms.color, holograms.framebuffer, holograms.combined_framebuffer)
+                (
+                    holograms.color,
+                    holograms.framebuffer,
+                    holograms.combined_framebuffer,
+                )
             };
             // MCC: the scene's depth copied in (`copy_depth`), the colour
             // cleared to nothing.
@@ -80,8 +112,12 @@ impl H4Game {
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(true);
             gen3_set_cull(gl, frame);
-            super::super::pass_hooks::h4_pass_hooks(state).submit_draw = Some(H4Draw::HologramOpaque);
-            for (batch, material) in holograms.iter().filter(|(_, material)| !post_bloom(material)) {
+            super::super::pass_hooks::h4_pass_hooks(state).submit_draw =
+                Some(H4Draw::HologramOpaque);
+            for (batch, material) in holograms
+                .iter()
+                .filter(|(_, material)| !post_bloom(material))
+            {
                 state.draw_pass(core, gl, frame, slot, batch, material, &material.lit, None);
             }
             super::super::pass_hooks::h4_pass_hooks(state).submit_draw = None;
@@ -91,9 +127,13 @@ impl H4Game {
             gl.enable(glow::BLEND);
             set_alpha_blend_max(gl);
             gl.depth_mask(false);
-            super::super::pass_hooks::h4_pass_hooks(state).submit_draw = Some(H4Draw::HologramBlend);
+            super::super::pass_hooks::h4_pass_hooks(state).submit_draw =
+                Some(H4Draw::HologramBlend);
             for (batch, material) in holograms.iter().filter(|(_, material)| {
-                !post_bloom(material) && material.h4().is_some_and(|submit| submit.is_blended_hologram())
+                !post_bloom(material)
+                    && material
+                        .h4()
+                        .is_some_and(|submit| submit.is_blended_hologram())
             }) {
                 state.draw_pass(core, gl, frame, slot, batch, material, &material.lit, None);
             }
@@ -104,17 +144,25 @@ impl H4Game {
             // Its bloom, by the hologram camera fx.
             let vertices = state.empty_array(gl);
             if self.bloom.is_none() {
-                self.bloom = super::super::bloom::H4Bloom::new(gl, core.black_flat, core.white_volume);
+                self.bloom =
+                    super::super::bloom::H4Bloom::new(gl, core.black_flat, core.white_volume);
             }
             let settings = H4BloomSettings::hologram(screen.bloom_scale);
-            let bloom = self.bloom.as_mut()?.build(gl, vertices, framebuffer, color, size, None, &settings);
+            let bloom =
+                self.bloom
+                    .as_mut()?
+                    .build(gl, vertices, framebuffer, color, size, None, &settings);
             // Pass 3, "hologram postbloom": layer 3, by its own blend.
             gl.enable(glow::SCISSOR_TEST);
             gl.scissor(x0, y0, x1 - x0, y1 - y0);
             gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
-            for (batch, material) in holograms.iter().filter(|(_, material)| post_bloom(material)) {
-                let blends = material.blend != super::super::super::gen3::shaders::Gen3Blend::Opaque;
+            for (batch, material) in holograms
+                .iter()
+                .filter(|(_, material)| post_bloom(material))
+            {
+                let blends =
+                    material.blend != super::super::super::gen3::shaders::Gen3Blend::Opaque;
                 if blends {
                     gl.enable(glow::BLEND);
                     super::super::super::gen3::pipeline::gen3_set_blend(gl, material.blend);
@@ -132,21 +180,54 @@ impl H4Game {
             gl.clear(glow::COLOR_BUFFER_BIT);
             gl.disable(glow::DEPTH_TEST);
             gl.depth_mask(false);
-            let window_constants = [width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32];
+            let window_constants = [
+                width as f32,
+                height as f32,
+                1.0 / width as f32,
+                1.0 / height as f32,
+            ];
             let generic = vec![screen.coverage, screen.texcoords, [0.0; 4], [0.0; 4]];
             let engine = [
-                ("ps_player_window_constants", Gen3Value::Floats(window_constants)),
-                ("ps_material_generic_parameters", Gen3Value::FloatArray(generic)),
-                ("ps_filmic_tone_curve_params", Gen3Value::FloatArray(IDENTITY_CURVE.map(|value| [value; 4]).to_vec())),
+                (
+                    "ps_player_window_constants",
+                    Gen3Value::Floats(window_constants),
+                ),
+                (
+                    "ps_material_generic_parameters",
+                    Gen3Value::FloatArray(generic),
+                ),
+                (
+                    "ps_filmic_tone_curve_params",
+                    Gen3Value::FloatArray(IDENTITY_CURVE.map(|value| [value; 4]).to_vec()),
+                ),
             ];
-            let textures = [("ps_surface_sampler_texture", Some(color)), ("ps_bloom_sampler_texture", bloom.or(core.black_flat))];
-            self.screen_pass(core, state, gl, frame, &post, &post.combine, owner, &engine, &textures, size);
+            let textures = [
+                ("ps_surface_sampler_texture", Some(color)),
+                ("ps_bloom_sampler_texture", bloom.or(core.black_flat)),
+            ];
+            self.screen_pass(
+                core,
+                state,
+                gl,
+                frame,
+                &post,
+                &post.combine,
+                owner,
+                &engine,
+                &textures,
+                size,
+            );
             gl.disable(glow::SCISSOR_TEST);
             gl.depth_mask(true);
             gl.enable(glow::DEPTH_TEST);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
             gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
-            Some(HologramPicture { screen, post, owner, distance: depth })
+            Some(HologramPicture {
+                screen,
+                post,
+                owner,
+                distance: depth,
+            })
         }
     }
 
@@ -180,12 +261,26 @@ impl H4Game {
             gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
             gl.color_mask(true, true, true, true);
             let engine = [
-                ("ps_filmic_tone_curve_params", Gen3Value::FloatArray(view_inverse.map(|value| [value; 4]).to_vec())),
+                (
+                    "ps_filmic_tone_curve_params",
+                    Gen3Value::FloatArray(view_inverse.map(|value| [value; 4]).to_vec()),
+                ),
                 ("ps_material_blend_constant", Gen3Value::Floats([0.0; 4])),
             ];
             let textures = [("source_samplerTexture", Some(combined))];
             let post = Arc::clone(&picture.post);
-            self.screen_pass(core, state, gl, frame, &post, &post.composite, picture.owner, &engine, &textures, size);
+            self.screen_pass(
+                core,
+                state,
+                gl,
+                frame,
+                &post,
+                &post.composite,
+                picture.owner,
+                &engine,
+                &textures,
+                size,
+            );
             gl.disable(glow::SCISSOR_TEST);
             gl.enable(glow::DEPTH_TEST);
             gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
@@ -212,25 +307,48 @@ impl H4Game {
         unsafe {
             let holograms = self.surfaces.as_mut().expect("the hologram surfaces");
             if !uploaded_from(holograms.uploaded.as_ref().map(|(known, _)| known), post) {
-                for texture in holograms.uploaded.take().into_iter().flat_map(|(_, map)| map.into_values()) {
+                for texture in holograms
+                    .uploaded
+                    .take()
+                    .into_iter()
+                    .flat_map(|(_, map)| map.into_values())
+                {
                     gl.delete_texture(texture);
                 }
                 let mut map = HashMap::new();
                 for screen in [&post.combine, &post.composite] {
                     for texture in &screen.textures {
-                        if let Some(uploaded) = upload_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
+                        if let Some(uploaded) = upload_image_linear(
+                            gl,
+                            &texture.image,
+                            texture.texels,
+                            &texture.mips,
+                            texture.sampler,
+                        ) {
                             map.insert(texture.uniform.clone(), uploaded);
                         }
                     }
                 }
                 holograms.uploaded = Some((post.clone(), map));
             }
-            let uploaded = holograms.uploaded.as_ref().map(|(_, map)| map.clone()).unwrap_or_default();
+            let uploaded = holograms
+                .uploaded
+                .as_ref()
+                .map(|(_, map)| map.clone())
+                .unwrap_or_default();
             let pass: &Arc<Gen3Pass> = &material.pass;
             state.with_program(core, gl, pass, |state, this, program| {
                 gl.use_program(Some(program.program));
-                let drawn = DrawnObject { values: frame.function_values_of_object(owner), time: frame.time, owner };
-                let node = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+                let drawn = DrawnObject {
+                    values: frame.function_values_of_object(owner),
+                    time: frame.time,
+                    owner,
+                };
+                let node = [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                ];
                 let functions = material.submit.draw_values(H4Draw::Lit, &drawn, node);
                 for (name, ty) in &pass.uniforms {
                     let location = program.location(gl, name);

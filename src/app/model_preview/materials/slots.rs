@@ -1,6 +1,5 @@
 //! The texture slots a material binds, and their parameters.
 
-
 /// The texture roles the preview understands.
 ///
 /// Deliberately the maps that describe the *surface* — its colour and its shape

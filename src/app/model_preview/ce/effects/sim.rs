@@ -104,7 +104,12 @@ pub(crate) struct CeObjectInputs {
 
 /// A range's lower bound and delta, each times the scales its `A` and `B`
 /// pairs name.
-pub(super) fn scaled(value: [f32; 2], effect: &RunningEffect, a: [bool; 2], b: [bool; 2]) -> [f32; 2] {
+pub(super) fn scaled(
+    value: [f32; 2],
+    effect: &RunningEffect,
+    a: [bool; 2],
+    b: [bool; 2],
+) -> [f32; 2] {
     let mut lower = value[0];
     let mut delta = value[1] - value[0];
     if a[0] {
@@ -125,17 +130,26 @@ pub(super) fn scaled(value: [f32; 2], effect: &RunningEffect, a: [bool; 2], b: [
 pub(super) fn rotate_about(vector: [f32; 3], axis: [f32; 3], sine: f32, cosine: f32) -> [f32; 3] {
     let along = dot(axis, vector);
     let across = cross(axis, vector);
-    std::array::from_fn(|at| vector[at] * cosine + across[at] * sine + axis[at] * along * (1.0 - cosine))
+    std::array::from_fn(|at| {
+        vector[at] * cosine + across[at] * sine + axis[at] * along * (1.0 - cosine)
+    })
 }
 
 fn turn_by_location(location: &CeLocation, local: [f32; 3]) -> [f32; 3] {
-    std::array::from_fn(|at| (0..3).map(|row| location.axes[row][at] * local[row]).sum::<f32>())
+    std::array::from_fn(|at| {
+        (0..3)
+            .map(|row| location.axes[row][at] * local[row])
+            .sum::<f32>()
+    })
 }
 
 impl CeParticleField {
     /// How many particles the systems its effects made hold.
     pub(crate) fn system_particle_count(&self) -> usize {
-        self.systems.iter().map(|(_, _, running)| running.particle_count()).sum()
+        self.systems
+            .iter()
+            .map(|(_, _, running)| running.particle_count())
+            .sum()
     }
 
     /// Step every effect and particle to `time`, a frame at a time: each
@@ -156,7 +170,9 @@ impl CeParticleField {
         others: usize,
     ) {
         let own = effects.len();
-        if self.effects.len() != own + self.spawned.len() || self.time.is_none_or(|last| time < last) {
+        if self.effects.len() != own + self.spawned.len()
+            || self.time.is_none_or(|last| time < last)
+        {
             self.effects = effects.iter().map(|_| new_running()).collect();
             self.particles.clear();
             self.lights.clear();
@@ -187,7 +203,14 @@ impl CeParticleField {
             for _ in 0..ticks {
                 self.tick_effects(&effects, &inputs, bones, ground, others, &mut random);
             }
-            self.frame_parts(&effects, ground, dt, ticks as f32 * STEP, others, &mut random);
+            self.frame_parts(
+                &effects,
+                ground,
+                dt,
+                ticks as f32 * STEP,
+                others,
+                &mut random,
+            );
             self.forget_spawned(own);
         }
         self.time = Some(time);
@@ -224,8 +247,16 @@ impl CeParticleField {
                 if self.spawned.len() >= MOST_SPAWNED {
                     return;
                 }
-                let spawn = CeSpawn { scales: plays.scales, color: [1.0; 3], velocity: [0.0; 3] };
-                let copy = CeEffectAt { spawn: Some(spawn), event: None, ..effect.clone() };
+                let spawn = CeSpawn {
+                    scales: plays.scales,
+                    color: [1.0; 3],
+                    velocity: [0.0; 3],
+                };
+                let copy = CeEffectAt {
+                    spawn: Some(spawn),
+                    event: None,
+                    ..effect.clone()
+                };
                 let mut running = new_running();
                 set_event(&mut running, &copy.def, 0, random);
                 self.effects.push(running);
@@ -246,7 +277,8 @@ impl CeParticleField {
         random: &mut CeRandom,
     ) {
         self.tick += 1;
-        let mut system_room = MOST_SYSTEM_PARTICLES.saturating_sub(self.system_particle_count() + others);
+        let mut system_room =
+            MOST_SYSTEM_PARTICLES.saturating_sub(self.system_particle_count() + others);
         for (index, effect) in effects.iter().enumerate() {
             // An event's own effect only stands for its plays.
             if effect.event.is_some() {
@@ -254,7 +286,9 @@ impl CeParticleField {
             }
             let state = inputs(effect.object);
             let running = &mut self.effects[index];
-            let system_random = self.system_random.get_or_insert_with(|| CeRandom::seeded(1));
+            let system_random = self
+                .system_random
+                .get_or_insert_with(|| CeRandom::seeded(1));
             let made = Made {
                 particles: &mut self.particles,
                 lights: &mut self.lights,
@@ -269,7 +303,9 @@ impl CeParticleField {
         // `lights_preprocess_scene` lets go of those past their duration.
         let tick = self.tick;
         self.lights.retain(|light| {
-            let def = effects.get(light.effect).and_then(|effect| effect.def.lights.get(light.def));
+            let def = effects
+                .get(light.effect)
+                .and_then(|effect| effect.def.lights.get(light.def));
             def.is_some_and(|def| def.alive(tick - light.born))
         });
     }
@@ -278,15 +314,28 @@ impl CeParticleField {
     /// `particle_systems_update` by the frame, then, only when ticks ran,
     /// `particles_update` by them, with the effects what they hit and died
     /// of make. A particle that steps a frame per update steps one per tick.
-    fn frame_parts(&mut self, effects: &[CeEffectAt], ground: f32, dt: f32, ticked: f32, others: usize, random: &mut CeRandom) {
-        let mut system_room = MOST_SYSTEM_PARTICLES.saturating_sub(self.system_particle_count() + others);
+    fn frame_parts(
+        &mut self,
+        effects: &[CeEffectAt],
+        ground: f32,
+        dt: f32,
+        ticked: f32,
+        others: usize,
+        random: &mut CeRandom,
+    ) {
+        let mut system_room =
+            MOST_SYSTEM_PARTICLES.saturating_sub(self.system_particle_count() + others);
         // Those with no type in a state go.
-        let system_random = self.system_random.get_or_insert_with(|| CeRandom::seeded(1));
+        let system_random = self
+            .system_random
+            .get_or_insert_with(|| CeRandom::seeded(1));
         self.systems.retain_mut(|(effect, def, running)| {
             effects
                 .get(*effect)
                 .and_then(|effect| effect.def.systems.get(*def))
-                .is_some_and(|def| update_unattached(def, running, ground, dt, system_random, &mut system_room))
+                .is_some_and(|def| {
+                    update_unattached(def, running, ground, dt, system_random, &mut system_room)
+                })
         });
         // `game_frame` runs `particles_update` only when ticks have.
         if ticked <= 0.0 {
@@ -334,7 +383,9 @@ impl CeParticleField {
         for (effect, _, _) in &self.systems {
             used[*effect] = true;
         }
-        let gone: Vec<bool> = (0..total).map(|at| at >= first && self.effects[at].finished && !used[at]).collect();
+        let gone: Vec<bool> = (0..total)
+            .map(|at| at >= first && self.effects[at].finished && !used[at])
+            .collect();
         if !gone.contains(&true) {
             return;
         }
@@ -347,10 +398,19 @@ impl CeParticleField {
             }
         }
         let effects = std::mem::take(&mut self.effects);
-        self.effects = effects.into_iter().zip(&gone).filter(|(_, dropped)| !**dropped).map(|(effect, _)| effect).collect();
+        self.effects = effects
+            .into_iter()
+            .zip(&gone)
+            .filter(|(_, dropped)| !**dropped)
+            .map(|(effect, _)| effect)
+            .collect();
         let spawned = std::mem::take(&mut self.spawned);
-        self.spawned =
-            spawned.into_iter().zip(&gone[first..]).filter(|(_, dropped)| !**dropped).map(|(effect, _)| effect).collect();
+        self.spawned = spawned
+            .into_iter()
+            .zip(&gone[first..])
+            .filter(|(_, dropped)| !**dropped)
+            .map(|(effect, _)| effect)
+            .collect();
         for particle in &mut self.particles {
             particle.effect = renumbered[particle.effect];
         }
@@ -373,7 +433,9 @@ impl CeParticleField {
         let effects = self.all(effects);
         let mut quads = Vec::new();
         let time = self.tick as f32 * STEP;
-        let random = self.system_random.get_or_insert_with(|| CeRandom::seeded(1));
+        let random = self
+            .system_random
+            .get_or_insert_with(|| CeRandom::seeded(1));
         for (effect, def, running) in &mut self.systems {
             let Some(at) = effects.get(*effect) else {
                 continue;
@@ -405,7 +467,14 @@ impl CeParticleField {
             .filter_map(|light| {
                 let effect = effects.get(light.effect)?;
                 let def = effect.def.lights.get(light.def)?;
-                let made = def.at(effect.object, light.node, light.position, light.forward, self.tick - light.born, light.scale)?;
+                let made = def.at(
+                    effect.object,
+                    light.node,
+                    light.position,
+                    light.forward,
+                    self.tick - light.born,
+                    light.scale,
+                )?;
                 Some((def_key(&effect.def), light.def, made))
             })
             .collect()
@@ -425,7 +494,8 @@ impl CeParticleField {
         let mut quads = Vec::new();
         // `render_particles` gives a particle's shader the average radius of
         // its kind drawn with it: sum and count, by effect and kind.
-        let mut radii: std::collections::HashMap<(usize, usize), (f32, f32)> = std::collections::HashMap::new();
+        let mut radii: std::collections::HashMap<(usize, usize), (f32, f32)> =
+            std::collections::HashMap::new();
         for particle in &mut self.particles {
             let Some(effect) = effects.get(particle.effect) else {
                 continue;
@@ -442,7 +512,9 @@ impl CeParticleField {
                 continue;
             }
             particle.undrawn = 0;
-            let entry = radii.entry((def_key(&effect.def), particle.def)).or_insert((0.0, 0.0));
+            let entry = radii
+                .entry((def_key(&effect.def), particle.def))
+                .or_insert((0.0, 0.0));
             entry.0 += radius;
             entry.1 += 1.0;
             let mut scale = radius * 2.0 * def.sprite_scale;
@@ -459,21 +531,33 @@ impl CeParticleField {
             let Some(sprite) = usize::try_from(particle.sequence)
                 .ok()
                 .and_then(|at| def.sequences.get(at))
-                .and_then(|frames| usize::try_from(particle.frame).ok().and_then(|at| frames.get(at)))
+                .and_then(|frames| {
+                    usize::try_from(particle.frame)
+                        .ok()
+                        .and_then(|at| frames.get(at))
+                })
             else {
                 continue;
             };
-            let to_particle = unit_or_unchanged(std::array::from_fn(|axis| center[axis] - view.eye[axis]));
+            let to_particle =
+                unit_or_unchanged(std::array::from_fn(|axis| center[axis] - view.eye[axis]));
             let (across, up) = sprite_basis(def.orientation, direction, to_particle, view);
             // `build_sprite_compute_vertex_fade`, which only a turned sprite takes.
             if def.fade_mode != 0 && def.orientation != 0 {
                 let normal = unit_or_unchanged(cross(across, up));
                 let facing = dot(to_particle, normal).abs();
-                fade *= if def.fade_mode == 2 { 1.0 - facing } else { facing };
+                fade *= if def.fade_mode == 2 {
+                    1.0 - facing
+                } else {
+                    facing
+                };
             }
             let [alpha, red, green, blue] = particle.color;
-            let shown_alpha =
-                if def.blend != FramebufferBlend::AlphaBlend && !def.nonlinear_tint { fade } else { alpha * fade };
+            let shown_alpha = if def.blend != FramebufferBlend::AlphaBlend && !def.nonlinear_tint {
+                fade
+            } else {
+                alpha * fade
+            };
             let size = def.image_widths.get(sprite.image).copied().unwrap_or(1.0) * scale;
             let [left, right, top, bottom] = sprite.rect;
             let center_uv = [left + sprite.registration[0], top + sprite.registration[1]];
@@ -489,7 +573,9 @@ impl CeParticleField {
                 if particle.flags & MIRROR_V != 0 {
                     y = -y;
                 }
-                let place: [f32; 3] = std::array::from_fn(|axis| center[axis] + (across[axis] * x + up[axis] * y) * size);
+                let place: [f32; 3] = std::array::from_fn(|axis| {
+                    center[axis] + (across[axis] * x + up[axis] * y) * size
+                });
                 [place[0], place[1], place[2], u, v]
             };
             quads.push(CeParticleQuad {
@@ -500,20 +586,36 @@ impl CeParticleField {
                 sort_bias: def.sort_bias,
                 secondary: None,
                 image: sprite.image,
-                corners: [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)],
+                corners: [
+                    corner(left, bottom),
+                    corner(right, bottom),
+                    corner(left, top),
+                    corner(right, top),
+                ],
                 color: [red, green, blue, shown_alpha],
             });
         }
         // Then each kind's second map, with what its kind's sprites average.
         let time = self.tick as f32 * STEP;
         for quad in &mut quads {
-            let Some(effect) = effects.iter().find(|effect| def_key(&effect.def) == quad.effect) else {
+            let Some(effect) = effects
+                .iter()
+                .find(|effect| def_key(&effect.def) == quad.effect)
+            else {
                 continue;
             };
-            let Some(map) = effect.def.particles.get(quad.def).and_then(|def| def.secondary.as_ref()) else {
+            let Some(map) = effect
+                .def
+                .particles
+                .get(quad.def)
+                .and_then(|def| def.secondary.as_ref())
+            else {
                 continue;
             };
-            let (sum, count) = radii.get(&(quad.effect, quad.def)).copied().unwrap_or((0.0, 0.0));
+            let (sum, count) = radii
+                .get(&(quad.effect, quad.def))
+                .copied()
+                .unwrap_or((0.0, 0.0));
             let average = if count > 0.0 { sum / count } else { 0.0 };
             quad.secondary = Some(map.draw(time, average));
         }
@@ -567,12 +669,22 @@ fn spawn_effect(def: &Arc<CeEffectDef>, particle: &CeParticle, scale: f32) -> Op
     let along = unit_or_unchanged(particle.direction);
     let frame = |forward: [f32; 3]| {
         let up = unit_or_unchanged(perpendicular(forward));
-        CeLocation { node: WORLD_NODE, position: particle.place, axes: [forward, cross(up, forward), up] }
+        CeLocation {
+            node: WORLD_NODE,
+            position: particle.place,
+            axes: [forward, cross(up, forward), up],
+        }
     };
     let locations = def
         .locations
         .iter()
-        .map(|name| vec![if name == "gravity" { frame([0.0, 0.0, -1.0]) } else { frame(along) }])
+        .map(|name| {
+            vec![if name == "gravity" {
+                frame([0.0, 0.0, -1.0])
+            } else {
+                frame(along)
+            }]
+        })
         .collect();
     Some(CeEffectAt {
         object: u8::MAX,
@@ -599,13 +711,20 @@ pub(crate) fn def_key(def: &Arc<CeEffectDef>) -> usize {
 /// those their particles make when they hit something or die.
 pub(crate) fn reachable_defs(effects: &[CeEffectAt]) -> Vec<Arc<CeEffectDef>> {
     let mut found: Vec<Arc<CeEffectDef>> = Vec::new();
-    let mut pending: Vec<Arc<CeEffectDef>> = effects.iter().map(|effect| effect.def.clone()).collect();
+    let mut pending: Vec<Arc<CeEffectDef>> =
+        effects.iter().map(|effect| effect.def.clone()).collect();
     while let Some(def) = pending.pop() {
         if found.iter().any(|known| Arc::ptr_eq(known, &def)) {
             continue;
         }
         for particle in &def.particles {
-            pending.extend(particle.collision_effect.iter().chain(&particle.death_effect).cloned());
+            pending.extend(
+                particle
+                    .collision_effect
+                    .iter()
+                    .chain(&particle.death_effect)
+                    .cloned(),
+            );
         }
         found.push(def);
     }
@@ -632,13 +751,21 @@ pub(super) struct Made<'a> {
 pub(super) fn created_here(entry: TagStruct<'_>) -> bool {
     let environment = entry.read_enum_option("create in");
     let violence = entry.read_enum_option("violence mode");
-    matches!(environment.as_deref(), None | Some("any environment" | "air only"))
-        && violence.as_deref() != Some("nonviolent mode only")
+    matches!(
+        environment.as_deref(),
+        None | Some("any environment" | "air only")
+    ) && violence.as_deref() != Some("nonviolent mode only")
 }
 
 /// `effect_generate_parts`, for the parts that make lights: one at every
 /// instance of the location, of the parts [`created_here`].
-pub(super) fn generate_parts(index: usize, running: &RunningEffect, effect: &CeEffectAt, lights: &mut Vec<CeRunningLight>, tick: u32) {
+pub(super) fn generate_parts(
+    index: usize,
+    running: &RunningEffect,
+    effect: &CeEffectAt,
+    lights: &mut Vec<CeRunningLight>,
+    tick: u32,
+) {
     for part in &effect.def.events[running.event].lights {
         if !part.created {
             continue;
@@ -669,7 +796,13 @@ pub(super) fn generate_parts(index: usize, running: &RunningEffect, effect: &CeE
 }
 
 /// `effect_real_random_range`, with a range's pair from each scale.
-fn effect_random_range(value: [f32; 2], running: &RunningEffect, a: [bool; 2], b: [bool; 2], random: &mut CeRandom) -> f32 {
+fn effect_random_range(
+    value: [f32; 2],
+    running: &RunningEffect,
+    a: [bool; 2],
+    b: [bool; 2],
+    random: &mut CeRandom,
+) -> f32 {
     let [lower, delta] = scaled(value, running, a, b);
     random.range(0.0, delta) + lower
 }
@@ -694,7 +827,10 @@ pub(super) fn generate_systems(
         if !part.created {
             continue;
         }
-        let (Some(instances), Some(def)) = (effect.locations.get(part.location), effect.def.systems.get(part.system)) else {
+        let (Some(instances), Some(def)) = (
+            effect.locations.get(part.location),
+            effect.def.systems.get(part.system),
+        ) else {
             continue;
         };
         let mut scale = 1.0;
@@ -705,11 +841,18 @@ pub(super) fn generate_systems(
             scale *= running.scale_b;
         }
         for instance in instances {
-            let (point, mut forward) = posed_on(instance.node, instance.position, instance.axes[0], bones);
+            let (point, mut forward) =
+                posed_on(instance.node, instance.position, instance.axes[0], bones);
             if part.face_down {
                 forward = [0.0, 0.0, -1.0];
             }
-            let speed = effect_random_range(part.velocity, running, part.scales_a.velocity, part.scales_b.velocity, random);
+            let speed = effect_random_range(
+                part.velocity,
+                running,
+                part.scales_a.velocity,
+                part.scales_b.velocity,
+                random,
+            );
             let mut cone = part.cone;
             if part.scales_a.cone {
                 cone *= running.scale_a;
@@ -724,9 +867,19 @@ pub(super) fn generate_systems(
                 direction = rotate_about(direction, random.direction(), sine, cosine);
             }
             let inherited = effect.spawn.map_or([0.0; 3], |spawn| spawn.velocity);
-            let velocity: [f32; 3] = std::array::from_fn(|axis| direction[axis] * speed + inherited[axis]);
+            let velocity: [f32; 3] =
+                std::array::from_fn(|axis| direction[axis] * speed + inherited[axis]);
             let [red, green, blue] = running.color;
-            let made = new_unattached(def, point, velocity, [1.0, red, green, blue], scale, ground, system_random, room);
+            let made = new_unattached(
+                def,
+                point,
+                velocity,
+                [1.0, red, green, blue],
+                scale,
+                ground,
+                system_random,
+                room,
+            );
             systems.push((index, part.system, made));
         }
     }
@@ -742,7 +895,11 @@ pub(super) fn generate_particles(
     bones: Option<&[[f32; 4]]>,
 ) {
     let def = &effect.def;
-    let fraction = if running.duration <= 0.0 { 1.0 } else { running.time / running.duration };
+    let fraction = if running.duration <= 0.0 {
+        1.0
+    } else {
+        running.time / running.duration
+    };
     let event = &def.events[running.event];
     for (at, entry) in event.particles.iter().enumerate() {
         let count = running.counts.get(at).copied().unwrap_or(0.0);
@@ -760,14 +917,25 @@ pub(super) fn generate_particles(
                 if particles.len() >= MOST_PARTICLES {
                     return;
                 }
-                let [lower, delta] = scaled(entry.distribution_radius, running, entry.scales_a.distribution_radius, entry.scales_b.distribution_radius);
+                let [lower, delta] = scaled(
+                    entry.distribution_radius,
+                    running,
+                    entry.scales_a.distribution_radius,
+                    entry.scales_b.distribution_radius,
+                );
                 let distance = random.range(0.0, delta) + lower;
                 let spread = random.direction();
                 let offset = turn_by_location(location, entry.offset);
-                let local: [f32; 3] =
-                    std::array::from_fn(|axis| location.position[axis] + spread[axis] * distance + offset[axis]);
+                let local: [f32; 3] = std::array::from_fn(|axis| {
+                    location.position[axis] + spread[axis] * distance + offset[axis]
+                });
                 // `effect_random_translational_velocity`.
-                let [lower, delta] = scaled(entry.velocity, running, entry.scales_a.velocity, entry.scales_b.velocity);
+                let [lower, delta] = scaled(
+                    entry.velocity,
+                    running,
+                    entry.scales_a.velocity,
+                    entry.scales_b.velocity,
+                );
                 let speed = random.range(0.0, delta) + lower;
                 let mut cone = entry.cone;
                 if entry.scales_a.cone {
@@ -785,8 +953,11 @@ pub(super) fn generate_particles(
                 }
                 let direction = turn_by_location(location, direction);
                 // Each particle goes with the effect too, which moves per tick.
-                let inherited = effect.spawn.map_or([0.0; 3], |spawn| spawn.velocity.map(|axis| axis * 30.0));
-                let velocity: [f32; 3] = std::array::from_fn(|axis| direction[axis] * speed + inherited[axis]);
+                let inherited = effect
+                    .spawn
+                    .map_or([0.0; 3], |spawn| spawn.velocity.map(|axis| axis * 30.0));
+                let velocity: [f32; 3] =
+                    std::array::from_fn(|axis| direction[axis] * speed + inherited[axis]);
                 let attached = entry.flags.stay_attached;
                 let (place, direction, velocity) = if attached {
                     (local, direction, velocity)
@@ -795,12 +966,25 @@ pub(super) fn generate_particles(
                     let (_, velocity) = posed_on(location.node, [0.0; 3], velocity, bones);
                     (place, direction, velocity)
                 };
-                let [lower, delta] = scaled(entry.radius, running, entry.scales_a.radius, entry.scales_b.radius);
+                let [lower, delta] = scaled(
+                    entry.radius,
+                    running,
+                    entry.scales_a.radius,
+                    entry.scales_b.radius,
+                );
                 let radius = random.range(0.0, delta) + lower;
-                let [lower, delta] = scaled(entry.angular_velocity, running, entry.scales_a.angular_velocity, entry.scales_b.angular_velocity);
+                let [lower, delta] = scaled(
+                    entry.angular_velocity,
+                    running,
+                    entry.scales_a.angular_velocity,
+                    entry.scales_b.angular_velocity,
+                );
                 let angular_velocity = random.range(0.0, delta) + lower;
-                let rotation =
-                    if entry.flags.random_initial_angle { random.range(0.0, std::f32::consts::TAU) } else { 0.0 };
+                let rotation = if entry.flags.random_initial_angle {
+                    random.range(0.0, std::f32::consts::TAU)
+                } else {
+                    0.0
+                };
                 let mix = if entry.scales_a.tint || entry.scales_b.tint {
                     let mut mix = 1.0;
                     if entry.scales_a.tint {
@@ -843,7 +1027,10 @@ pub(super) fn generate_particles(
                 let frame_span = if particle_def.animation_rate[1] == 0.0 {
                     f32::MAX
                 } else {
-                    1.0 / random.range(particle_def.animation_rate[0], particle_def.animation_rate[1])
+                    1.0 / random.range(
+                        particle_def.animation_rate[0],
+                        particle_def.animation_rate[1],
+                    )
                 };
                 let mut flags = 0;
                 if particle_def.flags.can_animate_backwards && random.bits() & 1 != 0 {
@@ -879,7 +1066,11 @@ pub(super) fn generate_particles(
                 if next_sequence(&mut particle, particle_def, random) {
                     let count = particle_def.sprites_in(particle.sequence) as i32;
                     particle.frame = if particle_def.flags.starts_on_random_frame {
-                        let step = if particle.flags & BACKWARDS == 0 { -1 } else { 1 };
+                        let step = if particle.flags & BACKWARDS == 0 {
+                            -1
+                        } else {
+                            1
+                        };
                         step + (random.next() * count as f32) as i32
                     } else if particle.flags & BACKWARDS != 0 {
                         count

@@ -11,12 +11,10 @@ use super::super::gl::buffer::slice_bytes;
 
 use super::super::gl::target::copy_frame;
 
-
 use super::super::common::sprite_gl::{SpriteGl, link_sprite_gl};
 
-
-use super::super::*;
 use super::super::gl::pass_state::PassState;
+use super::super::*;
 use super::view::ViewFrame;
 
 impl RenderCore {
@@ -31,12 +29,16 @@ impl RenderCore {
     ) -> Option<bool> {
         unsafe {
             let h3 = self.gen3_draws(frame);
-            let flares = self.sprite_gl.get_or_insert_with(|| link_sprite_gl(gl, self.program)).as_ref()?;
+            let flares = self
+                .sprite_gl
+                .get_or_insert_with(|| link_sprite_gl(gl, self.program))
+                .as_ref()?;
             if !(frame.preview.particles.is_empty()
                 && frame.preview.gen3.strips.is_empty()
                 && frame.preview.h3.leaves.is_empty())
             {
-                self.particle_gl.get_or_insert_with(|| gen3_particle_gl(gl, self.program));
+                self.particle_gl
+                    .get_or_insert_with(|| gen3_particle_gl(gl, self.program));
             }
             self.slots[slot].sync_sprite_textures(gl, frame);
             sprite_program_state(flares).apply(gl);
@@ -51,10 +53,20 @@ impl RenderCore {
 
     /// The state the model's own drawing expects back after a frame's last
     /// sprites, and the next frame's simulations let step again.
-    pub(in crate::app::model_preview) unsafe fn end_sprites(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(in crate::app::model_preview) unsafe fn end_sprites(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+    ) {
         unsafe {
             self.sprites_advanced = false;
-            after_sprites_state(frame.show_backfaces, self.program, self.slots[slot].vertex_array).apply(gl);
+            after_sprites_state(
+                frame.show_backfaces,
+                self.program,
+                self.slots[slot].vertex_array,
+            )
+            .apply(gl);
         }
     }
 }
@@ -88,12 +100,14 @@ fn sprite_blending_state(h3: bool) -> PassState {
     }
     // Halo 3's target is composited over the background by its alpha, so
     // what covers it has to say so.
-    state.color_mask([true, true, true, true]).blend_func_separate(
-        glow::SRC_ALPHA,
-        glow::ONE_MINUS_SRC_ALPHA,
-        glow::ONE,
-        glow::ONE_MINUS_SRC_ALPHA,
-    )
+    state
+        .color_mask([true, true, true, true])
+        .blend_func_separate(
+            glow::SRC_ALPHA,
+            glow::ONE_MINUS_SRC_ALPHA,
+            glow::ONE,
+            glow::ONE_MINUS_SRC_ALPHA,
+        )
 }
 
 /// What the model's own drawing expects back after the sprites: depth
@@ -147,7 +161,11 @@ pub(in crate::app::model_preview) unsafe fn draw_sprite_quad(
             let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
             [a, b, c, d, u, v]
         });
-        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+        gl.buffer_data_u8_slice(
+            glow::ARRAY_BUFFER,
+            slice_bytes(&vertices),
+            glow::STREAM_DRAW,
+        );
         gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
         gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
     }
@@ -170,22 +188,59 @@ pub(in crate::app::model_preview) fn advance_sprite_simulations(
         let systems = &frame.preview.particles;
         let values = |object: u8| frame.function_values_of_object(object).cloned();
         // The grid, or under the object if that hangs below it.
-        let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
+        let lowest = frame
+            .preview
+            .vertices
+            .iter()
+            .map(|vertex| vertex.position[2]);
         let ground = lowest.fold(0.0, f32::min);
-        simulations.particles.advance(systems, values, &mut simulations.effect_onsets, bones, view.eye, ground, frame.time);
+        simulations.particles.advance(
+            systems,
+            values,
+            &mut simulations.effect_onsets,
+            bones,
+            view.eye,
+            ground,
+            frame.time,
+        );
     }
     if !frame.preview.gen3.cheap_emitters.is_empty() {
         let values = |object: u8| frame.function_values_of_object(object).cloned();
-        let (emitters, shown) = (&frame.preview.gen3.cheap_emitters, frame.shown.list(super::features::paths::GEN3_CHEAP_EMITTERS));
-        simulations.reach_cheap.advance(emitters, shown, values, &mut simulations.effect_onsets, bones, view.eye, frame.time);
+        let (emitters, shown) = (
+            &frame.preview.gen3.cheap_emitters,
+            frame
+                .shown
+                .list(super::features::paths::GEN3_CHEAP_EMITTERS),
+        );
+        simulations.reach_cheap.advance(
+            emitters,
+            shown,
+            values,
+            &mut simulations.effect_onsets,
+            bones,
+            view.eye,
+            frame.time,
+        );
     }
     if !frame.preview.gen3.strips.is_empty() {
         let values = |object: u8| frame.function_values_of_object(object).cloned();
         let (systems, particles) = (&frame.preview.particles, &simulations.particles);
-        let tracks = |strip: &std::sync::Arc<gen3::effects::strips::Gen3StripAt>| -> Vec<(u64, [f32; 3])> {
-            particles.tracks_of(systems, strip).into_iter().map(|track| (track.id, track.place)).collect()
-        };
-        simulations.h3_strips.advance(&frame.preview.gen3.strips, values, &mut simulations.effect_onsets, tracks, bones, frame.time);
+        let tracks =
+            |strip: &std::sync::Arc<gen3::effects::strips::Gen3StripAt>| -> Vec<(u64, [f32; 3])> {
+                particles
+                    .tracks_of(systems, strip)
+                    .into_iter()
+                    .map(|track| (track.id, track.place))
+                    .collect()
+            };
+        simulations.h3_strips.advance(
+            &frame.preview.gen3.strips,
+            values,
+            &mut simulations.effect_onsets,
+            tracks,
+            bones,
+            frame.time,
+        );
     }
 }
 
@@ -206,7 +261,12 @@ pub(in crate::app::model_preview) unsafe fn draw_antennas(
         // Antennas are depth tested as well: `antenna_render_proper`
         // draws as a transparent group, tested and not written.
         if h3 {
-            gl.blend_func_separate(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+            gl.blend_func_separate(
+                glow::SRC_ALPHA,
+                glow::ONE_MINUS_SRC_ALPHA,
+                glow::ONE,
+                glow::ONE_MINUS_SRC_ALPHA,
+            );
         } else {
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
         }
@@ -261,7 +321,12 @@ pub(in crate::app::model_preview) unsafe fn draw_particle_system(
         let camera = &frame.camera;
         let values = frame.function_values_of_object(system.object);
         let lighting = gen3::pipeline::gen3_lighting_constants(frame);
-        let onset = uploaded.simulations.effect_onsets.of(system.object, system.scale_name(), values, frame.time);
+        let onset = uploaded.simulations.effect_onsets.of(
+            system.object,
+            system.scale_name(),
+            values,
+            frame.time,
+        );
         let drawn = uploaded.simulations.particles.vertices(
             index,
             system,
@@ -277,7 +342,11 @@ pub(in crate::app::model_preview) unsafe fn draw_particle_system(
             return;
         }
         let vertices = particle_floats(camera, &drawn);
-        let mut textures = uploaded.particle_textures.get(index).copied().unwrap_or_default();
+        let mut textures = uploaded
+            .particle_textures
+            .get(index)
+            .copied()
+            .unwrap_or_default();
         if system.look.shader.albedo == particles::ParticleAlbedo::H2Distortion {
             // `sub_915630`: before a pass that reads `GLOBAL particle
             // distortion`, the frame as it stands is copied there.
@@ -343,7 +412,11 @@ pub(in crate::app::model_preview) fn h2_antennas(
     bones: Option<&[[f32; 4]]>,
     view: &common::view::ViewFrame,
     tips: &[Option<[f32; 3]>],
-) -> Vec<(Vec<crate::app::model_preview::common::sprites::AntennaQuad>, glow::NativeTexture, bool)> {
+) -> Vec<(
+    Vec<crate::app::model_preview::common::sprites::AntennaQuad>,
+    glow::NativeTexture,
+    bool,
+)> {
     let preview = &frame.preview;
     preview
         .antennas
@@ -353,7 +426,11 @@ pub(in crate::app::model_preview) fn h2_antennas(
         .filter(|(index, _)| frame.shown.is(common::features::paths::ANTENNAS, *index))
         .filter_map(|(index, (antenna, texture))| {
             let tip = tips.get(index).copied().flatten();
-            Some((antenna.quads(bones, view, tip), (*texture)?, antenna.is_reach()))
+            Some((
+                antenna.quads(bones, view, tip),
+                (*texture)?,
+                antenna.is_reach(),
+            ))
         })
         .collect()
 }

@@ -24,7 +24,10 @@ pub(in crate::app::model_preview) fn scenario_bsp_paths(scenario: &TagFile) -> V
 
 /// Rename every region and batch of a preview to one region — the shape the
 /// scenario composite wants, where each BSP is a single toggle.
-pub(in crate::app::model_preview) fn rebrand_preview_region(preview: &mut RenderModelPreview, region_name: &str) {
+pub(in crate::app::model_preview) fn rebrand_preview_region(
+    preview: &mut RenderModelPreview,
+    region_name: &str,
+) {
     for batch in &mut preview.batches {
         batch.region_name = region_name.to_owned();
         batch.permutation_name = "default".to_owned();
@@ -45,7 +48,10 @@ pub(in crate::app::model_preview) fn bsp_display_name(reference: &str) -> String
 
 /// A structure BSP previews its own geometry, layered into `render` /
 /// `collision` / `portals` / `weather` regions so each is a toggle.
-pub(super) fn load_structure_bsp(model_tag: &TagFile, entry: &TagEntry) -> Result<ModelPreviewData, String> {
+pub(super) fn load_structure_bsp(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+) -> Result<ModelPreviewData, String> {
     let preview = build_sbsp_preview(model_tag, false)?;
     Ok(model_preview_data(
         entry.key.clone(),
@@ -84,7 +90,8 @@ pub(super) fn load_scenario(
             };
             // One BSP that will not read leaves the rest showing.
             let read = || {
-                let tag = reader.load(reference, "scenario_structure_bsp", b"sbsp")
+                let tag = reader
+                    .load(reference, "scenario_structure_bsp", b"sbsp")
                     .map_err(|error| format!("Could not load {reference}: {error}"))?;
                 build_sbsp_preview(&tag, true).map_err(|error| format!("{reference}: {error}"))
             };

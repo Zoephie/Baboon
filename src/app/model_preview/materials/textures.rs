@@ -28,7 +28,9 @@ impl TextureImage {
 
 /// Whether `rgba` holds four bytes for every texel of `dimensions`.
 pub(crate) fn rgba_fills(rgba: &[u8], dimensions: &[usize]) -> bool {
-    let texels = dimensions.iter().try_fold(4usize, |bytes, side| bytes.checked_mul(*side));
+    let texels = dimensions
+        .iter()
+        .try_fold(4usize, |bytes, side| bytes.checked_mul(*side));
     texels.is_some_and(|bytes| rgba.len() >= bytes)
 }
 

@@ -6,14 +6,14 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::super::common::fields::{elements, has_flag, has_flag_labelled};
-use super::super::super::common::view::{ViewFrame, posed_on};
-use super::super::super::functions::FunctionValues;
 use super::super::super::common::named_function::tag_function_at;
+use super::super::super::common::view::{ViewFrame, posed_on};
 use super::super::super::effects::{EffectOnsets, EffectTimes, for_each_attached_part};
-use super::super::super::*;
+use super::super::super::functions::FunctionValues;
 use super::super::super::reach::composite::REACH_SCREEN_NOISE_BITMAP;
+use super::super::super::*;
+use crate::app::model_preview::common::marker::MarkerFrame;
 use crate::core::h2_pixel_shader::SamplerKind;
 
 /// `build_saturation_matrix`'s weights.
@@ -68,7 +68,11 @@ impl Gen3ScreenSettings {
     /// The defaults, with VISR at `vision` and the view seeming to move by
     /// `suck_toward`.
     pub(crate) fn seeing(vision: f32, suck_toward: [f32; 3]) -> Self {
-        Self { vision, suck_toward, ..Self::default() }
+        Self {
+            vision,
+            suck_toward,
+            ..Self::default()
+        }
     }
 }
 
@@ -126,7 +130,11 @@ impl Gen3ScreenSettings {
         most(&mut self.vision, other.vision);
         // Unlike all the rest, this one adds up.
         let length = toward.iter().map(|axis| axis * axis).sum::<f32>().sqrt();
-        let unit = if length >= 0.0001 { toward.map(|axis| axis / length) } else { toward };
+        let unit = if length >= 0.0001 {
+            toward.map(|axis| axis / length)
+        } else {
+            toward
+        };
         for axis in 0..3 {
             self.suck_toward[axis] += unit[axis] * other.suck * falloff;
         }
@@ -149,7 +157,10 @@ impl Gen3ScreenSettings {
             return None;
         }
         let spread = self.blur.map(|blur| (blur + BLUR_OFFSET).max(BLUR_FLOOR));
-        Some((spread, (horizontal.max(vertical) * BLUR_BLEND / 255.0).clamp(0.0, 1.0)))
+        Some((
+            spread,
+            (horizontal.max(vertical) * BLUR_BLEND / 255.0).clamp(0.0, 1.0),
+        ))
     }
 
     /// How much wider the view is than the preview's lens, by
@@ -181,7 +192,10 @@ impl Gen3ScreenSettings {
             -self.color_floor[2] - contrast,
             1.0,
         ];
-        product(product(saturation_matrix(saturation), filters), hue_matrix(hue))
+        product(
+            product(saturation_matrix(saturation), filters),
+            hue_matrix(hue),
+        )
     }
 
     /// `postprocess_player_view`'s contrast.
@@ -211,11 +225,18 @@ fn identity() -> Matrix {
 }
 
 fn scaling([x, y, z]: [f32; 3]) -> Matrix {
-    [[x, 0.0, 0.0, 0.0], [0.0, y, 0.0, 0.0], [0.0, 0.0, z, 0.0], [0.0, 0.0, 0.0, 1.0]]
+    [
+        [x, 0.0, 0.0, 0.0],
+        [0.0, y, 0.0, 0.0],
+        [0.0, 0.0, z, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
 }
 
 fn product(a: Matrix, b: Matrix) -> Matrix {
-    std::array::from_fn(|row| std::array::from_fn(|column| (0..4).map(|at| a[row][at] * b[at][column]).sum()))
+    std::array::from_fn(|row| {
+        std::array::from_fn(|column| (0..4).map(|at| a[row][at] * b[at][column]).sum())
+    })
 }
 
 /// `build_saturation_matrix`.
@@ -231,19 +252,39 @@ fn saturation_matrix(saturation: f32) -> Matrix {
 }
 
 fn x_rotation(sin: f32, cos: f32) -> Matrix {
-    [[1.0, 0.0, 0.0, 0.0], [0.0, cos, sin, 0.0], [0.0, -sin, cos, 0.0], [0.0, 0.0, 0.0, 1.0]]
+    [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, cos, sin, 0.0],
+        [0.0, -sin, cos, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
 }
 
 fn y_rotation(sin: f32, cos: f32) -> Matrix {
-    [[cos, 0.0, -sin, 0.0], [0.0, 1.0, 0.0, 0.0], [sin, 0.0, cos, 0.0], [0.0, 0.0, 0.0, 1.0]]
+    [
+        [cos, 0.0, -sin, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [sin, 0.0, cos, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
 }
 
 fn z_rotation(sin: f32, cos: f32) -> Matrix {
-    [[cos, sin, 0.0, 0.0], [-sin, cos, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+    [
+        [cos, sin, 0.0, 0.0],
+        [-sin, cos, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
 }
 
 fn z_shear(x: f32, y: f32) -> Matrix {
-    [[1.0, 0.0, x, 0.0], [0.0, 1.0, y, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+    [
+        [1.0, 0.0, x, 0.0],
+        [0.0, 1.0, y, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
 }
 
 /// `build_hue_matrix`: a turn about the grey axis that keeps luminance.
@@ -251,7 +292,8 @@ fn hue_matrix(hue: f32) -> Matrix {
     let root = 2f32.sqrt().recip();
     let (y_sin, y_cos) = (-(3f32.sqrt().recip()), 2f32.sqrt() / 3f32.sqrt());
     let tilted = product(x_rotation(root, root), y_rotation(y_sin, y_cos));
-    let [x, y, z]: [f32; 3] = std::array::from_fn(|axis| (0..3).map(|at| LUMINANCE[at] * tilted[at][axis]).sum());
+    let [x, y, z]: [f32; 3] =
+        std::array::from_fn(|axis| (0..3).map(|at| LUMINANCE[at] * tilted[at][axis]).sum());
     let (shear_x, shear_y) = (x / z, y / z);
     let (sin, cos) = hue.to_radians().sin_cos();
     let mut result = product(tilted, z_shear(shear_x, shear_y));
@@ -333,7 +375,9 @@ fn insert_shader(shaders: &mut Vec<Gen3ScreenShader>, shader: Gen3ScreenShader) 
     if shaders.len() >= MOST_SCREEN_SHADERS {
         return;
     }
-    let before = shaders.iter().position(|known| (known.layer, known.order) >= (shader.layer, shader.order));
+    let before = shaders
+        .iter()
+        .position(|known| (known.layer, known.order) >= (shader.layer, shader.order));
     shaders.insert(before.unwrap_or(shaders.len()), shader);
 }
 
@@ -355,25 +399,52 @@ impl Gen3ScreenDefinition {
     }
 
     /// `evaluate_falloff`.
-    fn falloff(&self, distance: f32, angle: f32, time: f32, values: Option<&FunctionValues>) -> f32 {
+    fn falloff(
+        &self,
+        distance: f32,
+        angle: f32,
+        time: f32,
+        values: Option<&FunctionValues>,
+    ) -> f32 {
         if !self.outside_radius && !self.no_camera_falloffs && distance > self.radius {
             return 0.0;
         }
         let at = |function: &Option<TagFunction>, input: f32| {
-            function.as_ref().map_or(1.0, |function| function.evaluate(input.clamp(0.0, 1.0), FALLOFF_RANGE))
+            function.as_ref().map_or(1.0, |function| {
+                function.evaluate(input.clamp(0.0, 1.0), FALLOFF_RANGE)
+            })
         };
-        let time_input = if self.lifetime > f32::EPSILON { (time - self.delay) / self.lifetime } else { time };
+        let time_input = if self.lifetime > f32::EPSILON {
+            (time - self.delay) / self.lifetime
+        } else {
+            time
+        };
         let camera = if self.no_camera_falloffs {
             1.0
         } else {
-            at(&self.distance_falloff, distance / self.radius.max(f32::EPSILON))
-                * at(&self.angle_falloff, angle / std::f32::consts::PI)
+            at(
+                &self.distance_falloff,
+                distance / self.radius.max(f32::EPSILON),
+            ) * at(&self.angle_falloff, angle / std::f32::consts::PI)
         };
         let object = self.object_falloff.as_ref().map_or(1.0, |falloff| {
-            let read = |name: &str| values.and_then(|values| values.get(name)).copied().unwrap_or(0.0);
+            let read = |name: &str| {
+                values
+                    .and_then(|values| values.get(name))
+                    .copied()
+                    .unwrap_or(0.0)
+            };
             // With no input named, it reads how far through its life it is.
-            let input = if falloff.input.is_empty() { time_input } else { read(&falloff.input) };
-            let range = if falloff.range.is_empty() { FALLOFF_RANGE } else { read(&falloff.range) };
+            let input = if falloff.input.is_empty() {
+                time_input
+            } else {
+                read(&falloff.input)
+            };
+            let range = if falloff.range.is_empty() {
+                FALLOFF_RANGE
+            } else {
+                read(&falloff.range)
+            };
             falloff.mapping.evaluate(input.clamp(0.0, 1.0), range)
         });
         camera * at(&self.time_falloff, time_input) * object
@@ -393,7 +464,8 @@ const NO_CAMERA_FALLOFFS: [&str; 2] = ["disable camera falloffs", "cinematic"];
 /// of the three narrows it to those it names. `flagged` answers for an
 /// option under any of its labels.
 fn shows_in_third_person(flagged: impl Fn(&[&str]) -> bool) -> bool {
-    !(flagged(&UNATTACHED) || flagged(&FIRST_PERSON) || flagged(&THIRD_PERSON)) || flagged(&THIRD_PERSON)
+    !(flagged(&UNATTACHED) || flagged(&FIRST_PERSON) || flagged(&THIRD_PERSON))
+        || flagged(&THIRD_PERSON)
 }
 
 /// Reach's `is_visible` (the 360's 0x83033AB0) for a viewer who is nobody's
@@ -401,11 +473,17 @@ fn shows_in_third_person(flagged: impl Fn(&[&str]) -> bool) -> bool {
 /// twin hold only for the viewer's own unit, so an effect naming a person
 /// shows only if it also names `unattached`.
 fn shows_to_no_unit(flagged: impl Fn(&[&str]) -> bool) -> bool {
-    !(flagged(&UNATTACHED) || flagged(&FIRST_PERSON) || flagged(&THIRD_PERSON)) || flagged(&UNATTACHED)
+    !(flagged(&UNATTACHED) || flagged(&FIRST_PERSON) || flagged(&THIRD_PERSON))
+        || flagged(&UNATTACHED)
 }
 
-fn read_screen_shader(reader: &TagReader, element: TagStruct<'_>) -> Option<(String, ScreenLayer, i32)> {
-    let path = element.read_tag_ref_path("shader effect").filter(|path| !path.is_empty())?;
+fn read_screen_shader(
+    reader: &TagReader,
+    element: TagStruct<'_>,
+) -> Option<(String, ScreenLayer, i32)> {
+    let path = element
+        .read_tag_ref_path("shader effect")
+        .filter(|path| !path.is_empty())?;
     let tag = reader.load(&path, "shader_screen", b"rmss").ok()?;
     let root = tag.root();
     let layer = ScreenLayer::read(root);
@@ -413,11 +491,19 @@ fn read_screen_shader(reader: &TagReader, element: TagStruct<'_>) -> Option<(Str
     Some((path, layer, order))
 }
 
-fn read_definition(reader: &TagReader, element: TagStruct<'_>, delay: f32) -> Option<Gen3ScreenDefinition> {
+fn read_definition(
+    reader: &TagReader,
+    element: TagStruct<'_>,
+    delay: f32,
+) -> Option<Gen3ScreenDefinition> {
     let flagged = |labels: &[&str]| has_flag_labelled(element, "flags", labels);
     let reach = reader.source.game() == Some(GameId::HaloReach);
     // The preview's camera is a third person's, on nothing.
-    let shows = if reach { shows_to_no_unit(flagged) } else { shows_in_third_person(flagged) };
+    let shows = if reach {
+        shows_to_no_unit(flagged)
+    } else {
+        shows_in_third_person(flagged)
+    };
     if has_flag(element, "flags", "debug disable") || !shows {
         return None;
     }
@@ -427,7 +513,11 @@ fn read_definition(reader: &TagReader, element: TagStruct<'_>, delay: f32) -> Op
         let color = element.read_rgb(name);
         [color.red, color.green, color.blue]
     };
-    let falloff = |name: &str| element.descend(name).and_then(|holder| tag_function_at(&holder, "Mapping"));
+    let falloff = |name: &str| {
+        element
+            .descend(name)
+            .and_then(|holder| tag_function_at(&holder, "Mapping"))
+    };
     let object_falloff = element.descend("object falloff").and_then(|holder| {
         Some(Gen3ObjectFalloff {
             input: holder.read_string_id("Input Variable").unwrap_or_default(),
@@ -474,12 +564,20 @@ fn read_definition(reader: &TagReader, element: TagStruct<'_>, delay: f32) -> Op
 /// `s_area_screen_effect_definition::postprocess`: played in turn, each starts
 /// as the last ends, whatever its own `delay` says.
 fn read_definitions(reader: &TagReader, root: TagStruct<'_>) -> Vec<Gen3ScreenDefinition> {
-    let in_turn = has_flag(root, "global flags", "play sequentially - ignore delay settings");
+    let in_turn = has_flag(
+        root,
+        "global flags",
+        "play sequentially - ignore delay settings",
+    );
     let mut start = 0.0;
     let mut definitions = Vec::new();
     for element in elements(root, "screen effects") {
         let lifetime = element.read_real("lifetime").unwrap_or(0.0);
-        let delay = if in_turn { start } else { element.read_real("delay").unwrap_or(0.0) };
+        let delay = if in_turn {
+            start
+        } else {
+            element.read_real("delay").unwrap_or(0.0)
+        };
         start += lifetime;
         definitions.extend(read_definition(reader, element, delay));
     }
@@ -513,21 +611,36 @@ impl Gen3ScreenEffectAt {
 
     /// The object functions its object falloffs read.
     pub(crate) fn turns_on_vision(&self) -> bool {
-        self.definitions.iter().any(|definition| definition.settings.vision > 0.0)
+        self.definitions
+            .iter()
+            .any(|definition| definition.settings.vision > 0.0)
     }
 
     pub(crate) fn sucks(&self) -> bool {
-        self.definitions.iter().any(|definition| definition.settings.suck != 0.0)
+        self.definitions
+            .iter()
+            .any(|definition| definition.settings.suck != 0.0)
     }
 
     /// Whether any of it adds Reach's bright or dark noise.
     pub(crate) fn adds_noise(&self) -> bool {
-        self.definitions.iter().any(|definition| definition.settings.noise().iter().any(|amount| *amount > 0.0))
+        self.definitions.iter().any(|definition| {
+            definition
+                .settings
+                .noise()
+                .iter()
+                .any(|amount| *amount > 0.0)
+        })
     }
 
     pub(crate) fn object_inputs(&self) -> impl Iterator<Item = &str> {
-        let falloffs = self.definitions.iter().filter_map(|definition| definition.object_falloff.as_ref());
-        falloffs.flat_map(|falloff| [falloff.input.as_str(), falloff.range.as_str()]).filter(|name| !name.is_empty())
+        let falloffs = self
+            .definitions
+            .iter()
+            .filter_map(|definition| definition.object_falloff.as_ref());
+        falloffs
+            .flat_map(|falloff| [falloff.input.as_str(), falloff.range.as_str()])
+            .filter(|name| !name.is_empty())
     }
 }
 
@@ -574,12 +687,17 @@ pub(in crate::app::model_preview) fn read_h3_screen_effects(
 
 /// `rasterizer_globals`' default bitmap that Reach's final composite reads
 /// its bright and dark noise from (sampler 7 of MCC `sub_140841DE0`).
-pub(in crate::app::model_preview) fn read_reach_screen_noise(reader: &TagReader) -> Option<super::super::super::gen3::materials::Gen3Bitmap> {
-    let globals =
-        reader.load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
+pub(in crate::app::model_preview) fn read_reach_screen_noise(
+    reader: &TagReader,
+) -> Option<super::super::super::gen3::materials::Gen3Bitmap> {
+    let globals = reader
+        .load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg")
+        .ok()?;
     let defaults = elements(globals.root(), "default bitmaps");
     let noise = defaults.get(REACH_SCREEN_NOISE_BITMAP)?;
-    let path = noise.read_tag_ref_path("default bitmaps").filter(|path| !path.is_empty())?;
+    let path = noise
+        .read_tag_ref_path("default bitmaps")
+        .filter(|path| !path.is_empty())?;
     super::super::super::gen3::materials::read_h3_bitmap(reader, &path, 0, SamplerKind::Texture2D)
 }
 
@@ -588,15 +706,22 @@ pub(in crate::app::model_preview) fn read_reach_screen_noise(reader: &TagReader)
 pub(in crate::app::model_preview) fn add_screen_shader_materials(preview: &mut RenderModelPreview) {
     let group = u32::from_be_bytes(*b"rmss");
     let wanted: Vec<String> = preview
-        .gen3.screen_effects
+        .gen3
+        .screen_effects
         .iter()
         .flat_map(|effect| effect.definitions.iter())
         .filter_map(|definition| definition.shader.as_ref().map(|(path, ..)| path.clone()))
         .collect();
     for shader_path in wanted {
-        let present = |material: &RenderModelPreviewMaterial| material.shader_group == group && material.shader_path == shader_path;
+        let present = |material: &RenderModelPreviewMaterial| {
+            material.shader_group == group && material.shader_path == shader_path
+        };
         if !preview.materials.iter().any(present) {
-            preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group: group, ..Default::default() });
+            preview.materials.push(RenderModelPreviewMaterial {
+                shader_path,
+                shader_group: group,
+                ..Default::default()
+            });
         }
     }
 }
@@ -615,16 +740,27 @@ pub(crate) fn gen3_screen_settings<'a>(
     for effect in effects {
         let scope = values(effect.object);
         let on = effect.scale_by.is_empty()
-            || scope.and_then(|values| values.get(&effect.scale_by)).is_some_and(|value| *value > 0.0);
+            || scope
+                .and_then(|values| values.get(&effect.scale_by))
+                .is_some_and(|value| *value > 0.0);
         let onset = onsets.of(effect.object, &effect.scale_by, scope, time);
         // It outlives its event: nothing ends it but its own lifetime.
-        let Some(age) = effect.times.since_begun(effect.event, time - onset).filter(|_| on) else {
+        let Some(age) = effect
+            .times
+            .since_begun(effect.event, time - onset)
+            .filter(|_| on)
+        else {
             continue;
         };
         let (place, _) = posed_on(effect.node, effect.position, [1.0, 0.0, 0.0], bones);
         let to_effect: [f32; 3] = std::array::from_fn(|axis| place[axis] - view.eye[axis]);
-        let distance = (0..3).map(|axis| to_effect[axis] * to_effect[axis]).sum::<f32>().sqrt();
-        let along = (0..3).map(|axis| to_effect[axis] * view.forward[axis]).sum::<f32>();
+        let distance = (0..3)
+            .map(|axis| to_effect[axis] * to_effect[axis])
+            .sum::<f32>()
+            .sqrt();
+        let along = (0..3)
+            .map(|axis| to_effect[axis] * view.forward[axis])
+            .sum::<f32>();
         let angle = (along / distance.max(f32::EPSILON)).clamp(-1.0, 1.0).acos();
         for definition in effect.definitions.iter() {
             if definition.active(age) {
@@ -632,7 +768,12 @@ pub(crate) fn gen3_screen_settings<'a>(
                 if falloff > 0.0 {
                     settings.accumulate(&definition.settings, falloff, to_effect);
                     if let Some((path, layer, order)) = &definition.shader {
-                        let shader = Gen3ScreenShader { path: path.clone(), alpha: falloff, layer: *layer, order: *order };
+                        let shader = Gen3ScreenShader {
+                            path: path.clone(),
+                            alpha: falloff,
+                            layer: *layer,
+                            order: *order,
+                        };
                         insert_shader(&mut shaders, shader);
                     }
                 }
@@ -651,16 +792,28 @@ mod tests {
     #[test]
     fn only_odst_loses_what_is_older_than_object_falloff_and_only_on_an_object() {
         assert!(!shows_on_object(true, true, false));
-        assert!(shows_on_object(true, true, true), "on no object it is never read");
-        assert!(shows_on_object(true, false, false), "a newer tag has its function");
-        assert!(shows_on_object(false, true, false), "Halo 3 has no such function");
+        assert!(
+            shows_on_object(true, true, true),
+            "on no object it is never read"
+        );
+        assert!(
+            shows_on_object(true, false, false),
+            "a newer tag has its function"
+        );
+        assert!(
+            shows_on_object(false, true, false),
+            "Halo 3 has no such function"
+        );
     }
 
     #[test]
     fn motion_suck_adds_up_along_the_way_to_each_effect() {
         let mut settings = Gen3ScreenSettings::default();
         assert_eq!(settings.suck(), None, "nothing moved");
-        let sucks = Gen3ScreenSettings { suck: 0.5, ..Default::default() };
+        let sucks = Gen3ScreenSettings {
+            suck: 0.5,
+            ..Default::default()
+        };
         settings.accumulate(&sucks, 0.5, [0.0, 0.0, 4.0]);
         settings.accumulate(&sucks, 1.0, [3.0, 0.0, 0.0]);
         assert_eq!(settings.suck(), Some([0.5, 0.0, 0.25]));
@@ -698,10 +851,20 @@ mod tests {
     #[test]
     fn a_blur_spreads_by_axis_and_covers_by_the_stronger() {
         assert_eq!(Gen3ScreenSettings::default().blur(), None);
-        let (spread, cover) = Gen3ScreenSettings { blur: [2.0, 0.0], ..Default::default() }.blur().unwrap();
+        let (spread, cover) = Gen3ScreenSettings {
+            blur: [2.0, 0.0],
+            ..Default::default()
+        }
+        .blur()
+        .unwrap();
         assert_eq!(spread, [1.5, BLUR_FLOOR]);
         assert_eq!(cover, 1.0);
-        let (_, cover) = Gen3ScreenSettings { blur: [0.0, 0.17], ..Default::default() }.blur().unwrap();
+        let (_, cover) = Gen3ScreenSettings {
+            blur: [0.0, 0.17],
+            ..Default::default()
+        }
+        .blur()
+        .unwrap();
         assert!((cover - 0.2).abs() < 1e-5);
     }
 
@@ -709,24 +872,48 @@ mod tests {
     fn the_view_widens_by_stops_up_to_its_limit() {
         let half = 30f32.to_radians();
         assert_eq!(Gen3ScreenSettings::default().view_scale(half), 1.0);
-        let one_stop = Gen3ScreenSettings { fov: [0.0, 1.0], ..Default::default() }.view_scale(half);
+        let one_stop = Gen3ScreenSettings {
+            fov: [0.0, 1.0],
+            ..Default::default()
+        }
+        .view_scale(half);
         assert!((one_stop - 2.0).abs() < 1e-4, "{one_stop}");
-        let narrower = Gen3ScreenSettings { fov: [1.0, 0.0], ..Default::default() }.view_scale(half);
+        let narrower = Gen3ScreenSettings {
+            fov: [1.0, 0.0],
+            ..Default::default()
+        }
+        .view_scale(half);
         assert!((narrower - 0.5).abs() < 1e-4, "{narrower}");
-        let most = Gen3ScreenSettings { fov: [0.0, 9.0], ..Default::default() }.view_scale(half);
-        assert!((most - 75f32.to_radians().tan() / half.tan()).abs() < 1e-3, "{most}");
+        let most = Gen3ScreenSettings {
+            fov: [0.0, 9.0],
+            ..Default::default()
+        }
+        .view_scale(half);
+        assert!(
+            (most - 75f32.to_radians().tan() / half.tan()).abs() < 1e-3,
+            "{most}"
+        );
     }
 
     #[test]
     fn screen_shaders_sort_by_layer_then_order_and_stop_at_the_limit() {
-        let shader = |name: &str, layer, order| Gen3ScreenShader { path: name.to_owned(), alpha: 1.0, layer, order };
+        let shader = |name: &str, layer, order| Gen3ScreenShader {
+            path: name.to_owned(),
+            alpha: 1.0,
+            layer,
+            order,
+        };
         let mut shaders = Vec::new();
         insert_shader(&mut shaders, shader("post", ScreenLayer::PostUi, 0));
         insert_shader(&mut shaders, shader("b", ScreenLayer::PreUi, 5));
         insert_shader(&mut shaders, shader("a", ScreenLayer::PreUi, 2));
         insert_shader(&mut shaders, shader("c", ScreenLayer::PreUi, 5));
         let names: Vec<_> = shaders.iter().map(|shader| shader.path.as_str()).collect();
-        assert_eq!(names, ["a", "c", "b", "post"], "the later of equals goes first");
+        assert_eq!(
+            names,
+            ["a", "c", "b", "post"],
+            "the later of equals goes first"
+        );
         (0..9).for_each(|at| insert_shader(&mut shaders, shader("more", ScreenLayer::PostUi, at)));
         assert_eq!(shaders.len(), MOST_SCREEN_SHADERS);
     }
@@ -740,7 +927,10 @@ mod tests {
         assert!(definition.active(3.0));
         assert!(!definition.active(3.5));
         assert!(timed(0.0, 1.0).active(0.0));
-        assert!(timed(5.0, 0.0).active(0.0), "with no lifetime it ignores its delay");
+        assert!(
+            timed(5.0, 0.0).active(0.0),
+            "with no lifetime it ignores its delay"
+        );
     }
 
     #[test]
@@ -754,7 +944,11 @@ mod tests {
     /// Whether any of `names`, as a layout stores them, reads as any of the
     /// labels asked for.
     fn stored(names: &'static [&'static str]) -> impl Fn(&[&str]) -> bool {
-        move |labels| names.iter().any(|name| labels.contains(&blam_tags::option_display_name(name).as_ref()))
+        move |labels| {
+            names
+                .iter()
+                .any(|name| labels.contains(&blam_tags::option_display_name(name).as_ref()))
+        }
     }
 
     #[test]
@@ -764,7 +958,10 @@ mod tests {
         assert!(with(&["allow effect outside radius"]));
         assert!(with(&["third person only"]));
         assert!(with(&["third person{third person only}"]));
-        assert!(with(&["first person{first person only}", "third person{third person only}"]));
+        assert!(with(&[
+            "first person{first person only}",
+            "third person{third person only}"
+        ]));
         assert!(!with(&["first person only"]));
         assert!(!with(&["first person{first person only}"]));
         assert!(!with(&["unattached"]));
@@ -783,21 +980,40 @@ mod tests {
             "only affects attached object",
         ];
         assert!(!shows_to_no_unit(names(body_damage)));
-        assert!(shows_in_third_person(names(body_damage)), "ODST's rule shows it");
+        assert!(
+            shows_in_third_person(names(body_damage)),
+            "ODST's rule shows it"
+        );
         assert!(shows_to_no_unit(names(&[])));
-        assert!(shows_to_no_unit(names(&["unattached", "third person{third person only}"])));
+        assert!(shows_to_no_unit(names(&[
+            "unattached",
+            "third person{third person only}"
+        ])));
         assert!(shows_to_no_unit(names(&["unattached"])));
-        assert!(!shows_in_third_person(names(&["unattached"])), "where ODST's does not");
+        assert!(
+            !shows_in_third_person(names(&["unattached"])),
+            "where ODST's does not"
+        );
     }
 
     /// Reach's `is_visible` waits past a delay of 0 too.
     #[test]
     fn a_reach_effect_is_strict_on_its_delay() {
-        let reach = Gen3ScreenDefinition { strict_delay: true, ..timed(0.0, 1.0) };
+        let reach = Gen3ScreenDefinition {
+            strict_delay: true,
+            ..timed(0.0, 1.0)
+        };
         assert!(!reach.active(0.0));
         assert!(reach.active(0.01));
         assert!(timed(0.0, 1.0).active(0.0), "ODST's starts at once");
-        assert!(Gen3ScreenDefinition { strict_delay: true, ..timed(5.0, 0.0) }.active(0.0), "no lifetime ignores it");
+        assert!(
+            Gen3ScreenDefinition {
+                strict_delay: true,
+                ..timed(5.0, 0.0)
+            }
+            .active(0.0),
+            "no lifetime ignores it"
+        );
     }
 
     /// `c_player_view::render`'s stops: the strongest boost less the
@@ -806,28 +1022,59 @@ mod tests {
     fn reachs_stops_are_boost_less_deboost_and_noise_takes_the_strongest() {
         let mut settings = Gen3ScreenSettings::default();
         assert_eq!(settings.stops(), 0.0);
-        let boost = Gen3ScreenSettings { exposure_boost: 2.0, bright_noise: 0.4, ..Default::default() };
-        let deboost = Gen3ScreenSettings { exposure_deboost: 3.0, dark_noise: 0.8, bright_noise: 0.1, ..Default::default() };
+        let boost = Gen3ScreenSettings {
+            exposure_boost: 2.0,
+            bright_noise: 0.4,
+            ..Default::default()
+        };
+        let deboost = Gen3ScreenSettings {
+            exposure_deboost: 3.0,
+            dark_noise: 0.8,
+            bright_noise: 0.1,
+            ..Default::default()
+        };
         settings.accumulate(&boost, 1.0, [0.0; 3]);
         settings.accumulate(&deboost, 0.5, [0.0; 3]);
         assert_eq!(settings.stops(), 2.0 - 1.5);
         assert_eq!(settings.noise(), [0.4, 0.4]);
-        assert_eq!(settings.exposure(), 4.0, "Halo 3's composite reads the boost alone");
+        assert_eq!(
+            settings.exposure(),
+            4.0,
+            "Halo 3's composite reads the boost alone"
+        );
     }
 
     /// With `BLAM_TEST_HREK`: a `render layer` reads by its option's name,
     /// and only a pre-transparents shader stays out of the frame's end.
     #[test]
     fn kit_reach_screen_shaders_read_their_layer() {
-        let Some(source) = kit_source(GameId::HaloReach) else { return };
+        let Some(source) = kit_source(GameId::HaloReach) else {
+            return;
+        };
         for (path, layer) in [
-            ("fx\\screen_fx\\camera_fx\\dead_static_overlay", ScreenLayer::PostUi),
-            ("objects\\characters\\spartans\\fx\\night_vision\\night_vision", ScreenLayer::PreTransparents),
+            (
+                "fx\\screen_fx\\camera_fx\\dead_static_overlay",
+                ScreenLayer::PostUi,
+            ),
+            (
+                "objects\\characters\\spartans\\fx\\night_vision\\night_vision",
+                ScreenLayer::PreTransparents,
+            ),
         ] {
-            let tag = load_referenced_tag_from_source(&source, path, "shader_screen", b"rmss").expect(path);
+            let tag = load_referenced_tag_from_source(&source, path, "shader_screen", b"rmss")
+                .expect(path);
             assert_eq!(ScreenLayer::read(tag.root()), layer, "{path}");
-            let shader = Gen3ScreenShader { path: path.to_owned(), alpha: 1.0, layer, order: 0 };
-            assert_eq!(shader.at_frame_end(), layer != ScreenLayer::PreTransparents, "{path}");
+            let shader = Gen3ScreenShader {
+                path: path.to_owned(),
+                alpha: 1.0,
+                layer,
+                order: 0,
+            };
+            assert_eq!(
+                shader.at_frame_end(),
+                layer != ScreenLayer::PreTransparents,
+                "{path}"
+            );
         }
     }
 
@@ -835,12 +1082,24 @@ mod tests {
     /// by the preview's camera, and the composite's noise map reads.
     #[test]
     fn kit_reach_hides_body_damage_and_reads_its_noise_map() {
-        let Some(source) = kit_source(GameId::HaloReach) else { return };
-        let path = "objects\\characters\\spartans\\fx\\damage_feedback\\body_damage_screen_distortion";
-        let tag = load_referenced_tag_from_source(&source, path, "area_screen_effect", b"sefc").expect(path);
+        let Some(source) = kit_source(GameId::HaloReach) else {
+            return;
+        };
+        let path =
+            "objects\\characters\\spartans\\fx\\damage_feedback\\body_damage_screen_distortion";
+        let tag = load_referenced_tag_from_source(&source, path, "area_screen_effect", b"sefc")
+            .expect(path);
         assert!(!elements(tag.root(), "screen effects").is_empty());
-        assert!(read_definitions(&crate::app::model_preview::load::TagReader::new(&source), tag.root()).is_empty());
-        let (image, ..) = read_reach_screen_noise(&crate::app::model_preview::load::TagReader::new(&source)).expect("monochrome_random");
+        assert!(
+            read_definitions(
+                &crate::app::model_preview::load::TagReader::new(&source),
+                tag.root()
+            )
+            .is_empty()
+        );
+        let (image, ..) =
+            read_reach_screen_noise(&crate::app::model_preview::load::TagReader::new(&source))
+                .expect("monochrome_random");
         assert!(image.whole());
     }
 
@@ -854,14 +1113,20 @@ mod tests {
 
     #[test]
     fn full_desaturation_leaves_only_luminance() {
-        let settings = Gen3ScreenSettings { desaturate: 1.0, ..Default::default() };
+        let settings = Gen3ScreenSettings {
+            desaturate: 1.0,
+            ..Default::default()
+        };
         let grey = apply(&settings.color_matrix(), [1.0, 0.0, 0.0]);
         assert!(close(grey, [LUMINANCE[0]; 3]), "{grey:?}");
     }
 
     #[test]
     fn a_turn_of_hue_keeps_grey_and_moves_red() {
-        let settings = Gen3ScreenSettings { hue_right: 120.0, ..Default::default() };
+        let settings = Gen3ScreenSettings {
+            hue_right: 120.0,
+            ..Default::default()
+        };
         let matrix = settings.color_matrix();
         assert!(close(apply(&matrix, [0.5; 3]), [0.5; 3]));
         assert!(!close(apply(&matrix, [1.0, 0.0, 0.0]), [1.0, 0.0, 0.0]));
@@ -869,15 +1134,29 @@ mod tests {
 
     #[test]
     fn a_full_turn_of_hue_comes_back() {
-        assert!(close(apply(&hue_matrix(0.0), [0.2, 0.5, 0.9]), [0.2, 0.5, 0.9]));
+        assert!(close(
+            apply(&hue_matrix(0.0), [0.2, 0.5, 0.9]),
+            [0.2, 0.5, 0.9]
+        ));
     }
 
     #[test]
     fn the_strongest_wins_and_a_filter_fades_out_with_its_falloff() {
         let mut settings = Gen3ScreenSettings::default();
-        let strong = Gen3ScreenSettings { desaturate: 0.8, color_filter: [0.0, 1.0, 1.0], ..Default::default() };
+        let strong = Gen3ScreenSettings {
+            desaturate: 0.8,
+            color_filter: [0.0, 1.0, 1.0],
+            ..Default::default()
+        };
         settings.accumulate(&strong, 0.5, [0.0; 3]);
-        settings.accumulate(&Gen3ScreenSettings { desaturate: 0.2, ..Default::default() }, 1.0, [0.0; 3]);
+        settings.accumulate(
+            &Gen3ScreenSettings {
+                desaturate: 0.2,
+                ..Default::default()
+            },
+            1.0,
+            [0.0; 3],
+        );
         assert_eq!(settings.desaturate, 0.4);
         assert_eq!(settings.color_filter[0], 0.5);
         assert_eq!(settings.color_filter[1], 1.0);
@@ -885,15 +1164,39 @@ mod tests {
 
     #[test]
     fn gamma_stays_within_its_limits() {
-        assert_eq!(Gen3ScreenSettings { gamma_reduce: 5.0, ..Default::default() }.gamma(), 0.01);
-        assert_eq!(Gen3ScreenSettings { gamma_enhance: 20.0, ..Default::default() }.gamma(), 10.0);
+        assert_eq!(
+            Gen3ScreenSettings {
+                gamma_reduce: 5.0,
+                ..Default::default()
+            }
+            .gamma(),
+            0.01
+        );
+        assert_eq!(
+            Gen3ScreenSettings {
+                gamma_enhance: 20.0,
+                ..Default::default()
+            }
+            .gamma(),
+            10.0
+        );
     }
 
     #[test]
     fn past_its_radius_an_effect_is_gone_unless_it_says_otherwise() {
-        let definition = Gen3ScreenDefinition { radius: 10.0, ..timed(0.0, 0.0) };
+        let definition = Gen3ScreenDefinition {
+            radius: 10.0,
+            ..timed(0.0, 0.0)
+        };
         assert_eq!(definition.falloff(5.0, 0.0, 0.0, None), 1.0);
         assert_eq!(definition.falloff(11.0, 0.0, 0.0, None), 0.0);
-        assert_eq!(Gen3ScreenDefinition { outside_radius: true, ..definition }.falloff(11.0, 0.0, 0.0, None), 1.0);
+        assert_eq!(
+            Gen3ScreenDefinition {
+                outside_radius: true,
+                ..definition
+            }
+            .falloff(11.0, 0.0, 0.0, None),
+            1.0
+        );
     }
 }

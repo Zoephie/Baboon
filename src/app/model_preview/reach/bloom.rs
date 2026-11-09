@@ -49,7 +49,11 @@ const FRAGMENT: &str = include_str!("shaders/bloom.frag");
 /// `sub_1407C4D90 || sub_1407C4E10`: a frame large enough that the small
 /// surfaces take fixed sizes.
 fn high_resolution([width, height]: [i32; 2]) -> bool {
-    if width > height { height > 720 } else { width > 1152 }
+    if width > height {
+        height > 720
+    } else {
+        width > 1152
+    }
 }
 
 /// `sub_140849480`'s `floor(side / divisor + 0.5)`, at least a texel.
@@ -63,7 +67,13 @@ fn divided(frame: [i32; 2], divisor: f32) -> [i32; 2] {
 fn surface_sizes(frame: [i32; 2]) -> [[i32; 2]; 5] {
     let fixed = high_resolution(frame);
     let pick = |size: [i32; 2], divisor: f32| if fixed { size } else { divided(frame, divisor) };
-    [divided(frame, 2.0), divided(frame, 4.0), pick([288, 180], 4.0), pick([72, 45], 16.0), pick([18, 11], 64.0)]
+    [
+        divided(frame, 2.0),
+        divided(frame, 4.0),
+        pick([288, 180], 4.0),
+        pick([72, 45], 16.0),
+        pick([18, 11], 64.0),
+    ]
 }
 
 /// The surfaces of the chain, numbered as the game's.
@@ -80,7 +90,8 @@ impl Surfaces {
     unsafe fn new(gl: &glow::Context, frame: [i32; 2]) -> Option<Self> {
         let [temp, bloom_temp, small, tiny, mini] = surface_sizes(frame);
         let mut made = Made::new(gl);
-        let mut surface = |size| unsafe { made.color(size, Texels::RGBA16F, Sampling::LINEAR_CLAMPED) };
+        let mut surface =
+            |size| unsafe { made.color(size, Texels::RGBA16F, Sampling::LINEAR_CLAMPED) };
         let surfaces = Self {
             temp: surface(temp)?,
             bloom_temp: surface(bloom_temp)?,
@@ -108,12 +119,28 @@ pub(in crate::app::model_preview) struct ReachBloom {
 
 /// A colour scaled by the intensity, as `sub_140841B00` hands its passes.
 fn scaled(color: [f32; 3]) -> [f32; 4] {
-    [color[0] * INTENSITY, color[1] * INTENSITY, color[2] * INTENSITY, 1.0]
+    [
+        color[0] * INTENSITY,
+        color[1] * INTENSITY,
+        color[2] * INTENSITY,
+        1.0,
+    ]
 }
 
 impl ReachBloom {
-    pub(in crate::app::model_preview) unsafe fn new(gl: &glow::Context, nothing: Option<glow::NativeTexture>) -> Option<Self> {
-        unsafe { Some(Self { chain: ScreenChain { program: screen_program(gl, FRAGMENT)?, nothing }, surfaces: None }) }
+    pub(in crate::app::model_preview) unsafe fn new(
+        gl: &glow::Context,
+        nothing: Option<glow::NativeTexture>,
+    ) -> Option<Self> {
+        unsafe {
+            Some(Self {
+                chain: ScreenChain {
+                    program: screen_program(gl, FRAGMENT)?,
+                    nothing,
+                },
+                surfaces: None,
+            })
+        }
     }
 
     /// `c_screen_postprocess::copy` and `apply_binary_op_ex`: `source` (and
@@ -131,7 +158,11 @@ impl ReachBloom {
             self.chain.pass(gl, target, source.0, added, |uniform| {
                 gl.uniform_1_i32(uniform("pass").as_ref(), pass as i32);
                 gl.uniform_4_f32_slice(uniform("scale").as_ref(), &scale);
-                gl.uniform_2_f32(uniform("target_size").as_ref(), target.size[0] as f32, target.size[1] as f32);
+                gl.uniform_2_f32(
+                    uniform("target_size").as_ref(),
+                    target.size[0] as f32,
+                    target.size[1] as f32,
+                );
                 let [width, height] = source.1.map(|side| 1.0 / side as f32);
                 gl.uniform_2_f32(uniform("source_texel").as_ref(), width, height);
             });
@@ -140,10 +171,30 @@ impl ReachBloom {
 
     /// `gaussian_blur_fixed`: `surface` blurred across into `scratch` and
     /// back down, scaled.
-    unsafe fn blur(&self, gl: &glow::Context, surface: &ColorTarget, scratch: &ColorTarget, scale: [f32; 4]) {
+    unsafe fn blur(
+        &self,
+        gl: &glow::Context,
+        surface: &ColorTarget,
+        scratch: &ColorTarget,
+        scale: [f32; 4],
+    ) {
         unsafe {
-            self.step(gl, scratch, Pass::BlurHorizontal, (surface.texture, surface.size), None, [1.0; 4]);
-            self.step(gl, surface, Pass::Kernel5, (scratch.texture, scratch.size), None, scale);
+            self.step(
+                gl,
+                scratch,
+                Pass::BlurHorizontal,
+                (surface.texture, surface.size),
+                None,
+                [1.0; 4],
+            );
+            self.step(
+                gl,
+                surface,
+                Pass::Kernel5,
+                (scratch.texture, scratch.size),
+                None,
+                scale,
+            );
         }
     }
 
@@ -158,7 +209,11 @@ impl ReachBloom {
         frame: [i32; 2],
     ) -> Option<glow::NativeTexture> {
         unsafe {
-            if self.surfaces.as_ref().is_none_or(|surfaces| surfaces.frame != frame) {
+            if self
+                .surfaces
+                .as_ref()
+                .is_none_or(|surfaces| surfaces.frame != frame)
+            {
                 if let Some(old) = self.surfaces.take() {
                     old.delete(gl);
                 }
@@ -172,21 +227,63 @@ impl ReachBloom {
             let [small, small2] = &surfaces.small;
             let [tiny, tiny2] = &surfaces.tiny;
             let [mini, mini2] = &surfaces.mini;
-            self.step(gl, &surfaces.temp, Pass::Downsample2x2, (accumulation, frame), None, [1.0, 1.0, 0.0, 0.0]);
+            self.step(
+                gl,
+                &surfaces.temp,
+                Pass::Downsample2x2,
+                (accumulation, frame),
+                None,
+                [1.0, 1.0, 0.0, 0.0],
+            );
             let temp = (surfaces.temp.texture, surfaces.temp.size);
             if high_resolution(frame) {
-                self.step(gl, &surfaces.bloom_temp, Pass::BloomCurve, temp, None, curve);
+                self.step(
+                    gl,
+                    &surfaces.bloom_temp,
+                    Pass::BloomCurve,
+                    temp,
+                    None,
+                    curve,
+                );
                 let bloom_temp = (surfaces.bloom_temp.texture, surfaces.bloom_temp.size);
                 self.step(gl, small, Pass::Copy, bloom_temp, None, ones);
             } else {
                 self.step(gl, small, Pass::BloomCurve, temp, None, curve);
             }
-            self.step(gl, tiny, Pass::Gaussian4x4, (small.texture, small.size), None, ones);
-            self.step(gl, mini, Pass::Gaussian4x4, (tiny.texture, tiny.size), None, ones);
+            self.step(
+                gl,
+                tiny,
+                Pass::Gaussian4x4,
+                (small.texture, small.size),
+                None,
+                ones,
+            );
+            self.step(
+                gl,
+                mini,
+                Pass::Gaussian4x4,
+                (tiny.texture, tiny.size),
+                None,
+                ones,
+            );
             self.blur(gl, mini, mini2, scaled(LARGE_COLOR));
-            self.step(gl, tiny2, Pass::AddAlpha1, (tiny.texture, tiny.size), Some(mini.texture), scaled(MEDIUM_COLOR));
+            self.step(
+                gl,
+                tiny2,
+                Pass::AddAlpha1,
+                (tiny.texture, tiny.size),
+                Some(mini.texture),
+                scaled(MEDIUM_COLOR),
+            );
             self.blur(gl, tiny2, tiny, ones);
-            self.step(gl, small2, Pass::Add, (small.texture, small.size), Some(tiny2.texture), scaled(SMALL_COLOR));
+            self.step(
+                gl,
+                small2,
+                Pass::Add,
+                (small.texture, small.size),
+                Some(tiny2.texture),
+                scaled(SMALL_COLOR),
+            );
             self.blur(gl, small2, small, ones);
 
             self.chain.end(gl, run, scene);
@@ -205,8 +302,14 @@ mod tests {
         assert!(!high_resolution([1280, 720]), "720 itself is not above");
         assert!(high_resolution([1200, 1300]), "portrait goes by width");
         assert!(!high_resolution([1100, 1300]));
-        assert_eq!(surface_sizes([1920, 1080]), [[960, 540], [480, 270], [288, 180], [72, 45], [18, 11]]);
-        assert_eq!(surface_sizes([1000, 700]), [[500, 350], [250, 175], [250, 175], [63, 44], [16, 11]]);
+        assert_eq!(
+            surface_sizes([1920, 1080]),
+            [[960, 540], [480, 270], [288, 180], [72, 45], [18, 11]]
+        );
+        assert_eq!(
+            surface_sizes([1000, 700]),
+            [[500, 350], [250, 175], [250, 175], [63, 44], [16, 11]]
+        );
     }
 
     #[test]

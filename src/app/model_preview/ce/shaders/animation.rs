@@ -55,17 +55,29 @@ impl CeMapAnimation {
     /// Whether it moves with no object output doing the moving.
     pub(super) fn moves(&self, outputs: &[f32; 4]) -> bool {
         (0..3).any(|axis| {
-            self.waves[axis].moves() && self.sources[axis].is_none_or(|source| outputs[source] != 0.0)
+            self.waves[axis].moves()
+                && self.sources[axis].is_none_or(|source| outputs[source] != 0.0)
         })
     }
 
-    pub(super) fn apply(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32, outputs: &[f32; 4]) {
+    pub(super) fn apply(
+        &self,
+        rows: &mut [[f32; 4]; H2_TEXTURE_ROWS],
+        time: f32,
+        outputs: &[f32; 4],
+    ) {
         let [u, v, r] =
             std::array::from_fn(|axis| self.waves[axis].value(self.sources[axis], time, outputs));
-        let (offset_u, offset_v) =
-            (self.offset[0] - self.center[0] + u, self.offset[1] - self.center[1] + v);
+        let (offset_u, offset_v) = (
+            self.offset[0] - self.center[0] + u,
+            self.offset[1] - self.center[1] + v,
+        );
         let turn = r + self.rotation;
-        let (sin, cos) = if turn == 0.0 || turn == 360.0 { (0.0, 1.0) } else { turn.to_radians().sin_cos() };
+        let (sin, cos) = if turn == 0.0 || turn == 360.0 {
+            (0.0, 1.0)
+        } else {
+            turn.to_radians().sin_cos()
+        };
         rows[self.row] = [
             cos * self.scale[0],
             -sin * self.scale[1],
@@ -102,7 +114,13 @@ impl CeColorAnimation {
         self.function != PERIODIC_ONE && self.function != PERIODIC_ZERO && self.lower != self.upper
     }
 
-    fn apply(&self, value: &mut [f32; 4], time: f32, change_colors: &[[f32; 3]; 4], outputs: &[f32; 4]) {
+    fn apply(
+        &self,
+        value: &mut [f32; 4],
+        time: f32,
+        change_colors: &[[f32; 3]; 4],
+        outputs: &[f32; 4],
+    ) {
         let wave = if self.follows_output {
             outputs[0]
         } else {
@@ -110,7 +128,9 @@ impl CeColorAnimation {
         };
         let at = |axis: usize| self.lower[axis] + (self.upper[axis] - self.lower[axis]) * wave;
         for axis in 0..3 {
-            let tint = self.channel.map_or(1.0, |channel| change_colors[channel][axis]);
+            let tint = self
+                .channel
+                .map_or(1.0, |channel| change_colors[channel][axis]);
             value[axis] = at(axis) * tint;
         }
         if self.animates_alpha {
@@ -156,7 +176,8 @@ pub(super) struct CePlasma {
 
 impl CePlasma {
     fn intensity(&self, outputs: &[f32; 4]) -> f32 {
-        self.intensity_source.map_or(1.0, |source| outputs[source].powf(self.intensity_exponent))
+        self.intensity_source
+            .map_or(1.0, |source| outputs[source].powf(self.intensity_exponent))
     }
 
     fn apply(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32, outputs: &[f32; 4]) {
@@ -186,7 +207,12 @@ impl CePlasma {
             blue - parallel[2],
             (alpha - parallel[3]) * intensity,
         ];
-        rows[7] = [parallel[0], parallel[1], parallel[2], parallel[3] * intensity];
+        rows[7] = [
+            parallel[0],
+            parallel[1],
+            parallel[2],
+            parallel[3] * intensity,
+        ];
     }
 }
 
@@ -213,12 +239,19 @@ impl CeMeter {
         let with = |[r, g, b]: [f32; 3], w: f32| [r, g, b, w];
         let lit = self.flash.map(|channel| channel * flash);
         let (first_alpha, tint, tint_alpha, background_alpha) = match self.transparency {
-            Some([meter, background]) => {
-                (meter, self.tint.map(|channel| channel * brightness), meter, background)
-            }
+            Some([meter, background]) => (
+                meter,
+                self.tint.map(|channel| channel * brightness),
+                meter,
+                background,
+            ),
             None => (brightness, self.tint, brightness, 0.0),
         };
-        let (variable, sign) = if self.negative { (lit.map(|c| -c), -1.0) } else { (lit, 1.0) };
+        let (variable, sign) = if self.negative {
+            (lit.map(|c| -c), -1.0)
+        } else {
+            (lit, 1.0)
+        };
         [
             with(lit, first_alpha),
             with(self.maximum, 1.0 / (extension * 8.0f32).max(1.0)),
@@ -239,7 +272,9 @@ impl PassAnimation for CeModelAnimation {
     /// Whether it moves by itself while `outputs` hold: plasma's noise always
     /// runs, but there is nothing to see of it at no intensity.
     fn moves_with(&self, outputs: &[f32; 4]) -> bool {
-        self.plasma.as_ref().is_some_and(|plasma| plasma.intensity(outputs) > 0.0)
+        self.plasma
+            .as_ref()
+            .is_some_and(|plasma| plasma.intensity(outputs) > 0.0)
     }
 
     /// Which of the object's outputs this reads.
@@ -250,7 +285,11 @@ impl PassAnimation for CeModelAnimation {
             .iter()
             .flat_map(|map| map.sources)
             .chain(self.meter.iter().flat_map(|meter| meter.sources))
-            .chain(self.plasma.iter().flat_map(|plasma| [plasma.intensity_source, plasma.offset_source]))
+            .chain(
+                self.plasma
+                    .iter()
+                    .flat_map(|plasma| [plasma.intensity_source, plasma.offset_source]),
+            )
             .chain([self.fade_source]);
         sources.flatten().for_each(|source| read[source] = true);
         read[0] |= self.colors.iter().any(|color| color.follows_output);
@@ -262,17 +301,17 @@ impl PassAnimation for CeModelAnimation {
         self.fade_source.is_some()
             || self.meter.is_some()
             || self.plasma.is_some()
-            || self.maps.iter().any(|map| map.sources.iter().any(Option::is_some))
+            || self
+                .maps
+                .iter()
+                .any(|map| map.sources.iter().any(Option::is_some))
             || self.colors.iter().any(|color| color.follows_output)
     }
 
-    fn apply_rows(
-        &self,
-        rows: &mut [[f32; 4]; H2_TEXTURE_ROWS],
-        time: f32,
-        outputs: &[f32; 4],
-    ) {
-        self.maps.iter().for_each(|map| map.apply(rows, time, outputs));
+    fn apply_rows(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32, outputs: &[f32; 4]) {
+        self.maps
+            .iter()
+            .for_each(|map| map.apply(rows, time, outputs));
         if let Some(source) = self.fade_source {
             rows[8][0] = outputs[source];
         }
@@ -290,7 +329,11 @@ impl PassAnimation for CeModelAnimation {
         change_colors: &[[f32; 3]; 4],
         outputs: &[f32; 4],
     ) {
-        for color in self.colors.iter().filter(|color| color.register == register) {
+        for color in self
+            .colors
+            .iter()
+            .filter(|color| color.register == register)
+        {
             color.apply(value, time, change_colors, outputs);
         }
         if let Some(meter) = &self.meter
@@ -305,7 +348,8 @@ impl PassAnimation for CeModelAnimation {
     }
 }
 
-pub(super) const DETAIL_FUNCTIONS: [&str; 3] = ["double/biased multiply", "multiply", "double/biased add"];
+pub(super) const DETAIL_FUNCTIONS: [&str; 3] =
+    ["double/biased multiply", "multiply", "double/biased add"];
 
 const COLOR_SOURCES: [&str; 5] = ["none", "A", "B", "C", "D"];
 
@@ -343,7 +387,9 @@ pub(super) fn nonzero(value: Option<f32>, default: f32) -> f32 {
 
 /// An effect shader's second map's animation, as the game reads it: no
 /// postprocess fills in its zeros, and it is scaled by one.
-pub(in crate::app::model_preview) fn read_effect_map_animation(root: TagStruct<'_>) -> CeMapAnimation {
+pub(in crate::app::model_preview) fn read_effect_map_animation(
+    root: TagStruct<'_>,
+) -> CeMapAnimation {
     let center = root.read_point2d("rotation-animation center");
     CeMapAnimation {
         row: 0,
@@ -352,7 +398,11 @@ pub(in crate::app::model_preview) fn read_effect_map_animation(root: TagStruct<'
             function_source(root, "v-animation source"),
             function_source(root, "rotation-animation source"),
         ],
-        waves: [TextureWave::read(root, "u", 0.0), TextureWave::read(root, "v", 0.0), TextureWave::read(root, "rotation", 0.0)],
+        waves: [
+            TextureWave::read(root, "u", 0.0),
+            TextureWave::read(root, "v", 0.0),
+            TextureWave::read(root, "rotation", 0.0),
+        ],
         center: [center.x, center.y],
         scale: [1.0; 2],
         offset: [0.0; 2],
@@ -362,9 +412,16 @@ pub(in crate::app::model_preview) fn read_effect_map_animation(root: TagStruct<'
 
 impl CeMapAnimation {
     /// The two rows of the transform at a time, for an object's outputs.
-    pub(in crate::app::model_preview) fn rows(&self, time: f32, outputs: &[f32; 4]) -> [[f32; 4]; 2] {
+    pub(in crate::app::model_preview) fn rows(
+        &self,
+        time: f32,
+        outputs: &[f32; 4],
+    ) -> [[f32; 4]; 2] {
         let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
-        let at = Self { row: 0, ..self.clone() };
+        let at = Self {
+            row: 0,
+            ..self.clone()
+        };
         at.apply(&mut rows, time, outputs);
         [rows[0], rows[1]]
     }
@@ -397,7 +454,11 @@ pub(super) fn read_map_animation(
     }
 }
 
-pub(super) fn read_model_animation(root: TagStruct<'_>, scale: [f32; 2], detail_mask: i32) -> CeModelAnimation {
+pub(super) fn read_model_animation(
+    root: TagStruct<'_>,
+    scale: [f32; 2],
+    detail_mask: i32,
+) -> CeModelAnimation {
     let upper = root.read_rgb("animation color upper bound");
     let lower = root.read_rgb("animation color lower bound");
     CeModelAnimation {

@@ -36,7 +36,14 @@ impl ParticleField {
         }
         if system.child {
             for run in self.instances.get(index).into_iter().flatten() {
-                system.h4_draws_at(&run.running, (run.origin, run.axes, run.start), values, view, time, &mut draws);
+                system.h4_draws_at(
+                    &run.running,
+                    (run.origin, run.axes, run.start),
+                    values,
+                    view,
+                    time,
+                    &mut draws,
+                );
             }
             return draws;
         }
@@ -44,7 +51,14 @@ impl ParticleField {
             return draws;
         };
         let (origin, axes) = location(system, bones);
-        system.h4_draws_at(running, (origin, axes, onset), values, view, time, &mut draws);
+        system.h4_draws_at(
+            running,
+            (origin, axes, onset),
+            values,
+            view,
+            time,
+            &mut draws,
+        );
         draws
     }
 }
@@ -68,8 +82,10 @@ impl ParticleSystem {
             let base = ParticleState {
                 system_age: system.times.age(system.event, time - onset).unwrap_or(1.0),
                 game_time: particle_game_time(look.reach, time),
-                effect_a: system_state(system, values, time, time - onset).map_or(0.0, |state| state.effect_a),
-                effect_b: system_state(system, values, time, time - onset).map_or(1.0, |state| state.effect_b),
+                effect_a: system_state(system, values, time, time - onset)
+                    .map_or(0.0, |state| state.effect_a),
+                effect_b: system_state(system, values, time, time - onset)
+                    .map_or(1.0, |state| state.effect_b),
                 location_seed: system.location_seed,
                 lod: {
                     let away = minus(origin, view.eye);
@@ -78,7 +94,11 @@ impl ParticleSystem {
                 ..Default::default()
             };
             const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-            let (offset, turned) = if system.world { ([0.0; 3], IDENTITY) } else { emitter_frame(emitter, origin, axes, &base) };
+            let (offset, turned) = if system.world {
+                ([0.0; 3], IDENTITY)
+            } else {
+                emitter_frame(emitter, origin, axes, &base)
+            };
             // `random u/v mirror` reads bit 0 of `256·random`.
             let mirror = |flip: bool| if flip { 1.5 / 256.0 } else { 0.5 / 256.0 };
             let mut states = Vec::with_capacity(running.particles.len());
@@ -86,18 +106,41 @@ impl ParticleSystem {
                 let state = particle.state(base);
                 let tint = emitter.tint.color(&state);
                 let color = look.color.color(&state);
-                let alpha = (emitter.alpha.scalar(&state) * look.alpha.scalar(&state)).clamp(0.0, 1.0);
-                let rgb: [f32; 3] = std::array::from_fn(|axis| (tint[axis] * color[axis]).clamp(0.0, 1.0));
-                let [size_factor, aspect_factor] = emitter.h4.as_ref().map_or([1.0; 2], |h4| h4.size_and_aspect(&state));
-                let white_point = emitter.h4.as_ref().and_then(|h4| h4.white_point.as_ref()).map_or(1.0, |white| white.scalar(&state));
+                let alpha =
+                    (emitter.alpha.scalar(&state) * look.alpha.scalar(&state)).clamp(0.0, 1.0);
+                let rgb: [f32; 3] =
+                    std::array::from_fn(|axis| (tint[axis] * color[axis]).clamp(0.0, 1.0));
+                let [size_factor, aspect_factor] = emitter
+                    .h4
+                    .as_ref()
+                    .map_or([1.0; 2], |h4| h4.size_and_aspect(&state));
+                let white_point = emitter
+                    .h4
+                    .as_ref()
+                    .and_then(|h4| h4.white_point.as_ref())
+                    .map_or(1.0, |white| white.scalar(&state));
                 let packed = H4ParticleState {
                     position: particle.position,
                     size: emitter.size.scalar(&state) * emitter.scale.scalar(&state) * size_factor,
                     velocity: particle.velocity,
                     aspect: look.aspect.scalar(&state) * aspect_factor,
-                    random: [mirror(particle.flip[0]), mirror(particle.flip[1]), particle.seeds[0], particle.seeds[1]],
-                    random2: [particle.seeds[2], particle.seeds[3], particle.seeds[4], particle.seeds[5]],
-                    physical_rotation: if emitter.rotation_given { 0.0 } else { particle.rotation.rem_euclid(1.0) },
+                    random: [
+                        mirror(particle.flip[0]),
+                        mirror(particle.flip[1]),
+                        particle.seeds[0],
+                        particle.seeds[1],
+                    ],
+                    random2: [
+                        particle.seeds[2],
+                        particle.seeds[3],
+                        particle.seeds[4],
+                        particle.seeds[5],
+                    ],
+                    physical_rotation: if emitter.rotation_given {
+                        0.0
+                    } else {
+                        particle.rotation.rem_euclid(1.0)
+                    },
                     manual_rotation: emitter.rotation.scalar(&state).rem_euclid(1.0),
                     animated_frame: particle.frame.rem_euclid(1.0),
                     manual_frame: look.frame.scalar(&state).rem_euclid(1.0),
@@ -126,10 +169,21 @@ impl ParticleSystem {
                 to_world: [turned[0], turned[1], turned[2], offset],
                 states,
                 near: [system.near_range.recip(), system.near_cutoff],
-                black_or_white: emitter.black_point.function.as_constant().is_none_or(|value| value != 0.0)
-                    || emitter.h4.as_ref().and_then(|h4| h4.white_point.as_ref()).is_some_and(|white| {
-                        white.function.as_constant().is_none_or(|value| value != 1.0)
-                    }),
+                black_or_white: emitter
+                    .black_point
+                    .function
+                    .as_constant()
+                    .is_none_or(|value| value != 0.0)
+                    || emitter
+                        .h4
+                        .as_ref()
+                        .and_then(|h4| h4.white_point.as_ref())
+                        .is_some_and(|white| {
+                            white
+                                .function
+                                .as_constant()
+                                .is_none_or(|value| value != 1.0)
+                        }),
             });
         }
     }

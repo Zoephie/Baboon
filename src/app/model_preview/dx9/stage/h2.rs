@@ -6,8 +6,15 @@ impl Dx9VertexStage {
     /// From a pass's `vertex shader` reference, which ignores case as every
     /// tag reference does.
     pub(in crate::app) fn from_path(path: &str) -> Option<Self> {
-        match path.rsplit(['\\', '/']).next()?.to_ascii_lowercase().as_str() {
-            "transparent_generic_default" | "transparent_generic_default_sky" => Some(Self::Default),
+        match path
+            .rsplit(['\\', '/'])
+            .next()?
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "transparent_generic_default" | "transparent_generic_default_sky" => {
+                Some(Self::Default)
+            }
             "transparent_generic_reflection" | "transparent_generic_reflection_sky" => {
                 Some(Self::Reflection)
             }
@@ -94,7 +101,10 @@ impl Dx9VertexStage {
 
     /// Whether registers also carry lone values rather than only map scales.
     pub(in crate::app) fn takes_row_values(self) -> bool {
-        matches!(self, Self::ActiveCamo | Self::Offset | Self::Prt | Self::PrtDetail)
+        matches!(
+            self,
+            Self::ActiveCamo | Self::Offset | Self::Prt | Self::PrtDetail
+        )
     }
 
     /// What differs between the lightmap variants.

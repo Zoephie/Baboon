@@ -359,7 +359,14 @@ pub(crate) fn read_h4_flares(
     let lens_group = u32::from_be_bytes(*b"lens");
     let mut read: Vec<(String, Option<Arc<H4LensFlare>>)> = Vec::new();
     for attachment in object_attachments(object, &[lens_group]) {
-        let ObjectAttachment { path, marker: name, scale_by, secondary_by, change_color, .. } = attachment;
+        let ObjectAttachment {
+            path,
+            marker: name,
+            scale_by,
+            secondary_by,
+            change_color,
+            ..
+        } = attachment;
         let flare = match read.iter().find(|(known, _)| *known == path) {
             Some((_, flare)) => flare.clone(),
             None => {

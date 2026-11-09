@@ -28,7 +28,10 @@ pub(in crate::app::model_preview) struct Gen3State {
     pub(in crate::app::model_preview) targets: Option<super::super::gen3::pipeline::Gen3Targets>,
     /// Linked passes by their address, or the pass that failed to link: each
     /// holds its pass, so no other pass can come to have its address.
-    pub(in crate::app::model_preview) programs: HashMap<usize, Result<Rc<super::super::gen3::pipeline::Gen3Program>, Arc<super::shaders::Gen3Pass>>>,
+    pub(in crate::app::model_preview) programs: HashMap<
+        usize,
+        Result<Rc<super::super::gen3::pipeline::Gen3Program>, Arc<super::shaders::Gen3Pass>>,
+    >,
     /// The light drawing now, which a game's dynamic lights set for each.
     pub(in crate::app::model_preview) light: Option<PassLight>,
     /// Whether this frame's particles drew any distortion to apply.
@@ -48,7 +51,8 @@ pub(in crate::app::model_preview) struct Gen3State {
     pub(in crate::app::model_preview) inline_lights: Vec<[[f32; 4]; 5]>,
     /// Constants a Reach or Halo 4 pass of the frame sets over the material's:
     /// the self shadow's, the shield's and the camo's.
-    pub(in crate::app::model_preview) pass_values: Option<std::collections::HashMap<&'static str, [f32; 4]>>,
+    pub(in crate::app::model_preview) pass_values:
+        Option<std::collections::HashMap<&'static str, [f32; 4]>>,
     /// The self shadow mask the lit pass reads: Reach's or Halo 4's, made
     /// before it and dropped after.
     pub(in crate::app::model_preview) shadow_mask: Option<glow::NativeTexture>,

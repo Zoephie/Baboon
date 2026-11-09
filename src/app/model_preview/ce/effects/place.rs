@@ -56,7 +56,10 @@ impl super::super::functions::ReadsOutputs for CeEffectAt {
         if self.spawn.is_some() || self.event.is_some() {
             return Vec::new();
         }
-        [self.primary, self.secondary].into_iter().flatten().collect()
+        [self.primary, self.secondary]
+            .into_iter()
+            .flatten()
+            .collect()
     }
 }
 
@@ -107,7 +110,11 @@ fn locate(def: &CeEffectDef, markers: &[RenderModelPreviewMarker]) -> Vec<Vec<Ce
         .iter()
         .map(|name| {
             if name.is_empty() {
-                return vec![CeLocation { node: 0, position: [0.0; 3], axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }];
+                return vec![CeLocation {
+                    node: 0,
+                    position: [0.0; 3],
+                    axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                }];
             }
             markers
                 .iter()
@@ -151,7 +158,10 @@ pub(in crate::app::model_preview) fn read_ce_event_effects(
             object: owner,
             def,
             spawn: None,
-            event: Some(CeEventEffect { name: super::super::super::effects::event_function_name(&field, &path), path: path.clone() }),
+            event: Some(CeEventEffect {
+                name: super::super::super::effects::event_function_name(&field, &path),
+                path: path.clone(),
+            }),
             primary: None,
             secondary: None,
             change_color: None,

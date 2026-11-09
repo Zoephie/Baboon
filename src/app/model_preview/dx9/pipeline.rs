@@ -3,12 +3,12 @@
 //! shields; and what the finished frame blooms over. Each game hooks in
 //! where its own differs.
 
-use eframe::glow::{self, HasContext as _};
-use super::shadow::ShadowStyle;
 use super::super::*;
-use super::passes::{H2_DEFAULT_LIGHTS, H2_SHADOWED_LIGHT, Dx9Layer};
-use super::sprites::Dx9Sprites;
 use super::draw::draw_order;
+use super::passes::{Dx9Layer, H2_DEFAULT_LIGHTS, H2_SHADOWED_LIGHT};
+use super::shadow::ShadowStyle;
+use super::sprites::Dx9Sprites;
+use eframe::glow::{self, HasContext as _};
 
 /// Where Halo CE's and Halo 2's shading differ.
 pub(in crate::app::model_preview) trait Dx9Game {
@@ -21,7 +21,10 @@ pub(in crate::app::model_preview) trait Dx9Game {
 
     /// The transparent layer, in `order`.
     unsafe fn transparents(&mut self, cx: &mut FrameCx<'_>, order: &[usize]) {
-        unsafe { cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, Dx9Layer::Transparent, None) }
+        unsafe {
+            cx.core
+                .draw_h2_passes(cx.gl, cx.frame, cx.slot, order, Dx9Layer::Transparent, None)
+        }
     }
 
     /// After the transparents: the game's shield layers, in `order`.
@@ -50,7 +53,13 @@ pub(in crate::app::model_preview) trait Dx9Game {
     /// Each simulation the game keeps for `slot` while it holds its
     /// `uploads`th model, by name.
     #[cfg(test)]
-    fn each_simulation(&self, _slot: usize, _uploads: u64, _visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {}
+    fn each_simulation(
+        &self,
+        _slot: usize,
+        _uploads: u64,
+        _visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug),
+    ) {
+    }
 }
 
 impl RenderCore {
@@ -96,7 +105,8 @@ impl RenderCore {
                     self.draw_h2_passes(gl, frame, slot, &order, layer, None);
                 }
                 if frame.default_lights {
-                    let shadowed = frame.self_shadow && self.draw_h2_shadow(gl, frame, slot, &order, ShadowStyle::h2(frame));
+                    let shadowed = frame.self_shadow
+                        && self.draw_h2_shadow(gl, frame, slot, &order, ShadowStyle::h2(frame));
                     for (index, light) in H2_DEFAULT_LIGHTS.iter().enumerate() {
                         if shadowed && index == 0 {
                             gl.enable(glow::STENCIL_TEST);
@@ -110,12 +120,36 @@ impl RenderCore {
                     }
                 }
                 // `render_lights`: the game's own lights, each drawn over the layers it lights.
-                game.lights(&mut FrameCx { gl, frame, core: self, slot }, &order);
+                game.lights(
+                    &mut FrameCx {
+                        gl,
+                        frame,
+                        core: self,
+                        slot,
+                    },
+                    &order,
+                );
                 self.draw_h2_passes(gl, frame, slot, &order, Dx9Layer::Hologram, None);
             }
             let order = draw_order(frame, &self.slots[slot].sort_points);
-            game.transparents(&mut FrameCx { gl, frame, core: self, slot }, &order);
-            game.shields(&mut FrameCx { gl, frame, core: self, slot }, &order);
+            game.transparents(
+                &mut FrameCx {
+                    gl,
+                    frame,
+                    core: self,
+                    slot,
+                },
+                &order,
+            );
+            game.shields(
+                &mut FrameCx {
+                    gl,
+                    frame,
+                    core: self,
+                    slot,
+                },
+                &order,
+            );
             // `rasterizer_postprocess_scene` blooms the finished frame,
             // after every transparent and effect.
             if frame.game_shaders && frame.bloom {

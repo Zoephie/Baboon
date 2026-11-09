@@ -15,7 +15,18 @@ pub(in crate::app::model_preview) unsafe fn blit_depth(
         gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(from));
         gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(to));
         let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
-        gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
+        gl.blit_framebuffer(
+            0,
+            0,
+            width,
+            height,
+            0,
+            0,
+            width,
+            height,
+            mask,
+            glow::NEAREST,
+        );
     }
 }
 

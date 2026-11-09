@@ -1,19 +1,19 @@
 //! An object held or carried by another, folded into its preview: its own
 //! features by game, then its geometry, functions and change colors.
 
-use std::sync::Arc;
-use blam_tags::TagFile;
-use super::super::load::merge_attached;
-use crate::app::model_preview::common::marker::MarkerFrame;
-use crate::app::model_preview::animation::ik::weapon::attached_marker_frame;
 use super::super::common::fields::{elements, has_flag};
 use super::super::dx9::passes::{change_colors_for, read_change_colors};
-use super::super::*;
-use super::super::load::LoadCx;
 use super::super::h3::attached::read_h3_attached_features;
 use super::super::h4::attached::read_h4_attached_features;
+use super::super::load::LoadCx;
+use super::super::load::merge_attached;
 use super::super::reach::attached::read_reach_attached_features;
+use super::super::*;
+use crate::app::model_preview::animation::ik::weapon::attached_marker_frame;
 use crate::app::model_preview::common::attached::named;
+use crate::app::model_preview::common::marker::MarkerFrame;
+use blam_tags::TagFile;
+use std::sync::Arc;
 
 /// An attached object's lights and flares, then its geometry, into `preview`.
 /// `model` is the object's, built into `attached`, made as `variant`.
@@ -31,17 +31,31 @@ pub(in crate::app::model_preview) fn fold_attached(
     preview: &mut RenderModelPreview,
 ) -> Option<AttachedObject> {
     let frame = |marker: &RenderModelPreviewMarker| {
-        (attached_marker_frame(marker, &parent, &child), parent.node.max(0) as usize)
+        (
+            attached_marker_frame(marker, &parent, &child),
+            parent.node.max(0) as usize,
+        )
     };
-    let cx = LoadCx { reader, object, owner, markers: &attached.markers, frame: &frame, name: Some(name) };
+    let cx = LoadCx {
+        reader,
+        object,
+        owner,
+        markers: &attached.markers,
+        frame: &frame,
+        name: Some(name),
+    };
     // `Game::of` calls Reach `Halo3` too; its attachments, lights and held
     // weapons read differently, and wait on their own readers.
     if reader.source.game() == Some(GameId::Halo4) {
         // Halo 4's own readers, never Halo 3's readings of it.
-        let center = std::array::from_fn(|axis| (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5);
+        let center = std::array::from_fn(|axis| {
+            (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5
+        });
         read_h4_attached_features(&cx, center, preview);
     } else if reader.source.game() == Some(GameId::HaloReach) {
-        let center = std::array::from_fn(|axis| (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5);
+        let center = std::array::from_fn(|axis| {
+            (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5
+        });
         read_reach_attached_features(&cx, center, preview);
     } else if blam_tags::game::Game::of(object) == blam_tags::game::Game::Halo3 {
         read_h3_attached_features(&cx, preview);
@@ -54,7 +68,12 @@ pub(in crate::app::model_preview) fn fold_attached(
         prt.pad(attached.vertices.len());
     }
     if let Some(prt) = preview.gen3.prt.as_mut() {
-        match attached.gen3.prt.as_ref().filter(|own| own.vertices.len() == attached.vertices.len()) {
+        match attached
+            .gen3
+            .prt
+            .as_ref()
+            .filter(|own| own.vertices.len() == attached.vertices.len())
+        {
             Some(own) => prt.append(own),
             None => prt.pad(attached.vertices.len()),
         }
@@ -63,7 +82,11 @@ pub(in crate::app::model_preview) fn fold_attached(
     let functions = super::super::functions::read_object_functions(object, Some(model))?;
     // `object_set_initial_change_colors`: each object its own, from its own tag.
     let change_colors = change_colors_for(&read_change_colors(object), variant);
-    Some(AttachedObject { owner, functions, change_colors })
+    Some(AttachedObject {
+        owner,
+        functions,
+        change_colors,
+    })
 }
 
 /// A unit's own `weapons` that are an `extension of parent` (vehicle and
@@ -71,16 +94,28 @@ pub(in crate::app::model_preview) fn fold_attached(
 /// H3 `sub_180343CCC`, ODST `sub_140ABC7F0`) hands theirs to the unit, so
 /// their effects play at the unit's markers. On a child object they take its
 /// name, as its own effects do.
-pub(in crate::app::model_preview) fn read_extension_weapons<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+pub(in crate::app::model_preview) fn read_extension_weapons<
+    F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
+>(
     cx: &LoadCx<'_, F>,
     preview: &mut RenderModelPreview,
 ) {
-    let LoadCx { reader, object, owner, markers, frame, name: within } = *cx;
+    let LoadCx {
+        reader,
+        object,
+        owner,
+        markers,
+        frame,
+        name: within,
+    } = *cx;
     let Some(holder) = super::super::common::fields::object_block(object, "weapons") else {
         return;
     };
     for entry in elements(holder, "weapons") {
-        let Some(path) = entry.read_tag_ref_path("weapon").filter(|path| !path.is_empty()) else {
+        let Some(path) = entry
+            .read_tag_ref_path("weapon")
+            .filter(|path| !path.is_empty())
+        else {
             continue;
         };
         let Ok(weapon) = reader.load(&path, "weapon", b"weap") else {
@@ -91,18 +126,31 @@ pub(in crate::app::model_preview) fn read_extension_weapons<F: Fn(&RenderModelPr
             continue;
         }
         if blam_tags::game::Game::of(&weapon) == blam_tags::game::Game::Halo3 {
-            read_h3_attached_features(&LoadCx { object: &weapon, ..*cx }, preview);
+            read_h3_attached_features(
+                &LoadCx {
+                    object: &weapon,
+                    ..*cx
+                },
+                preview,
+            );
             continue;
         }
-        let particles = super::super::particles::read_h3_particles(reader, &weapon, owner, markers, frame);
-        preview.particles.extend(named(particles, within).map(Arc::new));
-        let (flares, lights, gels) = super::super::h2::lights::read_h2_flares(reader, &weapon, owner, markers, frame);
+        let particles =
+            super::super::particles::read_h3_particles(reader, &weapon, owner, markers, frame);
+        preview
+            .particles
+            .extend(named(particles, within).map(Arc::new));
+        let (flares, lights, gels) =
+            super::super::h2::lights::read_h2_flares(reader, &weapon, owner, markers, frame);
         preview.h2.flares.extend(named(flares, within));
         preview.h2.point_lights.extend(named(lights, within));
         preview.h2.gel_lights.extend(named(gels, within));
-        let volumes = super::super::h2::light_volumes::read_h2_light_volumes(reader, &weapon, owner, markers, frame);
+        let volumes = super::super::h2::light_volumes::read_h2_light_volumes(
+            reader, &weapon, owner, markers, frame,
+        );
         preview.h2.light_volumes.extend(named(volumes, within));
-        let contrails = super::super::h2::contrails::read_h2_contrails(reader, &weapon, owner, markers, frame);
+        let contrails =
+            super::super::h2::contrails::read_h2_contrails(reader, &weapon, owner, markers, frame);
         preview.h2.contrails.extend(named(contrails, within));
     }
 }

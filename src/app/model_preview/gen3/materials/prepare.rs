@@ -74,11 +74,17 @@ fn compile_passes(
     method: &RenderMethod,
     caches: &mut ResolveCaches,
 ) -> Result<CompiledPasses, String> {
-    let sources = caches.h3_sources.get_or_insert_with(|| Gen3Sources::new(&reader.source));
+    let sources = caches
+        .h3_sources
+        .get_or_insert_with(|| Gen3Sources::new(&reader.source));
     let definition = sources
         .definition(&method.definition_path)
         .ok_or_else(|| format!("{} did not read", method.definition_path))?;
-    let options: Vec<usize> = method.options.iter().map(|option| (*option).max(0) as usize).collect();
+    let options: Vec<usize> = method
+        .options
+        .iter()
+        .map(|option| (*option).max(0) as usize)
+        .collect();
     let glass = method.group_tag == u32::from_be_bytes(*b"rmgl");
     let blend = definition.blend_of(&options, glass);
     // ODST's `black` has only `albedo`, which is all it needs to be black.
@@ -93,11 +99,20 @@ fn compile_passes(
     // Reach's `select_mesh_entry_point_for_pass` (MCC `sub_14084C910`) lights
     // what blends in a single pass, by the mesh's policy: one probe, or the
     // ambient transfer.
-    let single_pass_entries = (dialect == RenderMethodDialect::Reach && !opaque && has("single_pass_single_probe"))
-        .then_some(("single_pass_single_probe", "single_pass_single_probe_ambient"));
-    let lit_entry = single_pass_entries.as_ref().map_or(lit_entry, |(entry, _)| entry);
+    let single_pass_entries =
+        (dialect == RenderMethodDialect::Reach && !opaque && has("single_pass_single_probe"))
+            .then_some((
+                "single_pass_single_probe",
+                "single_pass_single_probe_ambient",
+            ));
+    let lit_entry = single_pass_entries
+        .as_ref()
+        .map_or(lit_entry, |(entry, _)| entry);
     // `render_method_update_postprocess`: the single pass flag counts as blended.
-    let single_pass = method.postprocess_definition.as_ref().is_some_and(|baked| baked.flags & 1 != 0);
+    let single_pass = method
+        .postprocess_definition
+        .as_ref()
+        .is_some_and(|baked| baked.flags & 1 != 0);
     let own_albedo = !opaque || single_pass;
     // `render_albedo_decals`: into the albedo target, to be lit with what's under.
     let decal = definition.is_decal();
@@ -107,27 +122,45 @@ fn compile_passes(
     } else {
         sources.pass(&definition, &options, lit_entry, own_albedo)?
     };
-    let albedo = (opaque && definition.entry_points.iter().any(|entry| entry == "albedo"))
-        .then(|| sources.pass(&definition, &options, "albedo", false))
-        .transpose()?;
-    let camo = (definition.entry_points.iter().any(|entry| entry == "active_camo"))
-        .then(|| sources.pass(&definition, &options, "active_camo", false))
-        .transpose()?;
+    let albedo = (opaque
+        && definition
+            .entry_points
+            .iter()
+            .any(|entry| entry == "albedo"))
+    .then(|| sources.pass(&definition, &options, "albedo", false))
+    .transpose()?;
+    let camo = (definition
+        .entry_points
+        .iter()
+        .any(|entry| entry == "active_camo"))
+    .then(|| sources.pass(&definition, &options, "active_camo", false))
+    .transpose()?;
     // Reach's writes back what it samples, which the preview's copy holds
     // encoded.
     let camo = match dialect {
-        RenderMethodDialect::Reach => camo.and_then(|pass| super::super::super::reach::camo::camo_pass(&pass)).map(Arc::new),
+        RenderMethodDialect::Reach => camo
+            .and_then(|pass| super::super::super::reach::camo::camo_pass(&pass))
+            .map(Arc::new),
         RenderMethodDialect::Halo3 => camo,
     };
-    let shadow_generate = (dialect == RenderMethodDialect::Reach && opaque && has("shadow_generate"))
-        .then(|| sources.pass(&definition, &options, "shadow_generate", false))
-        .transpose()?;
-    let dynamic_light = (opaque && definition.entry_points.iter().any(|entry| entry == "dynamic_light"))
-        .then(|| sources.pass(&definition, &options, "dynamic_light", false))
-        .transpose()?;
+    let shadow_generate =
+        (dialect == RenderMethodDialect::Reach && opaque && has("shadow_generate"))
+            .then(|| sources.pass(&definition, &options, "shadow_generate", false))
+            .transpose()?;
+    let dynamic_light = (opaque
+        && definition
+            .entry_points
+            .iter()
+            .any(|entry| entry == "dynamic_light"))
+    .then(|| sources.pass(&definition, &options, "dynamic_light", false))
+    .transpose()?;
     // `render_mesh_part_default`: a mesh's `PRT vertex type` picks one.
     let mut prt = [None, None, None];
-    for (slot, entry) in prt.iter_mut().zip(["static_prt_ambient", "static_prt_linear", "static_prt_quadratic"]) {
+    for (slot, entry) in prt.iter_mut().zip([
+        "static_prt_ambient",
+        "static_prt_linear",
+        "static_prt_quadratic",
+    ]) {
         if opaque && has(entry) {
             *slot = Some(sources.pass(&definition, &options, entry, own_albedo)?);
         }
@@ -156,7 +189,9 @@ fn screen_maps(method: &RenderMethod) -> Vec<String> {
     method
         .parameters
         .iter()
-        .filter(|parameter| parameter.bitmap_extern_mode == Some(RenderMethodBitmapExternMode::Screen))
+        .filter(|parameter| {
+            parameter.bitmap_extern_mode == Some(RenderMethodBitmapExternMode::Screen)
+        })
         .map(|parameter| parameter.parameter_name.clone())
         .collect()
 }
@@ -196,15 +231,16 @@ fn parameter_animations(method: &RenderMethod, clock: Gen3Clock) -> Vec<Gen3Anim
             _ => format!("UserParameter_{}", parameter.parameter_name),
         };
         for animated in &parameter.animated_parameters {
-            let (Some(kind), Some(function)) = (animated.parameter_type, animated.function.as_ref()) else {
+            let (Some(kind), Some(function)) =
+                (animated.parameter_type, animated.function.as_ref())
+            else {
                 continue;
             };
             let writes = match kind.get() {
                 RenderMethodAnimatedParameterType::Color => Gen3Animated::Color,
                 RenderMethodAnimatedParameterType::ScaleUniform => Gen3Animated::ScaleUniform,
-                RenderMethodAnimatedParameterType::Value | RenderMethodAnimatedParameterType::ScaleX => {
-                    Gen3Animated::First
-                }
+                RenderMethodAnimatedParameterType::Value
+                | RenderMethodAnimatedParameterType::ScaleX => Gen3Animated::First,
                 RenderMethodAnimatedParameterType::ScaleY => Gen3Animated::Second,
                 RenderMethodAnimatedParameterType::TranslationX => Gen3Animated::Third,
                 RenderMethodAnimatedParameterType::TranslationY
@@ -244,14 +280,18 @@ fn bind_pass_values(values: &Values<'_>, pass: &Gen3Pass, material: &mut Gen3Mat
         let Some(name) = uniform.strip_prefix("UserParameter_") else {
             continue;
         };
-        if let Some(ParameterSource::Extern(source)) =
-            values.resolved.and_then(|resolved| resolved.find(name)).map(|found| &found.source)
+        if let Some(ParameterSource::Extern(source)) = values
+            .resolved
+            .and_then(|resolved| resolved.find(name))
+            .map(|found| &found.source)
         {
             let source: &'static str = source.into();
             if let Some(channel) = gen3_extern_change_color(source) {
                 material.change_colors.push((uniform.clone(), channel));
             } else if source == "debug tint" {
-                material.values.insert(uniform.clone(), Gen3Value::Floats([1.0, 1.0, 1.0, 0.0]));
+                material
+                    .values
+                    .insert(uniform.clone(), Gen3Value::Floats([1.0, 1.0, 1.0, 0.0]));
             }
             continue;
         }
@@ -278,7 +318,11 @@ fn bind_pass_textures(
         let Some(name) = uniform.strip_prefix("UserParameterTexture_") else {
             continue;
         };
-        if material.textures.iter().any(|known| known.uniform == *uniform) {
+        if material
+            .textures
+            .iter()
+            .any(|known| known.uniform == *uniform)
+        {
             continue;
         }
         let found = values.resolved.and_then(|resolved| resolved.find(name));
@@ -314,7 +358,9 @@ fn bind_pass_textures(
         });
         let frames = if animated {
             let tag = reader.load(&path, "bitmap", b"bitm").ok();
-            let count = tag.as_ref().map_or(0, |tag| elements(tag.root(), "bitmaps*").len());
+            let count = tag
+                .as_ref()
+                .map_or(0, |tag| elements(tag.root(), "bitmaps*").len());
             (0..count)
                 .filter_map(|at| gen3_image(reader, &path, at as i16, kind, caches))
                 .map(|(image, _, _)| image)
@@ -322,6 +368,13 @@ fn bind_pass_textures(
         } else {
             Vec::new()
         };
-        material.textures.push(Gen3Texture { uniform: uniform.clone(), image, texels, mips, sampler, frames });
+        material.textures.push(Gen3Texture {
+            uniform: uniform.clone(),
+            image,
+            texels,
+            mips,
+            sampler,
+            frames,
+        });
     }
 }

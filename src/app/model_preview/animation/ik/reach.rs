@@ -3,15 +3,15 @@
 //! weapon's, at the offset and weight its animation carries for it. See
 //! `docs/reach-preview-research/ik.md`.
 
-use blam_tags::animation::{decode_extended_block, AnimationGroup, ExtendedChannel};
+use blam_tags::animation::{AnimationGroup, ExtendedChannel, decode_extended_block};
 use blam_tags::math::{Matrix4, RealPoint3d, RealQuaternion};
 use blam_tags::{Skeleton, TagFile};
 
 use super::super::super::common::math::{minus, plus};
 
-use crate::app::model_preview::common::math::{axis_of, matrix_of, place_of, rigid_inverse};
-use super::super::super::common::fields::elements;
 use super::super::super::RenderModelPreviewNode;
+use super::super::super::common::fields::elements;
+use crate::app::model_preview::common::math::{axis_of, matrix_of, place_of, rigid_inverse};
 use crate::app::model_preview::common::math::{cross, dot, scaled, unit_by_reciprocal};
 
 /// `e_animation_ik_chain_event_usage`: whose markers a target names.
@@ -62,7 +62,10 @@ struct GraphChain {
 }
 
 fn node_name(skeleton: &Skeleton, index: i128) -> String {
-    usize::try_from(index).ok().and_then(|index| skeleton.nodes.get(index)).map_or_else(String::new, |node| node.name.clone())
+    usize::try_from(index)
+        .ok()
+        .and_then(|index| skeleton.nodes.get(index))
+        .map_or_else(String::new, |node| node.name.clone())
 }
 
 /// The chains of the first graph down `graphs` (the clip's own, then its
@@ -86,7 +89,10 @@ fn graph_chains(graphs: &[&TagFile]) -> Vec<GraphChain> {
                     name: chain.read_string_id("name").unwrap_or_default(),
                     kind: chain.read_int_any("type").unwrap_or(0),
                     start: node_name(&skeleton, start),
-                    effector: node_name(&skeleton, chain.read_int_any("effector node").unwrap_or(-1)),
+                    effector: node_name(
+                        &skeleton,
+                        chain.read_int_any("effector node").unwrap_or(-1),
+                    ),
                     rank: 0,
                 };
                 (start, chain)
@@ -104,24 +110,33 @@ fn graph_chains(graphs: &[&TagFile]) -> Vec<GraphChain> {
 
 /// What each entry of a section holds, frame by frame.
 fn channels(group: &AnimationGroup<'_>, name: &str) -> Vec<ExtendedChannel> {
-    group.data_section(name).and_then(|section| decode_extended_block(section).ok()).unwrap_or_default()
+    group
+        .data_section(name)
+        .and_then(|section| decode_extended_block(section).ok())
+        .unwrap_or_default()
 }
 
 /// The chain targets the clip `group` of `graphs[0]` carries
 /// (`setup_ik_chain_targets_for_animation`): none if the clip turns its
 /// chains off. Targets through proxies are left out; no kit unit has one.
-pub(crate) fn read_reach_ik_tracks(graphs: &[&TagFile], group: &AnimationGroup<'_>) -> Vec<ReachIkTrack> {
+pub(crate) fn read_reach_ik_tracks(
+    graphs: &[&TagFile],
+    group: &AnimationGroup<'_>,
+) -> Vec<ReachIkTrack> {
     let Some(graph) = graphs.first() else {
         return Vec::new();
     };
-    let Some(clip) = graph
-        .root()
-        .descend("definitions")
-        .and_then(|definitions| elements(definitions, "animations").get(group.index).copied())
-    else {
+    let Some(clip) = graph.root().descend("definitions").and_then(|definitions| {
+        elements(definitions, "animations")
+            .get(group.index)
+            .copied()
+    }) else {
         return Vec::new();
     };
-    if clip.read_int_any("user flags").is_some_and(|flags| flags & DISABLE_IK_CHAINS != 0) {
+    if clip
+        .read_int_any("user flags")
+        .is_some_and(|flags| flags & DISABLE_IK_CHAINS != 0)
+    {
         return Vec::new();
     }
     let Some(shared) = elements(clip, "shared animation data").first().copied() else {
@@ -147,13 +162,21 @@ pub(crate) fn read_reach_ik_tracks(graphs: &[&TagFile], group: &AnimationGroup<'
         }
         let name = event.read_string_id("chain name").unwrap_or_default();
         let kind = event.read_int_any("chain type").unwrap_or(0);
-        let start = node_name(&skeleton, event.read_int_any("chain start node").unwrap_or(-1));
-        let effector = node_name(&skeleton, event.read_int_any("chain effector node").unwrap_or(-1));
+        let start = node_name(
+            &skeleton,
+            event.read_int_any("chain start node").unwrap_or(-1),
+        );
+        let effector = node_name(
+            &skeleton,
+            event.read_int_any("chain effector node").unwrap_or(-1),
+        );
         // An event naming no chain of the graph is deleted at load.
-        let Some(chain) = chains
-            .iter()
-            .find(|chain| chain.name == name && chain.kind == kind && chain.start == start && chain.effector == effector)
-        else {
+        let Some(chain) = chains.iter().find(|chain| {
+            chain.name == name
+                && chain.kind == kind
+                && chain.start == start
+                && chain.effector == effector
+        }) else {
             continue;
         };
         if chain.rank >= MOST_RANKS {
@@ -167,23 +190,43 @@ pub(crate) fn read_reach_ik_tracks(graphs: &[&TagFile], group: &AnimationGroup<'
             // in a preview.
             _ => continue,
         };
-        let transform = entry(event.read_int_any("effector transform data index").unwrap_or(-1));
+        let transform = entry(
+            event
+                .read_int_any("effector transform data index")
+                .unwrap_or(-1),
+        );
         let effector_frames = match transform.and_then(|at| transforms.get(at..at + 2)) {
-            Some([ExtendedChannel::Rotation(rotations), ExtendedChannel::Translation(translations)]) => rotations
+            Some(
+                [
+                    ExtendedChannel::Rotation(rotations),
+                    ExtendedChannel::Translation(translations),
+                ],
+            ) => rotations
                 .iter()
                 .zip(translations)
-                .map(|(rotation, translation)| (*rotation, [translation.x, translation.y, translation.z]))
+                .map(|(rotation, translation)| {
+                    (*rotation, [translation.x, translation.y, translation.z])
+                })
                 .collect(),
             _ => continue,
         };
         // With no weight a target stays at the zero it was cleared to.
-        let weight = entry(event.read_int_any("effector weight data index").unwrap_or(-1));
+        let weight = entry(
+            event
+                .read_int_any("effector weight data index")
+                .unwrap_or(-1),
+        );
         let Some(ExtendedChannel::Scalar(weights)) = weight.and_then(|at| weights.get(at)) else {
             continue;
         };
         let pole = entry(event.read_int_any("pole point data index").unwrap_or(-1));
         let poles = match pole.and_then(|at| poles.get(at)) {
-            Some(ExtendedChannel::Translation(points)) => Some(points.iter().map(|point| [point.x, point.y, point.z]).collect()),
+            Some(ExtendedChannel::Translation(points)) => Some(
+                points
+                    .iter()
+                    .map(|point| [point.x, point.y, point.z])
+                    .collect(),
+            ),
             _ => None,
         };
         tracks.push(ReachIkTrack {
@@ -221,10 +264,14 @@ pub(crate) fn reach_ik_markers(
 ) -> Vec<ReachIkMarker> {
     let mut out: Vec<ReachIkMarker> = Vec::new();
     for marker in &model.markers {
-        if out.iter().any(|known| known.name.eq_ignore_ascii_case(&marker.name)) {
+        if out
+            .iter()
+            .any(|known| known.name.eq_ignore_ascii_case(&marker.name))
+        {
             continue;
         }
-        let frame = crate::app::model_preview::common::marker::MarkerFrame::find(model, &marker.name);
+        let frame =
+            crate::app::model_preview::common::marker::MarkerFrame::find(model, &marker.name);
         let (axes, position) = place(&frame);
         out.push(ReachIkMarker {
             holder,
@@ -262,18 +309,29 @@ pub(crate) fn apply_reach_ik(
         if weight.abs() < SMALLEST_WEIGHT {
             continue;
         }
-        let Some(marker) = markers.iter().find(|marker| marker.holder == track.holder && marker.name == track.marker) else {
+        let Some(marker) = markers
+            .iter()
+            .find(|marker| marker.holder == track.holder && marker.name == track.marker)
+        else {
             continue;
         };
-        let (Some(holder), Some(inverse)) = (worlds.get(marker.node), inverse_binds.get(marker.node)) else {
+        let (Some(holder), Some(inverse)) =
+            (worlds.get(marker.node), inverse_binds.get(marker.node))
+        else {
             continue;
         };
         let on = *holder * *inverse * marker.bind;
         let Some(((qa, ta), (qb, tb))) = sampled(&track.effector_frames, a, b) else {
             continue;
         };
-        let offset = (0..3).map(|axis| ta[axis] + (tb[axis] - ta[axis]) * blend).collect::<Vec<_>>();
-        let point = RealPoint3d { x: offset[0], y: offset[1], z: offset[2] };
+        let offset = (0..3)
+            .map(|axis| ta[axis] + (tb[axis] - ta[axis]) * blend)
+            .collect::<Vec<_>>();
+        let point = RealPoint3d {
+            x: offset[0],
+            y: offset[1],
+            z: offset[2],
+        };
         let desired = unscaled(&on) * Matrix4::from_loc_rot_scale(point, qa.nlerp(qb, blend), 1.0);
         let Some(effector) = nodes.iter().position(|node| node.name == track.effector) else {
             continue;
@@ -282,24 +340,32 @@ pub(crate) fn apply_reach_ik(
             continue;
         }
         solved.push(effector);
-        let pole = track.poles.as_ref().and_then(|poles| sampled(poles, a, b)).and_then(|(pa, pb)| {
-            let local = [0, 1, 2].map(|axis| pa[axis] + (pb[axis] - pa[axis]) * blend);
-            let root = worlds.first()?;
-            Some(transform_point(root, local))
-        });
+        let pole = track
+            .poles
+            .as_ref()
+            .and_then(|poles| sampled(poles, a, b))
+            .and_then(|(pa, pb)| {
+                let local = [0, 1, 2].map(|axis| pa[axis] + (pb[axis] - pa[axis]) * blend);
+                let root = worlds.first()?;
+                Some(transform_point(root, local))
+            });
         two_bone_ik(nodes, worlds, effector, desired, weight, pole);
     }
 }
 
 fn transform_point(matrix: &Matrix4, point: [f32; 3]) -> [f32; 3] {
     let m = &matrix.m;
-    [0, 1, 2].map(|row| m[row][0] * point[0] + m[row][1] * point[1] + m[row][2] * point[2] + m[row][3])
+    [0, 1, 2]
+        .map(|row| m[row][0] * point[0] + m[row][1] * point[1] + m[row][2] * point[2] + m[row][3])
 }
 
 /// A matrix with its axes made unit length: `matrix4x3_to_orientation` with
 /// the scale forced to 1.
 fn unscaled(matrix: &Matrix4) -> Matrix4 {
-    matrix_of([0, 1, 2].map(|axis| unit_by_reciprocal(axis_of(matrix, axis))), place_of(matrix))
+    matrix_of(
+        [0, 1, 2].map(|axis| unit_by_reciprocal(axis_of(matrix, axis))),
+        place_of(matrix),
+    )
 }
 
 /// Only the turn of `matrix`.
@@ -356,7 +422,10 @@ fn below(nodes: &[RenderModelPreviewNode], node: usize) -> Vec<usize> {
     let mut queue = vec![node];
     while let Some(at) = queue.pop() {
         for (index, child) in nodes.iter().enumerate() {
-            if usize::try_from(child.parent).ok() == Some(at) && !out.contains(&index) && index != node {
+            if usize::try_from(child.parent).ok() == Some(at)
+                && !out.contains(&index)
+                && index != node
+            {
                 out.push(index);
                 queue.push(index);
             }
@@ -383,7 +452,9 @@ pub(crate) fn two_bone_ik(
     let Some(base) = parent(joint) else {
         return;
     };
-    let (Some(&e_old), Some(&j_old), Some(&a_old)) = (worlds.get(effector), worlds.get(joint), worlds.get(base)) else {
+    let (Some(&e_old), Some(&j_old), Some(&a_old)) =
+        (worlds.get(effector), worlds.get(joint), worlds.get(base))
+    else {
         return;
     };
     if (weight - 1.0).abs() >= 1e-4 {
@@ -394,7 +465,15 @@ pub(crate) fn two_bone_ik(
             from + (to - from) * weight
         });
         let turn = from.nlerp(to, weight);
-        desired = Matrix4::from_loc_rot_scale(RealPoint3d { x: place[0], y: place[1], z: place[2] }, turn, 1.0);
+        desired = Matrix4::from_loc_rot_scale(
+            RealPoint3d {
+                x: place[0],
+                y: place[1],
+                z: place[2],
+            },
+            turn,
+            1.0,
+        );
     }
     let (mut a, mut j, mut e) = (a_old, j_old, e_old);
     let (a_at, j_at, e_at) = (place_of(&a), place_of(&j), place_of(&e));
@@ -405,33 +484,55 @@ pub(crate) fn two_bone_ik(
     a = a * align_a;
     let align_j = ik_alignment(&j, lower_bone);
     j = j * align_j;
-    let (upper, lower) = (dot(upper_bone, upper_bone).sqrt(), dot(lower_bone, lower_bone).sqrt());
+    let (upper, lower) = (
+        dot(upper_bone, upper_bone).sqrt(),
+        dot(lower_bone, lower_bone).sqrt(),
+    );
     if upper > 1e-4 && lower > 1e-4 {
         let reach = unit_by_reciprocal(minus(e_at, a_at));
         let to_goal = minus(place_of(&desired), a_at);
         let length = dot(to_goal, to_goal).sqrt();
-        let toward = if length > 0.0 { scaled(to_goal, 1.0 / length) } else { reach };
+        let toward = if length > 0.0 {
+            scaled(to_goal, 1.0 / length)
+        } else {
+            reach
+        };
         let longest = 0.98 * (upper + lower);
         let shortest = longest.min(1.02 * (upper - lower).abs());
         let distance = length.clamp(shortest, longest);
         let hand_at = plus(a_at, scaled(toward, distance));
         let bend_up = up_of_forward_left(reach, toward_pole);
         let [forward, left, _] = frame_forward_up(toward, bend_up);
-        let cosine = (lower * lower - distance * distance - upper * upper) / (-2.0 * distance * upper);
+        let cosine =
+            (lower * lower - distance * distance - upper * upper) / (-2.0 * distance * upper);
         let sine = (1.0 - cosine * cosine).max(1e-8).sqrt();
-        let elbow = plus(a_at, scaled(plus(scaled(forward, cosine), scaled(left, sine)), upper));
+        let elbow = plus(
+            a_at,
+            scaled(plus(scaled(forward, cosine), scaled(left, sine)), upper),
+        );
         let joint_axes = frame_forward_up(minus(hand_at, elbow), axis_of(&j, 2));
         let base_axes = frame_forward_up(minus(elbow, a_at), axis_of(&a, 2));
         a = matrix_of(base_axes, a_at);
         j = matrix_of(joint_axes, elbow);
-        e = matrix_of([0, 1, 2].map(|axis| unit_by_reciprocal(axis_of(&desired, axis))), hand_at);
+        e = matrix_of(
+            [0, 1, 2].map(|axis| unit_by_reciprocal(axis_of(&desired, axis))),
+            hand_at,
+        );
     }
     a = a * rigid_inverse(&align_a);
     j = j * rigid_inverse(&align_j);
     // The root never moves: its solve runs on a copy.
     let root = nodes.get(base).is_some_and(|node| node.parent < 0);
     let moved = |new: &Matrix4, old: &Matrix4| *new * rigid_inverse(old);
-    let (d_e, d_j, d_a) = (moved(&e, &e_old), moved(&j, &j_old), if root { Matrix4::IDENTITY } else { moved(&a, &a_old) });
+    let (d_e, d_j, d_a) = (
+        moved(&e, &e_old),
+        moved(&j, &j_old),
+        if root {
+            Matrix4::IDENTITY
+        } else {
+            moved(&a, &a_old)
+        },
+    );
     if !root {
         worlds[base] = a;
     }
@@ -466,7 +567,11 @@ mod tests {
     use crate::core::game::GameId;
 
     fn node(name: &str, parent: i16) -> RenderModelPreviewNode {
-        RenderModelPreviewNode { name: name.to_owned(), parent, ..Default::default() }
+        RenderModelPreviewNode {
+            name: name.to_owned(),
+            parent,
+            ..Default::default()
+        }
     }
 
     fn at(place: [f32; 3]) -> Matrix4 {
@@ -481,22 +586,62 @@ mod tests {
     /// A root, a shoulder, an upper arm and forearm of 1 each along x, a
     /// hand, and a finger off the hand.
     fn arm() -> (Vec<RenderModelPreviewNode>, Vec<Matrix4>) {
-        let nodes = vec![node("root", -1), node("upper", 0), node("fore", 1), node("hand", 2), node("finger", 3)];
-        let worlds = vec![at([0.0; 3]), at([0.0; 3]), at([1.0, 0.0, 0.0]), at([2.0, 0.0, 0.0]), at([2.5, 0.0, 0.0])];
+        let nodes = vec![
+            node("root", -1),
+            node("upper", 0),
+            node("fore", 1),
+            node("hand", 2),
+            node("finger", 3),
+        ];
+        let worlds = vec![
+            at([0.0; 3]),
+            at([0.0; 3]),
+            at([1.0, 0.0, 0.0]),
+            at([2.0, 0.0, 0.0]),
+            at([2.5, 0.0, 0.0]),
+        ];
         (nodes, worlds)
     }
 
     #[test]
     fn the_hand_lands_on_a_target_in_reach_with_its_turn() {
         let (nodes, mut worlds) = arm();
-        let turned = Matrix4::from_loc_rot_scale(RealPoint3d { x: 1.2, y: 0.8, z: 0.3 }, RealQuaternion::IDENTITY, 1.0);
-        let turned = turned * matrix_of([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], [0.0; 3]);
+        let turned = Matrix4::from_loc_rot_scale(
+            RealPoint3d {
+                x: 1.2,
+                y: 0.8,
+                z: 0.3,
+            },
+            RealQuaternion::IDENTITY,
+            1.0,
+        );
+        let turned = turned
+            * matrix_of(
+                [[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+                [0.0; 3],
+            );
         two_bone_ik(&nodes, &mut worlds, 3, turned, 1.0, None);
-        assert!(distance(place_of(&worlds[3]), [1.2, 0.8, 0.3]) < 1e-4, "{:?}", place_of(&worlds[3]));
-        assert!(distance(axis_of(&worlds[3], 0), [0.0, 1.0, 0.0]) < 1e-4, "the hand takes the target's turn");
-        assert!((distance(place_of(&worlds[2]), place_of(&worlds[1])) - 1.0).abs() < 1e-4, "the upper arm keeps its length");
-        assert!((distance(place_of(&worlds[3]), place_of(&worlds[2])) - 1.0).abs() < 1e-4, "and the forearm its");
-        assert!((distance(place_of(&worlds[4]), place_of(&worlds[3])) - 0.5).abs() < 1e-4, "the finger goes with the hand");
+        assert!(
+            distance(place_of(&worlds[3]), [1.2, 0.8, 0.3]) < 1e-4,
+            "{:?}",
+            place_of(&worlds[3])
+        );
+        assert!(
+            distance(axis_of(&worlds[3], 0), [0.0, 1.0, 0.0]) < 1e-4,
+            "the hand takes the target's turn"
+        );
+        assert!(
+            (distance(place_of(&worlds[2]), place_of(&worlds[1])) - 1.0).abs() < 1e-4,
+            "the upper arm keeps its length"
+        );
+        assert!(
+            (distance(place_of(&worlds[3]), place_of(&worlds[2])) - 1.0).abs() < 1e-4,
+            "and the forearm its"
+        );
+        assert!(
+            (distance(place_of(&worlds[4]), place_of(&worlds[3])) - 0.5).abs() < 1e-4,
+            "the finger goes with the hand"
+        );
         assert_eq!(place_of(&worlds[0]), [0.0; 3], "the root stays");
     }
 
@@ -504,7 +649,11 @@ mod tests {
     fn a_target_out_of_reach_takes_the_arm_to_its_limit() {
         let (nodes, mut worlds) = arm();
         two_bone_ik(&nodes, &mut worlds, 3, at([5.0, 0.0, 0.0]), 1.0, None);
-        assert!((place_of(&worlds[3])[0] - 1.96).abs() < 1e-4, "0.98 of the arm: {:?}", place_of(&worlds[3]));
+        assert!(
+            (place_of(&worlds[3])[0] - 1.96).abs() < 1e-4,
+            "0.98 of the arm: {:?}",
+            place_of(&worlds[3])
+        );
     }
 
     #[test]
@@ -512,28 +661,55 @@ mod tests {
         let (nodes, mut worlds) = arm();
         let target = [1.0, 1.0, 0.0];
         two_bone_ik(&nodes, &mut worlds, 3, at(target), 0.5, None);
-        assert!(distance(place_of(&worlds[3]), [1.5, 0.5, 0.0]) < 1e-4, "{:?}", place_of(&worlds[3]));
+        assert!(
+            distance(place_of(&worlds[3]), [1.5, 0.5, 0.0]) < 1e-4,
+            "{:?}",
+            place_of(&worlds[3])
+        );
     }
 
     /// With `BLAM_TEST_HREK`: the Spartan's rifle idle holds both hands to
     /// its primary weapon, the left arm first by rank, at full weight.
     #[test]
     fn the_spartans_rifle_idle_reaches_for_its_primary_weapon() {
-        let Some(root) = kit_root(GameId::HaloReach) else { return };
-        let path = std::path::Path::new(&root).join("objects/characters/spartans/spartans.model_animation_graph");
+        let Some(root) = kit_root(GameId::HaloReach) else {
+            return;
+        };
+        let path = std::path::Path::new(&root)
+            .join("objects/characters/spartans/spartans.model_animation_graph");
         let graph = TagFile::read(path).unwrap();
         let animation = blam_tags::Animation::new(&graph).unwrap();
         let idle = animation.find("combat:rifle:idle").unwrap();
         let tracks = read_reach_ik_tracks(&[&graph], idle);
-        let summary: Vec<_> = tracks.iter().map(|track| (track.rank, track.effector.as_str(), track.marker.as_str(), track.holder)).collect();
+        let summary: Vec<_> = tracks
+            .iter()
+            .map(|track| {
+                (
+                    track.rank,
+                    track.effector.as_str(),
+                    track.marker.as_str(),
+                    track.holder,
+                )
+            })
+            .collect();
         assert_eq!(
             summary,
             [
                 (2, "b_l_hand", "left_hand_spartan", ReachIkHolder::Weapon(1)),
-                (3, "b_r_hand", "right_hand_spartan", ReachIkHolder::Weapon(1)),
+                (
+                    3,
+                    "b_r_hand",
+                    "right_hand_spartan",
+                    ReachIkHolder::Weapon(1)
+                ),
             ]
         );
-        assert!(tracks.iter().all(|track| track.weights.iter().all(|weight| (weight - 1.0).abs() < 1e-3)));
+        assert!(tracks.iter().all(|track| {
+            track
+                .weights
+                .iter()
+                .all(|weight| (weight - 1.0).abs() < 1e-3)
+        }));
         assert_eq!(tracks[0].effector_frames.len(), 156);
     }
 }

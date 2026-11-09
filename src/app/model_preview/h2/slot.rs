@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use eframe::glow::{self, HasContext as _};
 
-use super::super::common::slots::GameSlot;
 use super::super::common::image::Image;
+use super::super::common::slots::GameSlot;
 use super::super::frame::ModelGpuFrame;
 use crate::app::model_preview::gl::texture::upload_image;
 
@@ -26,8 +26,19 @@ pub(in crate::app::model_preview) struct H2Textures {
 impl H2Textures {
     /// Every map held, deleted.
     unsafe fn delete(&mut self, gl: &glow::Context) {
-        let Self { flares, light_volumes, liquids, contrails } = std::mem::take(self);
-        let deleted = flares.into_iter().chain(light_volumes).chain(liquids).flatten().chain(contrails).flatten();
+        let Self {
+            flares,
+            light_volumes,
+            liquids,
+            contrails,
+        } = std::mem::take(self);
+        let deleted = flares
+            .into_iter()
+            .chain(light_volumes)
+            .chain(liquids)
+            .flatten()
+            .chain(contrails)
+            .flatten();
         for texture in deleted {
             unsafe { gl.delete_texture(texture) };
         }
@@ -38,18 +49,40 @@ impl H2Textures {
         let preview = &frame.preview;
         let image = |image: &Arc<Image>| unsafe { upload_image(gl, image) };
         Self {
-            flares: preview.h2.flares.iter().map(|at| at.flare.images.iter().map(image).collect()).collect(),
-            light_volumes: preview
-                .h2.light_volumes
+            flares: preview
+                .h2
+                .flares
                 .iter()
-                .map(|at| at.volumes().iter().map(|volume| volume.bitmap().and_then(image)).collect())
+                .map(|at| at.flare.images.iter().map(image).collect())
+                .collect(),
+            light_volumes: preview
+                .h2
+                .light_volumes
+                .iter()
+                .map(|at| {
+                    at.volumes()
+                        .iter()
+                        .map(|volume| volume.bitmap().and_then(image))
+                        .collect()
+                })
                 .collect(),
             liquids: preview
-                .h2.liquids
+                .h2
+                .liquids
                 .iter()
-                .map(|at| at.arcs().iter().map(|arc| arc.bitmap().and_then(image)).collect())
+                .map(|at| {
+                    at.arcs()
+                        .iter()
+                        .map(|arc| arc.bitmap().and_then(image))
+                        .collect()
+                })
                 .collect(),
-            contrails: preview.h2.contrails.iter().map(|at| at.bitmap().and_then(image)).collect(),
+            contrails: preview
+                .h2
+                .contrails
+                .iter()
+                .map(|at| at.bitmap().and_then(image))
+                .collect(),
         }
     }
 }
@@ -74,7 +107,11 @@ impl GameSlot for H2Slot {
 
 impl H2Slot {
     /// The maps of what `frame`'s geometry draws, uploaded once per geometry.
-    pub(in crate::app::model_preview) unsafe fn sync_textures(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+    pub(in crate::app::model_preview) unsafe fn sync_textures(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+    ) {
         if self.textures_for == Some(frame.geometry_id) {
             return;
         }
@@ -96,7 +133,9 @@ impl H2Slot {
                 unsafe { gl.delete_texture(texture) };
             }
             let gels = frame.preview.h2.gel_lights.iter().map(|light| light.gel());
-            self.gels = gels.map(|gel| gel.and_then(|gel| unsafe { upload_image(gl, gel) })).collect();
+            self.gels = gels
+                .map(|gel| gel.and_then(|gel| unsafe { upload_image(gl, gel) }))
+                .collect();
             self.gels_for = Some(frame.geometry_id);
         }
         &self.gels

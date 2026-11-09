@@ -56,7 +56,8 @@ pub(crate) struct Gen3Prt {
 impl Gen3Prt {
     /// Stay parallel to vertices that have none of this.
     pub(crate) fn pad(&mut self, count: usize) {
-        self.vertices.resize(self.vertices.len() + count, [0.0; COEFFICIENTS]);
+        self.vertices
+            .resize(self.vertices.len() + count, [0.0; COEFFICIENTS]);
     }
 
     /// Take on an attached object's own, after everything so far.
@@ -65,7 +66,8 @@ impl Gen3Prt {
         // What was padded on has no mesh, and must not read as `other`'s first.
         self.meshes.push((base, Gen3PrtKind::None));
         self.vertices.extend_from_slice(&other.vertices);
-        self.meshes.extend(other.meshes.iter().map(|(end, kind)| (end + base, *kind)));
+        self.meshes
+            .extend(other.meshes.iter().map(|(end, kind)| (end + base, *kind)));
     }
 
     /// What the mesh holding `vertex` baked.
@@ -89,12 +91,21 @@ pub(in crate::app) fn read_h3_prt(
         return None;
     }
     // The tags on disk leave the policy at 0; only its field marks the rules.
-    let reach = tag_meshes.first().is_some_and(|mesh| mesh.field("lighting policy").is_some());
+    let reach = tag_meshes
+        .first()
+        .is_some_and(|mesh| mesh.field("lighting policy").is_some());
     let mut per_mesh = Vec::with_capacity(meshes.len());
     for ((mesh, tag_mesh), element) in meshes.iter().zip(&tag_meshes).zip(&data) {
         let kind = Gen3PrtKind::from_tag(tag_mesh.read_int_any("PRT vertex type").unwrap_or(0));
-        let kind = if reach && kind != Gen3PrtKind::Ambient { Gen3PrtKind::None } else { kind };
-        let bytes = element.field("mesh pca data").and_then(|field| field.as_data()).unwrap_or(&[]);
+        let kind = if reach && kind != Gen3PrtKind::Ambient {
+            Gen3PrtKind::None
+        } else {
+            kind
+        };
+        let bytes = element
+            .field("mesh pca data")
+            .and_then(|field| field.as_data())
+            .unwrap_or(&[]);
         let mut prt = Gen3Prt::default();
         prt.pad(mesh.vertices.len());
         // Every coefficient of red, then green, then blue; the shaders read
@@ -108,8 +119,9 @@ pub(in crate::app) fn read_h3_prt(
                     f32::from_le_bytes([chunk[at], chunk[at + 1], chunk[at + 2], chunk[at + 3]])
                 };
                 for (coefficient, value) in vertex.iter_mut().take(count).enumerate() {
-                    let sum: f32 =
-                        (0..CHANNELS).map(|channel| word((channel * count + coefficient) * 4)).sum();
+                    let sum: f32 = (0..CHANNELS)
+                        .map(|channel| word((channel * count + coefficient) * 4))
+                        .sum();
                     *value = sum / CHANNELS as f32;
                     if reach {
                         *value = value.clamp(0.0, 1.0);
@@ -121,7 +133,9 @@ pub(in crate::app) fn read_h3_prt(
             for vertex in &mut prt.vertices {
                 // `static_prt_linear_vs` unpacks its four from a byte stream.
                 if kind == Gen3PrtKind::Linear {
-                    vertex[..4].iter_mut().for_each(|value| *value = (*value + 1.0) * 0.5);
+                    vertex[..4]
+                        .iter_mut()
+                        .for_each(|value| *value = (*value + 1.0) * 0.5);
                 }
             }
         }
@@ -129,7 +143,10 @@ pub(in crate::app) fn read_h3_prt(
         per_mesh.push((prt.vertices, kind));
     }
     let order = preview_mesh_order(model, meshes.len());
-    Some(in_preview_order(&per_mesh, order.iter().map(|(_, _, mesh)| *mesh)))
+    Some(in_preview_order(
+        &per_mesh,
+        order.iter().map(|(_, _, mesh)| *mesh),
+    ))
 }
 
 /// Each mesh's coefficients laid out as the preview lays out its vertices.
@@ -161,7 +178,9 @@ fn second_order_basis() -> [[[f32; 3]; 3]; 5] {
 
 /// What carries the last five coefficients through a rotation, the row and
 /// column of each function being its inner product with the turned other.
-pub(in crate::app::model_preview) fn second_order_rotation(rotation: [[f32; 3]; 3]) -> [[f32; 5]; 5] {
+pub(in crate::app::model_preview) fn second_order_rotation(
+    rotation: [[f32; 3]; 3],
+) -> [[f32; 5]; 5] {
     let product = |a: [[f32; 3]; 3], b: [[f32; 3]; 3]| -> [[f32; 3]; 3] {
         std::array::from_fn(|row| {
             std::array::from_fn(|column| (0..3).map(|at| a[row][at] * b[at][column]).sum())
@@ -184,13 +203,25 @@ mod tests {
 
     fn evaluate(coefficients: [f32; 5], n: [f32; 3]) -> f32 {
         let term = |m: &[[f32; 3]; 3]| -> f32 {
-            (0..3).map(|i| (0..3).map(|j| n[i] * m[i][j] * n[j]).sum::<f32>()).sum()
+            (0..3)
+                .map(|i| (0..3).map(|j| n[i] * m[i][j] * n[j]).sum::<f32>())
+                .sum()
         };
-        coefficients.iter().zip(&second_order_basis()).map(|(c, m)| c * term(m)).sum()
+        coefficients
+            .iter()
+            .zip(&second_order_basis())
+            .map(|(c, m)| c * term(m))
+            .sum()
     }
 
     fn turned(matrix: &[[f32; 5]; 5], coefficients: [f32; 5]) -> [f32; 5] {
-        std::array::from_fn(|row| matrix[row].iter().zip(&coefficients).map(|(a, b)| a * b).sum())
+        std::array::from_fn(|row| {
+            matrix[row]
+                .iter()
+                .zip(&coefficients)
+                .map(|(a, b)| a * b)
+                .sum()
+        })
     }
 
     #[test]
@@ -246,7 +277,12 @@ mod tests {
     #[test]
     fn a_mesh_two_permutations_share_appears_twice() {
         let per_mesh = [(vec![[0.0; COEFFICIENTS]], Gen3PrtKind::Ambient)];
-        assert_eq!(in_preview_order(&per_mesh, [0, 0].into_iter()).vertices.len(), 2);
+        assert_eq!(
+            in_preview_order(&per_mesh, [0, 0].into_iter())
+                .vertices
+                .len(),
+            2
+        );
     }
 
     #[test]

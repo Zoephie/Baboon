@@ -37,24 +37,33 @@ pub(in crate::app::model_preview) struct CustomPoint {
 
 /// A `particle_emitter_custom_points`.
 fn read_custom_points(reader: &TagReader, emitter: TagStruct<'_>) -> Vec<CustomPoint> {
-    let path = emitter.read_tag_ref_path("custom shape").filter(|path| !path.is_empty());
+    let path = emitter
+        .read_tag_ref_path("custom shape")
+        .filter(|path| !path.is_empty());
     let tag = path.and_then(|path| {
-        reader.load(&path, "particle_emitter_custom_points", b"pecp").ok()
+        reader
+            .load(&path, "particle_emitter_custom_points", b"pecp")
+            .ok()
     });
     let Some(tag) = tag else {
         return Vec::new();
     };
     let root = tag.root();
-    let (scale, offset) = (root.read_vec3("compression scale"), root.read_vec3("compression offset"));
+    let (scale, offset) = (
+        root.read_vec3("compression scale"),
+        root.read_vec3("compression offset"),
+    );
     let word = |point: TagStruct<'_>, name: &str| point.read_int_any(name).unwrap_or(0) as f32;
-    let points = elements(root, "points").into_iter().map(|point| CustomPoint {
-        position: [
-            word(point, "position_x") * scale.i + offset.i,
-            word(point, "position_y") * scale.j + offset.j,
-            word(point, "position_z") * scale.k + offset.k,
-        ],
-        normal: ["normal_x", "normal_y", "normal_z"].map(|name| word(point, name) / 127.0),
-    });
+    let points = elements(root, "points")
+        .into_iter()
+        .map(|point| CustomPoint {
+            position: [
+                word(point, "position_x") * scale.i + offset.i,
+                word(point, "position_y") * scale.j + offset.j,
+                word(point, "position_z") * scale.k + offset.k,
+            ],
+            normal: ["normal_x", "normal_y", "normal_z"].map(|name| word(point, name) / 127.0),
+        });
     points.collect()
 }
 
@@ -74,7 +83,10 @@ pub(super) fn emit_from_points(
     let point = points[at];
     let stray = (angle_degrees / 180.0).clamp(0.0, 1.0);
     let toward = random.direction();
-    (point.position, std::array::from_fn(|axis| (1.0 - stray) * point.normal[axis] + stray * toward[axis]))
+    (
+        point.position,
+        std::array::from_fn(|axis| (1.0 - stray) * point.normal[axis] + stray * toward[axis]),
+    )
 }
 
 impl EmissionShape {
@@ -242,13 +254,20 @@ impl H4EmitterTerms {
 
     /// The step a frame moves a particle along its velocity.
     pub(super) fn travel(&self, dt: f32) -> f32 {
-        if self.disable_velocity { 0.0 } else { dt * self.size_scale }
+        if self.disable_velocity {
+            0.0
+        } else {
+            dt * self.size_scale
+        }
     }
 
     /// `m_size`'s and `m_aspect`'s factors: scale y and the size scale, and
     /// scale x over scale y.
     pub(super) fn size_and_aspect(&self, state: &ParticleState) -> [f32; 2] {
-        let [x, y] = self.scale.as_ref().map_or([1.0; 2], |[x, y]| [x.scalar(state), y.scalar(state)]);
+        let [x, y] = self
+            .scale
+            .as_ref()
+            .map_or([1.0; 2], |[x, y]| [x.scalar(state), y.scalar(state)]);
         let aspect = if y != 0.0 { x / y } else { 1.0 };
         [y * self.size_scale, aspect]
     }
@@ -262,23 +281,43 @@ fn read_physics(
     flagged: impl Fn(&str) -> bool,
     seeds: &mut SeedAllocator,
 ) -> Option<ParticlePhysics> {
-    let movement = emitter.descend("particle movement").filter(|_| flagged("physics"))?;
+    let movement = emitter
+        .descend("particle movement")
+        .filter(|_| flagged("physics"))?;
     let mut parameter = |id: i128| movement_parameter(reader, movement, "physics", id, seeds);
-    Some(ParticlePhysics { gravity: parameter(0), air_friction: parameter(1), rotational_friction: parameter(2) })
+    Some(ParticlePhysics {
+        gravity: parameter(0),
+        air_friction: parameter(1),
+        rotational_friction: parameter(2),
+    })
 }
 
 /// A Halo 2 `particle_physics`' physics movement, its own or its template's.
-pub(in crate::app::model_preview) fn read_movement(reader: &TagReader, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<ParticlePhysics> {
+pub(in crate::app::model_preview) fn read_movement(
+    reader: &TagReader,
+    movement: TagStruct<'_>,
+    seeds: &mut SeedAllocator,
+) -> Option<ParticlePhysics> {
     let template = movement
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
         .and_then(|path| reader.load(&path, "particle_physics", b"pmov").ok());
     let own = elements(movement, "movements");
-    let movements = if own.is_empty() { template.as_ref().map_or(Vec::new(), |tag| elements(tag.root(), "movements")) } else { own };
-    let physics = movements.into_iter().find(|entry| entry.read_enum_option("type").as_deref() == Some("physics"))?;
+    let movements = if own.is_empty() {
+        template
+            .as_ref()
+            .map_or(Vec::new(), |tag| elements(tag.root(), "movements"))
+    } else {
+        own
+    };
+    let physics = movements
+        .into_iter()
+        .find(|entry| entry.read_enum_option("type").as_deref() == Some("physics"))?;
     let by_id = |id: i128, seeds: &mut SeedAllocator| {
         let parameters = elements(physics, "parameters");
-        let found = parameters.into_iter().find(|parameter| parameter.read_int_any("parameter id") == Some(id))?;
+        let found = parameters
+            .into_iter()
+            .find(|parameter| parameter.read_int_any("parameter id") == Some(id))?;
         ParticleProperty::named(found, "property", seeds)
     };
     Some(ParticlePhysics {
@@ -334,12 +373,21 @@ pub(super) fn read_emitter(
 ) -> Option<Emitter> {
     // Halo 4 seeds and moves as Reach does, with terms of its own.
     let rules = ParticleRules::of(reader.source.game());
-    let shape = EmissionShape::named(&emitter.read_enum_option("emission shape").unwrap_or_default())?;
+    let shape = EmissionShape::named(
+        &emitter
+            .read_enum_option("emission shape")
+            .unwrap_or_default(),
+    )?;
     let mut properties = unallocated_properties(emitter, EMITTER_PROPERTIES)?;
     let movement = emitter.descend("particle movement");
-    let movement_flagged = |wanted: &str| movement.is_some_and(|movement| has_flag(movement, "flags", wanted));
-    let (live_forever, disable_velocity) = (system_flagged("particles live forever"), system_flagged("disable velocity"));
-    let (update, card_at_rest) = particle_update(system_flagged, look.any_attachments, movement_flagged);
+    let movement_flagged =
+        |wanted: &str| movement.is_some_and(|movement| has_flag(movement, "flags", wanted));
+    let (live_forever, disable_velocity) = (
+        system_flagged("particles live forever"),
+        system_flagged("disable velocity"),
+    );
+    let (update, card_at_rest) =
+        particle_update(system_flagged, look.any_attachments, movement_flagged);
     let controllers = flagged_controllers(movement_flagged);
     let (physics, flock, collider, turbulence);
     if rules.reach_postprocess_seeds {
@@ -397,8 +445,15 @@ pub(super) fn read_emitter(
         card_lerps: rules.card_lerps,
         card_at_rest,
         spawn_slack: 0.0,
-        axis: ParticleAxis::named(&emitter.read_enum_option("particle axis (for models)").unwrap_or_default()),
-        reference_axis: match emitter.read_enum_option("particle reference axis").as_deref() {
+        axis: ParticleAxis::named(
+            &emitter
+                .read_enum_option("particle axis (for models)")
+                .unwrap_or_default(),
+        ),
+        reference_axis: match emitter
+            .read_enum_option("particle reference axis")
+            .as_deref()
+        {
             Some("y") => 1,
             Some("z") => 2,
             _ => 0,
@@ -407,20 +462,53 @@ pub(super) fn read_emitter(
         scroll: [scroll.i, scroll.j],
         controllers,
         points: read_custom_points(reader, emitter),
-        shape, offset, direction, radius, angle, starting, most, rate, lifespan, acceleration, speed,
-        rotation, rotation_rate, size, scale, tint, alpha, black_point, physics, flock, collider,
+        shape,
+        offset,
+        direction,
+        radius,
+        angle,
+        starting,
+        most,
+        rate,
+        lifespan,
+        acceleration,
+        speed,
+        rotation,
+        rotation_rate,
+        size,
+        scale,
+        tint,
+        alpha,
+        black_point,
+        physics,
+        flock,
+        collider,
         one_at_a_time: false,
         persistent: false,
         bunched: false,
         rotation_given: false,
         volume_random: rules.random_volume_velocities
-            && has_flag(emitter, "emitter flags", "volume emitter particle velocities are random"),
-        axis_scale: if rules.scales_axes { reach_axis_scale([raw_scale.x, raw_scale.y, raw_scale.z]) } else { [1.0; 3] },
+            && has_flag(
+                emitter,
+                "emitter flags",
+                "volume emitter particle velocities are random",
+            ),
+        axis_scale: if rules.scales_axes {
+            reach_axis_scale([raw_scale.x, raw_scale.y, raw_scale.z])
+        } else {
+            [1.0; 3]
+        },
         turbulence,
         h4: rules.h4_emitter_terms.then(|| {
             // Read past Reach's allocation [inferred: their seeds follow].
-            let property = |name: &str| emitter.descend(name).and_then(|holder| ParticleProperty::unallocated(holder));
-            let scale = property("particle scale x").zip(property("particle scale y")).map(|(x, y)| [x, y]);
+            let property = |name: &str| {
+                emitter
+                    .descend(name)
+                    .and_then(|holder| ParticleProperty::unallocated(holder))
+            };
+            let scale = property("particle scale x")
+                .zip(property("particle scale y"))
+                .map(|(x, y)| [x, y]);
             H4EmitterTerms {
                 live_forever,
                 disable_velocity,

@@ -36,12 +36,20 @@ pub(super) fn part_runs(part: TagStruct<'_>) -> bool {
 /// 0x515FC0 reads the part's second short). Only where there is no `violence
 /// mode`: an ordinal that misses falls back to the first `create in`.
 pub(super) fn part_violence(part: TagStruct<'_>) -> &'static str {
-    if part.field("violence mode").is_some() { "violence mode" } else { "create in#1" }
+    if part.field("violence mode").is_some() {
+        "violence mode"
+    } else {
+        "create in#1"
+    }
 }
 
 /// `part_runs`, for parts and particle systems, which name these two apart.
 /// Each is a field path, so a `#ordinal` picks one of two of a name.
-pub(in crate::app::model_preview) fn part_runs_by(part: TagStruct<'_>, environment: &str, violence: &str) -> bool {
+pub(in crate::app::model_preview) fn part_runs_by(
+    part: TagStruct<'_>,
+    environment: &str,
+    violence: &str,
+) -> bool {
     let named = |path: &str| match part.field_path(path).and_then(|field| field.value()) {
         Some(
             TagFieldData::CharEnum { name, .. }
@@ -72,7 +80,11 @@ pub(in crate::app::model_preview) const CHEAP_PARTICLE_EMITTER: u32 = u32::from_
 /// 0x82EA9570) submits a cheap particle part on its location and tag alone,
 /// so only the scrubber's drop keeps one out.
 pub(super) fn part_made(group: u32, generated: bool, disabled: bool) -> bool {
-    if group == CHEAP_PARTICLE_EMITTER { !disabled } else { generated }
+    if group == CHEAP_PARTICLE_EMITTER {
+        !disabled
+    } else {
+        generated
+    }
 }
 
 /// Every part of every effect `object` attaches, with its effect held open.
@@ -100,8 +112,11 @@ pub(in crate::app::model_preview) fn for_each_attached_part(
                     continue;
                 };
                 let marker = object_effect.marker_of(*location);
-                let secondary = usize::try_from(part.read_block_index("secondary location (beams)")).ok();
-                let secondary_marker = secondary.and_then(|at| locations.get(at)).map(|at| marker_name(*at, "marker name"));
+                let secondary =
+                    usize::try_from(part.read_block_index("secondary location (beams)")).ok();
+                let secondary_marker = secondary
+                    .and_then(|at| locations.get(at))
+                    .map(|at| marker_name(*at, "marker name"));
                 let unattached = has_flag(part, "flags", "never attached to object");
                 let scaled = has_flag(part, "A scales values", PART_SCALE);
                 let b_scaled = has_flag(part, "B scales values", PART_SCALE);
@@ -127,8 +142,19 @@ pub(in crate::app::model_preview) fn for_each_attached_part(
 
 impl EffectPart<'_> {
     /// Where a marker puts this part: its frame and the node it follows.
-    pub(in crate::app::model_preview) fn placed(&self, place: MarkerFrame, node: usize) -> (MarkerFrame, usize) {
-        let place = if self.world_oriented { MarkerFrame { axes: WORLD_AXES, ..place } } else { place };
+    pub(in crate::app::model_preview) fn placed(
+        &self,
+        place: MarkerFrame,
+        node: usize,
+    ) -> (MarkerFrame, usize) {
+        let place = if self.world_oriented {
+            MarkerFrame {
+                axes: WORLD_AXES,
+                ..place
+            }
+        } else {
+            place
+        };
         (place, if self.unattached { NO_NODE } else { node })
     }
 }

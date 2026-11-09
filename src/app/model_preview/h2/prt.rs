@@ -41,11 +41,16 @@ pub(crate) struct H2Prt {
 impl H2Prt {
     /// Stay parallel to vertices that have none of this.
     pub(crate) fn pad(&mut self, count: usize) {
-        self.vertices.resize(self.vertices.len() + count, [0.0; VERTEX_FLOATS]);
+        self.vertices
+            .resize(self.vertices.len() + count, [0.0; VERTEX_FLOATS]);
     }
 
     /// The constants of every cluster under `lights` and an ambient color.
-    pub(crate) fn clusters_lit_by(&self, lights: &[H2PrtLight], ambient: [f32; 3]) -> Vec<[f32; 4]> {
+    pub(crate) fn clusters_lit_by(
+        &self,
+        lights: &[H2PrtLight],
+        ambient: [f32; 3],
+    ) -> Vec<[f32; 4]> {
         let mut coefficients = sh_project(lights);
         // A uniform light holds only the first band, at root(4 pi) a unit.
         let band = 2.0 * std::f32::consts::PI.sqrt();
@@ -98,7 +103,11 @@ fn sh_project(lights: &[H2PrtLight]) -> [[f32; SH_COEFFICIENTS]; 3] {
 }
 
 fn sh_dot(basis: &[f32], light: &[f32; SH_COEFFICIENTS]) -> f32 {
-    basis.iter().zip(light).map(|(basis, light)| basis * light).sum()
+    basis
+        .iter()
+        .zip(light)
+        .map(|(basis, light)| basis * light)
+        .sum()
 }
 
 /// `prt_project_cluster_basis`: a cluster's mean, then its red, green and blue
@@ -120,7 +129,9 @@ fn cluster_constants(basis: &[f32], light: &[[f32; SH_COEFFICIENTS]; 3]) -> Vec<
             0.0,
         ]);
         for color in 0..3 {
-            registers.push(std::array::from_fn(|vector| channel(vector + 1, color)(cluster)));
+            registers.push(std::array::from_fn(|vector| {
+                channel(vector + 1, color)(cluster)
+            }));
         }
     }
     registers
@@ -128,7 +139,10 @@ fn cluster_constants(basis: &[f32], light: &[[f32; SH_COEFFICIENTS]; 3]) -> Vec<
 
 fn reals(info: &TagStruct<'_>, block: &str, field: &str) -> Option<Vec<f32>> {
     let block = info.field(block)?.as_block()?;
-    block.iter().map(|element| element.read_real(field)).collect()
+    block
+        .iter()
+        .map(|element| element.read_real(field))
+        .collect()
 }
 
 /// Read a Halo 2 render_model's PRT data, walking `meshes` in the order the
@@ -171,7 +185,10 @@ pub(in crate::app) fn read_h2_prt(
             let section = block.element(index)?;
             sections.insert(
                 usize::try_from(section.read_int_any("section index*")?).ok()?,
-                (usize::try_from(section.read_int_any("pca data offset*")?).ok()?, first_cluster),
+                (
+                    usize::try_from(section.read_int_any("pca data offset*")?).ok()?,
+                    first_cluster,
+                ),
             );
         }
     }
@@ -186,12 +203,23 @@ pub(in crate::app) fn read_h2_prt(
             let floats = section.and_then(|(offset, first_cluster)| {
                 let start = offset + vertex * VERTEX_FLOATS;
                 let data = raw.get(start..start + VERTEX_FLOATS)?;
-                Some([data[0] + *first_cluster as f32, data[1], data[2], data[3], data[4]])
+                Some([
+                    data[0] + *first_cluster as f32,
+                    data[1],
+                    data[2],
+                    data[3],
+                    data[4],
+                ])
             });
             vertices.push(floats.unwrap_or_default());
         }
     }
-    Some(H2Prt { vertices, clusters, light: lights.first()?.direction, basis: all_basis })
+    Some(H2Prt {
+        vertices,
+        clusters,
+        light: lights.first()?.direction,
+        basis: all_basis,
+    })
 }
 
 #[cfg(test)]
@@ -213,8 +241,14 @@ mod tests {
     fn relighting_keeps_what_each_light_adds_apart() {
         let mut basis = vec![0.0; CLUSTER_VECTOR * (PCA_VECTORS + 1)];
         basis[0] = 1.0;
-        let prt = H2Prt { basis, ..H2Prt::default() };
-        let light = H2PrtLight { direction: [0.0, 0.0, 1.0], color: [1.0; 3] };
+        let prt = H2Prt {
+            basis,
+            ..H2Prt::default()
+        };
+        let light = H2PrtLight {
+            direction: [0.0, 0.0, 1.0],
+            color: [1.0; 3],
+        };
         let lit = prt.clusters_lit_by(&[light], [0.0; 3])[0][0];
         let ambient = prt.clusters_lit_by(&[], [0.5; 3])[0][0];
         assert!(lit > 0.0);

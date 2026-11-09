@@ -9,21 +9,21 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
+use super::super::RenderModelPreviewBatch;
 use super::super::common::fields::{elements, has_flag};
+use super::super::frame::ModelGpuFrame;
 use super::super::functions::FunctionValues;
 use super::super::gen3::shaders::Gen3Texture;
-use crate::app::model_preview::common::image::ImageTexels;
 use super::super::materials::decode_image;
-use crate::core::h2_pixel_shader::SamplerKind;
-use crate::app::model_preview::common::named_function::NamedFunction;
-use crate::app::model_preview::gl::blit::blit_depth;
-use eframe::glow::{self, HasContext as _};
-use super::super::RenderModelPreviewBatch;
-use super::super::frame::ModelGpuFrame;
 use super::super::renderer::RenderCore;
 use super::pipeline::gen3_set_cull;
 use super::shaders::{Gen3Material, Gen3Pass};
 use super::state::Gen3State;
+use crate::app::model_preview::common::image::ImageTexels;
+use crate::app::model_preview::common::named_function::NamedFunction;
+use crate::app::model_preview::gl::blit::blit_depth;
+use crate::core::h2_pixel_shader::SamplerKind;
+use eframe::glow::{self, HasContext as _};
 
 /// `shield_impact` `flags`.
 const PROCEDURAL_UV: &str = "use procedural uv generation";
@@ -33,9 +33,14 @@ const SMALLEST: f32 = 1e-4;
 
 /// The vertex stage's two noise maps, which the source names as the pixel
 /// stage's but the game binds the oscillation textures to.
-pub(crate) const OSCILLATION: [&str; 2] = ["ReachShieldOscillation_texture1", "ReachShieldOscillation_texture2"];
-pub(crate) const PLASMA: [&str; 2] =
-    ["GlobalTexture_shield_impact_noise_texture1", "GlobalTexture_shield_impact_noise_texture2"];
+pub(crate) const OSCILLATION: [&str; 2] = [
+    "ReachShieldOscillation_texture1",
+    "ReachShieldOscillation_texture2",
+];
+pub(crate) const PLASMA: [&str; 2] = [
+    "GlobalTexture_shield_impact_noise_texture1",
+    "GlobalTexture_shield_impact_noise_texture2",
+];
 /// What the preview's depth reads back as world distance with.
 pub(crate) const DEPTH_DECODE: &str = "reach_shield_depth_decode";
 pub(crate) const WORLD_SCALE: &str = "reach_shield_world_scale";
@@ -68,7 +73,11 @@ impl ShieldChannel {
             "shield_intensity" => state.intensity,
             "render_time" => state.time,
             "event_time" => 0.0,
-            other => state.values.and_then(|values| values.get(other)).copied().unwrap_or(0.0),
+            other => state
+                .values
+                .and_then(|values| values.get(other))
+                .copied()
+                .unwrap_or(0.0),
         })
     }
 
@@ -76,7 +85,8 @@ impl ShieldChannel {
     /// number on every call, when none is named.
     fn sample(&self, state: &ShieldState<'_>, salt: u32) -> (f32, f32) {
         let input = Self::lookup(&self.input, state).unwrap_or(state.time);
-        let range = Self::lookup(&self.range, state).unwrap_or_else(|| real_random(state.time, salt));
+        let range =
+            Self::lookup(&self.range, state).unwrap_or_else(|| real_random(state.time, salt));
         (input, range)
     }
 
@@ -152,8 +162,11 @@ impl ReachShieldSettings {
         let root = tag.root();
         let real = |name: &str| root.read_real(name).unwrap_or(0.0);
         let flagged = |wanted: &str| has_flag(root, "flags", wanted);
-        let ([outer, inner], [outer_offset, inner_offset]) =
-            edge_lines(real("Outer Fade Radius"), real("Center Radius"), real("Inner Fade Radius"));
+        let ([outer, inner], [outer_offset, inner_offset]) = edge_lines(
+            real("Outer Fade Radius"),
+            real("Center Radius"),
+            real("Inner Fade Radius"),
+        );
         let ([plasma_outer, plasma_inner], [plasma_outer_offset, plasma_inner_offset]) = edge_lines(
             real("Plasma Outer Fade Radius"),
             real("Plasma Center Radius"),
@@ -164,7 +177,10 @@ impl ReachShieldSettings {
         let inverse_depth_fade = 1.0 / real("Depth Fade Range").max(SMALLEST);
         let inverse_plasma_fade = 1.0 / real("Plasma Depth Fade Range").max(SMALLEST);
         let pair = |color: &str, intensity: &str| {
-            Some((ShieldChannel::read(root, color)?, ShieldChannel::read(root, intensity)?))
+            Some((
+                ShieldChannel::read(root, color)?,
+                ShieldChannel::read(root, intensity)?,
+            ))
         };
         let mut textures = Vec::new();
         for (field, uniform) in [
@@ -173,7 +189,10 @@ impl ReachShieldSettings {
             ("Oscillation Texture 0", OSCILLATION[0]),
             ("Oscillation Texture 1", OSCILLATION[1]),
         ] {
-            let Some(bitmap) = root.read_tag_ref_path(field).filter(|bitmap| !bitmap.is_empty()) else {
+            let Some(bitmap) = root
+                .read_tag_ref_path(field)
+                .filter(|bitmap| !bitmap.is_empty())
+            else {
                 continue;
             };
             let Some(image) = decode_image(reader, &bitmap, SamplerKind::Texture2D, 0) else {
@@ -197,8 +216,18 @@ impl ReachShieldSettings {
             oscillation_tiling: real("Oscillation Tiling Scale"),
             oscillation_scroll: real("Oscillation Scroll Speed"),
             edge_scales: [outer, inner, plasma_outer, plasma_inner],
-            edge_offsets: [outer_offset, inner_offset, plasma_outer_offset, plasma_inner_offset],
-            plasma_scales: [tiling, tiling, edge_sharpness - center_sharpness, center_sharpness],
+            edge_offsets: [
+                outer_offset,
+                inner_offset,
+                plasma_outer_offset,
+                plasma_inner_offset,
+            ],
+            plasma_scales: [
+                tiling,
+                tiling,
+                edge_sharpness - center_sharpness,
+                center_sharpness,
+            ],
             depth_fade_params: [inverse_depth_fade, inverse_plasma_fade, 0.0, 0.0],
             inverse_depth_fade,
             edge_glow: pair("Edge Glow Color", "Edge Glow Intensity"),
@@ -218,21 +247,40 @@ impl ReachShieldSettings {
 
     /// The state `render_object_internal` decompresses, at the moment of an
     /// impact of `damage`: recent and current alike.
-    pub(crate) fn state<'a>(&self, damage: f32, time: f32, values: Option<&'a FunctionValues>) -> ShieldState<'a> {
+    pub(crate) fn state<'a>(
+        &self,
+        damage: f32,
+        time: f32,
+        values: Option<&'a FunctionValues>,
+    ) -> ShieldState<'a> {
         let intensity = self.recent_intensity * damage + self.current_intensity * damage;
-        ShieldState { recent: damage, current: damage, intensity, time, values }
+        ShieldState {
+            recent: damage,
+            current: damage,
+            intensity,
+            time,
+            values,
+        }
     }
 
     /// Every constant the pass reads, but the depth decode, by uniform.
     /// `center` is the bounding sphere's, where a shield with no hit puts it.
-    pub(crate) fn values(&self, state: &ShieldState<'_>, center: [f32; 3]) -> HashMap<&'static str, [f32; 4]> {
+    pub(crate) fn values(
+        &self,
+        state: &ShieldState<'_>,
+        center: [f32; 3],
+    ) -> HashMap<&'static str, [f32; 4]> {
         let tinted = |pair: &Option<(ShieldChannel, ShieldChannel)>, salt: u32| {
             pair.as_ref().map_or([0.0; 3], |(color, intensity)| {
                 let scale = intensity.scalar(state, salt + 1);
                 color.color(state, salt).map(|channel| channel * scale)
             })
         };
-        let scalar = |channel: &Option<ShieldChannel>, salt: u32| channel.as_ref().map_or(0.0, |channel| channel.scalar(state, salt));
+        let scalar = |channel: &Option<ShieldChannel>, salt: u32| {
+            channel
+                .as_ref()
+                .map_or(0.0, |channel| channel.scalar(state, salt))
+        };
         let t = state.time;
         let scroll = t * self.scroll_speed;
         let edge_glow = tinted(&self.edge_glow, 0);
@@ -240,12 +288,20 @@ impl ReachShieldSettings {
         let plasma_edge = tinted(&self.plasma_edge, 4);
         let k = t * self.oscillation_scroll;
         let mut values = HashMap::new();
-        values.insert("plasma_offsets", [scroll / 12.0, scroll / 13.0, -scroll / 11.0, scroll / 17.0]);
+        values.insert(
+            "plasma_offsets",
+            [scroll / 12.0, scroll / 13.0, -scroll / 11.0, scroll / 17.0],
+        );
         values.insert("edge_glow", [edge_glow[0], edge_glow[1], edge_glow[2], 1.0]);
         values.insert("plasma_color", [plasma[0], plasma[1], plasma[2], 1.0]);
         values.insert(
             "plasma_edge_color",
-            [plasma_edge[0] - plasma[0], plasma_edge[1] - plasma[1], plasma_edge[2] - plasma[2], 1.0],
+            [
+                plasma_edge[0] - plasma[0],
+                plasma_edge[1] - plasma[1],
+                plasma_edge[2] - plasma[2],
+                1.0,
+            ],
         );
         values.insert("edge_scales", self.edge_scales);
         values.insert("edge_offsets", self.edge_offsets);
@@ -254,11 +310,19 @@ impl ReachShieldSettings {
         values.insert("depth_constants", [0.0, 0.0, 0.0, self.inverse_depth_fade]);
         values.insert(
             "vertex_params",
-            [scalar(&self.extrusion, 6), 0.0, scalar(&self.oscillation_amplitude, 7), self.oscillation_tiling],
+            [
+                scalar(&self.extrusion, 6),
+                0.0,
+                scalar(&self.oscillation_amplitude, 7),
+                self.oscillation_tiling,
+            ],
         );
         values.insert("vertex_params2", [k, k, -1.07 * k, 1.08 * k]);
         // No hit: the impact sits at the centre, too small to reach anything.
-        values.insert("impact0_params", [center[0], center[1], center[2], SMALLEST]);
+        values.insert(
+            "impact0_params",
+            [center[0], center[1], center[2], SMALLEST],
+        );
         values.insert("impact0_color", [0.0; 4]);
         values
     }
@@ -275,14 +339,21 @@ pub(crate) fn shield_impact_path(model: &TagFile) -> Option<String> {
     if info.read_real("maximum vitality").unwrap_or(0.0) <= 0.0 {
         return None;
     }
-    let reference = |holder: TagStruct<'_>, name: &str| holder.read_tag_ref_path(name).filter(|path| !path.is_empty());
+    let reference = |holder: TagStruct<'_>, name: &str| {
+        holder
+            .read_tag_ref_path(name)
+            .filter(|path| !path.is_empty())
+    };
     let sections = elements(info, "damage sections");
     let chosen = sections.into_iter().rev().find(|section| {
         let starts_inactive = has_flag(*section, "flags", "starts inactive");
-        let shield = section.read_string_id("shield material name").is_some_and(|name| !name.is_empty());
+        let shield = section
+            .read_string_id("shield material name")
+            .is_some_and(|name| !name.is_empty());
         let vitality = section.read_real("vitality percentage").unwrap_or(0.0) > 0.0;
         // An empty `rendering` gains an element in postprocess, and so counts.
-        let renders = !elements(*section, "rendering").is_empty() || reference(root, "shield impact parameter override").is_some();
+        let renders = !elements(*section, "rendering").is_empty()
+            || reference(root, "shield impact parameter override").is_some();
         shield && vitality && renders && !starts_inactive
     })?;
     match elements(chosen, "rendering").first() {
@@ -297,7 +368,6 @@ pub(crate) fn shield_impact_path(model: &TagFile) -> Option<String> {
 pub(crate) fn draws_shield(shield_only: bool, never_shield: bool, decal: bool) -> bool {
     shield_only || (!never_shield && !decal)
 }
-
 
 /// The parts of `frame` that take the shield, with their materials.
 pub(in crate::app::model_preview) fn shield_parts(
@@ -334,13 +404,30 @@ impl Gen3State {
         mut values: HashMap<&'static str, [f32; 4]>,
     ) {
         let camera = &frame.camera;
-        let eye = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
-        values.insert(DEPTH_DECODE, [camera.depth_scale * camera.depth_map[0], camera.depth_map[1], camera.perspective, eye]);
+        let eye = if camera.perspective > 0.0 {
+            1.0 / camera.perspective
+        } else {
+            1.0e5
+        };
+        values.insert(
+            DEPTH_DECODE,
+            [
+                camera.depth_scale * camera.depth_map[0],
+                camera.depth_map[1],
+                camera.perspective,
+                eye,
+            ],
+        );
         values.insert(WORLD_SCALE, [camera.scale; 4]);
         unsafe {
             // What the pass fades against: everything drawn so far.
             if let Some(targets) = self.targets.as_ref() {
-                blit_depth(gl, targets.accumulation_framebuffer, targets.depth_copy_framebuffer, targets.size);
+                blit_depth(
+                    gl,
+                    targets.accumulation_framebuffer,
+                    targets.depth_copy_framebuffer,
+                    targets.size,
+                );
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
                 self.depth_copy = Some(targets.depth_copy);
             }
@@ -365,9 +452,9 @@ impl Gen3State {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::source::TagSource;
     use super::*;
     use crate::app::export::geometry::load_referenced_tag_from_source;
+    use crate::core::source::TagSource;
 
     #[test]
     fn edge_radii_become_the_lines_through_their_fades() {
@@ -377,7 +464,10 @@ mod tests {
         assert!((inner + 4.0).abs() < 1e-5 && (inner_offset - 4.0).abs() < 1e-5);
         let at = |c: f32| (c * outer + outer_offset).min(c * inner + inner_offset);
         assert!((at(0.75) - 1.0).abs() < 1e-5, "full at the center");
-        assert!(at(0.35).abs() < 1e-5 && at(1.0).abs() < 1e-5, "nothing past either fade");
+        assert!(
+            at(0.35).abs() < 1e-5 && at(1.0).abs() < 1e-5,
+            "nothing past either fade"
+        );
     }
 
     #[test]
@@ -413,9 +503,15 @@ mod tests {
             return;
         };
         let spartan = model(&source, "objects\\characters\\spartans\\spartans");
-        assert_eq!(shield_impact_path(&spartan).as_deref(), Some("fx\\shield_impacts\\spartan_3p"));
+        assert_eq!(
+            shield_impact_path(&spartan).as_deref(),
+            Some("fx\\shield_impacts\\spartan_3p")
+        );
         let elite = model(&source, "objects\\characters\\elite\\elite");
-        assert_eq!(shield_impact_path(&elite).as_deref(), Some("fx\\shield_impacts\\elite_3p"));
+        assert_eq!(
+            shield_impact_path(&elite).as_deref(),
+            Some("fx\\shield_impacts\\elite_3p")
+        );
         let grunt = model(&source, "objects\\characters\\grunt\\grunt");
         assert_eq!(shield_impact_path(&grunt), None);
     }
@@ -427,16 +523,39 @@ mod tests {
         let Some(source) = kit() else {
             return;
         };
-        let settings = ReachShieldSettings::read(&crate::app::model_preview::load::TagReader::new(&source), "fx\\shield_impacts\\spartan_3p").unwrap();
+        let settings = ReachShieldSettings::read(
+            &crate::app::model_preview::load::TagReader::new(&source),
+            "fx\\shield_impacts\\spartan_3p",
+        )
+        .unwrap();
         let close = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-3);
-        assert!(close(settings.edge_scales, [2.5, -4.0, 4.0, -4.0]), "{:?}", settings.edge_scales);
-        assert!(close(settings.edge_offsets, [-0.875, 4.0, 0.0, 2.0]), "{:?}", settings.edge_offsets);
-        assert!(close(settings.plasma_scales, [1.75, 1.75, -55.0, 60.0]), "{:?}", settings.plasma_scales);
-        assert!(close(settings.depth_fade_params, [2.0, 6.667, 0.0, 0.0]), "{:?}", settings.depth_fade_params);
+        assert!(
+            close(settings.edge_scales, [2.5, -4.0, 4.0, -4.0]),
+            "{:?}",
+            settings.edge_scales
+        );
+        assert!(
+            close(settings.edge_offsets, [-0.875, 4.0, 0.0, 2.0]),
+            "{:?}",
+            settings.edge_offsets
+        );
+        assert!(
+            close(settings.plasma_scales, [1.75, 1.75, -55.0, 60.0]),
+            "{:?}",
+            settings.plasma_scales
+        );
+        assert!(
+            close(settings.depth_fade_params, [2.0, 6.667, 0.0, 0.0]),
+            "{:?}",
+            settings.depth_fade_params
+        );
         assert_eq!(settings.textures.len(), 4);
         assert!(!settings.showing(0.0));
         assert!(settings.showing(0.5));
         let state = settings.state(1.0, 2.0, None);
-        assert!((state.intensity - 1.5).abs() < 1e-6, "0.5 recent and 1 current");
+        assert!(
+            (state.intensity - 1.5).abs() < 1e-6,
+            "0.5 recent and 1 current"
+        );
     }
 }

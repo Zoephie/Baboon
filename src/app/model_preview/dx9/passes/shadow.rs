@@ -1,7 +1,7 @@
 //! The self-shadow passes, and the shadow apply that Halo 3 shares.
 
-use super::*;
 use super::super::super::gl::glsl::fill;
+use super::*;
 use crate::app::model_preview::gen3::shadow::{H3_SHADOW_APPLY, H3_SHADOW_APPLY_BIAS};
 
 /// The passes behind the preview's own key light shadow. Under the default
@@ -13,7 +13,10 @@ pub(crate) fn h2_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
         fragment,
         blend: None,
         depth_bias: 0.0,
-        depth: Dx9Depth { compare: Some(compare), write },
+        depth: Dx9Depth {
+            compare: Some(compare),
+            write,
+        },
         cull: Dx9Cull::Frame,
         hidden_by_camo: false,
         numeric: None,
@@ -51,7 +54,10 @@ pub(crate) fn h2_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
                 Dx9VertexStage::ShadowMask,
                 fill(
                     include_str!("shaders/shadow_mask.frag"),
-                    &[("version", &H2_GLSL_VERSION), ("bias", &format!("{H2_SHADOW_BIAS:.4}"))],
+                    &[
+                        ("version", &H2_GLSL_VERSION),
+                        ("bias", &format!("{H2_SHADOW_BIAS:.4}")),
+                    ],
                 ),
                 Dx9Compare::Equal,
                 false,
@@ -63,7 +69,10 @@ pub(crate) fn h2_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
                 channels: [false, false, false, true],
                 ..pass(
                     Dx9VertexStage::LightGel,
-                    fill(include_str!("shaders/gel_mask.frag"), &[("version", &H2_GLSL_VERSION)]),
+                    fill(
+                        include_str!("shaders/gel_mask.frag"),
+                        &[("version", &H2_GLSL_VERSION)],
+                    ),
                     Dx9Compare::Equal,
                     false,
                 )

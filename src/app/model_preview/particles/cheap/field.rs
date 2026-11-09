@@ -37,7 +37,9 @@ impl CheapField {
             time: None,
             particles: vec![EMPTY; MOST_PARTICLES],
             cursor: 0,
-            random: (0..emitters).map(|at| Random((at as u32 + 1).wrapping_mul(977))).collect(),
+            random: (0..emitters)
+                .map(|at| Random((at as u32 + 1).wrapping_mul(977)))
+                .collect(),
             phases: Vec::new(),
         }
     }
@@ -66,7 +68,8 @@ impl CheapField {
         };
         let library = Arc::clone(first.library());
         let mut now = resume_point(now, time, PRE_ROLL);
-        let scopes: Vec<Option<FunctionValues>> = emitters.iter().map(|at| values(at.object)).collect();
+        let scopes: Vec<Option<FunctionValues>> =
+            emitters.iter().map(|at| values(at.object)).collect();
         // By the frame's clock, which the steps trail.
         let onset_of: Vec<f32> = emitters
             .iter()
@@ -80,7 +83,9 @@ impl CheapField {
                 if !shown.get(index).copied().unwrap_or(true) {
                     continue;
                 }
-                let Some(mut submission) = at.submission(scopes[index].as_ref(), bones, eye, now, onset_of[index]) else {
+                let Some(mut submission) =
+                    at.submission(scopes[index].as_ref(), bones, eye, now, onset_of[index])
+                else {
                     continue;
                 };
                 if submitted.len() >= MOST_EMITTERS {
@@ -93,7 +98,14 @@ impl CheapField {
             }
             self.update(&library, dt);
             for (index, submission) in submitted {
-                self.spawn(&emitters[index], &submission, scopes[index].as_ref(), now, dt, index);
+                self.spawn(
+                    &emitters[index],
+                    &submission,
+                    scopes[index].as_ref(),
+                    now,
+                    dt,
+                    index,
+                );
             }
         }
         self.time = Some(time);
@@ -141,7 +153,11 @@ impl CheapField {
         let random = &mut self.random[index];
         let input = spawn_input(&definition.input, values, time, submission.scale);
         let rolled = random.next();
-        let range = if definition.range.is_empty() { rolled } else { object_value(values, &definition.range) };
+        let range = if definition.range.is_empty() {
+            rolled
+        } else {
+            object_value(values, &definition.range)
+        };
         let rate = definition.spawn_rate.evaluate(input, range);
         let count = spawn_count(rate, dt, submission.scale, random.range(0.0, 1.0 - 1e-4));
         if count == 0 {
@@ -152,7 +168,8 @@ impl CheapField {
         let shader_dt = dt.min(MOST_SHADER_STEP);
         for _ in 0..count {
             let slot = self.cursor;
-            self.particles[slot] = definition.spawn_particle(submission, &transforms, lighting, slot, shader_dt);
+            self.particles[slot] =
+                definition.spawn_particle(submission, &transforms, lighting, slot, shader_dt);
             self.cursor = (slot + 1) % MOST_PARTICLES;
         }
     }
@@ -168,7 +185,10 @@ impl CheapField {
                 continue;
             }
             let [kind, lighting, dx, dy] = particle.parameters;
-            let Some(found) = usize::try_from(kind).ok().and_then(|kind| library.types.get(kind)) else {
+            let Some(found) = usize::try_from(kind)
+                .ok()
+                .and_then(|kind| library.types.get(kind))
+            else {
                 continue;
             };
             let [_, size, stretch_factor, y_scale] = found.rows[RENDER];
@@ -182,7 +202,8 @@ impl CheapField {
             };
             let to_particle = clamped_unit(minus(particle.position, view.eye));
             // Pulled 1 cm toward the camera.
-            let place: [f32; 3] = std::array::from_fn(|axis| particle.position[axis] - to_particle[axis] * 0.01);
+            let place: [f32; 3] =
+                std::array::from_fn(|axis| particle.position[axis] - to_particle[axis] * 0.01);
             let local = [f32::from(dx) / 63.5 * size, f32::from(dy) / 63.5 * size];
             let velocity = particle.velocity;
             let speed = dot(velocity, velocity).sqrt();
@@ -201,13 +222,23 @@ impl CheapField {
             let blend = (fade - (fade * particle.age).abs()).clamp(0.0, 1.0);
             let [red, green, blue, alpha] = found.rows[COLOR0];
             let lit = blend * illumination(lighting);
-            let color = [red * lit, green * lit, blue * lit, (alpha * blend).clamp(0.0, 1.0)];
+            let color = [
+                red * lit,
+                green * lit,
+                blue * lit,
+                (alpha * blend).clamp(0.0, 1.0),
+            ];
             // `generate_quad_point_2d`'s Direct3D 11 order, as a strip.
             let corner = |[x, y]: [f32; 2]| {
                 let (across, down) = (x - 0.5, y - 0.5);
-                let offset = [across * local[0] - down * local[1], across * local[1] + down * local[0]];
+                let offset = [
+                    across * local[0] - down * local[1],
+                    across * local[1] + down * local[0],
+                ];
                 CheapVertex {
-                    place: std::array::from_fn(|axis| place[axis] + offset[0] * basis[0][axis] + offset[1] * basis[1][axis]),
+                    place: std::array::from_fn(|axis| {
+                        place[axis] + offset[0] * basis[0][axis] + offset[1] * basis[1][axis]
+                    }),
                     texcoord: [x, (y - 0.5) * y_scale + 0.5, found.texture as f32],
                     color,
                 }
@@ -222,10 +253,20 @@ impl CheapField {
 /// `update.hlsl`'s `update_particle` for a live particle at ring slot
 /// `index`, with each kind of turbulence's `(du_dp, dv_dp, phase)` and the
 /// shaders' `dt`.
-pub(super) fn update_particle(particle: &mut CheapParticle, index: usize, library: &CheapLibrary, transforms: &[[f32; 4]], dt: f32) {
+pub(super) fn update_particle(
+    particle: &mut CheapParticle,
+    index: usize,
+    library: &CheapLibrary,
+    transforms: &[[f32; 4]],
+    dt: f32,
+) {
     let kind = usize::try_from(particle.parameters[0]).unwrap_or(usize::MAX);
     let [drag, gravity, strength, place] = library.row(kind, PHYSICS);
-    let (layer, transform) = if library.halo4 { turbulence_of(place) } else { (0, 0) };
+    let (layer, transform) = if library.halo4 {
+        turbulence_of(place)
+    } else {
+        (0, 0)
+    };
     let gravity = -gravity;
     particle.age += sign(particle.age) * particle.delta_age * dt;
     if particle.age >= 0.0 {

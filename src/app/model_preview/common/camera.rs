@@ -35,7 +35,8 @@ pub(in crate::app::model_preview) struct ModelGpuCamera {
 /// That is the dolly: zooming in walks the eye toward the orbit point and the
 /// perspective deepens, where the old fixed eye at two radii only magnified
 /// the picture and flattened toward orthographic the closer one looked.
-pub(in crate::app::model_preview) const PERSPECTIVE_FOV_Y: f32 = 60.0 * std::f32::consts::PI / 180.0;
+pub(in crate::app::model_preview) const PERSPECTIVE_FOV_Y: f32 =
+    60.0 * std::f32::consts::PI / 180.0;
 
 /// The perspective near plane, as a fraction of the eye's distance to the
 /// orbit point. Small, because a dolly brings the eye right up to (and
@@ -61,7 +62,11 @@ pub(in crate::app::model_preview) fn camera_light(yaw: f32, pitch: f32) -> [f32;
 /// The eye in model space, which the pass stages measure Fresnel from. An
 /// orthographic view has no eye, so one far away along the view axis stands in.
 pub(in crate::app::model_preview) fn eye_position(camera: &ModelGpuCamera) -> [f32; 3] {
-    let distance = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
+    let distance = if camera.perspective > 0.0 {
+        1.0 / camera.perspective
+    } else {
+        1.0e5
+    };
     let eye = unrotate_view_vector(camera.yaw, camera.pitch, [0.0, -distance, 0.0]);
     std::array::from_fn(|axis| camera.center[axis] + eye[axis] / camera.scale.max(1e-6))
 }
@@ -72,7 +77,12 @@ pub(in crate::app::model_preview) const DEPTH_UNITS: f32 = (1 << 24) as f32;
 /// `u_depth` for [`VIEW_DEPTH`](crate::app::model_preview::gl::glsl::VIEW_DEPTH): the projection's depth terms, then
 /// the preview's scale, which brings its units back to the world's.
 pub(in crate::app::model_preview) fn scene_depth_terms(camera: &ModelGpuCamera) -> [f32; 4] {
-    [camera.depth_scale * camera.depth_map[0], camera.depth_map[1], camera.perspective, camera.scale]
+    [
+        camera.depth_scale * camera.depth_map[0],
+        camera.depth_map[1],
+        camera.perspective,
+        camera.scale,
+    ]
 }
 
 pub(in crate::app::model_preview) struct ProjectedPoint {
@@ -97,7 +107,9 @@ pub(in crate::app) fn min_preview_scale(preview: &RenderModelPreview) -> f32 {
     (radius * 1.1 / WIDEST_PREVIEW_VIEW).min(1.0)
 }
 
-pub(in crate::app::model_preview) fn preview_center_radius(preview: &RenderModelPreview) -> ([f32; 3], f32) {
+pub(in crate::app::model_preview) fn preview_center_radius(
+    preview: &RenderModelPreview,
+) -> ([f32; 3], f32) {
     let (min, max) = (preview.bounds_min, preview.bounds_max);
     let center = [
         (min[0] + max[0]) * 0.5,
@@ -117,7 +129,11 @@ pub(in crate::app::model_preview) fn preview_center_radius(preview: &RenderModel
 
 /// World → view: yaw about Z, then pitch about X — the one rotation this
 /// preview uses, mirrored in the vertex shader's `rotate_view`.
-pub(in crate::app::model_preview) fn rotate_view_vector(yaw: f32, pitch: f32, vector: [f32; 3]) -> [f32; 3] {
+pub(in crate::app::model_preview) fn rotate_view_vector(
+    yaw: f32,
+    pitch: f32,
+    vector: [f32; 3],
+) -> [f32; 3] {
     let (sy, cy) = yaw.sin_cos();
     let x = vector[0] * cy - vector[1] * sy;
     let y = vector[0] * sy + vector[1] * cy;
@@ -128,7 +144,11 @@ pub(in crate::app::model_preview) fn rotate_view_vector(yaw: f32, pitch: f32, ve
 /// View → world: the exact inverse of [`rotate_view_vector`] (un-pitch, then
 /// un-yaw). What turns a screen-space pan or zoom-to-cursor offset back into
 /// the world-space focus move it stands for.
-pub(in crate::app::model_preview) fn unrotate_view_vector(yaw: f32, pitch: f32, vector: [f32; 3]) -> [f32; 3] {
+pub(in crate::app::model_preview) fn unrotate_view_vector(
+    yaw: f32,
+    pitch: f32,
+    vector: [f32; 3],
+) -> [f32; 3] {
     let (sp, cp) = pitch.sin_cos();
     let y = vector[1] * cp + vector[2] * sp;
     let z = -vector[1] * sp + vector[2] * cp;
@@ -153,7 +173,11 @@ pub(in crate::app::model_preview) struct PreviewCamera {
 }
 
 impl PreviewCamera {
-    pub(in crate::app::model_preview) fn new(data: &ModelPreviewData, state: &ModelPreviewState, rect: egui::Rect) -> Self {
+    pub(in crate::app::model_preview) fn new(
+        data: &ModelPreviewData,
+        state: &ModelPreviewState,
+        rect: egui::Rect,
+    ) -> Self {
         let (bounds_center, radius) = preview_center_radius(&data.preview);
         let center = [
             bounds_center[0] + state.focus[0],
@@ -175,7 +199,9 @@ impl PreviewCamera {
             .as_deref()
             .map(|pose| pose.reach)
             .unwrap_or(0.0);
-        let scale = state.scale.clamp(min_preview_scale(&data.preview), MAX_PREVIEW_SCALE);
+        let scale = state
+            .scale
+            .clamp(min_preview_scale(&data.preview), MAX_PREVIEW_SCALE);
         Self {
             rect,
             center,
@@ -276,7 +302,10 @@ pub(in crate::app::model_preview) fn depth_map_coefficients(eye: Option<f32>) ->
 }
 
 /// The vertex shader's `clip_position`.
-pub(in crate::app::model_preview) fn ce_flare_clip(camera: &ModelGpuCamera, point: [f32; 3]) -> [f32; 4] {
+pub(in crate::app::model_preview) fn ce_flare_clip(
+    camera: &ModelGpuCamera,
+    point: [f32; 3],
+) -> [f32; 4] {
     let scaled = std::array::from_fn(|axis| (point[axis] - camera.center[axis]) * camera.scale);
     let view = rotate_view_vector(camera.yaw, camera.pitch, scaled);
     [
@@ -290,7 +319,12 @@ pub(in crate::app::model_preview) fn ce_flare_clip(camera: &ModelGpuCamera, poin
 /// How many pixels wide plus high a screen-facing sprite of `half` extents
 /// is at `center`: `lens_flare_project_billboard`'s half extents across the
 /// viewport, as Reach's `lens_flare_render_internal` measures them.
-pub(in crate::app::model_preview) fn ce_flare_pixels(camera: &ModelGpuCamera, viewport: [i32; 2], center: [f32; 3], half: [f32; 2]) -> f32 {
+pub(in crate::app::model_preview) fn ce_flare_pixels(
+    camera: &ModelGpuCamera,
+    viewport: [i32; 2],
+    center: [f32; 3],
+    half: [f32; 2],
+) -> f32 {
     let w = ce_flare_clip(camera, center)[3];
     if w <= 0.0 {
         return 0.0;
@@ -308,7 +342,8 @@ mod tests {
     fn the_camera_light_keeps_its_place_as_the_view_orbits() {
         let toward_eye = |yaw, pitch| unrotate_view_vector(yaw, pitch, [0.0, -1.0, 0.0]);
         let share = |yaw, pitch| {
-            let (light, eye): ([f32; 3], [f32; 3]) = (camera_light(yaw, pitch), toward_eye(yaw, pitch));
+            let (light, eye): ([f32; 3], [f32; 3]) =
+                (camera_light(yaw, pitch), toward_eye(yaw, pitch));
             (0..3).map(|axis| light[axis] * eye[axis]).sum::<f32>()
         };
         for (yaw, pitch) in [(0.0, 0.0), (1.5, 0.4), (3.1, -0.6), (-2.0, 1.0)] {
@@ -373,7 +408,10 @@ mod tests {
                 ..Default::default()
             };
             let (_, radius) = preview_center_radius(&preview);
-            (radius * 1.1 / min_preview_scale(&preview), radius * 1.1 / 0.02)
+            (
+                radius * 1.1 / min_preview_scale(&preview),
+                radius * 1.1 / 0.02,
+            )
         };
         let (tiny, tiny_at_a_fixed_scale) = widest(0.01);
         let (level, level_at_a_fixed_scale) = widest(500.0);

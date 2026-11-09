@@ -27,13 +27,22 @@ pub(super) fn profile_layout(length: f32, density: f32) -> (i32, f32, f32) {
 
 /// `light_volume_update`'s place along the row. A row of one sits at its start.
 pub(in crate::app::model_preview) fn percentile(index: i32, profiles: f32) -> f32 {
-    if profiles > 1.0 { index as f32 / (profiles - 1.0) } else { 0.0 }
+    if profiles > 1.0 {
+        index as f32 / (profiles - 1.0)
+    } else {
+        0.0
+    }
 }
 
 /// What `light_volume.fx` divides alpha by to hold a volume's brightness at
 /// any angle. Head on the spacing vanishes, and every profile stacks.
 pub(super) fn overdraw(profiles: f32, profile_length: f32, spacing: f32) -> f32 {
-    if spacing > 0.0 { profiles.min(profile_length / spacing) } else { profiles }.max(1e-6)
+    if spacing > 0.0 {
+        profiles.min(profile_length / spacing)
+    } else {
+        profiles
+    }
+    .max(1e-6)
 }
 
 impl Gen3LightVolumeAt {
@@ -50,11 +59,21 @@ impl Gen3LightVolumeAt {
     pub(crate) fn animates(&self) -> bool {
         let volume = &*self.definition;
         let reads_time = [
-            &volume.length, &volume.offset, &volume.density, &volume.profile_length,
-            &volume.thickness, &volume.color, &volume.alpha, &volume.intensity,
+            &volume.length,
+            &volume.offset,
+            &volume.density,
+            &volume.profile_length,
+            &volume.thickness,
+            &volume.color,
+            &volume.alpha,
+            &volume.intensity,
         ];
         self.times.moves()
-            || reads_time.iter().any(|property| property.inputs().any(|input| input == Gen3VolumeInput::GameTime))
+            || reads_time.iter().any(|property| {
+                property
+                    .inputs()
+                    .any(|input| input == Gen3VolumeInput::GameTime)
+            })
     }
 
     /// Its sort position: `submit` hands the transparents its location.
@@ -89,12 +108,20 @@ impl Gen3LightVolumeAt {
     }
 
     /// The states this frame, or none while its event is not running.
-    fn state(&self, values: Option<&FunctionValues>, time: f32, onset: f32) -> Option<Gen3VolumeState> {
+    fn state(
+        &self,
+        values: Option<&FunctionValues>,
+        time: f32,
+        onset: f32,
+    ) -> Option<Gen3VolumeState> {
         let read = |name: &str, none: f32| {
             if name.is_empty() {
                 return none;
             }
-            values.and_then(|values| values.get(name)).copied().unwrap_or(0.0)
+            values
+                .and_then(|values| values.get(name))
+                .copied()
+                .unwrap_or(0.0)
         };
         // `attachments_update` runs the effect while its function is on.
         let effect_a = read(&self.scale_by, 1.0);
@@ -140,7 +167,11 @@ impl Gen3LightVolumeAt {
         let length = volume.length.scalar(&state);
         let density = volume.density.scalar(&state);
         let (count, profiles, distance) = profile_layout(length, density);
-        let direction = if self.world_oriented { self.forward } else { turned };
+        let direction = if self.world_oriented {
+            self.forward
+        } else {
+            turned
+        };
         Some(VolumeLayout {
             state,
             origin,
@@ -169,8 +200,16 @@ impl Gen3LightVolumeAt {
         onset: f32,
         stops: f32,
     ) -> Vec<AntennaQuad> {
-        let Some(VolumeLayout { mut state, origin, direction, count, profiles, distance, offset, side_length }) =
-            self.layout(values, bones, view, time, onset)
+        let Some(VolumeLayout {
+            mut state,
+            origin,
+            direction,
+            count,
+            profiles,
+            distance,
+            offset,
+            side_length,
+        }) = self.layout(values, bones, view, time, onset)
         else {
             return Vec::new();
         };
@@ -184,9 +223,13 @@ impl Gen3LightVolumeAt {
         for index in 0..count {
             state.percentile = percentile(index, profiles);
             let along = offset + distance * index as f32;
-            let place: [f32; 3] = std::array::from_fn(|axis| origin[axis] + direction[axis] * along);
+            let place: [f32; 3] =
+                std::array::from_fn(|axis| origin[axis] + direction[axis] * along);
             let row = baked.map(|rows| rows[index as usize]);
-            let thickness = row.map_or_else(|| volume.thickness.scalar(&state), |(_, thickness)| thickness);
+            let thickness = row.map_or_else(
+                || volume.thickness.scalar(&state),
+                |(_, thickness)| thickness,
+            );
             let to_profile = clamped_unit(std::array::from_fn(|axis| place[axis] - view.eye[axis]));
             let sine = length(cross(direction, to_profile)).min(1.0);
             let drawn_length = thickness + (side_length - thickness) * sine;
@@ -194,14 +237,25 @@ impl Gen3LightVolumeAt {
             let across = cross(to_profile, up);
             let corner = |u: f32, v: f32| {
                 let (x, y) = ((u - 0.5) * drawn_length, (v - 0.5) * thickness);
-                let [a, b, c] = std::array::from_fn(|axis| place[axis] + across[axis] * x + up[axis] * y);
+                let [a, b, c] =
+                    std::array::from_fn(|axis| place[axis] + across[axis] * x + up[axis] * y);
                 [a, b, c, u, v]
             };
             let ratio = volume.brightness_ratio + (1.0 - volume.brightness_ratio) * sine;
             let overdrawn = overdraw(profiles, drawn_length, distance * sine);
             quads.push(AntennaQuad {
-                corners: [corner(0.0, 0.0), corner(1.0, 0.0), corner(0.0, 1.0), corner(1.0, 1.0)],
-                color: volume.profile_color(&state, row.map(|(color, _)| color), [ratio, overdrawn], stops),
+                corners: [
+                    corner(0.0, 0.0),
+                    corner(1.0, 0.0),
+                    corner(0.0, 1.0),
+                    corner(1.0, 1.0),
+                ],
+                color: volume.profile_color(
+                    &state,
+                    row.map(|(color, _)| color),
+                    [ratio, overdrawn],
+                    stops,
+                ),
             });
         }
         quads

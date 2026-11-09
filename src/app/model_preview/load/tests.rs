@@ -1,10 +1,9 @@
 use super::*;
-use crate::app::model_preview::harness::kit::kit_root;
-use blam_tags::TagFile;
 use crate::app::editor::{
     is_model_group, is_previewable_geometry_group, is_previewable_geometry_group_for_game,
 };
 use crate::app::model_preview::RenderModelPreview;
+use crate::app::model_preview::harness::kit::kit_root;
 use crate::app::model_preview::load::build_particle_model_preview;
 use crate::app::model_preview::state::ModelTagPanelTab;
 use crate::app::{Baboon, LoadedSourceData, ModelPreviewState, TagDocument};
@@ -12,6 +11,7 @@ use crate::core::format::TagNameIndex;
 use crate::core::game::GameId;
 use crate::core::source::{TagEntry, TagEntryLocation, TagSource, TagTree};
 use crate::core::tag_key::file_entry_key;
+use blam_tags::TagFile;
 use eframe::egui;
 use std::path::Path;
 use std::path::PathBuf;
@@ -306,10 +306,18 @@ fn reach_lights_quadratic_meshes_by_sh_and_clamps_its_ambient_transfer() {
         super::super::gen3::prt::read_h3_prt(&tag, &model, &meshes).unwrap()
     };
     // Its meshes bake quadratic transfer, which Reach's tool no longer lights by.
-    let quadratic = read("objects/test/test_fbx_characters/test_fbx_civilian_female_custom_animation/test_fbx_civilian_female_custom_animation.render_model");
-    assert!((0..quadratic.vertices.len() as u32).all(|vertex| quadratic.kind_at(vertex) == super::super::gen3::prt::Gen3PrtKind::None));
+    let quadratic = read(
+        "objects/test/test_fbx_characters/test_fbx_civilian_female_custom_animation/test_fbx_civilian_female_custom_animation.render_model",
+    );
+    assert!(
+        (0..quadratic.vertices.len() as u32)
+            .all(|vertex| quadratic.kind_at(vertex) == super::super::gen3::prt::Gen3PrtKind::None)
+    );
     let ambient = read("objects/characters/spartans/spartans.render_model");
-    assert!((0..ambient.vertices.len() as u32).any(|vertex| ambient.kind_at(vertex) == super::super::gen3::prt::Gen3PrtKind::Ambient));
+    assert!(
+        (0..ambient.vertices.len() as u32)
+            .any(|vertex| ambient.kind_at(vertex) == super::super::gen3::prt::Gen3PrtKind::Ambient)
+    );
     // The client's clamp to 0..1 is kept, but no object in the kit has an
     // ambient value outside it (all 1,549 render models scanned), so
     // nothing here can show it.
@@ -540,7 +548,10 @@ fn fixture(tags: &Path, game: &str, rel: &str) -> Option<Fixture> {
         active_tab: ModelTagPanelTab::ModelPreview,
         ..ModelPreviewState::default()
     };
-    app.views[app.model.kits[0].id].caches.model_previews.insert(entry.key.clone(), preview);
+    app.views[app.model.kits[0].id]
+        .caches
+        .model_previews
+        .insert(entry.key.clone(), preview);
     Some(Fixture {
         app,
         key: entry.key,
@@ -550,11 +561,17 @@ fn fixture(tags: &Path, game: &str, rel: &str) -> Option<Fixture> {
 
 impl Fixture {
     fn state(&self) -> &ModelPreviewState {
-        &self.app.views[self.app.model.kits[0].id].caches.model_previews[&self.key]
+        &self.app.views[self.app.model.kits[0].id]
+            .caches
+            .model_previews[&self.key]
     }
 
     fn state_mut(&mut self) -> &mut ModelPreviewState {
-        self.app.views[self.app.model.kits[0].id].caches.model_previews.get_mut(&self.key).unwrap()
+        self.app.views[self.app.model.kits[0].id]
+            .caches
+            .model_previews
+            .get_mut(&self.key)
+            .unwrap()
     }
 
     /// One frame's worth of preview work: drain replies, then the post-draw hook.
@@ -576,8 +593,16 @@ impl Fixture {
 
     /// Open the tag as an edited document, so the worker parses its bytes.
     fn open_edited(&mut self) {
-        let entry = self.app.model.kits[0].entry_for_key(&self.key).unwrap().clone();
-        let source = self.app.model.kits[0].source.as_ref().unwrap().source.clone();
+        let entry = self.app.model.kits[0]
+            .entry_for_key(&self.key)
+            .unwrap()
+            .clone();
+        let source = self.app.model.kits[0]
+            .source
+            .as_ref()
+            .unwrap()
+            .source
+            .clone();
         let tag = crate::core::source::read_entry(&source, &entry).expect("read render_model");
         let mut document = TagDocument::clean(tag);
         document.dirty.touch();
@@ -618,7 +643,9 @@ fn check(tags: &Path, game: &str, rel: &str) {
 
 #[test]
 fn a_halo3_render_model_loads_on_a_worker() {
-    let Some(tags) = crate::app::model_preview::harness::kit::kit_root(GameId::Halo3) else { return };
+    let Some(tags) = crate::app::model_preview::harness::kit::kit_root(GameId::Halo3) else {
+        return;
+    };
     check(
         &tags,
         "halo3_mcc",
@@ -628,7 +655,9 @@ fn a_halo3_render_model_loads_on_a_worker() {
 
 #[test]
 fn a_classic_halo2_render_model_loads_on_a_worker() {
-    let Some(tags) = crate::app::model_preview::harness::kit::kit_root(GameId::Halo2) else { return };
+    let Some(tags) = crate::app::model_preview::harness::kit::kit_root(GameId::Halo2) else {
+        return;
+    };
     check(
         &tags,
         "halo2_mcc",
@@ -653,7 +682,9 @@ fn wait_for_reply(fixture: &Fixture) -> crate::app::WorkerMessage {
 /// installed as current and left for a later frame to notice.
 #[test]
 fn a_result_for_a_superseded_request_is_dropped() {
-    let Some(tags) = kit_root(GameId::Halo3) else { return };
+    let Some(tags) = kit_root(GameId::Halo3) else {
+        return;
+    };
     let rel = "objects/weapons/rifle/assault_rifle/assault_rifle.render_model";
     let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
         return;
@@ -667,8 +698,13 @@ fn a_result_for_a_superseded_request_is_dropped() {
 
     fixture.state_mut().high_detail = false;
     let key = fixture.key.clone();
-    fixture.app.maybe_request_model_preview(0, &key, &fixture.ctx);
-    let second = fixture.state().preview_load_id.expect("a new worker started");
+    fixture
+        .app
+        .maybe_request_model_preview(0, &key, &fixture.ctx);
+    let second = fixture
+        .state()
+        .preview_load_id
+        .expect("a new worker started");
     assert_ne!(first, second);
     fixture.app.tx.send(reply).unwrap();
     fixture.app.process_worker_messages(&fixture.ctx);
@@ -685,17 +721,26 @@ fn a_result_for_a_superseded_request_is_dropped() {
 /// stays chosen by name, and the animation plays on as it was set.
 #[test]
 fn a_reload_keeps_the_variant_and_how_the_animation_plays() {
-    let Some(tags) = kit_root(GameId::Halo3) else { return };
+    let Some(tags) = kit_root(GameId::Halo3) else {
+        return;
+    };
     let rel = "objects/vehicles/warthog/warthog.model";
     let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
         return;
     };
     fixture.frames_until_loaded();
     let variants: Vec<String> = match &fixture.state().data {
-        Some(Ok(data)) => data.variants.iter().map(|variant| variant.name.clone()).collect(),
+        Some(Ok(data)) => data
+            .variants
+            .iter()
+            .map(|variant| variant.name.clone())
+            .collect(),
         _ => panic!("the warthog loads"),
     };
-    let chosen = variants.iter().position(|name| name != "default").expect("a variant past default");
+    let chosen = variants
+        .iter()
+        .position(|name| name != "default")
+        .expect("a variant past default");
     let state = fixture.state_mut();
     state.selected_variant = Some(chosen);
     state.animation.speed = 0.5;
@@ -703,24 +748,40 @@ fn a_reload_keeps_the_variant_and_how_the_animation_plays() {
     state.invalidate_load();
     fixture.frames_until_loaded();
     let state = fixture.state();
-    assert_eq!(state.selected_variant.map(|index| variants[index].as_str()), Some(variants[chosen].as_str()));
-    assert_eq!((state.animation.speed, state.animation.looped), (0.5, false));
+    assert_eq!(
+        state.selected_variant.map(|index| variants[index].as_str()),
+        Some(variants[chosen].as_str())
+    );
+    assert_eq!(
+        (state.animation.speed, state.animation.looped),
+        (0.5, false)
+    );
 }
 
 /// The overlays landing seed their collision-only regions as the chosen
 /// variant does, so the variant still reads as chosen, not "(custom)".
 #[test]
 fn overlays_landing_keep_the_variant_chosen() {
-    let Some(tags) = kit_root(GameId::Halo3) else { return };
+    let Some(tags) = kit_root(GameId::Halo3) else {
+        return;
+    };
     let rel = "objects/vehicles/warthog/warthog.model";
     let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
         return;
     };
     fixture.frames_until_loaded();
     let kit = &fixture.app.model.kits[0];
-    let stamp = KitStamp { kit: kit.id, generation: kit.generation };
+    let stamp = KitStamp {
+        kit: kit.id,
+        generation: kit.generation,
+    };
     let (geometry_id, chosen) = match &fixture.state().data {
-        Some(Ok(data)) => (data.geometry_id, data.variants.iter().position(|variant| variant.name != "default")),
+        Some(Ok(data)) => (
+            data.geometry_id,
+            data.variants
+                .iter()
+                .position(|variant| variant.name != "default"),
+        ),
         _ => panic!("the warthog loads"),
     };
     fixture.state_mut().selected_variant = chosen;
@@ -737,10 +798,22 @@ fn overlays_landing_keep_the_variant_chosen() {
         ..Default::default()
     };
     let key = fixture.key.clone();
-    fixture.app.handle_model_overlays_built(stamp, key, geometry_id, Some(collision), None, Vec::new());
+    fixture.app.handle_model_overlays_built(
+        stamp,
+        key,
+        geometry_id,
+        Some(collision),
+        None,
+        Vec::new(),
+    );
     let state = fixture.state();
-    let Some(Ok(data)) = &state.data else { panic!("still loaded") };
-    assert_eq!(super::super::selection::detect_active_variant(data, state), Some(chosen));
+    let Some(Ok(data)) = &state.data else {
+        panic!("still loaded")
+    };
+    assert_eq!(
+        super::super::selection::detect_active_variant(data, state),
+        Some(chosen)
+    );
 }
 
 /// A reader that panics costs its feature, with a note, and the preview it
@@ -752,21 +825,32 @@ fn a_crashing_feature_is_noted_and_its_half_merge_undone() {
     assert!(lights.is_empty());
     assert_eq!(notes, ["its lights: the reader crashed (bad light tag)"]);
     let mut preview = RenderModelPreview::default();
-    feature_into(&mut notes, "a held weapon", &mut preview, |preview| -> Option<()> {
-        preview.indices.push(7);
-        panic!("half merged");
-    });
+    feature_into(
+        &mut notes,
+        "a held weapon",
+        &mut preview,
+        |preview| -> Option<()> {
+            preview.indices.push(7);
+            panic!("half merged");
+        },
+    );
     assert!(preview.indices.is_empty(), "the half merge was left in");
     assert_eq!(notes.len(), 2);
     let kept = feature(&mut notes, "its functions", || Some(3));
-    assert_eq!((kept, notes.len()), (Some(3), 2), "a reader that works is untouched");
+    assert_eq!(
+        (kept, notes.len()),
+        (Some(3), 2),
+        "a reader that works is untouched"
+    );
 }
 
 /// A scenario whose chosen BSP will not load still previews, saying why,
 /// rather than failing as a whole.
 #[test]
 fn a_scenario_with_an_unloadable_bsp_previews_with_a_note() {
-    let Some(tags) = kit_root(GameId::Halo3) else { return };
+    let Some(tags) = kit_root(GameId::Halo3) else {
+        return;
+    };
     let rel = "levels/multi/guardian/guardian.scenario";
     if !tags.join(rel).is_file() {
         eprintln!("skipping: BLAM_TEST_H3EK has no {rel}");
@@ -781,7 +865,12 @@ fn a_scenario_with_an_unloadable_bsp_previews_with_a_note() {
         game: Some(GameId::Halo3),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
-    let TagSource::LooseFolder { definitions_root, .. } = &source else { unreachable!() };
+    let TagSource::LooseFolder {
+        definitions_root, ..
+    } = &source
+    else {
+        unreachable!()
+    };
     let names = TagNameIndex::load_game(definitions_root, GameId::Halo3).unwrap();
     let entry = TagEntry {
         key: rel.to_owned(),
@@ -791,26 +880,38 @@ fn a_scenario_with_an_unloadable_bsp_previews_with_a_note() {
         location: TagEntryLocation::LooseFile(root.join(rel)),
     };
     let tag = read_entry(&source, &entry).unwrap();
-    let settings = PreviewLoadSettings { scenario_selection: [0].into(), ..Default::default() };
+    let settings = PreviewLoadSettings {
+        scenario_selection: [0].into(),
+        ..Default::default()
+    };
     let loaded = load_model_preview(&tag, &entry, &names, Some(&source), &settings);
     std::fs::remove_dir_all(&root).ok();
     let data = loaded.expect("the scenario previews without its BSP");
     assert_eq!(data.notes.len(), 1, "{:?}", data.notes);
-    assert!(data.notes[0].starts_with("Could not load"), "{:?}", data.notes);
+    assert!(
+        data.notes[0].starts_with("Could not load"),
+        "{:?}",
+        data.notes
+    );
 }
 
 /// A clip list made for geometry a reload has replaced is dropped; one made
 /// for the geometry loaded now lands.
 #[test]
 fn a_clip_list_for_replaced_geometry_is_dropped() {
-    let Some(tags) = kit_root(GameId::Halo3) else { return };
+    let Some(tags) = kit_root(GameId::Halo3) else {
+        return;
+    };
     let rel = "objects/vehicles/warthog/warthog.model";
     let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
         return;
     };
     fixture.frames_until_loaded();
     let kit = &fixture.app.model.kits[0];
-    let stamp = KitStamp { kit: kit.id, generation: kit.generation };
+    let stamp = KitStamp {
+        kit: kit.id,
+        generation: kit.generation,
+    };
     let current = match &fixture.state().data {
         Some(Ok(data)) => data.geometry_id,
         _ => panic!("the warthog loads"),
@@ -830,14 +931,19 @@ fn a_clip_list_for_replaced_geometry_is_dropped() {
     assert!(!animations(&fixture), "the old geometry's list landed");
     fixture.app.tx.send(listed(current)).unwrap();
     fixture.app.process_worker_messages(&fixture.ctx);
-    assert!(animations(&fixture), "the current geometry's list was dropped");
+    assert!(
+        animations(&fixture),
+        "the current geometry's list was dropped"
+    );
 }
 
 /// An edit invalidates the preview while a load is in flight: the worker is
 /// parsing the bytes from before the edit, so its result must not land.
 #[test]
 fn invalidating_drops_the_load_in_flight() {
-    let Some(tags) = kit_root(GameId::Halo3) else { return };
+    let Some(tags) = kit_root(GameId::Halo3) else {
+        return;
+    };
     let rel = "objects/weapons/rifle/assault_rifle/assault_rifle.render_model";
     let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
         return;
@@ -858,7 +964,9 @@ fn invalidating_drops_the_load_in_flight() {
 /// preview must ask again rather than wait on a request nobody will answer.
 #[test]
 fn a_result_dropped_for_a_generation_bump_is_requested_again() {
-    let Some(tags) = kit_root(GameId::Halo3) else { return };
+    let Some(tags) = kit_root(GameId::Halo3) else {
+        return;
+    };
     let rel = "objects/weapons/rifle/assault_rifle/assault_rifle.render_model";
     let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
         return;
@@ -869,10 +977,15 @@ fn a_result_dropped_for_a_generation_bump_is_requested_again() {
     fixture.app.model.kits[0].generation = fixture.app.model.kits[0].generation.wrapping_add(1);
     fixture.app.tx.send(reply).unwrap();
     fixture.app.process_worker_messages(&fixture.ctx);
-    assert!(fixture.state().data.is_none(), "a stale result was installed");
+    assert!(
+        fixture.state().data.is_none(),
+        "a stale result was installed"
+    );
 
     let key = fixture.key.clone();
-    fixture.app.maybe_request_model_preview(0, &key, &fixture.ctx);
+    fixture
+        .app
+        .maybe_request_model_preview(0, &key, &fixture.ctx);
     let second = fixture.state().preview_load_id;
     assert!(
         second.is_some_and(|second| second != first),
@@ -987,8 +1100,11 @@ fn gbxmodel() -> TagFile {
         );
     }
     add(&mut tag, "geometries[0]/parts[0]/triangles");
-    for (field, index) in [("vertex0 index", "0"), ("vertex1 index", "1"), ("vertex2 index", "2")]
-    {
+    for (field, index) in [
+        ("vertex0 index", "0"),
+        ("vertex1 index", "1"),
+        ("vertex2 index", "2"),
+    ] {
         set(
             &mut tag,
             &format!("geometries[0]/parts[0]/triangles[0]/{field}"),
@@ -1014,10 +1130,18 @@ fn names() -> TagNameIndex {
     TagNameIndex::load_from_definitions(&crate::core::bundled::locate_definitions_root())
 }
 
-fn load(tag: &TagFile, display_path: &str, source: Option<&TagSource>) -> Result<ModelPreviewData, String> {
+fn load(
+    tag: &TagFile,
+    display_path: &str,
+    source: Option<&TagSource>,
+) -> Result<ModelPreviewData, String> {
     load_model_preview(
         tag,
-        &entry(display_path, tag, TagEntryLocation::LooseFile(display_path.into())),
+        &entry(
+            display_path,
+            tag,
+            TagEntryLocation::LooseFile(display_path.into()),
+        ),
         &names(),
         source,
         &PreviewLoadSettings::default(),
@@ -1094,7 +1218,9 @@ fn a_gbxmodel_previews_itself() {
 fn an_empty_render_tag_is_refused() {
     let tag = classic_ce_tag("gbxmodel");
     assert_eq!(
-        load(&tag, "objects/thing/empty.gbxmodel", None).err().as_deref(),
+        load(&tag, "objects/thing/empty.gbxmodel", None)
+            .err()
+            .as_deref(),
         Some("This render tag has no previewable draw batches.")
     );
 }
@@ -1114,9 +1240,16 @@ fn a_halo_ce_object_previews_the_gbxmodel_it_names() {
             .as_deref(),
         Some("This object references no gbxmodel.")
     );
-    reference(&mut scenery, "object/model", b"mod2", "objects\\thing\\thing");
+    reference(
+        &mut scenery,
+        "object/model",
+        b"mod2",
+        "objects\\thing\\thing",
+    );
     assert_eq!(
-        load(&scenery, "objects/thing/thing.scenery", None).err().as_deref(),
+        load(&scenery, "objects/thing/thing.scenery", None)
+            .err()
+            .as_deref(),
         Some("Halo CE object preview requires a loaded source.")
     );
     let data = load(&scenery, "objects/thing/thing.scenery", Some(&source))
@@ -1125,8 +1258,15 @@ fn a_halo_ce_object_previews_the_gbxmodel_it_names() {
     assert_eq!(data.render_model_path, "objects\\thing\\thing");
     assert_one_triangle(&data.preview);
 
-    reference(&mut scenery, "object/model", b"mod2", "objects\\thing\\missing");
-    let error = load(&scenery, "objects/thing/thing.scenery", Some(&source)).err().expect("refused");
+    reference(
+        &mut scenery,
+        "object/model",
+        b"mod2",
+        "objects\\thing\\missing",
+    );
+    let error = load(&scenery, "objects/thing/thing.scenery", Some(&source))
+        .err()
+        .expect("refused");
     assert!(
         error.starts_with("Could not load objects\\thing\\missing.gbxmodel:"),
         "{error}"
@@ -1146,12 +1286,20 @@ fn a_model_resolves_its_render_model_in_the_loose_folder() {
             .as_deref(),
         Some("This model tag has no render model reference.")
     );
-    set(&mut model, "render model", "objects\\thing\\thing.render_model");
+    set(
+        &mut model,
+        "render model",
+        "objects\\thing\\thing.render_model",
+    );
     assert_eq!(
-        load(&model, "objects/thing/thing.model", None).err().as_deref(),
+        load(&model, "objects/thing/thing.model", None)
+            .err()
+            .as_deref(),
         Some("Render model preview requires a loaded loose-folder editing kit.")
     );
-    let error = load(&model, "objects/thing/thing.model", Some(&source)).err().expect("refused");
+    let error = load(&model, "objects/thing/thing.model", Some(&source))
+        .err()
+        .expect("refused");
     assert!(
         error.starts_with("Referenced render_model was not found:"),
         "{error}"
@@ -1213,7 +1361,8 @@ fn a_scenario_lists_its_bsps_without_loading_them() {
         None,
         &settings,
     )
-    .err().expect("refused");
+    .err()
+    .expect("refused");
     assert_eq!(error, "Scenario preview requires a loaded source.");
 }
 
@@ -1223,7 +1372,9 @@ fn a_scenario_lists_its_bsps_without_loading_them() {
 fn other_groups_take_the_paths_their_group_names() {
     let biped = new_tag_for("halo3_mcc", "biped");
     assert_eq!(
-        load(&biped, "objects/thing/thing.biped", None).err().as_deref(),
+        load(&biped, "objects/thing/thing.biped", None)
+            .err()
+            .as_deref(),
         Some("Object preview requires a loaded source.")
     );
     let physics = new_tag_for("halo3_mcc", "physics_model");
@@ -1270,18 +1421,26 @@ fn a_gbxmodel_preview_loads_on_a_worker() {
                 "0, 4, 5",
             );
             document.dirty.touch();
-            app.model.kits[0].parsed_tags.insert(entry.key.clone(), document);
+            app.model.kits[0]
+                .parsed_tags
+                .insert(entry.key.clone(), document);
         }
         let ctx = egui::Context::default();
         // Not the preview tab: nothing is asked for.
         app.views[app.model.kits[0].id]
-            .caches.model_previews
+            .caches
+            .model_previews
             .insert(entry.key.clone(), ModelPreviewState::default());
         app.maybe_request_model_preview(0, &entry.key, &ctx);
-        assert!(app.views[app.model.kits[0].id].caches.model_previews[&entry.key].preview_load_id.is_none());
+        assert!(
+            app.views[app.model.kits[0].id].caches.model_previews[&entry.key]
+                .preview_load_id
+                .is_none()
+        );
 
         app.views[app.model.kits[0].id]
-            .caches.model_previews
+            .caches
+            .model_previews
             .get_mut(&entry.key)
             .unwrap()
             .active_tab = ModelTagPanelTab::ModelPreview;
@@ -1298,7 +1457,10 @@ fn a_gbxmodel_preview_loads_on_a_worker() {
         );
 
         let deadline = Instant::now() + Duration::from_secs(60);
-        while app.views[app.model.kits[0].id].caches.model_previews[&entry.key].data.is_none() {
+        while app.views[app.model.kits[0].id].caches.model_previews[&entry.key]
+            .data
+            .is_none()
+        {
             assert!(Instant::now() < deadline, "the preview never landed");
             app.process_worker_messages(&ctx);
             std::thread::sleep(Duration::from_millis(5));
@@ -1308,7 +1470,11 @@ fn a_gbxmodel_preview_loads_on_a_worker() {
         assert_eq!(state.render_model_path.as_deref(), Some(relative));
         let data = state.data.as_ref().unwrap().as_ref().expect("it loads");
         assert_eq!(data.preview.vertices.len(), 3);
-        let apex = if edited { [1.0, 4.0, 5.0] } else { [1.0, 2.0, 3.0] };
+        let apex = if edited {
+            [1.0, 4.0, 5.0]
+        } else {
+            [1.0, 2.0, 3.0]
+        };
         assert_eq!(data.preview.bounds_max, apex, "edited: {edited}");
     }
 }

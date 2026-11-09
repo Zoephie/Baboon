@@ -15,7 +15,10 @@ pub(in crate::app::model_preview) enum OcclusionOffset {
 
 impl OcclusionOffset {
     pub(in crate::app::model_preview) fn read(root: TagStruct<'_>) -> Self {
-        match root.read_enum_option("occlusion offset direction").as_deref() {
+        match root
+            .read_enum_option("occlusion offset direction")
+            .as_deref()
+        {
             Some("toward viewer") => Self::TowardViewer,
             Some("marker forward") => Self::MarkerForward,
             _ => Self::None,

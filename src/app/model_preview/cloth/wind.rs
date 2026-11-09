@@ -38,7 +38,11 @@ pub(crate) struct H3Wind {
 
 impl Default for H3Wind {
     fn default() -> Self {
-        Self { direction: [0.0; 3], scale: 0.0, random: 1 }
+        Self {
+            direction: [0.0; 3],
+            scale: 0.0,
+            random: 1,
+        }
     }
 }
 
@@ -78,7 +82,9 @@ impl H3Wind {
         self.direction = turned_about(self.direction, about, angle);
         self.direction = away_from_pole([0.0, 0.0, 1.0], WIND_POLE_ANGLE, self.direction);
         let slow = (t * 0.0001).cos();
-        let drift = ((t * 0.005).sin() * 0.01 * slow + (t * 0.001).cos() * (t * 0.0006).cos() * 0.01 * slow) * 0.4;
+        let drift = ((t * 0.005).sin() * 0.01 * slow
+            + (t * 0.001).cos() * (t * 0.0006).cos() * 0.01 * slow)
+            * 0.4;
         self.scale = (self.scale + drift).clamp(-0.1, 0.1);
         let strength = (self.scale.abs() + 0.0075) * 0.4 * 0.2;
         self.direction.map(|axis| axis * strength)
@@ -95,7 +101,11 @@ pub(super) struct H2Wind {
 
 impl Default for H2Wind {
     fn default() -> Self {
-        Self { direction: [0.0; 3], scale: 0.1, random: 1 }
+        Self {
+            direction: [0.0; 3],
+            scale: 0.1,
+            random: 1,
+        }
     }
 }
 
@@ -117,9 +127,13 @@ impl H2Wind {
             self.direction = self.random_direction();
         }
         let about = self.random_direction();
-        self.direction = held_from_straight_up(turned_about(self.direction, about, angle), H2_WIND_POLE_ANGLE);
+        self.direction = held_from_straight_up(
+            turned_about(self.direction, about, angle),
+            H2_WIND_POLE_ANGLE,
+        );
         let slow = (t * 0.0001).cos();
-        let drift = (t * 0.001).cos() * (t * 0.0006).cos() * 0.01 * slow + (t * 0.005).sin() * 0.01 * slow;
+        let drift =
+            (t * 0.001).cos() * (t * 0.0006).cos() * 0.01 * slow + (t * 0.005).sin() * 0.01 * slow;
         self.scale = (self.scale + drift * 0.3).clamp(-0.1, 0.1);
         let strength = (self.scale.abs() + 0.0075) * 0.4 * 0.2;
         self.direction.map(|axis| axis * strength)
@@ -139,7 +153,12 @@ pub(super) struct ReachWind {
 
 impl Default for ReachWind {
     fn default() -> Self {
-        Self { direction: [0.0; 3], scale: 0.0, random: 1, last_frame: 0 }
+        Self {
+            direction: [0.0; 3],
+            scale: 0.0,
+            random: 1,
+            last_frame: 0,
+        }
     }
 }
 
@@ -175,7 +194,8 @@ impl ReachWind {
             self.direction = turned_about(self.direction, about, angle);
             self.direction = away_from_pole([0.0, 0.0, 1.0], WIND_POLE_ANGLE, self.direction);
             let slow = (t * 0.0001).cos();
-            let drift = 0.01 * (t * 0.005).sin() * slow + 0.01 * (t * 0.0006).cos() * (t * 0.001).cos() * slow;
+            let drift = 0.01 * (t * 0.005).sin() * slow
+                + 0.01 * (t * 0.0006).cos() * (t * 0.001).cos() * slow;
             self.scale += drift;
             // Never stiller than its least: nothing at all counts as the other way.
             self.scale = if self.scale <= 0.0 {

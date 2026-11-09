@@ -1,13 +1,21 @@
 //! The one place the loader names a game: what each game reads of an
 //! object, a model and a Halo CE object of its own.
 
-use super::*;
 use super::super::particles::{OwnParticleSystem, ParticleMaterialReader, ParticleRules};
+use super::*;
 
 /// The object's change colors, functions and its game's own features, each
 /// noted if its reader crashes, by the kit's game.
-pub(super) fn read_object_features(object: &ObjectLoad<'_>, data: &mut ModelPreviewData, notes: &mut Vec<String>) {
-    let ObjectLoad { reader, object: model_tag, model } = *object;
+pub(super) fn read_object_features(
+    object: &ObjectLoad<'_>,
+    data: &mut ModelPreviewData,
+    notes: &mut Vec<String>,
+) {
+    let ObjectLoad {
+        reader,
+        object: model_tag,
+        model,
+    } = *object;
     let game = match &reader.source {
         TagSource::LooseFolder { game, .. } => *game,
         _ => None,
@@ -17,7 +25,9 @@ pub(super) fn read_object_features(object: &ObjectLoad<'_>, data: &mut ModelPrev
             object.read_colors_and_functions(data, notes);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(notes, "its lights and effects", preview, |preview| {
-                super::super::h3::object::read_h3_object_features(reader, model_tag, model, preview);
+                super::super::h3::object::read_h3_object_features(
+                    reader, model_tag, model, preview,
+                );
             });
         }
         // Reach's attachments, lights and effects read differently, and wait
@@ -26,14 +36,18 @@ pub(super) fn read_object_features(object: &ObjectLoad<'_>, data: &mut ModelPrev
             object.read_colors_and_functions(data, notes);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(notes, "its flares and lights", preview, |preview| {
-                super::super::reach::object::read_reach_object_features(reader, model_tag, model, preview);
+                super::super::reach::object::read_reach_object_features(
+                    reader, model_tag, model, preview,
+                );
             });
         }
         // Halo 4's functions and switches feed its materials' functions; its
         // attachments, lights and effects wait on their own readers.
         Some(GameId::Halo4) => {
             object.read_colors_and_functions(data, notes);
-            super::super::h4::object::read_h4_object_features(reader, model_tag, model, data, notes);
+            super::super::h4::object::read_h4_object_features(
+                reader, model_tag, model, data, notes,
+            );
         }
         Some(GameId::Halo2) => {
             object.read_colors_and_functions(data, notes);
@@ -51,7 +65,8 @@ pub(super) fn read_object_features(object: &ObjectLoad<'_>, data: &mut ModelPrev
 pub(super) fn read_model_features(reader: Option<&TagReader>, data: &mut ModelPreviewData) {
     if let Some(reader) = reader.filter(|reader| reader.source.game() == Some(GameId::Halo4)) {
         // Just built: no other handle shares it, so this does not copy.
-        Arc::make_mut(&mut data.preview).h4.color_grading = super::super::h4::lighting::read_h4_color_grading(reader);
+        Arc::make_mut(&mut data.preview).h4.color_grading =
+            super::super::h4::lighting::read_h4_color_grading(reader);
     }
 }
 
@@ -80,7 +95,10 @@ impl ParticleRules {
         let reach_on = reach || halo4;
         Self {
             reach_render_method: reach,
-            read_material: halo4.then_some(super::super::h4::effects::particles::read_h4_particle_material as ParticleMaterialReader),
+            read_material: halo4.then_some(
+                super::super::h4::effects::particles::read_h4_particle_material
+                    as ParticleMaterialReader,
+            ),
             reach_postprocess_seeds: reach_on,
             cheap_shader: reach_on,
             adds_at_illum: reach_on,

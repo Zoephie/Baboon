@@ -8,14 +8,13 @@
 use eframe::glow::{self, HasContext};
 use std::collections::HashMap;
 
-use super::super::super::gen3::shaders::{Gen3Pass, Gen3Value, Gen3Values};
-use super::super::super::h4::materials::H4EffectMaterial;
-use super::super::super::gl::buffer::slice_bytes;
-use super::super::super::*;
-use super::super::super::gl::program::Linked;
 use super::super::super::common::image::Image;
+use super::super::super::gen3::shaders::{Gen3Pass, Gen3Value, Gen3Values};
+use super::super::super::gl::buffer::slice_bytes;
+use super::super::super::gl::program::Linked;
+use super::super::super::h4::materials::H4EffectMaterial;
+use super::super::super::*;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
-
 
 /// What a Halo 4 effect pass (a tracer, a light volume, a particle system)
 /// draws with: the slot's effect GL, the frame, the scene's depth for the
@@ -55,12 +54,19 @@ impl H4EffectGl {
         }
     }
 
-    unsafe fn program(&mut self, gl: &glow::Context, pass: &Gen3Pass) -> Option<glow::NativeProgram> {
+    unsafe fn program(
+        &mut self,
+        gl: &glow::Context,
+        pass: &Gen3Pass,
+    ) -> Option<glow::NativeProgram> {
         let key = pass as *const Gen3Pass as usize;
         if let Some(known) = self.programs.get(&key) {
             return known.as_ref().map(|linked| linked.program);
         }
-        let stages = [(glow::VERTEX_SHADER, pass.vertex.as_str()), (glow::FRAGMENT_SHADER, pass.pixel.as_str())];
+        let stages = [
+            (glow::VERTEX_SHADER, pass.vertex.as_str()),
+            (glow::FRAGMENT_SHADER, pass.pixel.as_str()),
+        ];
         let linked = unsafe { super::super::super::gl::link::link(gl, &stages, &[]) }
             .map_err(|error| eprintln!("h4 effect program: {error}"))
             .ok();
@@ -216,7 +222,9 @@ impl H4EffectGl {
                 gl.active_texture(glow::TEXTURE0 + unit as u32);
                 match name.as_str() {
                     name if name == buffer => gl.bind_texture(glow::TEXTURE_BUFFER, Some(uploaded)),
-                    "mesh_vertices" if mesh.is_some() => gl.bind_texture(glow::TEXTURE_BUFFER, mesh),
+                    "mesh_vertices" if mesh.is_some() => {
+                        gl.bind_texture(glow::TEXTURE_BUFFER, mesh)
+                    }
                     "psDepthSampler_texture" => {
                         gl.bind_texture(glow::TEXTURE_2D, depth.or(placeholder))
                     }
@@ -303,9 +311,11 @@ pub(in crate::app::model_preview) fn material_functions(
         [0.0, 1.0, 0.0, 0.0],
         [0.0, 0.0, 1.0, 0.0],
     ];
-    material
-        .submit
-        .draw_values(super::super::materials::submit::H4Draw::Lit, &drawn, identity)
+    material.submit.draw_values(
+        super::super::materials::submit::H4Draw::Lit,
+        &drawn,
+        identity,
+    )
 }
 
 /// What every effect's constant `name` is, before the material's own.
@@ -412,7 +422,11 @@ unsafe fn upload_array(
             glow::LINEAR as i32,
         );
         if let Some(sampler) = sampler {
-            crate::app::model_preview::gl::texture::gen3_apply_sampler(gl, glow::TEXTURE_2D_ARRAY, sampler);
+            crate::app::model_preview::gl::texture::gen3_apply_sampler(
+                gl,
+                glow::TEXTURE_2D_ARRAY,
+                sampler,
+            );
         }
         gl.bind_texture(glow::TEXTURE_2D_ARRAY, None);
         Some(texture)
@@ -473,10 +487,29 @@ mod tests {
     fn effects_blend_as_the_engine_sets_each_mode() {
         assert_eq!(effect_blend(0), None);
         assert_eq!(effect_blend(23), None, "opaque_alpha_blend");
-        assert_eq!(effect_blend(4), Some((glow::DST_COLOR, glow::SRC_COLOR, glow::FUNC_ADD)), "double_multiply");
-        assert_eq!(effect_blend(7), effect_blend(5), "multiply_add sets pre_multiplied_alpha's state");
-        assert_eq!(effect_blend(3), Some((glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::FUNC_ADD)));
-        assert_eq!(effect_blend(17), Some((glow::ONE, glow::ONE, glow::MIN)), "minimum");
-        assert_eq!(effect_blend(18), Some((glow::ONE, glow::ONE, glow::FUNC_REVERSE_SUBTRACT)), "revsubtract");
+        assert_eq!(
+            effect_blend(4),
+            Some((glow::DST_COLOR, glow::SRC_COLOR, glow::FUNC_ADD)),
+            "double_multiply"
+        );
+        assert_eq!(
+            effect_blend(7),
+            effect_blend(5),
+            "multiply_add sets pre_multiplied_alpha's state"
+        );
+        assert_eq!(
+            effect_blend(3),
+            Some((glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::FUNC_ADD))
+        );
+        assert_eq!(
+            effect_blend(17),
+            Some((glow::ONE, glow::ONE, glow::MIN)),
+            "minimum"
+        );
+        assert_eq!(
+            effect_blend(18),
+            Some((glow::ONE, glow::ONE, glow::FUNC_REVERSE_SUBTRACT)),
+            "revsubtract"
+        );
     }
 }

@@ -4,6 +4,7 @@
 //! [`RenderModelPreview`]s; render_model decoding, the GL renderer, and the
 //! panel presentation belong elsewhere.
 
+use super::super::common::geometry::{Overflow, VertexBase};
 use super::*;
 use blam_tags::geometry::{CompressionBounds, read_compression_bounds_at};
 use blam_tags::jms_split::MaterialLabel;
@@ -11,7 +12,6 @@ use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
 use blam_tags::render_model::extract_sbsp_render_geometry_meshes;
 use blam_tags::{AssFile, AssObjectPayload, AssTriangle, JmsFile};
 use std::collections::HashMap;
-use super::super::common::geometry::{Overflow, VertexBase};
 
 mod collision;
 pub(in crate::app::model_preview) use collision::*;
@@ -78,7 +78,11 @@ fn push_derived_batch(
     if triples.is_empty() {
         return;
     }
-    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), triples.len(), Overflow::RefusesAppend) else {
+    let Some(vertex_base) = VertexBase::of(
+        preview.vertices.len(),
+        triples.len(),
+        Overflow::RefusesAppend,
+    ) else {
         return;
     };
     for (position, normal) in triples {
@@ -123,9 +127,17 @@ fn ensure_preview_region_permutation(
     region_name: &str,
     permutation_name: &str,
 ) {
-    match preview.regions.iter_mut().find(|region| region.name == region_name) {
+    match preview
+        .regions
+        .iter_mut()
+        .find(|region| region.name == region_name)
+    {
         Some(region) => {
-            if !region.permutations.iter().any(|name| name == permutation_name) {
+            if !region
+                .permutations
+                .iter()
+                .any(|name| name == permutation_name)
+            {
                 region.permutations.push(permutation_name.to_owned());
             }
         }

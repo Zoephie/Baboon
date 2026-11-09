@@ -1,15 +1,17 @@
 //! The GPU core every game draws through: the slots, the main program and the shared frame steps.
 
-use super::*;
 use super::super::common::sprite_gl::SpriteGl;
+use super::super::dx9::draw::Dx9Gl;
 use super::super::gl::buffer::model_draw_range;
-use super::super::gl::texture::{upload_black_cube, upload_black_flat, upload_placeholder_texture, upload_solid_volume};
-use super::super::gl::target::H2Target;
 use super::super::gl::link::link;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::ColorTarget;
-use super::super::particles::{ParticleGl, CheapGl};
-use super::super::dx9::draw::Dx9Gl;
+use super::super::gl::target::H2Target;
+use super::super::gl::texture::{
+    upload_black_cube, upload_black_flat, upload_placeholder_texture, upload_solid_volume,
+};
+use super::super::particles::{CheapGl, ParticleGl};
+use super::*;
 use eframe::glow;
 
 /// The GL state the preview draws with: the shared program, slots and
@@ -19,7 +21,8 @@ pub(in crate::app::model_preview) struct RenderCore {
     /// The gen3 targets between frames. Every gen3 pipeline draws through
     /// the one set, taking it for its frame and handing it back, so a session
     /// that previews several gen3 games keeps one set, not one each.
-    pub(in crate::app::model_preview) gen3_targets: Option<super::super::gen3::pipeline::Gen3Targets>,
+    pub(in crate::app::model_preview) gen3_targets:
+        Option<super::super::gen3::pipeline::Gen3Targets>,
     /// What a gen3 array sampler reads with nothing of its own.
     pub(in crate::app::model_preview) black_array: Option<glow::NativeTexture>,
     /// As `Dx9Gl::h2_bloom`.
@@ -81,7 +84,11 @@ impl RenderCore {
     /// Each simulation `geometry_id`'s slot keeps between frames, by name,
     /// for the refactor's G-sim gate.
     #[cfg(test)]
-    pub(in crate::app::model_preview) fn for_each_simulation(&self, geometry_id: u64, visit: impl FnMut(&str, &dyn std::fmt::Debug)) {
+    pub(in crate::app::model_preview) fn for_each_simulation(
+        &self,
+        geometry_id: u64,
+        visit: impl FnMut(&str, &dyn std::fmt::Debug),
+    ) {
         if let Some(slot) = self.slot_of(geometry_id) {
             self.slots[slot].simulations.each(visit);
         }
@@ -96,20 +103,32 @@ impl RenderCore {
     /// The slot holding `geometry_id`, if one does.
     #[cfg(test)]
     pub(super) fn slot_of(&self, geometry_id: u64) -> Option<usize> {
-        let index = self.lru.slots.iter().position(|(id, _)| *id == geometry_id)?;
+        let index = self
+            .lru
+            .slots
+            .iter()
+            .position(|(id, _)| *id == geometry_id)?;
         (index < self.slots.len()).then_some(index)
     }
 
     pub(super) fn new(gl: &glow::Context) -> Result<Self, String> {
         let shader_version = eframe::egui_glow::ShaderVersion::get(gl);
         let modern = shader_version.is_new_shader_interface();
-        let precision = if shader_version.is_embedded() { "precision mediump float;\n" } else { "" };
+        let precision = if shader_version.is_embedded() {
+            "precision mediump float;\n"
+        } else {
+            ""
+        };
         let (vertex_source, fragment_source) =
             model_shader_sources(shader_version.version_declaration(), modern, precision);
 
         unsafe {
-            let stages = [(glow::VERTEX_SHADER, vertex_source.as_str()), (glow::FRAGMENT_SHADER, fragment_source.as_str())];
-            let program = link(gl, &stages, &[]).map_err(|error| format!("model preview shader: {error}"))?;
+            let stages = [
+                (glow::VERTEX_SHADER, vertex_source.as_str()),
+                (glow::FRAGMENT_SHADER, fragment_source.as_str()),
+            ];
+            let program =
+                link(gl, &stages, &[]).map_err(|error| format!("model preview shader: {error}"))?;
 
             let uniform = |name| {
                 gl.get_uniform_location(program, name)
@@ -125,7 +144,11 @@ impl RenderCore {
                 black_flat,
                 black_array,
                 sprite_gl: None,
-                shaders_supported: h2_context_supported(version.major, version.minor, version.is_embedded),
+                shaders_supported: h2_context_supported(
+                    version.major,
+                    version.minor,
+                    version.is_embedded,
+                ),
                 black_cube: upload_black_cube(gl),
                 particle_gl: None,
                 reach_cheap_gl: None,
@@ -167,7 +190,11 @@ impl RenderCore {
 
     /// The frame's slot, its geometry and textures uploaded and its
     /// simulations restarted for a new model; none if no slot can be made.
-    pub(super) unsafe fn acquire_frame_slot(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) -> Option<usize> {
+    pub(super) unsafe fn acquire_frame_slot(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+    ) -> Option<usize> {
         unsafe {
             let (slot, upload) = self.lru.acquire(frame.geometry_id, MODEL_GPU_SLOTS);
             if slot == self.slots.len() {
@@ -196,7 +223,12 @@ impl RenderCore {
     }
 
     /// The shared program's state, camera and pose, then the ground grid.
-    pub(super) unsafe fn begin_drawing(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(super) unsafe fn begin_drawing(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+    ) {
         unsafe {
             gl.use_program(Some(self.program));
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
@@ -292,17 +324,23 @@ impl RenderCore {
                     }
                 }
             }
-
         }
     }
 
     /// The slot's effect onsets: when each effect's scale came on.
-    pub(in crate::app::model_preview) fn effect_onsets(&mut self, slot: usize) -> &mut effects::EffectOnsets {
+    pub(in crate::app::model_preview) fn effect_onsets(
+        &mut self,
+        slot: usize,
+    ) -> &mut effects::EffectOnsets {
         &mut self.slots[slot].simulations.effect_onsets
     }
 
     /// Bind the slot's model vertex array again.
-    pub(in crate::app::model_preview) unsafe fn bind_slot_vertices(&self, gl: &glow::Context, slot: usize) {
+    pub(in crate::app::model_preview) unsafe fn bind_slot_vertices(
+        &self,
+        gl: &glow::Context,
+        slot: usize,
+    ) {
         unsafe { gl.bind_vertex_array(Some(self.slots[slot].vertex_array)) }
     }
 
@@ -316,11 +354,24 @@ impl RenderCore {
         slot: usize,
         replaced: &dyn Fn(&Self, usize) -> bool,
     ) {
-        unsafe { self.draw_batches(gl, frame, false, replaced, Self::bound_materials(frame, &self.slots[slot].materials)) }
+        unsafe {
+            self.draw_batches(
+                gl,
+                frame,
+                false,
+                replaced,
+                Self::bound_materials(frame, &self.slots[slot].materials),
+            )
+        }
     }
 
     /// The wireframe over what shaded, in the shared program.
-    pub(super) unsafe fn draw_wireframe(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(super) unsafe fn draw_wireframe(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+    ) {
         unsafe {
             if frame.render_mode.draws_wireframe() {
                 // Halo 3's passes end on their own programs; the camera and
@@ -331,7 +382,13 @@ impl RenderCore {
                 gl.line_width(1.0);
                 gl.depth_func(glow::LEQUAL);
                 gl.uniform_1_f32(Some(&self.unlit), 1.0);
-                self.draw_batches(gl, frame, true, &|_, _| false, Self::bound_materials(frame, &self.slots[slot].materials));
+                self.draw_batches(
+                    gl,
+                    frame,
+                    true,
+                    &|_, _| false,
+                    Self::bound_materials(frame, &self.slots[slot].materials),
+                );
             }
         }
     }
@@ -353,7 +410,10 @@ impl RenderCore {
     }
 
     /// Whether a frame has flares or antennas to draw.
-    pub(in crate::app::model_preview) fn draws_object_sprites(&self, frame: &ModelGpuFrame) -> bool {
+    pub(in crate::app::model_preview) fn draws_object_sprites(
+        &self,
+        frame: &ModelGpuFrame,
+    ) -> bool {
         let preview = &frame.preview;
         frame.game_shaders
             && self.shaders_supported
@@ -381,8 +441,15 @@ impl RenderCore {
     }
 
     /// The slot's uploaded maps, or none in a mode that draws without them.
-    pub(super) fn bound_materials<'a>(frame: &ModelGpuFrame, uploaded: &'a [MaterialGlTextures]) -> &'a [MaterialGlTextures] {
-        if frame.textures.is_some() { uploaded } else { &[] }
+    pub(super) fn bound_materials<'a>(
+        frame: &ModelGpuFrame,
+        uploaded: &'a [MaterialGlTextures],
+    ) -> &'a [MaterialGlTextures] {
+        if frame.textures.is_some() {
+            uploaded
+        } else {
+            &[]
+        }
     }
 
     /// With game shaders on, send the whole frame to the scene target. What it
@@ -432,7 +499,12 @@ impl RenderCore {
             if state.scissored {
                 gl.enable(glow::SCISSOR_TEST);
             }
-            gl.scissor(state.scissor[0], state.scissor[1], state.scissor[2], state.scissor[3]);
+            gl.scissor(
+                state.scissor[0],
+                state.scissor[1],
+                state.scissor[2],
+                state.scissor[3],
+            );
             gl.blit_framebuffer(
                 0,
                 0,
@@ -458,7 +530,11 @@ impl RenderCore {
     /// and logs "unit 0 GLD_TEXTURE_INDEX_2D is unloadable" for any batch
     /// without a base map. That includes every batch while the textures are
     /// still loading.
-    pub(super) unsafe fn bind_material(&self, gl: &glow::Context, material: Option<&MaterialGlTextures>) {
+    pub(super) unsafe fn bind_material(
+        &self,
+        gl: &glow::Context,
+        material: Option<&MaterialGlTextures>,
+    ) {
         let mut have = [0.0f32; SLOT_COUNT];
         let mut scales = [[1.0f32; 2]; SLOT_COUNT];
         for slot in ALL_SLOTS {

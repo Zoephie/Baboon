@@ -42,8 +42,7 @@ pub(in crate::app::model_preview) fn read_h4_tracers(
         if part.group != tracer_group {
             return;
         }
-        let Ok(tag) = reader.load(&part.path, "tracer_system", b"trac")
-        else {
+        let Ok(tag) = reader.load(&part.path, "tracer_system", b"trac") else {
             return;
         };
         let root = tag.root();

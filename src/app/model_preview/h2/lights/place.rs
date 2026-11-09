@@ -42,7 +42,10 @@ pub(super) fn light_value(
 
 /// What an attachment's `scale by` reads: full with none named, and the
 /// idle object's input for a name nothing gave a value.
-pub(in crate::app::model_preview) fn attachment_value(name: &str, values: Option<&FunctionValues>) -> f32 {
+pub(in crate::app::model_preview) fn attachment_value(
+    name: &str,
+    values: Option<&FunctionValues>,
+) -> f32 {
     if name.is_empty() {
         return 1.0;
     }
@@ -139,7 +142,8 @@ pub(in crate::app::model_preview) fn read_h2_flares(
     let mut found = (Vec::new(), Vec::new(), Vec::new());
     let lens_group = u32::from_be_bytes(*b"lens");
     let light_group = u32::from_be_bytes(*b"ligh");
-    let attachments = object_block(object, "attachments").map(|block| elements(block, "attachments"));
+    let attachments =
+        object_block(object, "attachments").map(|block| elements(block, "attachments"));
     for attachment in attachments.unwrap_or_default() {
         let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
             continue;
@@ -148,9 +152,13 @@ pub(in crate::app::model_preview) fn read_h2_flares(
             continue;
         }
         let name = attachment.read_string_id("marker").unwrap_or_default();
-        let scale_by = attachment.read_string_id("primary scale").unwrap_or_default();
+        let scale_by = attachment
+            .read_string_id("primary scale")
+            .unwrap_or_default();
         let change_color = function_slot_of(attachment, "change color");
-        let mut named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name));
+        let mut named = markers
+            .iter()
+            .filter(|marker| marker.name.eq_ignore_ascii_case(&name));
         if group == light_group {
             let Some(marker) = named.next() else {
                 continue;
@@ -225,7 +233,10 @@ pub(in crate::app::model_preview) fn read_h2_flares(
             return;
         }
         // `sub_8EBD10` takes the location's node, or none if not attached.
-        let Some(marker) = part_markers(markers, &part.marker, part.effect.once).into_iter().next() else {
+        let Some(marker) = part_markers(markers, &part.marker, part.effect.once)
+            .into_iter()
+            .next()
+        else {
             return;
         };
         let (place, node) = frame(&marker);
@@ -237,7 +248,11 @@ pub(in crate::app::model_preview) fn read_h2_flares(
             only_under: marker.only_under.clone(),
             scale_by: part.effect.scale_by.clone(),
             change_color: None,
-            effect: Some(H2EffectLight::new(Arc::clone(&part.times), part.event, part.scaled)),
+            effect: Some(H2EffectLight::new(
+                Arc::clone(&part.times),
+                part.event,
+                part.scaled,
+            )),
         };
         place_h2_light(reader, &part.path, owner, at, &mut found);
     });

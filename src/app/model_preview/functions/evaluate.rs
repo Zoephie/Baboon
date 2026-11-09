@@ -22,16 +22,30 @@ impl H2ObjectFunction {
         }
         let (input, mut active) = owner.exported(&self.import, inputs);
         // No name reads full, which is what an object with no such field gets.
-        let range = if self.range.is_empty() { 1.0 } else { owner.value(&self.range, inputs, scripted, clock, depth + 1).0 };
+        let range = if self.range.is_empty() {
+            1.0
+        } else {
+            owner
+                .value(&self.range, inputs, scripted, clock, depth + 1)
+                .0
+        };
         let mapping_passes = self.flags.mapping_does_not_control_active;
         let mut value;
         if self.is_periodic() {
-            let time = if self.flags.random_time_offset { clock.time + clock.offset } else { clock.time };
+            let time = if self.flags.random_time_offset {
+                clock.time + clock.offset
+            } else {
+                clock.time
+            };
             value = self.function.evaluate(time, range) * input;
         } else if !active && mapping_passes {
             value = input;
         } else {
-            let inverted = if self.flags.invert { 1.0 - input } else { input };
+            let inverted = if self.flags.invert {
+                1.0 - input
+            } else {
+                input
+            };
             value = self.function.evaluate(inverted, range);
             if !mapping_passes {
                 active = value > 0.0;
@@ -52,7 +66,8 @@ impl H2ObjectFunction {
             active = match owner.rules {
                 FunctionRules::Halo2 => owner.exported(&self.turn_off_with, inputs).1,
                 FunctionRules::Gen3 => {
-                    let (magnitude, on) = owner.value(&self.turn_off_with, inputs, scripted, clock, depth + 1);
+                    let (magnitude, on) =
+                        owner.value(&self.turn_off_with, inputs, scripted, clock, depth + 1);
                     on && (!self.flags.turn_off_with_uses_magnitude || magnitude != 0.0)
                 }
             };
@@ -78,7 +93,9 @@ impl ObjectFunctions {
     /// Whether the object's type exports `name`, so its exporter answers for
     /// it before any function of the same name.
     pub(super) fn type_exports(&self, name: &str) -> bool {
-        self.exports.as_ref().is_some_and(|exports| exports.idle(name).is_some())
+        self.exports
+            .as_ref()
+            .is_some_and(|exports| exports.idle(name).is_some())
     }
 
     /// What `object_type_export_function_values` leaves for `name`: the
@@ -96,20 +113,38 @@ impl ObjectFunctions {
 
     /// Every name a function or switch here exports.
     fn exports_named(&self) -> impl Iterator<Item = &str> {
-        let functions = self.functions.iter().map(|function| function.export.as_str());
+        let functions = self
+            .functions
+            .iter()
+            .map(|function| function.export.as_str());
         functions.chain(self.switches.iter().map(|switch| switch.export.as_str()))
     }
 
     /// What `name` is made from here: a function's import, scale and
     /// `turn off with`, or a switch's switch function and cases.
     fn sources_of<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a str> + 'a {
-        let functions = self.functions.iter().filter(move |function| function.export == name);
-        let functions = functions.flat_map(|function| [&function.import, &function.scale_by, &function.turn_off_with]);
-        let switches = self.switches.iter().filter(move |switch| switch.export == name);
+        let functions = self
+            .functions
+            .iter()
+            .filter(move |function| function.export == name);
+        let functions = functions.flat_map(|function| {
+            [
+                &function.import,
+                &function.scale_by,
+                &function.turn_off_with,
+            ]
+        });
+        let switches = self
+            .switches
+            .iter()
+            .filter(move |switch| switch.export == name);
         let switches = switches.flat_map(|switch| {
             std::iter::once(&switch.switch).chain(switch.cases.iter().map(|(_, function)| function))
         });
-        functions.chain(switches).map(String::as_str).filter(|source| !source.is_empty())
+        functions
+            .chain(switches)
+            .map(String::as_str)
+            .filter(|source| !source.is_empty())
     }
 
     /// `object_get_function_value`: a script's value first
@@ -146,7 +181,12 @@ impl ObjectFunctions {
         if let Some(function) = answers {
             return function.evaluate(self, inputs, scripted, clock, depth);
         }
-        match self.switches.iter().rev().find(|switch| switch.export == name) {
+        match self
+            .switches
+            .iter()
+            .rev()
+            .find(|switch| switch.export == name)
+        {
             Some(switch) => switch.evaluate(self, inputs, scripted, clock, depth),
             None => self.exported(name, inputs),
         }
@@ -200,9 +240,16 @@ impl ObjectFunctions {
     ) -> FunctionValues {
         let clock = Clock::of(time, owner);
         let mut set = FunctionValues::new();
-        let names = self.imports().into_iter().map(str::to_owned).chain(extra.iter().cloned());
+        let names = self
+            .imports()
+            .into_iter()
+            .map(str::to_owned)
+            .chain(extra.iter().cloned());
         for name in names {
-            let value = inputs.get(&(geometry_id, name.clone())).copied().unwrap_or_else(|| self.idle(&name));
+            let value = inputs
+                .get(&(geometry_id, name.clone()))
+                .copied()
+                .unwrap_or_else(|| self.idle(&name));
             set.insert(name, value);
         }
         // What the panel sets of a name a function makes is a script's value.

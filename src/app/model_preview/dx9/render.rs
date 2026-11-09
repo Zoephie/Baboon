@@ -2,8 +2,8 @@
 //! and Halo 2.
 
 use super::super::ce::render::CeGame;
-use super::super::h2::render::H2Game;
 use super::super::frame::ModelGpuFrame;
+use super::super::h2::render::H2Game;
 use super::super::renderer::{FrameCx, GameRender};
 use super::pipeline::Dx9Game;
 use crate::core::game::GameId;
@@ -39,7 +39,10 @@ impl GameRender for Dx9Render {
     unsafe fn shade(&mut self, cx: &mut FrameCx<'_>) {
         unsafe {
             cx.core.prepare_h2_programs(cx.gl, cx.frame);
-            cx.core.draw_slot_batches(cx.gl, cx.frame, cx.slot, &|core, material| core.h2_replaces_slots(cx.frame, material));
+            cx.core
+                .draw_slot_batches(cx.gl, cx.frame, cx.slot, &|core, material| {
+                    core.h2_replaces_slots(cx.frame, material)
+                });
             let game = self.game(cx.frame.preview.game);
             self.bloom_order = cx.core.draw_dx9_passes(game, cx.gl, cx.frame, cx.slot);
         }
@@ -58,7 +61,12 @@ impl GameRender for Dx9Render {
     }
 
     #[cfg(test)]
-    fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
+    fn each_simulation(
+        &self,
+        slot: usize,
+        uploads: u64,
+        visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug),
+    ) {
         let Self { ce, h2, .. } = self;
         for game in [ce as &dyn Dx9Game, h2] {
             game.each_simulation(slot, uploads, visit);

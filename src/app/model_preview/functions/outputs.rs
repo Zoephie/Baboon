@@ -202,8 +202,13 @@ impl TypeExports {
             b"mach" | b"ctrl" | b"lifi" => &[OBJECT_EXPORTS, DEVICE_EXPORTS],
             _ => &[OBJECT_EXPORTS],
         };
-        let damage = model.and_then(|model| elements(model.root(), "new damage info").first().copied());
-        let vitality = |field: &str| damage.and_then(|damage| damage.read_real(field)).unwrap_or(0.0);
+        let damage =
+            model.and_then(|model| elements(model.root(), "new damage info").first().copied());
+        let vitality = |field: &str| {
+            damage
+                .and_then(|damage| damage.read_real(field))
+                .unwrap_or(0.0)
+        };
         Some(Self {
             tables,
             has_body: vitality("maximum vitality") > 0.0,
@@ -220,10 +225,18 @@ impl TypeExports {
             "body_vitality" => Some(f32::from(u8::from(self.has_body))),
             "shield_vitality" => Some(f32::from(u8::from(self.has_shield))),
             "shield_depleted" => Some(f32::from(u8::from(!self.has_shield))),
-            "variant" => Some(if self.variants > 0 { 1.0 / self.variants as f32 } else { 0.0 }),
+            "variant" => Some(if self.variants > 0 {
+                1.0 / self.variants as f32
+            } else {
+                0.0
+            }),
             _ => None,
         };
-        let claimed = self.tables.iter().flat_map(|table| table.iter()).find(|(export, _)| *export == name);
+        let claimed = self
+            .tables
+            .iter()
+            .flat_map(|table| table.iter())
+            .find(|(export, _)| *export == name);
         claimed.map(|(_, idle)| model_says.unwrap_or(*idle))
     }
 }

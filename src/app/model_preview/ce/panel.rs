@@ -1,7 +1,9 @@
 //! The panel's controls for a Halo CE object's functions and effects.
 
+use crate::app::model_preview::ce::functions::{
+    CeEventCounts, CeFunctionInputs, CeObjectFunctions, CeObjectKey, OUTPUTS, object_time,
+};
 use eframe::egui::{self, Ui};
-use crate::app::model_preview::ce::functions::{CeEventCounts, CeFunctionInputs, CeObjectFunctions, CeObjectKey, OUTPUTS, object_time};
 
 /// What the Effects section plays and fires, and where it keeps track.
 pub(in crate::app::model_preview) struct CeEffectControls<'a> {
@@ -18,13 +20,29 @@ pub(in crate::app::model_preview) struct CeEffectControls<'a> {
 /// A Fire button for each trigger of a weapon, and a Play button for each
 /// effect the objects name for their events, each under its object's name
 /// when it is not the opened one's, with the scales they go at.
-pub(in crate::app::model_preview) fn draw_ce_event_effects(ui: &mut Ui, controls: CeEffectControls<'_>, object_name: impl Fn(u8) -> Option<String>) {
-    let CeEffectControls { effects, firing, geometry, counts, shots, scales, time } = controls;
-    let named = |object: u8, name: &str| object_name(object).map_or_else(|| name.to_owned(), |object| format!("{object}: {name}"));
+pub(in crate::app::model_preview) fn draw_ce_event_effects(
+    ui: &mut Ui,
+    controls: CeEffectControls<'_>,
+    object_name: impl Fn(u8) -> Option<String>,
+) {
+    let CeEffectControls {
+        effects,
+        firing,
+        geometry,
+        counts,
+        shots,
+        scales,
+        time,
+    } = controls;
+    let named = |object: u8, name: &str| {
+        object_name(object).map_or_else(|| name.to_owned(), |object| format!("{object}: {name}"))
+    };
     let events: Vec<(usize, String)> = effects
         .iter()
         .enumerate()
-        .filter_map(|(index, effect)| Some((index, named(effect.object, &effect.event.as_ref()?.name))))
+        .filter_map(|(index, effect)| {
+            Some((index, named(effect.object, &effect.event.as_ref()?.name)))
+        })
         .collect();
     if events.is_empty() && firing.is_empty() {
         return;
@@ -79,30 +97,39 @@ pub(in crate::app::model_preview) fn draw_ce_function_controls(
     let mut values = functions.inputs_for(set, key);
     ui.add_space(6.0);
     ui.push_id(key.1, |ui| {
-    ui.horizontal(|ui| {
-        ui.strong(name.map_or("Object Functions".to_owned(), |name| format!("{name} Functions")));
-        let changed = values != functions.inputs;
-        if ui.add_enabled(changed, egui::Button::new("Reset")).clicked() {
-            values = functions.inputs;
-            set.remove(&key);
+        ui.horizontal(|ui| {
+            ui.strong(name.map_or("Object Functions".to_owned(), |name| {
+                format!("{name} Functions")
+            }));
+            let changed = values != functions.inputs;
+            if ui
+                .add_enabled(changed, egui::Button::new("Reset"))
+                .clicked()
+            {
+                values = functions.inputs;
+                set.remove(&key);
+            }
+        });
+        let before = values;
+        for ((value, name), active) in values.iter_mut().zip(&functions.input_names).zip(reaching) {
+            let Some(name) = name else {
+                continue;
+            };
+            ui.add_enabled(active, egui::Slider::new(value, 0.0..=1.0).text(name))
+                .on_disabled_hover_text(UNREAD);
         }
-    });
-    let before = values;
-    for ((value, name), active) in values.iter_mut().zip(&functions.input_names).zip(reaching) {
-        let Some(name) = name else {
-            continue;
-        };
-        ui.add_enabled(active, egui::Slider::new(value, 0.0..=1.0).text(name))
-            .on_disabled_hover_text(UNREAD);
-    }
-    if values != before {
-        set.insert(key, values);
-    }
-    let time = object_time(ui.input(|input| input.time) as f32, key.1);
-    let outputs = functions.outputs(&functions.with_fired(values, fired), time);
-    for (index, function) in functions.functions.iter().take(OUTPUTS.len()).enumerate() {
-        let text = format!("{}: {:.2}  {}", OUTPUTS[index], outputs[index], function.usage);
-        ui.add_enabled(read[index], egui::Label::new(text)).on_disabled_hover_text(UNREAD);
-    }
+        if values != before {
+            set.insert(key, values);
+        }
+        let time = object_time(ui.input(|input| input.time) as f32, key.1);
+        let outputs = functions.outputs(&functions.with_fired(values, fired), time);
+        for (index, function) in functions.functions.iter().take(OUTPUTS.len()).enumerate() {
+            let text = format!(
+                "{}: {:.2}  {}",
+                OUTPUTS[index], outputs[index], function.usage
+            );
+            ui.add_enabled(read[index], egui::Label::new(text))
+                .on_disabled_hover_text(UNREAD);
+        }
     });
 }

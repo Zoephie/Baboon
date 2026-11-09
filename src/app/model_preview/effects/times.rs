@@ -39,7 +39,11 @@ impl EventTime {
         let delay = event.read_real_bounds("delay bounds");
         let duration = event.read_real_bounds("duration bounds");
         let (delay, duration) = ([delay.lower, delay.upper], [duration.lower, duration.upper]);
-        if baked { Self::of(delay, duration) } else { Self::unbaked(delay, duration) }
+        if baked {
+            Self::of(delay, duration)
+        } else {
+            Self::unbaked(delay, duration)
+        }
     }
 
     /// The bake: a duration that can be 0 is a tick, which also flattens a
@@ -48,7 +52,11 @@ impl EventTime {
         let baked = duration[0] <= 0.0 && duration[1] >= 0.0;
         Self {
             delay: (delay[0] + delay[1]) * 0.5,
-            duration: if baked { ONE_TICK } else { (duration[0] + duration[1]) * 0.5 },
+            duration: if baked {
+                ONE_TICK
+            } else {
+                (duration[0] + duration[1]) * 0.5
+            },
         }
     }
 
@@ -57,7 +65,10 @@ impl EventTime {
     /// the tick it stands for here.
     pub(super) fn unbaked(delay: [f32; 2], duration: [f32; 2]) -> Self {
         let duration = (duration[0] + duration[1]) * 0.5;
-        Self { delay: (delay[0] + delay[1]) * 0.5, duration: if duration > 0.0 { duration } else { ONE_TICK } }
+        Self {
+            delay: (delay[0] + delay[1]) * 0.5,
+            duration: if duration > 0.0 { duration } else { ONE_TICK },
+        }
     }
 
     fn length(self) -> f32 {
@@ -95,7 +106,10 @@ impl EffectTimes {
         // as authored.
         let baked = effect.field("looping sounds").is_none();
         Self {
-            events: elements(effect, "events").iter().map(|event| EventTime::read(*event, baked)).collect(),
+            events: elements(effect, "events")
+                .iter()
+                .map(|event| EventTime::read(*event, baked))
+                .collect(),
             loop_start: usize::try_from(effect.read_block_index("loop start event")).unwrap_or(0),
             parallel: has_flag(effect, "flags", PARALLEL),
             once: false,
@@ -111,7 +125,11 @@ impl EffectTimes {
             return None;
         }
         if self.parallel {
-            let cycle = self.events.iter().map(|event| event.length()).fold(0.0, f32::max);
+            let cycle = self
+                .events
+                .iter()
+                .map(|event| event.length())
+                .fold(0.0, f32::max);
             let time = time.rem_euclid(cycle.max(ONE_TICK));
             return (time < event.length()).then(|| event.age(time)).flatten();
         }
@@ -123,7 +141,11 @@ impl EffectTimes {
             self.events.len() - looped.len()
         };
         let cycle: f32 = looped.iter().map(|event| event.length()).sum();
-        let mut left = if time < first { time } else { (time - first).rem_euclid(cycle.max(ONE_TICK)) };
+        let mut left = if time < first {
+            time
+        } else {
+            (time - first).rem_euclid(cycle.max(ONE_TICK))
+        };
         for (at, candidate) in self.events.iter().enumerate().skip(start) {
             if left < candidate.length() {
                 return (at == index).then(|| candidate.age(left)).flatten();
@@ -137,19 +159,35 @@ impl EffectTimes {
     /// (a tick) given back as the 0 it stands for.
     pub(in crate::app::model_preview) fn duration(&self, index: usize) -> Option<f32> {
         let event = self.events.get(index)?;
-        Some(if event.duration <= ONE_TICK { 0.0 } else { event.duration })
+        Some(if event.duration <= ONE_TICK {
+            0.0
+        } else {
+            event.duration
+        })
     }
 
     /// Seconds since `index` began, ended or not, for what outlives its event.
-    pub(in crate::app::model_preview) fn since_begun(&self, index: usize, time: f32) -> Option<f32> {
+    pub(in crate::app::model_preview) fn since_begun(
+        &self,
+        index: usize,
+        time: f32,
+    ) -> Option<f32> {
         let event = *self.events.get(index)?;
         let before: f32 = if self.parallel {
             0.0
         } else {
-            self.events.iter().take(index).map(|event| event.length()).sum()
+            self.events
+                .iter()
+                .take(index)
+                .map(|event| event.length())
+                .sum()
         };
         let cycle = self.once();
-        let time = if self.once || cycle <= 0.0 { time } else { time.rem_euclid(cycle.max(ONE_TICK)) };
+        let time = if self.once || cycle <= 0.0 {
+            time
+        } else {
+            time.rem_euclid(cycle.max(ONE_TICK))
+        };
         let age = time - before - event.delay;
         (age >= 0.0).then_some(age)
     }
@@ -157,7 +195,10 @@ impl EffectTimes {
     /// A run that never ends of itself, for what something else times.
     pub(in crate::app::model_preview) fn lasting() -> Self {
         Self {
-            events: vec![EventTime { delay: 0.0, duration: f32::MAX }],
+            events: vec![EventTime {
+                delay: 0.0,
+                duration: f32::MAX,
+            }],
             loop_start: 0,
             parallel: false,
             once: false,
@@ -167,11 +208,23 @@ impl EffectTimes {
     /// Events of these `(delay, duration)` bounds, one after another, as
     /// Reach's postprocess leaves them (`reach`) or Halo 3's.
     #[cfg(test)]
-    pub(in crate::app::model_preview) fn of_events(events: &[([f32; 2], [f32; 2])], reach: bool) -> Self {
+    pub(in crate::app::model_preview) fn of_events(
+        events: &[([f32; 2], [f32; 2])],
+        reach: bool,
+    ) -> Self {
         let time = |&(delay, duration): &([f32; 2], [f32; 2])| {
-            if reach { EventTime::unbaked(delay, duration) } else { EventTime::of(delay, duration) }
+            if reach {
+                EventTime::unbaked(delay, duration)
+            } else {
+                EventTime::of(delay, duration)
+            }
         };
-        Self { events: events.iter().map(time).collect(), loop_start: 0, parallel: false, once: false }
+        Self {
+            events: events.iter().map(time).collect(),
+            loop_start: 0,
+            parallel: false,
+            once: false,
+        }
     }
 
     #[cfg(test)]
@@ -192,18 +245,31 @@ impl EffectTimes {
     /// How long a run that does not loop takes.
     pub(in crate::app::model_preview) fn once(&self) -> f32 {
         let lengths = self.events.iter().map(|event| event.length());
-        if self.parallel { lengths.fold(0.0, f32::max) } else { lengths.sum() }
+        if self.parallel {
+            lengths.fold(0.0, f32::max)
+        } else {
+            lengths.sum()
+        }
     }
 
     /// A time inside `index`, if it first begins after `from` and by `to`: a
     /// step can be longer than a whole event, and must not pass over it. Half a
     /// tick in, as rounding can put its very start before it.
-    pub(in crate::app::model_preview) fn begins_within(&self, index: usize, from: f32, to: f32) -> Option<f32> {
+    pub(in crate::app::model_preview) fn begins_within(
+        &self,
+        index: usize,
+        from: f32,
+        to: f32,
+    ) -> Option<f32> {
         let event = *self.events.get(index)?;
         let before: f32 = if self.parallel {
             0.0
         } else {
-            self.events.iter().take(index).map(|event| event.length()).sum()
+            self.events
+                .iter()
+                .take(index)
+                .map(|event| event.length())
+                .sum()
         };
         let begin = before + event.delay;
         (from < begin && begin <= to).then_some(begin + ONE_TICK * 0.5)
@@ -220,10 +286,17 @@ impl EffectTimes {
         let before: f32 = if self.parallel {
             0.0
         } else {
-            self.events.iter().take(index).map(|event| event.length()).sum()
+            self.events
+                .iter()
+                .take(index)
+                .map(|event| event.length())
+                .sum()
         };
         let cycle: f32 = if self.parallel {
-            self.events.iter().map(|event| event.length()).fold(0.0, f32::max)
+            self.events
+                .iter()
+                .map(|event| event.length())
+                .fold(0.0, f32::max)
         } else {
             self.events.iter().map(|event| event.length()).sum()
         };
@@ -232,7 +305,12 @@ impl EffectTimes {
 
     /// Whether the event's age or its being on changes as time passes.
     pub(in crate::app::model_preview) fn moves(&self) -> bool {
-        self.once || self.events.len() > 1 || self.events.iter().any(|event| event.delay > 0.0 || event.duration > ONE_TICK)
+        self.once
+            || self.events.len() > 1
+            || self
+                .events
+                .iter()
+                .any(|event| event.delay > 0.0 || event.duration > ONE_TICK)
     }
 }
 
@@ -243,11 +321,19 @@ impl EffectTimes {
 pub(crate) struct EffectOnsets(std::collections::BTreeMap<(u8, String), (bool, f32)>);
 
 impl EffectOnsets {
-    pub(crate) fn of(&mut self, object: u8, name: &str, values: Option<&FunctionValues>, time: f32) -> f32 {
+    pub(crate) fn of(
+        &mut self,
+        object: u8,
+        name: &str,
+        values: Option<&FunctionValues>,
+        time: f32,
+    ) -> f32 {
         if name.is_empty() {
             return 0.0;
         }
-        let on = values.and_then(|values| values.get(name)).is_some_and(|value| *value > 0.0);
+        let on = values
+            .and_then(|values| values.get(name))
+            .is_some_and(|value| *value > 0.0);
         let seen = self.0.entry((object, name.to_owned())).or_insert((on, 0.0));
         if on && !seen.0 {
             seen.1 = time;

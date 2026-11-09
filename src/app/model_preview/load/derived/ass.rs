@@ -85,7 +85,11 @@ pub(super) fn ass_to_preview(ass: &AssFile, render_only: bool) -> RenderModelPre
         }
         let color = layer_color(region);
 
-        let Some(vertex_base) = VertexBase::of(preview.vertices.len(), vertices.len(), Overflow::RefusesAppend) else {
+        let Some(vertex_base) = VertexBase::of(
+            preview.vertices.len(),
+            vertices.len(),
+            Overflow::RefusesAppend,
+        ) else {
             break;
         };
         for vertex in vertices {

@@ -15,7 +15,11 @@ fn preview_node(name: &str, parent: i16) -> RenderModelPreviewNode {
         parent,
         bind_rotation: [0.0, 0.0, 0.0, 1.0],
         bind_translation: [0.0; 3],
-        inverse_bind: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]],
+        inverse_bind: [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+        ],
     }
 }
 
@@ -38,13 +42,27 @@ fn a_muted_node_holds_its_subtree() {
 /// its cockpit, bay door, caches and props.
 #[test]
 fn halo_4_pelican_variant_reads_its_muted_nodes() {
-    let Some(root) = kit_root(GameId::Halo4) else { return };
-    let path = std::path::Path::new(&root).join("objects/vehicles/human/storm_pelican/storm_pelican.model");
-    let variants = super::super::load::read_model_variants(&blam_tags::TagFile::read(path).unwrap());
-    let cockpit = variants.iter().find(|variant| variant.name == "m70_gunship_opaque_cockpit").unwrap();
+    let Some(root) = kit_root(GameId::Halo4) else {
+        return;
+    };
+    let path = std::path::Path::new(&root)
+        .join("objects/vehicles/human/storm_pelican/storm_pelican.model");
+    let variants =
+        super::super::load::read_model_variants(&blam_tags::TagFile::read(path).unwrap());
+    let cockpit = variants
+        .iter()
+        .find(|variant| variant.name == "m70_gunship_opaque_cockpit")
+        .unwrap();
     assert_eq!(cockpit.muted_nodes.len(), 10);
     assert!(cockpit.muted_nodes.iter().any(|name| name == "b_bay_door"));
-    assert!(variants.iter().find(|variant| variant.name == "default").unwrap().muted_nodes.is_empty());
+    assert!(
+        variants
+            .iter()
+            .find(|variant| variant.name == "default")
+            .unwrap()
+            .muted_nodes
+            .is_empty()
+    );
 }
 
 fn raw_node(name: &str, parent: i16, translation: RealPoint3d, rotation: RealQuaternion) -> Node {
@@ -200,7 +218,10 @@ fn armature_positions_follow_the_current_animation_pose() {
 #[test]
 fn armature_holds_a_muted_node_where_the_skin_does() {
     let nodes = test_nodes();
-    let bind = armature_node_positions(&preview_with_nodes(nodes.clone()), &ModelPreviewState::default());
+    let bind = armature_node_positions(
+        &preview_with_nodes(nodes.clone()),
+        &ModelPreviewState::default(),
+    );
     let mut frame = bind_pose_frame(&nodes);
     frame[0].translation[0] += 0.5;
     frame[1].translation[2] += 0.75;
@@ -212,14 +233,26 @@ fn armature_holds_a_muted_node_where_the_skin_does() {
         muted_nodes: vec!["spine".to_owned()],
     }];
     let mut state = ModelPreviewState::default();
-    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(0, vec![frame])));
+    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(
+        0,
+        vec![frame],
+    )));
     let unmuted = armature_node_positions(&data, &state);
     state.selected_variant = Some(0);
     let muted = armature_node_positions(&data, &state);
 
-    assert!((unmuted[1][2] - bind[1][2]).abs() > 0.1, "unmuted, the spine plays its own move");
-    assert!((muted[1][0] - bind[1][0] - 0.5).abs() < 1e-4, "it follows its parent");
-    assert!((muted[1][2] - bind[1][2]).abs() < 1e-4, "and holds its own bind pose");
+    assert!(
+        (unmuted[1][2] - bind[1][2]).abs() > 0.1,
+        "unmuted, the spine plays its own move"
+    );
+    assert!(
+        (muted[1][0] - bind[1][0] - 0.5).abs() < 1e-4,
+        "it follows its parent"
+    );
+    assert!(
+        (muted[1][2] - bind[1][2]).abs() < 1e-4,
+        "and holds its own bind pose"
+    );
     // The skin's translation is world × inverse bind, so the joint is the
     // skin applied to the bind position.
     let rows = animation_skinning_rows(&data, &state).expect("skinning rows");
@@ -228,7 +261,11 @@ fn armature_holds_a_muted_node_where_the_skin_does() {
         row[0] * bind[1][0] + row[1] * bind[1][1] + row[2] * bind[1][2] + row[3]
     });
     for axis in 0..3 {
-        assert!((skinned[axis] - muted[1][axis]).abs() < 1e-4, "{skinned:?} {:?}", muted[1]);
+        assert!(
+            (skinned[axis] - muted[1][axis]).abs() < 1e-4,
+            "{skinned:?} {:?}",
+            muted[1]
+        );
     }
 }
 
@@ -260,13 +297,27 @@ fn a_looping_clip_holds_its_last_frame_then_continues_from_the_loop_frame() {
         armature_node_positions(&data, state)[0][0] - bind[0][0]
     };
 
-    assert!((offset_at(&mut state, 2.5) - 2.0).abs() < 1e-4, "the last frame holds");
-    assert!((offset_at(&mut state, 3.25) - 1.25).abs() < 1e-4, "continues from the loop frame");
-    assert!((offset_at(&mut state, 5.25) - 1.25).abs() < 1e-4, "loops between frame 1 and the end");
+    assert!(
+        (offset_at(&mut state, 2.5) - 2.0).abs() < 1e-4,
+        "the last frame holds"
+    );
+    assert!(
+        (offset_at(&mut state, 3.25) - 1.25).abs() < 1e-4,
+        "continues from the loop frame"
+    );
+    assert!(
+        (offset_at(&mut state, 5.25) - 1.25).abs() < 1e-4,
+        "loops between frame 1 and the end"
+    );
 
     let restarting = state.animation.pose.as_ref().unwrap().frames.clone();
-    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(0, restarting)));
-    assert!((offset_at(&mut state, 3.25) - 0.25).abs() < 1e-4, "a loop frame of 0 restarts");
+    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(
+        0, restarting,
+    )));
+    assert!(
+        (offset_at(&mut state, 3.25) - 0.25).abs() < 1e-4,
+        "a loop frame of 0 restarts"
+    );
 }
 
 #[test]
@@ -278,21 +329,33 @@ fn without_interpolation_the_pose_holds_each_frame() {
     let mut second = bind_pose_frame(&nodes);
     second[0].translation[0] += 1.0;
     let mut state = ModelPreviewState::default();
-    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(0, vec![first, second])));
+    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(
+        0,
+        vec![first, second],
+    )));
     state.animation.looped = false;
     state.animation.time = 0.5 / ANIMATION_FRAME_RATE;
 
     let blended = armature_node_positions(&data, &state);
-    assert!((blended[0][0] - bind[0][0] - 0.5).abs() < 1e-4, "halfway between the frames");
+    assert!(
+        (blended[0][0] - bind[0][0] - 0.5).abs() < 1e-4,
+        "halfway between the frames"
+    );
 
     state.animation.interpolate = false;
     let held = armature_node_positions(&data, &state);
-    assert!((held[0][0] - bind[0][0]).abs() < 1e-4, "still on the first frame");
+    assert!(
+        (held[0][0] - bind[0][0]).abs() < 1e-4,
+        "still on the first frame"
+    );
     assert_eq!(playback_frame_position(&state.animation, 2), 0.0);
 
     state.animation.time = 1.0 / ANIMATION_FRAME_RATE;
     let next = armature_node_positions(&data, &state);
-    assert!((next[0][0] - bind[0][0] - 1.0).abs() < 1e-4, "on the second frame");
+    assert!(
+        (next[0][0] - bind[0][0] - 1.0).abs() < 1e-4,
+        "on the second frame"
+    );
 }
 
 #[test]
@@ -444,7 +507,10 @@ fn a_halo3_replacement_leaves_unanimated_bones_on_the_base() {
     let folder = tags_root.join("objects/characters/masterchief");
     let model_path = folder.join("masterchief.model");
     if !model_path.is_file() {
-        eprintln!("skipping: no masterchief.model under {}", tags_root.display());
+        eprintln!(
+            "skipping: no masterchief.model under {}",
+            tags_root.display()
+        );
         return;
     }
     let name = "combat:pistol:hp:reload_1";
@@ -452,15 +518,29 @@ fn a_halo3_replacement_leaves_unanimated_bones_on_the_base() {
     let render = blam_tags::TagFile::read(folder.join("masterchief.render_model")).ok();
     let animation = Animation::new(&jmad).unwrap();
     let skeleton = Skeleton::from_tag(&jmad);
-    let object_space = blam_tags::extract::animation::additional_node_data_is_object_space(&animation);
-    let defaults = blam_tags::extract::animation::build_defaults(&skeleton, &jmad, render.as_ref(), object_space);
+    let object_space =
+        blam_tags::extract::animation::additional_node_data_is_object_space(&animation);
+    let defaults = blam_tags::extract::animation::build_defaults(
+        &skeleton,
+        &jmad,
+        render.as_ref(),
+        object_space,
+    );
     let group = (0..animation.len())
         .filter_map(|index| animation.get(index))
         .find(|group| group.name.as_deref() == Some(name))
         .expect("the chief's graph has no pistol reload");
-    assert!(!group.object_space_parents.is_empty(), "{name} carries no object-space entries");
+    assert!(
+        !group.object_space_parents.is_empty(),
+        "{name} carries no object-space entries"
+    );
     let base = animation
-        .overlay_base_pose(&AnimationGraph::from_tag(&jmad), group, &skeleton, &defaults)
+        .overlay_base_pose(
+            &AnimationGraph::from_tag(&jmad),
+            group,
+            &skeleton,
+            &defaults,
+        )
         .unwrap_or_else(|| defaults.clone());
     let flags = group.decode().unwrap().node_flags.expect("node flags");
 
@@ -558,7 +638,13 @@ fn a_real_kits_animation_decodes_into_frames() {
 
 /// Angle between two `[i, j, k, w]` rotations, in degrees.
 fn rotation_angle(a: [f32; 4], b: [f32; 4]) -> f32 {
-    let dot = a.iter().zip(b).map(|(a, b)| a * b).sum::<f32>().abs().min(1.0);
+    let dot = a
+        .iter()
+        .zip(b)
+        .map(|(a, b)| a * b)
+        .sum::<f32>()
+        .abs()
+        .min(1.0);
     2.0 * dot.acos().to_degrees()
 }
 
@@ -570,7 +656,11 @@ fn rotation_angle(a: [f32; 4], b: [f32; 4]) -> f32 {
 /// check is the one a wrong conjugation fails.
 fn plays_a_classic_idle(source: TagSource, entry: TagEntry, game: &str, idle: &str) {
     let tag = crate::core::source::read_entry(&source, &entry).expect("tag reads");
-    let names = TagNameIndex::load_game(crate::core::test_kits::definitions(), GameId::from_id(game).unwrap()).expect("tag names");
+    let names = TagNameIndex::load_game(
+        crate::core::test_kits::definitions(),
+        GameId::from_id(game).unwrap(),
+    )
+    .expect("tag names");
     let data = crate::app::model_preview::load::load_model_preview(
         &tag,
         &entry,
@@ -606,18 +696,29 @@ fn plays_a_classic_idle(source: TagSource, entry: TagEntry, game: &str, idle: &s
     let index = list
         .iter()
         .position(|animation| animation.name == idle)
-        .unwrap_or_else(|| panic!("{}: no '{idle}' in {} animations", entry.display_path, list.len()));
+        .unwrap_or_else(|| {
+            panic!(
+                "{}: no '{idle}' in {} animations",
+                entry.display_path,
+                list.len()
+            )
+        });
     assert!(list[index].playable);
     let decoded = decode_model_animation(&source, &entry, index).expect("decode");
     assert_eq!(decoded.frames.len(), list[index].frame_count as usize);
 
-    let by_name: HashMap<&str, &RenderModelPreviewNode> =
-        nodes.iter().map(|node| (node.name.as_str(), node)).collect();
+    let by_name: HashMap<&str, &RenderModelPreviewNode> = nodes
+        .iter()
+        .map(|node| (node.name.as_str(), node))
+        .collect();
     let (mut chosen, mut opposite) = (Vec::new(), Vec::new());
     for (name, transform) in decoded.skeleton_names.iter().zip(&decoded.frames[0]) {
-        let node = by_name
-            .get(name.as_str())
-            .unwrap_or_else(|| panic!("{}: animated node '{name}' is not in the preview", entry.display_path));
+        let node = by_name.get(name.as_str()).unwrap_or_else(|| {
+            panic!(
+                "{}: animated node '{name}' is not in the preview",
+                entry.display_path
+            )
+        });
         let [i, j, k, w] = transform.rotation;
         chosen.push(rotation_angle(transform.rotation, node.bind_rotation));
         opposite.push(rotation_angle([-i, -j, -k, w], node.bind_rotation));
@@ -643,7 +744,9 @@ fn plays_a_classic_idle(source: TagSource, entry: TagEntry, game: &str, idle: &s
 /// `model_animations` both. `BLAM_TEST_HCEEK` names the kit's `tags` folder.
 #[test]
 fn a_halo_ce_biped_plays_its_idle() {
-    let Some(tags) = kit_root(GameId::HaloCe) else { return };
+    let Some(tags) = kit_root(GameId::HaloCe) else {
+        return;
+    };
     let rel = "characters/cyborg/cyborg.biped";
     let source = TagSource::LooseFolder {
         root: tags.clone(),
@@ -667,7 +770,9 @@ fn a_halo_ce_biped_plays_its_idle() {
 /// `tags` folder.
 #[test]
 fn a_halo_ce_vehicle_animates_its_gbxmodels_nodes() {
-    let Some(tags) = kit_root(GameId::HaloCe) else { return };
+    let Some(tags) = kit_root(GameId::HaloCe) else {
+        return;
+    };
     let rel = "vehicles/warthog/warthog.vehicle";
     let source = TagSource::LooseFolder {
         root: tags.clone(),
@@ -700,7 +805,9 @@ fn a_halo_ce_vehicle_animates_its_gbxmodels_nodes() {
 /// reversing the order. `BLAM_TEST_HCEEK` names the kit's `tags` folder.
 #[test]
 fn a_halo_ce_overlay_is_applied_in_the_games_order() {
-    let Some(tags) = kit_root(GameId::HaloCe) else { return };
+    let Some(tags) = kit_root(GameId::HaloCe) else {
+        return;
+    };
     let rel = "characters/cyborg/cyborg.biped";
     let source = TagSource::LooseFolder {
         root: tags.clone(),
@@ -726,13 +833,19 @@ fn a_halo_ce_overlay_is_applied_in_the_games_order() {
     let antr = load_object_animations(&source, &object).unwrap();
     let animations = CeAnimations::new(&antr);
     let animation = animations.get(index).unwrap();
-    assert_eq!(ce_jma_kind(animation), JmaKind::Jmo, "{name} is not an overlay");
+    assert_eq!(
+        ce_jma_kind(animation),
+        JmaKind::Jmo,
+        "{name} is not an overlay"
+    );
     let gbxmodel = object_reference(&object, "model").and_then(|reference| {
         load_referenced_tag_from_source(&source, &reference, "gbxmodel", b"mod2").ok()
     });
-    let skeleton = blam_tags::extract::animation::ce_skeleton(&animations, &antr, gbxmodel.as_ref());
+    let skeleton =
+        blam_tags::extract::animation::ce_skeleton(&animations, &antr, gbxmodel.as_ref());
     let mut rest = ce_rest_pose(&skeleton, gbxmodel.as_ref());
-    rest.iter_mut().for_each(|node| node.rotation = node.rotation.conjugate());
+    rest.iter_mut()
+        .for_each(|node| node.rotation = node.rotation.conjugate());
     let idle = ce_idle_beneath(&animations, animation).expect("the cyborg has no idle");
     let idle = ce_inverted_clip(idle).pose(&skeleton, Some(&rest));
     let clip = animation.decode();
@@ -746,7 +859,9 @@ fn a_halo_ce_overlay_is_applied_in_the_games_order() {
         }
         for (frame, delta) in tracks.rotations[track].iter().enumerate() {
             // The game's order, on the values as the tag stores them.
-            let base = idle.frames[frame % idle.frames.len()][node].rotation.conjugate();
+            let base = idle.frames[frame % idle.frames.len()][node]
+                .rotation
+                .conjugate();
             let want = (*delta * base).conjugate().normalized();
             let reversed = (base * *delta).conjugate().normalized();
             orders_differ |= want.dot(reversed).abs() < 0.999;
@@ -767,7 +882,9 @@ fn a_halo_ce_overlay_is_applied_in_the_games_order() {
 /// `BLAM_TEST_H2EK` names a Halo 2 kit's `tags` folder.
 #[test]
 fn a_halo_2_model_plays_its_idle() {
-    let Some(tags) = kit_root(GameId::Halo2) else { return };
+    let Some(tags) = kit_root(GameId::Halo2) else {
+        return;
+    };
     let rel = "objects/characters/masterchief/masterchief.model";
     let source = TagSource::LooseFolder {
         root: tags.clone(),
@@ -788,7 +905,9 @@ fn a_halo_2_model_plays_its_idle() {
 /// everything else she plays comes from the marine's.
 #[test]
 fn a_model_lists_and_plays_what_its_graph_inherits() {
-    let Some(tags) = kit_root(GameId::Halo2) else { return };
+    let Some(tags) = kit_root(GameId::Halo2) else {
+        return;
+    };
     let rel = "objects/characters/miranda/miranda.model";
     let source = TagSource::LooseFolder {
         root: tags.clone(),
@@ -807,7 +926,11 @@ fn a_model_lists_and_plays_what_its_graph_inherits() {
     let mut names: Vec<_> = list.iter().map(|entry| &entry.name).collect();
     names.sort();
     names.dedup();
-    assert_eq!(names.len(), list.len(), "a child's animation should replace its parent's");
+    assert_eq!(
+        names.len(),
+        list.len(),
+        "a child's animation should replace its parent's"
+    );
 
     let inherited = list
         .iter()
@@ -825,7 +948,9 @@ fn a_model_lists_and_plays_what_its_graph_inherits() {
 /// `.model` it names, and the `.model` is what holds what it draws.
 #[test]
 fn an_object_previews_through_its_model() {
-    let Some(tags) = kit_root(GameId::Halo2) else { return };
+    let Some(tags) = kit_root(GameId::Halo2) else {
+        return;
+    };
     let rel = "objects/vehicles/pelican/pelican.vehicle";
     let source = TagSource::LooseFolder {
         root: tags.clone(),
@@ -860,7 +985,9 @@ fn an_object_previews_through_its_model() {
 /// called `ultra` that no variant uses must not take its place.
 #[test]
 fn a_variant_shows_the_permutation_it_names() {
-    let Some(tags) = kit_root(GameId::Halo2) else { return };
+    let Some(tags) = kit_root(GameId::Halo2) else {
+        return;
+    };
     let rel = "objects/characters/elite/elite.model";
     let source = TagSource::LooseFolder {
         root: tags.clone(),
@@ -887,7 +1014,9 @@ fn a_variant_shows_the_permutation_it_names() {
     .unwrap();
     let helmet = |variant: &str| {
         let index = data.variants.iter().position(|entry| entry.name == variant);
-        compute_variant_selection(&data, index)["helmet"].permutation.clone()
+        compute_variant_selection(&data, index)["helmet"]
+            .permutation
+            .clone()
     };
     assert_eq!(helmet("ultra_scl"), "base");
     assert_eq!(helmet("council_scl"), "council");

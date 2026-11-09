@@ -2,20 +2,20 @@
 //! light volumes, contrails, liquid and PRT the preview draws for it. Its
 //! shader passes, which Halo CE's share, are in `dx9`.
 
-mod features;
-pub(in crate::app::model_preview) mod particles;
 pub(in crate::app::model_preview) mod attached;
-pub(in crate::app::model_preview) mod overlays;
 pub(super) mod bloom;
 pub(super) mod contrails;
-pub(super) mod light_volumes;
-pub(super) mod liquid;
-pub(super) mod lights;
-pub(super) mod lighting;
 pub(super) mod effect_part;
-pub(in crate::app::model_preview) mod shader;
+mod features;
+pub(super) mod light_volumes;
+pub(super) mod lighting;
+pub(super) mod lights;
+pub(super) mod liquid;
+pub(in crate::app::model_preview) mod overlays;
+pub(in crate::app::model_preview) mod particles;
 pub(in crate::app) mod prt;
 pub(in crate::app::model_preview) mod render;
+pub(in crate::app::model_preview) mod shader;
 pub(in crate::app::model_preview) mod slot;
 
 /// What a Halo 2 object brings to its preview beyond its geometry: its PRT,

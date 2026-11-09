@@ -250,7 +250,11 @@ fn a_rewritten_container_keys_a_new_set() {
     let path = std::env::temp_dir().join(format!("baboon-utoc-key-{}", std::process::id()));
     std::fs::write(&path, b"before").unwrap();
     let before = files_key(std::iter::once(path.as_path()));
-    assert_eq!(before, files_key(std::iter::once(path.as_path())), "an unchanged file keys the same");
+    assert_eq!(
+        before,
+        files_key(std::iter::once(path.as_path())),
+        "an unchanged file keys the same"
+    );
     std::fs::write(&path, b"after the update").unwrap();
     let after = files_key(std::iter::once(path.as_path()));
     std::fs::remove_file(&path).ok();
