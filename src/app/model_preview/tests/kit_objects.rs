@@ -219,7 +219,7 @@ fn a_halo_3_child_object_has_its_own_change_colors() {
     let data = kit_preview(&root, GameId::Halo3, "objects\\vehicles\\scorpion\\scorpion", "vehicle", b"vehi");
     let colored = data.attached.iter().find(|attached| attached.change_colors != [[1.0; 3]; 4]);
     let colored = colored.expect("a child with change colors");
-    let hull = super::super::dx9::passes::h2_change_colors_for(&data.change_colors, "default");
+    let hull = super::super::dx9::passes::change_colors_for(&data.change_colors, "default");
     assert_ne!(colored.change_colors, hull);
     let owned = data.preview.materials.iter().filter(|material| material.object == colored.owner);
     assert!(owned.count() > 0, "its materials read them");

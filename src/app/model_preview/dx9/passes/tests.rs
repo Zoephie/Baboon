@@ -82,7 +82,7 @@ fn the_lights_choose_between_the_game_s_two_lightmap_paths() {
 
 #[test]
 fn change_colors_filter_by_variant_and_fall_back_to_white() {
-    let entry = |weight, value: f32, variant: &str| H2ChangePermutation {
+    let entry = |weight, value: f32, variant: &str| ChangePermutation {
         weight,
         lower: [value; 3],
         upper: [value + 0.25; 3],
@@ -99,7 +99,7 @@ fn change_colors_filter_by_variant_and_fall_back_to_white() {
 
 #[test]
 fn a_block_with_no_weights_shares_them_evenly() {
-    let entry = |value: f32, variant: &str| H2ChangePermutation {
+    let entry = |value: f32, variant: &str| ChangePermutation {
         weight: 0.0,
         lower: [value; 3],
         upper: [value; 3],
@@ -143,8 +143,8 @@ fn the_source_file_follows_the_pass_path() {
     assert_eq!(pass.pixel_shader_file(), "shaders_shader_passes_transparent_lit_0.psh");
 }
 
-fn permutation(weight: f32, lower: [f32; 3], upper: [f32; 3]) -> H2ChangePermutation {
-    H2ChangePermutation { weight, lower, upper, variant: String::new() }
+fn permutation(weight: f32, lower: [f32; 3], upper: [f32; 3]) -> ChangePermutation {
+    ChangePermutation { weight, lower, upper, variant: String::new() }
 }
 
 #[test]

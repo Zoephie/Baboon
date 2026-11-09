@@ -339,7 +339,7 @@ fn brute_hair_resolves_from_the_kit() {
     assert_eq!(drawn.stage, H2VertexStage::from_path(&pass.vertex_shader).unwrap());
     assert!(!drawn.change_colors.is_empty());
     let object = read("objects\\characters\\brute\\brute", "biped", b"bipd").unwrap();
-    let colors = read_h2_change_colors(&object);
+    let colors = read_change_colors(&object);
     assert!(colors.iter().any(|channel| !channel.is_empty()), "the brute has change colors");
     assert_eq!(drawn.textures.len(), 2);
     assert!(drawn.textures.iter().all(|texture| texture.image.is_some()), "both maps decode");

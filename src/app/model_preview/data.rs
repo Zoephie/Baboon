@@ -279,7 +279,7 @@ pub(in crate::app) struct ModelPreviewData {
     /// The variant an object tag starts in, when it names one.
     pub(in crate::app) default_variant: Option<String>,
     /// The Halo 2 object beside this model's change colors; empty otherwise.
-    pub(in crate::app) change_colors: H2ChangeColors,
+    pub(in crate::app) change_colors: ChangeColors,
     /// An opened Halo CE object's functions.
     pub(in crate::app) ce_object_functions: Option<super::ce::functions::CeObjectFunctions>,
     /// What the opened Halo CE object brings with it.

@@ -4,7 +4,7 @@ use super::*;
 
 /// One initial permutation of a change color channel.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct H2ChangePermutation {
+pub(crate) struct ChangePermutation {
     pub(crate) weight: f32,
     pub(crate) lower: [f32; 3],
     pub(crate) upper: [f32; 3],
@@ -15,11 +15,11 @@ pub(crate) struct H2ChangePermutation {
 pub(super) type H2AnimatedTint = ([bool; 4], Vec<H2Animation>);
 
 /// An object's four change color channels.
-pub(crate) type H2ChangeColors = [Vec<H2ChangePermutation>; 4];
+pub(crate) type ChangeColors = [Vec<ChangePermutation>; 4];
 
 /// The object's change colors. Halo 2 nests each group's parent as a struct,
 /// so `object` sits at the end of the chain of leading structs.
-pub(in crate::app) fn read_h2_change_colors(object: &TagFile) -> H2ChangeColors {
+pub(in crate::app) fn read_change_colors(object: &TagFile) -> ChangeColors {
     let mut holder = object.root();
     let block = loop {
         if holder.field("change colors").is_some() {
@@ -30,7 +30,7 @@ pub(in crate::app) fn read_h2_change_colors(object: &TagFile) -> H2ChangeColors 
         };
         holder = parent;
     };
-    let mut colors = H2ChangeColors::default();
+    let mut colors = ChangeColors::default();
     let Some(block) = block else {
         return colors;
     };
@@ -41,7 +41,7 @@ pub(in crate::app) fn read_h2_change_colors(object: &TagFile) -> H2ChangeColors 
             .find(|name| entry.field(name).is_some())
             .unwrap_or("initial permutations");
         colors[channel] = elements(entry, permutations)
-            .map(|permutation| H2ChangePermutation {
+            .map(|permutation| ChangePermutation {
                 weight: permutation.read_real("weight").unwrap_or(0.0),
                 lower: rgb(permutation, "color lower bound"),
                 upper: rgb(permutation, "color upper bound"),
@@ -56,11 +56,11 @@ pub(in crate::app) fn read_h2_change_colors(object: &TagFile) -> H2ChangeColors 
 /// position; a preview has none, so this takes the permutation at the middle
 /// of the weights and the middle of its range. White with nothing allowed, as
 /// the game does.
-pub(super) fn change_color_for(permutations: &[H2ChangePermutation], variant: &str) -> [f32; 3] {
+pub(super) fn change_color_for(permutations: &[ChangePermutation], variant: &str) -> [f32; 3] {
     // `object_postprocess` shares out a block with no weights evenly, so
     // there a zero is as likely as any other entry and not ruled out.
     let unweighted = permutations.iter().all(|entry| entry.weight <= 0.0);
-    let weight = |entry: &H2ChangePermutation| if unweighted { 1.0 } else { entry.weight };
+    let weight = |entry: &ChangePermutation| if unweighted { 1.0 } else { entry.weight };
     let allowed: Vec<_> = permutations
         .iter()
         .filter(|entry| weight(entry) > 0.0)
@@ -77,7 +77,7 @@ pub(super) fn change_color_for(permutations: &[H2ChangePermutation], variant: &s
     [1.0; 3]
 }
 
-pub(crate) fn h2_change_colors_for(colors: &H2ChangeColors, variant: &str) -> [[f32; 3]; 4] {
+pub(crate) fn change_colors_for(colors: &ChangeColors, variant: &str) -> [[f32; 3]; 4] {
     std::array::from_fn(|channel| change_color_for(&colors[channel], variant))
 }
 
@@ -129,13 +129,13 @@ pub(super) fn hsv_interpolate(lower: [f32; 3], upper: [f32; 3], u: f32, long_way
 /// `object_choose_random_change_colors` for an object at the world's origin,
 /// where its hash of the position leaves only the channel. White with no
 /// permutation, as an unplaced object has.
-pub(super) fn ce_change_color(permutations: &[H2ChangePermutation], channel: usize) -> [f32; 3] {
+pub(super) fn ce_change_color(permutations: &[ChangePermutation], channel: usize) -> [f32; 3] {
     let pick = (channel as f32 * 431.12894).rem_euclid(1.0);
     let u = (channel as f32 * 0.71211).rem_euclid(1.0);
     // Tool bakes the weights to a running share of the whole, shared out
     // evenly where a block has none.
     let unweighted = permutations.iter().all(|entry| entry.weight <= 0.0);
-    let weight = |entry: &H2ChangePermutation| if unweighted { 1.0 } else { entry.weight };
+    let weight = |entry: &ChangePermutation| if unweighted { 1.0 } else { entry.weight };
     let total: f32 = permutations.iter().map(weight).sum();
     let mut running = 0.0;
     for entry in permutations {
@@ -162,6 +162,6 @@ pub(crate) fn ce_color_interpolate(flags: i128, lower: [f32; 3], upper: [f32; 3]
     }
 }
 
-pub(crate) fn ce_change_colors(colors: &H2ChangeColors) -> [[f32; 3]; 4] {
+pub(crate) fn ce_change_colors(colors: &ChangeColors) -> [[f32; 3]; 4] {
     std::array::from_fn(|channel| ce_change_color(&colors[channel], channel))
 }

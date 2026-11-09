@@ -137,7 +137,7 @@ pub(in crate::app::model_preview) fn load_ce_object(
         super::object::read_ce_object_features(reader, model_tag, attached.as_ref(), preview);
     });
     let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
-    data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
+    data.change_colors = feature(&mut notes, "its change colors", || read_change_colors(model_tag));
     data.ce_object_functions =
         feature(&mut notes, "its functions", || super::functions::read_ce_object_functions(model_tag));
     data.ce_attached.extend(attached);

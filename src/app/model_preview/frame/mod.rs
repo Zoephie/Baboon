@@ -2,7 +2,7 @@
 //! from its state, the visibility it derives and the function values.
 
 use super::*;
-use super::dx9::passes::{H2Layer, h2_change_colors_for, h2_object_light_direction, h2_prt_object_lights};
+use super::dx9::passes::{H2Layer, change_colors_for, h2_object_light_direction, h2_prt_object_lights};
 
 mod visibility;
 pub(in crate::app::model_preview) use visibility::*;
@@ -84,7 +84,7 @@ pub(in crate::app::model_preview) fn build_frame(
         shown: common::features::FeatureShown::of(&data.preview, &state.region_selections),
         ce_points: Vec::new(),
         ce_plays: ce_event_plays(data, &state.ce_event_counts, state.ce_event_scales),
-        change_colors: h2_change_colors_for(
+        change_colors: change_colors_for(
             &data.change_colors,
             state
                 .selected_variant

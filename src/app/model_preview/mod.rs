@@ -79,7 +79,7 @@ use common::camera::{
     scene_depth_terms, unrotate_view_vector,
 };
 use common::clock::{frame_steps, resume_point};
-use dx9::passes::{H2ChangeColors, read_h2_change_colors};
+use dx9::passes::{ChangeColors, read_change_colors};
 use selection::*;
 #[cfg(test)]
 use panel::*;

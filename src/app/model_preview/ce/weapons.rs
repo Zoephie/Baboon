@@ -7,7 +7,7 @@ use super::super::common::fields::{elements, object_block};
 use blam_tags::{TagFile, TagStruct};
 
 use super::functions::{CeObjectFunctions, read_ce_forced_permutation, read_ce_object_functions};
-use super::super::dx9::passes::{H2ChangeColors, read_h2_change_colors};
+use super::super::dx9::passes::{ChangeColors, read_change_colors};
 use super::super::load::build_render_preview;
 use super::super::*;
 use super::super::load::merge_attached;
@@ -27,7 +27,7 @@ pub(crate) struct CeAttachedObject {
     pub(crate) path: String,
     pub(crate) markers: Vec<RenderModelPreviewMarker>,
     pub(crate) functions: Option<CeObjectFunctions>,
-    pub(crate) change_colors: H2ChangeColors,
+    pub(crate) change_colors: ChangeColors,
 }
 
 /// `weapon_class_animation_block` slots of the aiming screens.
@@ -326,7 +326,7 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
         path: path.to_owned(),
         markers,
         functions: read_ce_object_functions(&weapon),
-        change_colors: read_h2_change_colors(&weapon),
+        change_colors: read_change_colors(&weapon),
     })
 }
 

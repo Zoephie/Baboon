@@ -67,7 +67,7 @@ impl ObjectLoad<'_> {
     /// The object's change colors, then its functions.
     pub(super) fn read_colors_and_functions(&self, data: &mut ModelPreviewData, notes: &mut Vec<String>) {
         let Self { object: model_tag, model, .. } = *self;
-        data.change_colors = feature(notes, "its change colors", || read_h2_change_colors(model_tag));
+        data.change_colors = feature(notes, "its change colors", || read_change_colors(model_tag));
         let functions = || super::super::functions::read_object_functions(model_tag, Some(model));
         data.object_functions = feature(notes, "its functions", functions);
     }

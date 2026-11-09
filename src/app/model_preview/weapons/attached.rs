@@ -7,7 +7,7 @@ use super::super::load::merge_attached;
 use crate::app::model_preview::common::marker::MarkerFrame;
 use crate::app::model_preview::animation::ik::weapon::attached_marker_frame;
 use super::super::common::fields::{elements, has_flag};
-use super::super::dx9::passes::{h2_change_colors_for, read_h2_change_colors};
+use super::super::dx9::passes::{change_colors_for, read_change_colors};
 use super::super::*;
 use super::super::load::LoadCx;
 use super::super::h3::attached::read_h3_attached_features;
@@ -62,7 +62,7 @@ pub(in crate::app::model_preview) fn fold_attached(
     merge_attached(preview, attached, parent, child, owner, name);
     let functions = super::super::functions::read_object_functions(object, Some(model))?;
     // `object_set_initial_change_colors`: each object its own, from its own tag.
-    let change_colors = h2_change_colors_for(&read_h2_change_colors(object), variant);
+    let change_colors = change_colors_for(&read_change_colors(object), variant);
     Some(AttachedObject { owner, functions, change_colors })
 }
 
