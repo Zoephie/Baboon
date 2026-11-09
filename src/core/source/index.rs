@@ -3,6 +3,11 @@
 
 use super::*;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static ENTRY_INDEX_WRITES: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
 /// Returns the legacy per-game JSON entry-index path used for migration.
 pub fn index_path(game: &str) -> PathBuf {
     app_cache_path(&format!("{game}_index.json"), "Baboon", "baboon")
@@ -109,6 +114,58 @@ pub fn upsert_entry_with_dependencies(
         replace_tag_dependencies(&tx, source_id, &entry.key, Some(references))?;
     }
     tx.commit().context("commit entry and dependencies")?;
+    Ok(true)
+}
+
+/// Apply a refactor's changed entry/reference rows atomically. A missing cache
+/// returns false so the worker can bootstrap a complete snapshot instead.
+pub fn patch_refactor_indexes(
+    game: &str,
+    root: &Path,
+    removed: &[String],
+    changed: &[TagEntry],
+    index: &ReverseDependencyIndex,
+) -> Result<bool> {
+    let mut conn = open_index_db()?;
+    let Some(source_id) = source_id(&conn, game, root)? else { return Ok(false); };
+    // Acquire the writer before reading cache membership. A deferred WAL
+    // transaction can fail to upgrade after another worker commits.
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .context("begin refactor index update")?;
+    let has_index: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM indexed_tags WHERE source_id = ?1)",
+        params![source_id], |row| row.get(0),
+    )?;
+    if !has_index { return Ok(false); }
+    let saved_keys = {
+        let mut statement = tx.prepare("SELECT tag_key FROM indexed_tags WHERE source_id = ?1")?;
+        statement.query_map(params![source_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<HashSet<_>>>()?
+    };
+    for (key, deps) in &index.by_tag {
+        if !saved_keys.contains(key) {
+            replace_tag_dependencies(&tx, source_id, key, Some(deps))?;
+        }
+    }
+    for key in saved_keys.iter().filter(|key| !index.contains_tag(key)) {
+        replace_tag_dependencies(&tx, source_id, key, None)?;
+    }
+    // Insert new keys first: deleting the sole old key must not make the
+    // reference writer mistake a one-tag rename for an absent index.
+    for entry in changed.iter().filter(|entry| index.contains_tag(&entry.key)) {
+        upsert_entry_row(&tx, source_id, root, entry)?;
+        replace_tag_dependencies(&tx, source_id, &entry.key, Some(index.dependencies_of(&entry.key)))?;
+    }
+    for entry in changed.iter().filter(|entry| !index.contains_tag(&entry.key)) {
+        // Do not advance the fingerprint of a tag whose references could not
+        // be read. The next refresh must still retry it.
+        replace_tag_dependencies(&tx, source_id, &entry.key, None)?;
+    }
+    for key in removed {
+        tx.execute("DELETE FROM entries WHERE source_id = ?1 AND key = ?2", params![source_id, key])?;
+        replace_tag_dependencies(&tx, source_id, key, None)?;
+    }
+    tx.commit().context("commit refactor index update")?;
     Ok(true)
 }
 
@@ -316,6 +373,10 @@ fn execute_entry_row(
     root: &Path,
     entry: &TagEntry,
 ) -> rusqlite::Result<usize> {
+    #[cfg(test)]
+    ENTRY_INDEX_WRITES.with(|writes| {
+        if let Some(writes) = writes.borrow_mut().as_mut() { writes.push(entry.key.clone()); }
+    });
     let rel_path = entry_relative_path(root, entry)
         .map(|path| path_to_display(&path))
         .unwrap_or_default();

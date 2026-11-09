@@ -693,7 +693,7 @@ pub(in crate::app) fn draw_tag_diff_list(
         let width = ui.available_width();
         let height = ui.available_height().max(120.0);
         let mut header_rect: Option<egui::Rect> = None;
-        TableBuilder::new(ui)
+        let scroll = TableBuilder::new(ui)
             .id_salt(id_salt)
             .striped(true)
             .resizable(true)
@@ -787,6 +787,7 @@ pub(in crate::app) fn draw_tag_diff_list(
                     });
                 });
             });
+        crate::app::ui_kit::autoscroll::register(ui, &scroll, egui::Vec2b::new(false, true));
         if let Some(rect) = header_rect {
             ui.painter().line_segment(
                 [rect.left_bottom(), rect.right_bottom()],
@@ -1561,7 +1562,7 @@ impl Dialog for TagDiffState {
                                 Stroke::new(1.0_f32, foundation_group_edge());
                             let width = ui.available_width();
                             let mut header_rect: Option<egui::Rect> = None;
-                            TableBuilder::new(ui)
+                            let scroll = TableBuilder::new(ui)
                                 .id_salt("tag_diff_table")
                                 .striped(true)
                                 .resizable(true)
@@ -1710,6 +1711,7 @@ impl Dialog for TagDiffState {
                                         });
                                     });
                                 });
+                            crate::app::ui_kit::autoscroll::register(ui, &scroll, egui::Vec2b::new(false, true));
                             if let Some(rect) = header_rect {
                                 ui.painter().line_segment(
                                     [rect.left_bottom(), rect.right_bottom()],

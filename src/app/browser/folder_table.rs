@@ -151,12 +151,11 @@ pub(in crate::app) fn begin_folder_table(
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(
             ui.available_width().max(layout.width()),
-            ui.spacing().interact_size.y + 6.0,
+            TABLE_HEADER_HEIGHT,
         ),
         Sense::hover(),
     );
-    ui.painter()
-        .rect_filled(rect, 0.0, editor_bg());
+    ui.painter().add(table_header_background(rect));
     let mut x = rect.left();
     let mut columns = Vec::new();
     let mut reorder = None;
@@ -218,35 +217,19 @@ pub(in crate::app) fn begin_folder_table(
                 cell.left_center() + Vec2::new(text_offset, 0.0),
                 Align2::LEFT_CENTER,
                 label,
-                FontId::proportional(13.0),
-                text_dark(),
+                table_header_font(ui),
+                ui.visuals().strong_text_color(),
             );
-        let divider = egui::Rect::from_min_max(
-            egui::pos2(cell.right() - 4.0, rect.top()),
-            egui::pos2(cell.right() + 4.0, rect.bottom()),
-        );
-        let resize = ui
-            .interact(
-                divider,
-                ui.make_persistent_id(("folder_column_resize", column)),
-                Sense::drag(),
-            )
-            .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-        // A drag-only handle activates on mouse-down. Its first pointer delta
-        // can include travel to the handle before pressing, which is not a resize.
+        let resize = table_header_resize_divider(ui, rect, cell.right(),
+            ui.make_persistent_id(("folder_column_resize", column)));
+        // Ignore travel to the handle on the press frame.
         if resize.dragged() && !ui.input(|input| input.pointer.any_pressed()) {
             layout.resize(index, ui.input(|input| input.pointer.delta().x));
             ui.ctx().request_repaint();
         }
-        ui.painter().line_segment(
-            [
-                egui::pos2(cell.right(), rect.top()),
-                egui::pos2(cell.right(), rect.bottom()),
-            ],
-            Stroke::new(1.0_f32, foundation_input_edge()),
-        );
         x += width;
     }
+    paint_table_header_rule(ui, rect);
     if let Some(column) = clicked {
         layout.toggle_sort(column);
     }

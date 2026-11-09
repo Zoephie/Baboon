@@ -533,16 +533,54 @@ pub(in crate::app) fn selectable_text_button(
     selectable_option_button(ui, None, label, selected)
 }
 
-/// egui offsets a popup frame to align its first row with the trigger. Shift
-/// only the positioning response by that inset so the frame edge aligns with
-/// the real button while retaining the frame's visible content padding.
+/// Keep an open dropdown visibly engaged even when the pointer is in its menu.
+/// Restore the parent style before drawing the popup or neighboring controls.
+pub(in crate::app) fn with_open_dropdown_visuals<R>(
+    ui: &mut Ui,
+    popup_id: Option<egui::Id>,
+    draw_button: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let popup_id = popup_id.unwrap_or_else(|| ui.next_auto_id().with("popup"));
+    if !egui::Popup::is_id_open(ui.ctx(), popup_id) {
+        return draw_button(ui);
+    }
+    let previous_style = ui.style().clone();
+    let mut open = ui.visuals().widgets.open;
+    // Ordinary buttons paint weak_bg_fill; value dropdowns paint bg_fill.
+    open.weak_bg_fill = open.bg_fill;
+    let widgets = &mut ui.visuals_mut().widgets;
+    widgets.inactive = open;
+    widgets.hovered = open;
+    widgets.active = open;
+    let result = draw_button(ui);
+    ui.set_style(previous_style);
+    result
+}
+
+fn dropdown_menu_button<R>(
+    ui: &mut Ui,
+    button: egui::Button<'_>,
+    contents: impl FnOnce(&mut Ui) -> R,
+) -> (egui::Response, Option<egui::InnerResponse<R>>) {
+    let response = with_open_dropdown_visuals(ui, None, |ui| ui.add(button));
+    let config = menu_config();
+    let inner = egui::Popup::menu(&response)
+        .close_behavior(config.close_behavior)
+        .style(config.style.clone())
+        .info(egui::UiStackInfo::new(egui::UiKind::Menu)
+            .with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config))
+        .show(contents);
+    (response, inner)
+}
+
+/// Shift only the popup anchor so its frame edge aligns with the real button.
 fn aligned_menu_custom_button<R>(
     ui: &mut Ui,
     button: egui::Button<'_>,
     right_aligned_width: Option<f32>,
     add_contents: impl FnOnce(&mut Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
-    let button_response = ui.add(button);
+    let button_response = with_open_dropdown_visuals(ui, None, |ui| ui.add(button));
     let mut positioning_response = button_response.clone();
     let frame_left = Frame::menu(ui.style()).total_margin().left;
     positioning_response.rect.min.x = right_aligned_width
@@ -644,9 +682,7 @@ pub(in crate::app) fn text_dropdown_button<R>(
         None => egui::Button::new(label),
     }.right_text("    ")
         .min_size(Vec2::new(0.0, BUTTON_HEIGHT));
-    let (response, inner) = egui::containers::menu::MenuButton::from_button(button)
-        .config(menu_config())
-        .ui(ui, add_contents);
+    let (response, inner) = dropdown_menu_button(ui, button, add_contents);
     let chevron = egui::Rect::from_center_size(
         egui::pos2(response.rect.right() - 12.0, response.rect.center().y),
         Vec2::splat(BUTTON_ICON_SIZE),
@@ -695,7 +731,7 @@ fn icon_text_dropdown_button_sized<R>(
             .truncate();
     }
     let menu = if width.is_some() {
-        let response = ui.add(button);
+        let response = with_open_dropdown_visuals(ui, None, |ui| ui.add(button));
         let frame = Frame::menu(ui.style());
         let content_width = (response.rect.width() - frame.total_margin().sum().x).max(0.0);
         let mut anchor = response.clone();
@@ -717,9 +753,7 @@ fn icon_text_dropdown_button_sized<R>(
             });
         egui::InnerResponse::new(inner.map(|inner| inner.inner), response)
     } else {
-        let (response, inner) = egui::containers::menu::MenuButton::from_button(button)
-            .config(menu_config())
-            .ui(ui, add_contents);
+        let (response, inner) = dropdown_menu_button(ui, button, add_contents);
         egui::InnerResponse::new(inner.map(|inner| inner.inner), response)
     };
     let icon_rect = egui::Rect::from_center_size(
@@ -949,6 +983,57 @@ mod tests {
     //! It owns test-only characterization and does not participate in runtime application behavior.
 
     use super::*;
+
+    #[test]
+    fn dropdown_triggers_share_open_styling_without_moving_their_contents() {
+        for kind in 0..6 {
+            let ctx = egui::Context::default();
+            ctx.set_global_style(foundation_style());
+            let open_fill = Color32::from_rgb(47, 88, 131);
+            ctx.global_style_mut(|style| {
+                style.visuals.widgets.open.bg_fill = open_fill;
+                style.visuals.widgets.open.bg_stroke = Stroke::new(2.0, Color32::WHITE);
+            });
+            let picker_id = egui::Id::new("block_picker_open_style");
+            let frame = || {
+                let mut trigger = None;
+                let output = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+                    let response = match kind {
+                        0 => text_dropdown_button(ui, "Pick", None, |ui| { ui.label("Menu item"); }).response,
+                        1 => icon_text_dropdown_button(ui, ButtonIcon::Other, "Pick", |ui| { ui.label("Menu item"); }).response,
+                        2 => fixed_width_icon_text_dropdown_button(ui, ButtonIcon::Other, "Pick", 180.0, |ui| { ui.label("Menu item"); }).response,
+                        3 => icon_menu_button(ui, ButtonIcon::Other, "Pick", |ui| { ui.label("Menu item"); }),
+                        4 => aligned_menu_button(ui, "Pick", |ui| { ui.label("Menu item"); }).response,
+                        _ => {
+                            let response = crate::app::editor::fields::picker_button(ui, picker_id, "Pick", 3, 180.0, text_dark(), true);
+                            egui::Popup::from_response(&response).id(picker_id).open_memory(None).show(|ui| { ui.label("Menu item"); });
+                            response
+                        }
+                    };
+                    trigger = Some(response);
+                });
+                let trigger = trigger.unwrap();
+                let open_background = output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Rect(rect) if rect.rect.contains(trigger.rect.center()) && rect.fill == open_fill));
+                let text_pos = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text().trim() == "Pick" => Some(text.pos), _ => None,
+                });
+                (trigger, open_background, text_pos)
+            };
+            frame();
+            let idle = frame();
+            assert!(!idle.1);
+            let popup_id = if kind == 5 { picker_id } else { egui::Popup::default_response_id(&idle.0) };
+            egui::Popup::open_id(&ctx, popup_id);
+            frame();
+            let open = frame();
+            assert!(open.1, "trigger kind {kind} uses the open palette with the pointer away");
+            assert_eq!(open.0.rect, idle.0.rect, "opening must preserve the trigger bounds");
+            assert_eq!(open.2, idle.2, "opening must preserve the label position");
+            egui::Popup::close_id(&ctx, popup_id);
+            assert!(!frame().1, "closing restores the normal palette");
+        }
+    }
 
     #[test]
     fn button_icon_lookup_uses_expected_assets() {

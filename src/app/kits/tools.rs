@@ -3,6 +3,56 @@
 
 use super::*;
 
+struct BitmapReimportConfirm {
+    kit: KitId,
+    key: String,
+    data_folder: PathBuf,
+}
+
+fn draw_bitmap_reimport_confirmation(ctx: &egui::Context, folder: &Path) -> Option<bool> {
+    let mut choice = None;
+    let response = egui::Modal::new(egui::Id::new("halo2_bitmap_reimport_confirm"))
+        .frame(egui::Frame::window(&ctx.global_style()))
+        .show(ctx, |ui| {
+            ui.set_width(460.0);
+            crate::app::search::draw_icon_window_header_without_close(
+                ui, "Reimport Bitmap Folder?", ButtonIcon::Import,
+            );
+            ui.add_space(12.0);
+            ui.label("Halo 2's Tool reimports every bitmap in the entire data folder below, including other bitmaps alongside the selected one.");
+            ui.add_space(8.0);
+            ui.label(RichText::new(folder.display().to_string()).monospace());
+            ui.add_space(12.0);
+            popup_footer(ui, |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if icon_text_button(ui, ButtonIcon::Clear, "Cancel", true).clicked() {
+                        choice = Some(false);
+                    }
+                    if icon_text_button(ui, ButtonIcon::Import, "Reimport Folder", true).clicked() {
+                        choice = Some(true);
+                    }
+                });
+            });
+        });
+    choice.or_else(|| response.should_close().then_some(false))
+}
+
+impl Dialog for BitmapReimportConfirm {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
+        if cx.model.kit_index(self.kit).is_none() {
+            return false;
+        }
+        match draw_bitmap_reimport_confirmation(cx.egui, &self.data_folder) {
+            Some(true) => {
+                cx.send(crate::app::editor::EditorCommand::ConfirmBitmapReimport);
+                true // The command takes the approval back out of the host.
+            }
+            Some(false) => false,
+            None => true,
+        }
+    }
+}
+
 fn shortcut_startup_file(executable: &Path) -> Option<&'static str> {
     let name = executable.file_name()?.to_str()?;
     if name.eq_ignore_ascii_case("sapien.exe") {
@@ -20,6 +70,74 @@ fn prepare_shortcut_startup(executable: &Path) -> Result<(), String> {
         clear_scenario_startup_commands(&root.join(file))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod bitmap_reimport_tests {
+    use super::*;
+
+    #[test]
+    fn halo2_bitmap_reimport_waits_before_source_recovery_or_tool_start() {
+        let fixture = crate::app::loose_fixture::LooseKit::new("h2-reimport-confirm", "halo2_mcc");
+        fixture.write_mcc("ui/example", "bitmap", |_| {});
+        let mut app = Baboon::for_test();
+        fixture.install(&mut app);
+        let ctx = egui::Context::default();
+        let key = fixture.key("ui/example.bitmap");
+        let data = app.model.kit_layout_for(app.model.active).unwrap().data;
+        app.begin_reimport_bitmap(key.clone(), ctx.clone());
+        let prompt = app.dialogs.get::<BitmapReimportConfirm>().expect("Halo 2 needs approval");
+        assert_eq!(prompt.key, key);
+        assert_eq!(prompt.data_folder, data.join("ui"));
+        assert!(!app.kit_tools.terminal.running);
+        assert!(app.kit_tools.terminal.lines.is_empty());
+        assert!(!data.join("ui/example.tif").exists(), "Source recovery must wait for approval");
+
+        // Cancel removes the approval; even a later confirm command cannot run it.
+        app.dialogs.close::<BitmapReimportConfirm>();
+        app.confirm_reimport_bitmap(&ctx);
+        assert!(!app.kit_tools.terminal.running);
+        assert!(!data.join("ui/example.tif").exists());
+
+        // Approval of another folder cannot authorize the current folder.
+        app.reimport_bitmap_with_confirmation(key, ctx.clone(), Some(data.join("other")));
+        assert_eq!(app.dialogs.get::<BitmapReimportConfirm>().unwrap().data_folder, data.join("ui"));
+        assert!(!app.kit_tools.terminal.running);
+
+        // Preconditions are checked again when Proceed is applied.
+        app.kit_tools.terminal.running = true;
+        app.confirm_reimport_bitmap(&ctx);
+        assert!(app.dialogs.get::<BitmapReimportConfirm>().is_none());
+        assert_eq!(app.model.status, "A command is already running");
+        assert!(app.kit_tools.terminal.lines.is_empty());
+        assert!(!data.join("ui/example.tif").exists());
+    }
+
+    #[test]
+    fn halo2_reimport_confirmation_has_explicit_proceed_and_cancel() {
+        for (label, expected) in [("Cancel", false), ("Reimport Folder", true)] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            let mut choice = None;
+            let mut frame = |events| crate::app::run_ui_test(&ctx,
+                egui::RawInput { events, ..Default::default() }, |ui| {
+                    choice = draw_bitmap_reimport_confirmation(ui.ctx(), Path::new("H2EK/data/ui"));
+                });
+            frame(vec![]);
+            let output = frame(vec![]);
+            let pos = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == label =>
+                    Some(text.pos + text.galley.rect.center().to_vec2()),
+                _ => None,
+            }).expect(label);
+            for pressed in [true, false] {
+                frame(vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton {
+                    pos, pressed, button: egui::PointerButton::Primary, modifiers: Default::default(),
+                }]);
+            }
+            assert_eq!(choice, Some(expected));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -209,6 +327,17 @@ impl Baboon {
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(in crate::app) fn begin_reimport_bitmap(&mut self, key: String, ctx: egui::Context) {
+        self.reimport_bitmap_with_confirmation(key, ctx, None);
+    }
+
+    pub(in crate::app) fn confirm_reimport_bitmap(&mut self, ctx: &egui::Context) {
+        let Some(approval) = self.dialogs.close::<BitmapReimportConfirm>() else { return; };
+        let Some(index) = self.model.kit_index(approval.kit) else { return; };
+        self.focus_kit(index);
+        self.reimport_bitmap_with_confirmation(approval.key, ctx.clone(), Some(approval.data_folder));
+    }
+
+    fn reimport_bitmap_with_confirmation(&mut self, key: String, ctx: egui::Context, approved_folder: Option<PathBuf>) {
         if self.refuse_read_only_edit(self.model.active) {
             return;
         }
@@ -251,6 +380,16 @@ impl Baboon {
                 return;
             }
         };
+        if game == GameId::Halo2 {
+            let folder = tag_path::parent(&data_path).unwrap_or("");
+            let data_folder = layout.data.join(tag_path::to_relative(folder));
+            if approved_folder.as_ref() != Some(&data_folder) {
+                self.dialogs.open(BitmapReimportConfirm {
+                    kit: self.model.active_kit_id(), key, data_folder,
+                });
+                return;
+            }
+        }
         let command = with_tool_folder_options(&plan.command, &self.model.active_kit_tool_folder_options());
         self.views[self.model.kits[self.model.active].id].terminal.open = true;
         self.kit_tools.terminal

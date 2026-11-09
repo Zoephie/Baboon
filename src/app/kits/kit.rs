@@ -340,14 +340,28 @@ impl Baboon {
         if closing_campaign_evolved {
             self.reset_runtime_poke_source_state();
         }
+        let pane = self.kit_tree.tiles.iter().find_map(|(tile, content)|
+            matches!(content, egui_tiles::Tile::Pane(kit) if *kit == id).then_some(*tile));
+        let neighbour = pane.and_then(|pane| {
+            let group = self.kit_tree.tiles.parent_of(pane);
+            crate::app::shell::tab_selection::with_tab_neighbour_selection(&mut self.kit_tree,
+                |tree| { tree.remove_recursively(pane); });
+            match self.kit_tree.tiles.get_container(group?)? {
+                egui_tiles::Container::Tabs(tabs) => self.kit_tree.tiles.get_pane(&tabs.active?).copied(),
+                _ => None,
+            }
+        });
+        let closing_active = self.model.active == index;
         self.model.kits.remove(index);
         self.views.remove(id);
         if self.model.kits.is_empty() {
             self.push_empty_kit();
         }
-        // The tab bar would otherwise fall back to its first tab while the
-        // actions went to the kit that slid into the closed one's place.
-        self.focus_kit(active_after_removal(self.model.active, index, self.model.kits.len()));
+        // Tab order can differ from the kit store after a drag. Keep actions
+        // focused on the same workspace the source tab group now displays.
+        let next = neighbour.filter(|_| closing_active).and_then(|kit| self.model.kit_index(kit))
+            .unwrap_or_else(|| active_after_removal(self.model.active, index, self.model.kits.len()));
+        self.focus_kit(next);
         self.shell.home_open = stay_on_home;
         self.shell.home_groups = home_groups;
     }
@@ -516,10 +530,10 @@ pub(in crate::app) fn kit_strip_label(kit: &Kit) -> String {
 ///
 /// Kits before the removed one keep their index; kits after it shift down by
 /// one, so the active selection has to shift with them or it silently
-/// retargets a neighbour. Removing the active kit itself falls through to the
-/// clamp, which selects the kit that slid into its place (or the new last one).
+/// retargets a neighbour. Without a layout neighbour, removing the active kit
+/// selects its left neighbour, or the first surviving kit when closing index 0.
 fn active_after_removal(active: usize, removed: usize, new_len: usize) -> usize {
-    let shifted = if active > removed { active - 1 } else { active };
+    let shifted = if active >= removed { active.saturating_sub(1) } else { active };
     shifted.min(new_len.saturating_sub(1))
 }
 
@@ -763,9 +777,9 @@ mod tests {
     }
 
     #[test]
-    fn removing_the_active_kit_selects_the_one_that_took_its_place() {
-        // [a *b c] -> remove b -> [a c]: index 1 is now the former c.
-        assert_eq!(active_after_removal(1, 1, 2), 1);
+    fn removing_the_active_kit_prefers_its_left_neighbour() {
+        // [a *b c] -> remove b -> [*a c].
+        assert_eq!(active_after_removal(1, 1, 2), 0);
         // Removing the last kit clamps back onto the new last kit.
         assert_eq!(active_after_removal(2, 2, 2), 1);
     }

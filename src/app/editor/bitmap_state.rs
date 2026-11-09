@@ -124,7 +124,7 @@ impl Default for BitmapPreviewState {
             show_red: true,
             show_green: true,
             show_blue: true,
-            show_alpha: true,
+            show_alpha: false,
             show_checkerboard: true,
             show_border: true,
             decoded: None,

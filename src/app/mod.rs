@@ -338,6 +338,9 @@ impl Baboon {
             ctx.set_style_of(theme, style);
         }
         egui_extras::install_image_loaders(ctx);
+        install_focus_outlines(ctx);
+        install_text_focus(ctx);
+        ui_kit::autoscroll::install(ctx);
         // A drag hovering Sapien's window asks for a copy or not-allowed
         // cursor (see `track_kit_tool_drop`). It is applied at the end of the
         // pass, over whatever cursor a widget under the pointer chose. egui's

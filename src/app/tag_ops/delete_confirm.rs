@@ -17,22 +17,19 @@ impl Dialog for DeleteConfirm {
             DeleteKind::Loose => None,
         };
         let title = match container_target {
-            Some(_) => "Delete from Campaign Evolved container?",
-            None => "Delete tag?",
+            Some(_) => "Delete from Campaign Evolved Container?",
+            None => "Delete Tag?",
         };
-        let mut open = true;
         let mut delete = false;
         let mut cancel = false;
-        egui::Window::new(title)
-            .id(egui::Id::new("delete_tag_confirm"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(window_width(ctx, 560.0))
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        let response = egui::Modal::new(egui::Id::new("delete_tag_confirm"))
+            .frame(egui::Frame::window(&ctx.global_style()))
             .show(ctx, |ui| {
-                ui.label(RichText::new(format!("Delete {display_path}")).color(text_dark()));
-                ui.add_space(7.0);
+                ui.set_width(window_width(ctx, 560.0));
+                crate::app::search::draw_icon_window_header_without_close(ui, title, ButtonIcon::Garbage);
+                ui.add_space(12.0);
+                ui.label(RichText::new(&display_path).monospace());
+                ui.add_space(8.0);
                 match &container_target {
                     Some(target_label) => {
                         ui.label(
@@ -40,7 +37,7 @@ impl Dialog for DeleteConfirm {
                                 .color(text_dark())
                                 .monospace(),
                         );
-                        ui.add_space(7.0);
+                        ui.add_space(8.0);
                         ui.label(
                             RichText::new(
                                 "This changes the target UTOC. The retired bytes stay in the \
@@ -62,13 +59,13 @@ impl Dialog for DeleteConfirm {
                     }
                 }
                 if has_unsaved_edits {
-                    ui.add_space(7.0);
+                    ui.add_space(8.0);
                     ui.label(
                         RichText::new("This tag has unsaved edits. They will be discarded.")
                             .color(text_dark()),
                     );
                 }
-                ui.add_space(7.0);
+                ui.add_space(8.0);
                 if referrers_unavailable {
                     ui.label(
                         RichText::new(
@@ -95,20 +92,18 @@ impl Dialog for DeleteConfirm {
                             }
                         });
                 }
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Delete").clicked() {
-                        delete = true;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        cancel = true;
-                    }
+                ui.add_space(12.0);
+                popup_footer(ui, |ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        cancel = icon_text_button(ui, ButtonIcon::Clear, "Cancel", true).clicked();
+                        delete = icon_text_button(ui, ButtonIcon::Garbage, "Delete Tag", true).clicked();
+                    });
                 });
             });
         // Left open for the delete, which takes it back from the host.
         if delete {
             cx.send(TagOpsCommand::Delete);
         }
-        open && !cancel
+        !cancel && !response.should_close()
     }
 }

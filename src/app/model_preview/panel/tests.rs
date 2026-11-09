@@ -33,6 +33,93 @@ use blam_tags::TagFile;
 use eframe::egui;
 use eframe::egui::{Sense, Vec2};
 
+#[test]
+fn middle_drag_pans_model_without_starting_page_autoscroll() {
+    let context = egui::Context::default();
+    crate::app::ui_kit::autoscroll::install(&context);
+    let data = model_preview_data(
+        "test".into(),
+        "test".into(),
+        RenderModelPreview::default(),
+        vec![],
+    );
+    let mut state = ModelPreviewState::default();
+    let initial_focus = state.focus;
+    let mut time = 0.0;
+    let mut frame = |events| {
+        time += 1.0 / 60.0;
+        let mut offset = 0.0;
+        let mut rect = egui::Rect::NOTHING;
+        let output = crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(500.0, 350.0),
+                )),
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let scroll = crate::app::ScrollArea::vertical().show(ui, |ui| {
+                        rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(300.0, 180.0));
+                        crate::app::model_preview::viewport::draw_model_viewport(
+                            ui,
+                            &data,
+                            &mut state,
+                            rect.size(),
+                        );
+                        ui.add_space(900.0);
+                    });
+                    offset = scroll.state.offset.y;
+                });
+                crate::app::ui_kit::autoscroll::draw_blocker(ui);
+            },
+        );
+        let anchor = output.shapes.iter().any(|shape| {
+            matches!(&shape.shape,
+            egui::Shape::Circle(circle) if (circle.radius - 13.0).abs() < 0.01)
+        });
+        (rect, offset, anchor)
+    };
+    frame(vec![]);
+    let (rect, _, _) = frame(vec![]);
+    let origin = rect.center();
+    frame(vec![egui::Event::PointerMoved(origin)]);
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Middle,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let (_, _, anchor) = frame(vec![button(origin, true)]);
+    assert!(!anchor, "model panning must own the initial middle press");
+    frame(vec![egui::Event::PointerMoved(
+        origin + Vec2::new(30.0, 45.0),
+    )]);
+    for _ in 0..8 {
+        let (_, offset, anchor) = frame(vec![]);
+        assert_eq!(
+            offset, 0.0,
+            "panning a model must not move its containing page"
+        );
+        assert!(!anchor);
+    }
+    frame(vec![button(origin + Vec2::new(30.0, 45.0), false)]);
+    // A click without a drag must not latch page autoscroll either.
+    frame(vec![button(origin, true)]);
+    frame(vec![button(origin, false)]);
+    assert!(!frame(vec![]).2);
+    drop(frame);
+    assert_ne!(
+        state.focus, initial_focus,
+        "middle-drag must still pan the camera"
+    );
+}
+
 fn bitmap_header_control_rows(screen_width: f32, wrap_width: f32) -> (f32, f32) {
     let context = egui::Context::default();
     let mut left_y = 0.0;

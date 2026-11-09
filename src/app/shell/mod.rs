@@ -72,6 +72,7 @@ pub(in crate::app) use settings::{
 pub(in crate::app) mod kit_tiles;
 pub(in crate::app) use kit_tiles::TileParts;
 pub(in crate::app) mod tag_tiles;
+pub(in crate::app) mod tab_selection;
 pub(in crate::app) use tag_tiles::{TileInputs, draw_tag_tiles};
 pub(in crate::app) mod loading;
 pub(in crate::app) use loading::centered_loading_state;
