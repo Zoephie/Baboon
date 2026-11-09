@@ -169,7 +169,10 @@ impl GameRender for Gen3Render {
         unsafe {
             // Halo 3's and ODST's self shadow draws through dx9 shadow passes.
             cx.core.prepare_h2_programs(cx.gl, cx.frame);
-            cx.core.draw_slot_batches(cx.gl, cx.frame, cx.slot);
+            // A material with translated passes draws through them; the rest
+            // carry only the shadow passes, which replace nothing.
+            let frame = cx.frame;
+            cx.core.draw_slot_batches(cx.gl, frame, cx.slot, &|core, material| core.h3_material(frame, material).is_some());
             let order = cx.frame.visible_batches.clone();
             let (state, game) = self.parts(cx.frame.preview.game);
             state.draw(cx.core, game, cx.gl, cx.frame, cx.slot, &order);

@@ -327,9 +327,16 @@ impl RenderCore {
     }
 
     /// The slot's own draw of the visible batches, in the shared program:
-    /// what a game's passes do not replace.
-    pub(in crate::app::model_preview) unsafe fn draw_slot_batches(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
-        unsafe { self.draw_batches(gl, frame, false, Self::bound_materials(frame, &self.slots[slot].materials)) }
+    /// what a game's passes do not replace. `replaced` says, by material,
+    /// which the calling game's own passes draw instead.
+    pub(in crate::app::model_preview) unsafe fn draw_slot_batches(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        replaced: &dyn Fn(&Self, usize) -> bool,
+    ) {
+        unsafe { self.draw_batches(gl, frame, false, replaced, Self::bound_materials(frame, &self.slots[slot].materials)) }
     }
 
     /// The wireframe over what shaded, in the shared program.
@@ -344,7 +351,7 @@ impl RenderCore {
                 gl.line_width(1.0);
                 gl.depth_func(glow::LEQUAL);
                 gl.uniform_1_f32(Some(&self.unlit), 1.0);
-                self.draw_batches(gl, frame, true, Self::bound_materials(frame, &self.slots[slot].materials));
+                self.draw_batches(gl, frame, true, &|_, _| false, Self::bound_materials(frame, &self.slots[slot].materials));
             }
         }
     }
@@ -602,6 +609,7 @@ impl RenderCore {
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         wire: bool,
+        replaced: &dyn Fn(&Self, usize) -> bool,
         materials: &[MaterialGlTextures],
     ) {
         for &batch_index in &frame.visible_batches {
@@ -627,7 +635,7 @@ impl RenderCore {
             };
             // Passes draw after every opaque batch; see `draw_h2_passes`.
             let index = batch.material_index as usize;
-            if !wire && self.h2_replaces_slots(frame, index) {
+            if !wire && replaced(self, index) {
                 continue;
             }
             // The wireframe pass draws flat on purpose, so it never binds a

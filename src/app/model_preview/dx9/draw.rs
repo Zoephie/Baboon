@@ -217,6 +217,8 @@ impl RenderCore {
     /// always do. Opaque ones need game shaders on, and a template with a
     /// lightmap layer needs that layer to have prepared.
     pub(in crate::app::model_preview) fn h2_replaces_slots(&self, frame: &ModelGpuFrame, material: usize) -> bool {
+        // Halo 3's and ODST's materials draw their shadow passes through here
+        // too, and those stand in wherever the translated passes do.
         if frame.game_shaders && self.h3_material(frame, material).is_some() {
             return true;
         }

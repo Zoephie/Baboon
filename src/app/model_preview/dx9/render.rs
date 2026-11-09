@@ -34,7 +34,7 @@ impl GameRender for Dx9Render {
     unsafe fn shade(&mut self, cx: &mut FrameCx<'_>) {
         unsafe {
             cx.core.prepare_h2_programs(cx.gl, cx.frame);
-            cx.core.draw_slot_batches(cx.gl, cx.frame, cx.slot);
+            cx.core.draw_slot_batches(cx.gl, cx.frame, cx.slot, &|core, material| core.h2_replaces_slots(cx.frame, material));
             let game = self.game(cx.frame.preview.game);
             self.bloom_order = cx.core.draw_dx9_passes(game, cx.gl, cx.frame, cx.slot);
         }
