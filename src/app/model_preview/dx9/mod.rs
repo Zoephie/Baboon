@@ -5,6 +5,7 @@ pub(in crate::app::model_preview) mod draw;
 pub(in crate::app) mod passes;
 pub(in crate::app::model_preview) mod pipeline;
 pub(in crate::app::model_preview) mod render;
+pub(in crate::app::model_preview) mod resolved;
 pub(in crate::app::model_preview) mod shadow;
 pub(in crate::app::model_preview) mod sprites;
 pub(in crate::app) mod stage;

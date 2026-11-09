@@ -1,13 +1,15 @@
 //! The one place the loader names a game: what each game reads of an
 //! object, a model and a Halo CE object of its own.
 
-use super::super::RenderModelPreviewMarker;
 use super::super::common::marker::MarkerFrame;
 use super::super::functions::TypeExporter;
 use super::super::particles::{OwnParticleSystem, ParticleMaterialReader, ParticleRules};
 use super::super::{
     GameId, ModelPreviewData, RenderModelPreview, TagEntry, TagFile, TagSource,
     is_object_family_group,
+};
+use super::super::{
+    MaterialTextures, RenderModelPreviewMarker, RenderModelPreviewMaterial, ResolveCaches,
 };
 use super::jobs::PreviewLoadSettings;
 use super::object::ObjectLoad;
@@ -253,6 +255,38 @@ pub(super) fn read_render_prt(
                 prt
             })
             .filter(|prt| prt.vertices.len() == preview.vertices.len());
+}
+
+/// A shader whose game resolves it its own way: Halo 4's `material`, Halo
+/// CE's shaders, and Halo 2's template-and-parameters `shader`. `None` for a
+/// render method, which the shared resolver reads.
+pub(in crate::app::model_preview) fn resolve_own_shader(
+    reader: &TagReader,
+    shader: &TagFile,
+    group: [u8; 4],
+    material: &RenderModelPreviewMaterial,
+    caches: &mut ResolveCaches,
+) -> Option<MaterialTextures> {
+    if group == *b"mat " {
+        return Some(super::super::h4::materials::resolve_h4_material(
+            reader, shader, caches,
+        ));
+    }
+    match blam_tags::game::Game::of(shader) {
+        blam_tags::game::Game::Halo1 => {
+            Some(super::super::ce::shaders::resolve::resolve_ce_shader(
+                reader,
+                shader,
+                group,
+                material.permutation,
+                caches,
+            ))
+        }
+        blam_tags::game::Game::Halo2 if group == *b"shad" => Some(
+            super::super::h2::shader::resolve::resolve_h2_shader(reader, shader, caches),
+        ),
+        _ => None,
+    }
 }
 
 /// What each game's particles do differently.

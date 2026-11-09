@@ -16,37 +16,6 @@ use crate::app::model_preview::harness::kit::{kit_root, kit_source};
 use crate::core::game::GameId;
 use std::path::PathBuf;
 
-/// The model's hologram and damage passes go to its own materials, never
-/// to a held weapon's.
-#[test]
-fn a_models_overlay_passes_stay_on_its_own_object() {
-    let material = |object, overlay, shield| RenderModelPreviewMaterial {
-        object,
-        overlay,
-        shield,
-        ..Default::default()
-    };
-    let materials = [
-        material(0, false, None),
-        material(0, true, None),
-        material(0, false, Some(Dx9Layer::ShieldDamaged)),
-        material(1, false, None),
-    ];
-    let mut textures = vec![MaterialTextures::default(); materials.len()];
-    let [(_, pass), ..] = dx9_shadow_passes();
-    textures[1].h2_layers[Dx9Layer::Transparent as usize] = vec![pass.clone()];
-    textures[2].h2_layers[Dx9Layer::Transparent as usize] = vec![pass];
-    share_object_layers(&materials, &mut textures);
-    let has = |index: usize, layer: Dx9Layer| !textures[index].h2_layers[layer as usize].is_empty();
-    for layer in [Dx9Layer::Hologram, Dx9Layer::ShieldDamaged] {
-        assert!(
-            has(0, layer) && has(1, layer) && has(2, layer),
-            "{layer:?} on the model"
-        );
-        assert!(!has(3, layer), "{layer:?} on the weapon");
-    }
-}
-
 /// The kit a case resolves against, through the shared harness helper.
 ///
 /// Halo 3 and Reach both, deliberately — they are the two games this targets,

@@ -29,7 +29,7 @@ pub(in crate::app::model_preview) use render_model::*;
 mod games;
 use games::{add_overlay_shaders, load_own_object, load_unreal_model};
 pub(in crate::app::model_preview) use games::{
-    read_attached_features, read_extension_weapon_features, rules, type_exports,
+    read_attached_features, read_extension_weapon_features, resolve_own_shader, rules, type_exports,
 };
 mod rules;
 pub(in crate::app::model_preview) use rules::GameRules;

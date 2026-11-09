@@ -2,6 +2,7 @@
 //! folder defines its own, `load/games.rs` picks it by the kit's game, and the
 //! shared readers read its flags rather than naming a game.
 
+use super::super::gen3::rules::Gen3Rules;
 use blam_tags::TagFile;
 
 /// One game's choices, flag by flag.
@@ -25,6 +26,8 @@ pub(crate) struct GameRules {
     /// Whether the unit's IK reaches for its held weapon's markers where they
     /// ride: Reach's IK chains and Halo 4's IK sets.
     pub(crate) ik_markers_on_weapons: bool,
+    /// The Halo 3 family's choices.
+    pub(crate) gen3: Gen3Rules,
 }
 
 /// A unit's own hand marker for a weapon: the unit, the weapon, and whether
@@ -39,5 +42,6 @@ impl GameRules {
         none_instance_takes_all: false,
         weapon_hand_marker: None,
         ik_markers_on_weapons: false,
+        gen3: Gen3Rules::DEFAULT,
     };
 }

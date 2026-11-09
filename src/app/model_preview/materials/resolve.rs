@@ -1,9 +1,7 @@
 //! Resolving a model's materials into their textures.
 
-use super::super::super::{GameId, TagNameIndex, TagSource};
-use super::super::ce::shaders::resolve::resolve_ce_shader;
+use super::super::super::{TagNameIndex, TagSource};
 use super::super::common::fields::elements;
-use super::super::h2::shader::resolve::resolve_h2_shader;
 use super::super::{
     MaterialTextures, RenderModelPreviewMaterial, ResolveCaches, TagReader, TextureImage,
     TextureSlot, Values, cached_render_method_definition, cached_render_method_option,
@@ -11,10 +9,7 @@ use super::super::{
 };
 use super::binding::{cached_bitmap, slot_binding};
 use super::slots::{MAX_TEXTURE_EDGE, SLOT_PARAMETERS};
-use super::{
-    Dx9DrawPass, Dx9Layer, Dx9VertexStage, Image, SamplerKind, dx9_shadow_passes,
-    prepare_h3_material, reach_reference, reach_version_update,
-};
+use super::{Image, SamplerKind, prepare_h3_material, reach_reference, reach_version_update};
 use blam_tags::render_method::{RenderMethod, ResolvedRenderMethod};
 use std::sync::Arc;
 
@@ -57,80 +52,8 @@ pub(crate) fn resolve_model_textures(
             })
         })
         .collect();
-    share_object_layers(materials, &mut textures);
-    for texture in &mut textures {
-        // A pass with no object implementation still has the fallback's.
-        if texture.h2_layers[Dx9Layer::ObjectLightmap as usize].is_empty() {
-            texture.h2_layers[Dx9Layer::ObjectLightmap as usize] =
-                texture.h2_layers[Dx9Layer::Lightmap as usize].clone();
-        }
-        let lit = [Dx9Layer::Lightmap, Dx9Layer::Prt]
-            .iter()
-            .flat_map(|layer| &texture.h2_layers[*layer as usize])
-            .any(|pass| pass.stage != Dx9VertexStage::CeModel);
-        if lit || texture.h3.is_some() {
-            for (layer, pass) in dx9_shadow_passes() {
-                texture.h2_layers[layer as usize] = vec![pass];
-            }
-        }
-    }
+    super::super::dx9::resolved::finish_dx9_layers(materials, &mut textures);
     textures
-}
-
-/// A model's hologram shader is on no batch: every material of its object
-/// takes its passes. So do its damage shaders, which take their turn over the
-/// object; a hologram shader's bloom passes go to the frame's bloom with the
-/// rest. A held weapon is an object of its own, without them.
-pub(super) fn share_object_layers(
-    materials: &[RenderModelPreviewMaterial],
-    textures: &mut [MaterialTextures],
-) {
-    let transparent = Dx9Layer::Transparent as usize;
-    let bloom = Dx9Layer::Bloom as usize;
-    if let Some(overlay) = materials.iter().position(|material| material.overlay) {
-        let passes = std::mem::take(&mut textures[overlay].h2_layers[transparent]);
-        share_with_object(
-            materials,
-            textures,
-            materials[overlay].object,
-            Dx9Layer::Hologram as usize,
-            &passes,
-        );
-    }
-    for (layer, from) in [
-        (Dx9Layer::ShieldDamaged, transparent),
-        (Dx9Layer::Overshield, transparent),
-        (Dx9Layer::HologramBloom, bloom),
-    ] {
-        if let Some(owner) = materials
-            .iter()
-            .position(|material| material.shield == Some(layer))
-        {
-            let passes = std::mem::take(&mut textures[owner].h2_layers[from]);
-            share_with_object(
-                materials,
-                textures,
-                materials[owner].object,
-                layer as usize,
-                &passes,
-            );
-        }
-    }
-}
-
-/// Give every material of `object` a copy of `passes` as its `layer`.
-fn share_with_object(
-    materials: &[RenderModelPreviewMaterial],
-    textures: &mut [MaterialTextures],
-    object: u8,
-    layer: usize,
-    passes: &[Dx9DrawPass],
-) {
-    for (material, texture) in materials.iter().zip(textures) {
-        if material.object == object {
-            texture.h2_layers[layer] = passes.to_vec();
-        }
-    }
 }
 
 fn resolve_one_material(
@@ -160,17 +83,10 @@ fn resolve_one_material(
         Ok(tag) => tag,
         Err(error) => return MaterialTextures::failed(error.to_string()),
     };
-    if group == *b"mat " {
-        return super::super::h4::materials::resolve_h4_material(reader, &shader, caches);
-    }
-    match blam_tags::game::Game::of(&shader) {
-        blam_tags::game::Game::Halo1 => {
-            return resolve_ce_shader(reader, &shader, group, material.permutation, caches);
-        }
-        blam_tags::game::Game::Halo2 if group == *b"shad" => {
-            return resolve_h2_shader(reader, &shader, caches);
-        }
-        _ => {}
+    if let Some(textures) =
+        super::super::load::resolve_own_shader(reader, &shader, group, material, caches)
+    {
+        return textures;
     }
     let Ok(mut render_method) = RenderMethod::from_tag(&shader) else {
         // Halo CE and Halo 2 shaders are not render methods at all; they carry
@@ -190,7 +106,7 @@ fn resolve_one_material(
         &mut caches.definitions,
     );
     if let Some(definition) = &definition
-        && reader.source.game() == Some(GameId::HaloReach)
+        && reader.rules().gen3.reference_shaders
     {
         reach_version_update(&mut render_method, definition);
         let reference = reach_reference(

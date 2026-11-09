@@ -9,6 +9,7 @@ pub(in crate::app::model_preview) mod materials;
 pub(in crate::app::model_preview) mod pipeline;
 pub(in crate::app) mod prt;
 pub(in crate::app::model_preview) mod render;
+pub(in crate::app::model_preview) mod rules;
 pub(in crate::app::model_preview) mod screen_lights;
 pub(crate) mod shaders;
 pub(in crate::app::model_preview) mod shadow;
