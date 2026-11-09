@@ -25,6 +25,17 @@ struct H2TemplateParameter {
     bitmap_scale: f32,
 }
 
+/// What a resolve keeps of Halo 2's across a model's materials.
+#[derive(Default)]
+pub(in crate::app::model_preview) struct H2ResolveCaches {
+    /// Shader templates' parameter defaults, by template path. 1,637 shaders
+    /// share a few dozen templates; `tex_bump` alone serves 296.
+    pub(in crate::app::model_preview) templates: HashMap<String, Option<Arc<H2TemplateDefaults>>>,
+    /// The kit's `global shader`, read at most once; see
+    /// [`prepare_h2_camo_passes`].
+    pub(in crate::app::model_preview) camo_shader: Option<Option<Arc<TagFile>>>,
+}
+
 /// A Halo 2 `shader_template`'s parameters by name, plus whether it alpha
 /// tests.
 pub(in crate::app::model_preview) struct H2TemplateDefaults {
@@ -47,7 +58,7 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
     let template = root
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
-        .and_then(|path| cached_h2_template(reader, &path, &mut caches.h2_templates));
+        .and_then(|path| cached_h2_template(reader, &path, &mut caches.h2.templates));
     let parameters = h2_shader_parameters(root);
 
     let mut textures = MaterialTextures {
@@ -172,7 +183,8 @@ fn prepare_h2_camo_passes(
     caches: &mut ResolveCaches,
 ) -> Vec<Dx9DrawPass> {
     let shader = caches
-        .h2_camo_shader
+        .h2
+        .camo_shader
         .get_or_insert_with(|| {
             let globals = reader.load("globals\\globals", "globals", b"matg").ok()?;
             let root = globals.root();
@@ -189,7 +201,7 @@ fn prepare_h2_camo_passes(
     let template = root
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
-        .and_then(|path| cached_h2_template(reader, &path, &mut caches.h2_templates));
+        .and_then(|path| cached_h2_template(reader, &path, &mut caches.h2.templates));
     prepare_h2_passes(
         reader,
         &shader,

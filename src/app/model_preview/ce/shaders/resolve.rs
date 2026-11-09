@@ -11,6 +11,17 @@ use super::super::super::materials::{
 use super::super::super::{TagFile, TagReader};
 use crate::core::h2_pixel_shader::SamplerKind;
 use std::collections::HashMap;
+
+/// What a resolve keeps of Halo CE's across a model's materials.
+#[derive(Default)]
+pub(in crate::app::model_preview) struct CeResolveCaches {
+    /// The camouflage, read once.
+    pub(in crate::app::model_preview) camo: Option<Option<super::CeCamoSettings>>,
+    /// How many images a bitmap holds.
+    pub(in crate::app::model_preview) image_counts: HashMap<String, usize>,
+    /// The kit's model shader as GLSL, read once. `None` until asked for.
+    pub(in crate::app::model_preview) model_common: Option<Option<super::CeModelCommon>>,
+}
 use std::sync::Arc;
 
 /// Halo CE model shading, as `ShaderModel()` in the kit's `fx/model_common.h`
@@ -48,7 +59,7 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
     let factor = |value: Option<f32>| value.filter(|v| v.is_finite() && *v != 0.0).unwrap_or(1.0);
     let mut bind = |path: Option<String>, scale: [f32; 2]| {
         let path = path.filter(|path| !path.is_empty())?;
-        let image_index = ce_image_index(reader, &path, permutation, &mut caches.ce_image_counts);
+        let image_index = ce_image_index(reader, &path, permutation, &mut caches.ce.image_counts);
         let binding = SlotBitmap {
             path,
             image_index: image_index as i16,
@@ -112,9 +123,9 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
         }
         _ => {}
     }
-    let mut common = caches.ce_model_common.take();
+    let mut common = caches.ce.model_common.take();
     let mut bitmap = |path: &str, kind: SamplerKind| {
-        let image = ce_image_index(reader, path, permutation, &mut caches.ce_image_counts);
+        let image = ce_image_index(reader, path, permutation, &mut caches.ce.image_counts);
         let key = (path.to_owned(), kind, image);
         if let Some(cached) = caches.h2_images.get(&key) {
             return cached.clone();
@@ -128,7 +139,8 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
     let transparent = ce_transparent_passes(reader, root, &group, &mut bitmap);
     if matches!(&group, b"soso" | b"senv") {
         let settings = caches
-            .ce_camo
+            .ce
+            .camo
             .get_or_insert_with(|| read_ce_camo_settings(reader));
         if let Some(settings) = settings {
             let two_sided = flags.has("two-sided");
@@ -138,7 +150,7 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
     }
     textures.h2_layers[Dx9Layer::Transparent as usize] =
         expand_ce_digits(reader, transparent, permutation, caches);
-    caches.ce_model_common = common;
+    caches.ce.model_common = common;
     if !textures.h2_layers[Dx9Layer::Transparent as usize].is_empty() {
         return textures;
     }
@@ -168,7 +180,8 @@ fn expand_ce_digits(
         };
         // `ce_image_index` wraps at the count, so this is the count itself.
         let count = caches
-            .ce_image_counts
+            .ce
+            .image_counts
             .get(&numeric.map)
             .copied()
             .unwrap_or_else(|| {

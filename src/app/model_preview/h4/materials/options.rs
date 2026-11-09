@@ -77,7 +77,7 @@ pub(super) fn bitmap_kind(
     path: &str,
     caches: &mut ResolveCaches,
 ) -> Option<bool> {
-    if let Some(known) = caches.h4_bitmap_kinds.get(path) {
+    if let Some(known) = caches.h4.bitmap_kinds.get(path) {
         return *known;
     }
     let found = reader.load(path, "bitmap", b"bitm").ok().map(|tag| {
@@ -86,7 +86,7 @@ pub(super) fn bitmap_kind(
             .and_then(|image| image.field("type"))
             .is_some_and(|kind| kind.enum_is("cube map"))
     });
-    caches.h4_bitmap_kinds.insert(path.to_owned(), found);
+    caches.h4.bitmap_kinds.insert(path.to_owned(), found);
     found
 }
 

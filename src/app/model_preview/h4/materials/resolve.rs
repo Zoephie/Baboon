@@ -13,7 +13,22 @@ use super::{
 };
 use blam_tags::material::{Material, bake, shader_flags};
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
+use std::collections::HashMap;
 use std::sync::Arc;
+
+/// What a resolve keeps of Halo 4's across a model's materials.
+#[derive(Default)]
+pub(in crate::app::model_preview) struct H4ResolveCaches {
+    /// The material shaders by path, read and parsed once.
+    pub(in crate::app::model_preview) shaders: HashMap<String, Result<super::H4Shader, Arc<str>>>,
+    /// Bitmaps by path: whether each exists, and is a cube.
+    pub(in crate::app::model_preview) bitmap_kinds: HashMap<String, Option<bool>>,
+    /// `rasterizer_globals`' two hologram screen materials, read once.
+    pub(in crate::app::model_preview) hologram_post:
+        Option<Option<Arc<super::submit::H4HologramPost>>>,
+    /// `globals`' `camo distortion texture`, read once.
+    pub(in crate::app::model_preview) camo_texture: Option<Option<String>>,
+}
 
 /// A full-screen triangle for an explicit shader's pass, its texcoord running
 /// up the picture as GL's targets do: v is GL's t. The hologram's screen
@@ -36,7 +51,7 @@ fn screen_material(
         .load(path, "material", b"mat ")
         .map_err(|error| error.to_string())?;
     let material = Material::from_tag(&tag);
-    let shader = match caches.h4_shaders.remove(&material.shader) {
+    let shader = match caches.h4.shaders.remove(&material.shader) {
         Some(known) => known.map_err(|error| error.to_string()),
         None => read_shader(reader, &material.shader),
     }?;
@@ -48,7 +63,8 @@ fn screen_material(
         })
     };
     caches
-        .h4_shaders
+        .h4
+        .shaders
         .insert(material.shader.clone(), Ok(shader));
     let pixel = pixel?;
     let pass = Arc::new(Gen3Pass {
@@ -99,7 +115,7 @@ fn screen_material(
 fn hologram_post(reader: &TagReader, caches: &mut ResolveCaches) -> Option<Arc<H4HologramPost>> {
     const POSTPROCESS_HOLOGRAM: usize = 22;
     const HOLOGRAM_COMPOSITE: usize = 24;
-    if let Some(known) = &caches.h4_hologram_post {
+    if let Some(known) = &caches.h4.hologram_post {
         return known.clone();
     }
     let post = (|| {
@@ -119,7 +135,7 @@ fn hologram_post(reader: &TagReader, caches: &mut ResolveCaches) -> Option<Arc<H
             composite: screen_material(reader, &composite, caches).ok()?,
         }))
     })();
-    caches.h4_hologram_post = Some(post.clone());
+    caches.h4.hologram_post = Some(post.clone());
     post
 }
 
@@ -147,7 +163,7 @@ pub(in crate::app::model_preview) fn resolve_h4_material(
     if material.shader.is_empty() {
         return MaterialTextures::failed("the material names no material shader");
     }
-    let shader = match caches.h4_shaders.remove(&material.shader) {
+    let shader = match caches.h4.shaders.remove(&material.shader) {
         Some(known) => known,
         None => read_shader(reader, &material.shader).map_err(Arc::<str>::from),
     };
@@ -155,7 +171,8 @@ pub(in crate::app::model_preview) fn resolve_h4_material(
         Ok(shader) => shader,
         Err(error) => {
             caches
-                .h4_shaders
+                .h4
+                .shaders
                 .insert(material.shader.clone(), Err(Arc::clone(&error)));
             return MaterialTextures::failed(format!("Halo 4 material shader not read: {error}"));
         }
@@ -314,7 +331,8 @@ pub(in crate::app::model_preview) fn resolve_h4_material(
             }
             // `c_render_active_camo` binds `globals`' distortion texture at s13.
             let camo_texture = caches
-                .h4_camo_texture
+                .h4
+                .camo_texture
                 .get_or_insert_with(|| {
                     super::super::super::h4::camo::H4Camo::read(reader)
                         .and_then(|camo| camo.texture)
@@ -376,6 +394,6 @@ pub(in crate::app::model_preview) fn resolve_h4_material(
         Ok(h3) => textures.h3 = Some(Arc::new(h3)),
         Err(error) => textures.error = Some(format!("Halo 4 material not drawn: {error}")),
     }
-    caches.h4_shaders.insert(material.shader, Ok(shader));
+    caches.h4.shaders.insert(material.shader, Ok(shader));
     textures
 }

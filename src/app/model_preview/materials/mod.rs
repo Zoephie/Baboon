@@ -4,7 +4,6 @@
 //! resolution is its folder's `materials.rs`. GL upload and drawing belong to
 //! the renderer, and geometry to the preview conversion beside it.
 
-use super::ce::shaders::{CeCamoSettings, CeModelCommon};
 use super::common::image::Image;
 #[cfg(test)]
 use super::dx9::passes::Dx9Layer;
