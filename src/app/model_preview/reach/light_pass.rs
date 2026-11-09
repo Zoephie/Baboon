@@ -15,6 +15,7 @@ use super::lights::{CHEAP_ALBEDO_BLEND, ReachLightMethod, ReachLitLight};
 use super::render::ReachGame;
 
 use std::sync::Arc;
+use super::super::{RenderModelPreview, TagReader};
 
 use super::super::gen3::shaders::{H3Pass, H3Sources, SCREEN_VERTEX, VERTEX_SKINNED, base_defines, pass_of};
 use crate::core::hlsl::emit::{Stage, Translated};
@@ -34,6 +35,17 @@ impl H3Sources {
         pass.vertex = SCREEN_VERTEX.to_owned();
         pass.fullscreen = true;
         Ok(Arc::new(pass))
+    }
+}
+
+/// `render_screenspace_light_callback`'s `99 + combo`, gels aside: the
+/// `light_apply` passes the object's lights draw with, compiled once.
+pub(in crate::app::model_preview) fn read_reach_light_passes(reader: &TagReader, preview: &mut RenderModelPreview) {
+    let lit = !(preview.reach.lights.is_empty() && preview.reach.cheap_lights.is_empty());
+    if lit && preview.reach.light_passes.is_empty() {
+        let mut sources = H3Sources::new(&reader.source);
+        let files = ["light_apply", "light_apply_frustum", "light_apply_specular", "light_apply_frustum_specular"];
+        preview.reach.light_passes = files.iter().map(|file| sources.reach_light_pass(file).ok()).collect();
     }
 }
 
