@@ -3,7 +3,10 @@
 use super::super::super::GameId;
 use super::super::dx9::render::Dx9Pipeline;
 use super::super::gen3::render::Gen3Pipeline;
-use super::super::{ModelGpuFrame, RenderCore, RenderModelPreview, ce, common, h2, h3, h4, reach};
+use super::super::{
+    ModelGpuFrame, ModelPreviewData, ModelPreviewState, RenderCore, RenderModelPreview, ce, common,
+    h2, h3, h4, reach,
+};
 use eframe::glow;
 
 /// What a game's drawing is handed each frame.
@@ -96,6 +99,20 @@ pub(super) unsafe fn game_flare_images(
         Route::Halo4 => unsafe { h4::flares::pass::h4_flare_images(gl, frame) },
         _ => Vec::new(),
     }
+}
+
+/// Each game's own part of a frame of `data`, as `state` shows it at
+/// `time`, once the rest of the frame is set: Halo CE's object states and
+/// event plays, Halo 2's PRT constants, then Halo CE's point lights.
+pub(in crate::app::model_preview) fn prepare_game_frames(
+    frame: &mut ModelGpuFrame,
+    data: &ModelPreviewData,
+    state: &ModelPreviewState,
+    time: f32,
+) {
+    frame.ce = ce::frame::CeFrame::of(data, &state.ce, time);
+    h2::frame::prepare(frame);
+    ce::frame::prepare(frame);
 }
 
 /// Which drawing a preview goes to.

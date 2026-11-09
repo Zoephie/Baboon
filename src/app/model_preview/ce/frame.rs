@@ -5,7 +5,7 @@ use super::super::ModelPreviewData;
 use super::super::frame::ModelGpuFrame;
 
 /// What a frame holds of Halo CE's.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(in crate::app::model_preview) struct CeFrame {
     /// Each object's `A out` to `D out` and change colors this frame, the
     /// opened one first. Empty with none.

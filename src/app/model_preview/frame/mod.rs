@@ -87,7 +87,7 @@ pub(in crate::app::model_preview) fn build_frame(
         light_follows_camera: state.light_follows_camera,
         time,
         h2: Default::default(),
-        ce: ce::frame::CeFrame::of(data, &state.ce, time),
+        ce: Default::default(),
         object_moves: object_moves(data, &state.function_inputs, time, function_values.as_ref()),
         function_values,
         attached_values: attached_values(data, time),
@@ -101,8 +101,7 @@ pub(in crate::app::model_preview) fn build_frame(
                 .map_or("", |variant| variant.name.as_str()),
         ),
     };
-    super::h2::frame::prepare(&mut frame);
-    ce::frame::prepare(&mut frame);
+    super::renderer::prepare_game_frames(&mut frame, data, state, time);
     frame
 }
 
