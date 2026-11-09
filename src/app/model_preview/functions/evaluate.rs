@@ -1,12 +1,12 @@
 //! Evaluating an object's functions for a frame.
 
 use super::read::{
-    Clock, DEEPEST_CHAIN, FunctionInputs, FunctionRules, FunctionValues, H2ObjectFunction,
+    Clock, DEEPEST_CHAIN, FunctionInputs, FunctionRules, FunctionValues, ObjectFunction,
     ObjectFunctions, object_input,
 };
 use blam_tags::tag_function::FunctionType;
 
-impl H2ObjectFunction {
+impl ObjectFunction {
     fn is_periodic(&self) -> bool {
         self.function.function_type() == FunctionType::Periodic
     }
@@ -177,7 +177,7 @@ impl ObjectFunctions {
         if self.type_exports(name) {
             return self.exported(name, inputs);
         }
-        let named = |function: &&H2ObjectFunction| function.export == name;
+        let named = |function: &&ObjectFunction| function.export == name;
         let answers = match self.rules {
             FunctionRules::Halo2 => self.functions.iter().rev().find(named),
             FunctionRules::Gen3 => self.functions.iter().find(named),

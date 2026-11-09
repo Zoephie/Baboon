@@ -166,11 +166,11 @@ pub(in crate::app::model_preview) struct ModelGpuFrame {
 }
 
 /// Wrapped to keep a frame time precise in the `f32` the shaders take.
-const H2_TIME_WRAP: f64 = 3600.0;
+const TIME_WRAP: f64 = 3600.0;
 
 /// The time the preview's simulations and functions run by.
 pub(in crate::app::model_preview) fn preview_clock(ui: &Ui) -> f32 {
-    ui.input(|input| input.time % H2_TIME_WRAP) as f32
+    ui.input(|input| input.time % TIME_WRAP) as f32
 }
 
 /// What the parts an object owns draw with.

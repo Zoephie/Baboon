@@ -377,7 +377,7 @@ fn an_attached_object_answers_the_names_its_effects_read() {
     );
     let name = "warthog_chaingun_illumination";
     assert!(
-        !super::super::frame::h2_shader_inputs(&data, 0)
+        !super::super::frame::shader_input_names(&data, 0)
             .iter()
             .any(|read| read == name)
     );
@@ -387,7 +387,7 @@ fn an_attached_object_answers_the_names_its_effects_read() {
             .iter()
             .find(|(owner, _)| *owner == attached.owner)
             .unwrap();
-        for read in super::super::frame::h2_shader_inputs(&data, attached.owner) {
+        for read in super::super::frame::shader_input_names(&data, attached.owner) {
             assert!(
                 own.contains_key(&read),
                 "owner {} lacks {read}",

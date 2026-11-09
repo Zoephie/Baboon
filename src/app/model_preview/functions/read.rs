@@ -67,7 +67,7 @@ impl Clock {
 pub(super) const DEEPEST_CHAIN: usize = 8;
 
 #[derive(Debug, Clone)]
-pub(super) struct H2ObjectFunction {
+pub(super) struct ObjectFunction {
     pub(super) flags: FunctionFlags,
     pub(super) import: String,
     pub(super) export: String,
@@ -132,7 +132,7 @@ impl FunctionSwitch {
 /// An object's `functions` block, and what its type exports to it.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ObjectFunctions {
-    pub(super) functions: Vec<H2ObjectFunction>,
+    pub(super) functions: Vec<ObjectFunction>,
     /// Halo 4's `function switches`; empty for every earlier game.
     pub(super) switches: Vec<FunctionSwitch>,
     pub(super) rules: FunctionRules,
@@ -154,7 +154,7 @@ pub(crate) fn read_object_functions(
         .iter()
         .filter_map(|entry| {
             let entry = *entry;
-            Some(H2ObjectFunction {
+            Some(ObjectFunction {
                 flags: FunctionFlags::read(entry),
                 import: name(entry, "import name"),
                 export: name(entry, "export name"),

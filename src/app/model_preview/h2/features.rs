@@ -14,7 +14,7 @@ features!(super::H2Features {
 });
 
 // Lights and flares move when they animate (`object_moves`), and read their
-// scale and the functions their channels name (`h2_shader_inputs`).
+// scale and the functions their channels name (`shader_input_names`).
 attached_feature!(super::lights::H2FlareAt, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);
 
 attached_feature!(super::lights::H2PointLight, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);

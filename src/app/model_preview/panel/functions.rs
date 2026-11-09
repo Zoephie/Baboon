@@ -28,14 +28,14 @@ pub(in crate::app::model_preview) fn draw_object_functions(
     draw_h2_weapon_pickers(ui, data, state);
     if let Some(functions) = &data.object_functions {
         let time = ui.input(|input| input.time) as f32;
-        let values = frame::h2_function_values(data, &state.function_inputs, time);
+        let values = frame::object_function_values(data, &state.function_inputs, time);
         super::super::functions::draw_function_controls(
             ui,
             functions,
             data.geometry_id,
             &mut state.function_inputs,
             &values,
-            &frame::h2_shader_inputs(data, 0),
+            &frame::shader_input_names(data, 0),
         );
     }
     let read = |object: u8| {

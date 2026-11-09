@@ -44,8 +44,8 @@ fn only_what_reaches_something_drawn_counts() {
     }
 }
 
-fn function(import: &str, export: &str) -> H2ObjectFunction {
-    H2ObjectFunction {
+fn function(import: &str, export: &str) -> ObjectFunction {
+    ObjectFunction {
         flags: FunctionFlags::default(),
         import: import.to_owned(),
         export: export.to_owned(),
@@ -57,7 +57,7 @@ fn function(import: &str, export: &str) -> H2ObjectFunction {
     }
 }
 
-fn value(functions: Vec<H2ObjectFunction>, name: &str, inputs: &[(&str, f32)]) -> f32 {
+fn value(functions: Vec<ObjectFunction>, name: &str, inputs: &[(&str, f32)]) -> f32 {
     let inputs = inputs
         .iter()
         .map(|(name, value)| ((*name).to_owned(), *value))
@@ -116,7 +116,7 @@ fn switch(switch: &str, export: &str, cases: &[([f32; 2], &str)]) -> FunctionSwi
 }
 
 fn switched(
-    functions: Vec<H2ObjectFunction>,
+    functions: Vec<ObjectFunction>,
     switches: Vec<FunctionSwitch>,
     inputs: &[(&str, f32)],
 ) -> FunctionValues {
@@ -260,7 +260,7 @@ fn nothing_named_reads_full_and_an_unknown_name_reads_nothing() {
 
 #[test]
 fn invert_and_scale_by_shape_the_value() {
-    let inverted = H2ObjectFunction {
+    let inverted = ObjectFunction {
         flags: FunctionFlags {
             invert: true,
             ..Default::default()
@@ -268,7 +268,7 @@ fn invert_and_scale_by_shape_the_value() {
         ..function("speed", "glow")
     };
     assert_eq!(value(vec![inverted], "glow", &[("speed", 0.25)]), 0.75);
-    let scaled = H2ObjectFunction {
+    let scaled = ObjectFunction {
         scale_by: "power".to_owned(),
         ..function("speed", "glow")
     };
@@ -278,7 +278,7 @@ fn invert_and_scale_by_shape_the_value() {
     );
 }
 
-fn device(functions: Vec<H2ObjectFunction>) -> ObjectFunctions {
+fn device(functions: Vec<ObjectFunction>) -> ObjectFunctions {
     let tables = &[OBJECT_EXPORTS, DEVICE_EXPORTS];
     let exports = TypeExports {
         tables,
@@ -352,7 +352,7 @@ fn without_known_exporters_the_functions_answer_first() {
 
 #[test]
 fn a_min_value_keeps_a_function_off_below_it() {
-    let held = H2ObjectFunction {
+    let held = ObjectFunction {
         min_value: 0.5,
         ..function("speed", "glow")
     };
@@ -362,7 +362,7 @@ fn a_min_value_keeps_a_function_off_below_it() {
 
 #[test]
 fn turn_off_with_needs_its_export_on() {
-    let tied = H2ObjectFunction {
+    let tied = ObjectFunction {
         turn_off_with: "alive".to_owned(),
         ..function("speed", "glow")
     };
@@ -380,7 +380,7 @@ fn turn_off_with_needs_its_export_on() {
     );
 }
 
-fn gen3(functions: Vec<H2ObjectFunction>, name: &str, inputs: &[(&str, f32)]) -> (f32, bool) {
+fn gen3(functions: Vec<ObjectFunction>, name: &str, inputs: &[(&str, f32)]) -> (f32, bool) {
     let inputs = inputs
         .iter()
         .map(|(name, value)| ((*name).to_owned(), *value))
@@ -411,7 +411,7 @@ fn halo_3_and_reach_take_the_first_function_of_a_name() {
 fn halo_3_and_reach_look_turn_off_with_up_in_full_and_can_ask_its_magnitude() {
     // `alive` is made by a function here, which Halo 2's exported read misses.
     let made = function("power", "alive");
-    let tied = H2ObjectFunction {
+    let tied = ObjectFunction {
         turn_off_with: "alive".to_owned(),
         ..function("speed", "glow")
     };
@@ -431,14 +431,14 @@ fn halo_3_and_reach_look_turn_off_with_up_in_full_and_can_ask_its_magnitude() {
         (1.0, true)
     );
     // On, but by magnitude: a mapping that holds it active at 0.
-    let held = H2ObjectFunction {
+    let held = ObjectFunction {
         flags: FunctionFlags {
             always_active: true,
             ..Default::default()
         },
         ..made
     };
-    let magnitude = H2ObjectFunction {
+    let magnitude = ObjectFunction {
         flags: FunctionFlags {
             turn_off_with_uses_magnitude: true,
             ..Default::default()
@@ -460,11 +460,11 @@ fn halo_3_and_reach_look_turn_off_with_up_in_full_and_can_ask_its_magnitude() {
 
 #[test]
 fn always_exports_value_keeps_its_value_while_off() {
-    let held = H2ObjectFunction {
+    let held = ObjectFunction {
         min_value: 0.5,
         ..function("speed", "glow")
     };
-    let exporting = H2ObjectFunction {
+    let exporting = ObjectFunction {
         flags: FunctionFlags {
             always_exports_value: true,
             ..Default::default()
@@ -487,7 +487,7 @@ fn a_range_name_feeds_the_curves_range() {
     let curve = TagFunction::parse_encoded(encoding, &ranged.to_bytes()).unwrap();
     let low = curve.evaluate(0.5, 0.0);
     let high = curve.evaluate(0.5, 1.0);
-    let function = H2ObjectFunction {
+    let function = ObjectFunction {
         range: "heat".to_owned(),
         function: Arc::new(curve),
         ..function("speed", "glow")
@@ -514,7 +514,7 @@ fn the_last_function_of_a_name_stands_and_a_loop_ends() {
         value(list, "glow", &[("speed", 0.25), ("power", 0.75)]),
         0.75
     );
-    let looped = H2ObjectFunction {
+    let looped = ObjectFunction {
         scale_by: "glow".to_owned(),
         ..function("speed", "glow")
     };

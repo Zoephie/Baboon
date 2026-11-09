@@ -40,7 +40,7 @@ pub(in crate::app::model_preview) const SLIDER_SOURCES: [SliderSource; 20] = [
 
 /// The names the shaders, lights and effects of `object` read, besides what
 /// its functions import: 0 for the opened object, or an attached one's owner.
-pub(in crate::app::model_preview) fn h2_shader_inputs(
+pub(in crate::app::model_preview) fn shader_input_names(
     data: &ModelPreviewData,
     object: u8,
 ) -> Vec<String> {
@@ -120,12 +120,12 @@ pub(in crate::app::model_preview) fn h2_shader_inputs(
 }
 
 /// Every name an opened Halo 2 object answers to.
-pub(in crate::app::model_preview) fn h2_function_values(
+pub(in crate::app::model_preview) fn object_function_values(
     data: &ModelPreviewData,
     set: &super::super::functions::FunctionInputs,
     time: f32,
 ) -> super::super::functions::FunctionValues {
-    let inputs = h2_shader_inputs(data, 0);
+    let inputs = shader_input_names(data, 0);
     data.object_functions
         .as_ref()
         .map_or_else(Default::default, |functions| {
@@ -144,7 +144,7 @@ pub(in crate::app::model_preview) fn attached_values(
     }
     let rest = super::super::functions::FunctionInputs::default();
     let values = data.attached.iter().map(|attached| {
-        let inputs = h2_shader_inputs(data, attached.owner);
+        let inputs = shader_input_names(data, attached.owner);
         (
             attached.owner,
             attached
@@ -192,7 +192,7 @@ pub(in crate::app::model_preview) fn function_values_for(
         .iter()
         .flat_map(|textures| textures.iter())
         .any(|texture| texture.h3.is_some());
-    (data.object_functions.is_some() || flares || h3).then(|| h2_function_values(data, set, time))
+    (data.object_functions.is_some() || flares || h3).then(|| object_function_values(data, set, time))
 }
 
 /// Whether anything on the object changes with time alone.
@@ -203,7 +203,7 @@ pub(in crate::app::model_preview) fn object_moves(
     function_values: Option<&super::super::functions::FunctionValues>,
 ) -> bool {
     object_functions(data).any(|functions| functions.move_at_rest())
-        || h2_functions_move(data, set, time)
+        || object_functions_move(data, set, time)
         || data.preview.any_feature(|list| list.moves())
         || data.preview.reach.shield.as_ref().is_some_and(|shield| {
             let damage = function_values
@@ -235,7 +235,7 @@ pub(in crate::app::model_preview) fn has_effects(preview: &RenderModelPreview) -
     preview.any_feature(|list| !list.is_empty())
 }
 
-fn h2_functions_move(
+fn object_functions_move(
     data: &ModelPreviewData,
     set: &super::super::functions::FunctionInputs,
     time: f32,
@@ -250,5 +250,5 @@ fn h2_functions_move(
         || data
             .object_functions
             .as_ref()
-            .is_some_and(|functions| functions.move_at_rest(&h2_function_values(data, set, time)))
+            .is_some_and(|functions| functions.move_at_rest(&object_function_values(data, set, time)))
 }
