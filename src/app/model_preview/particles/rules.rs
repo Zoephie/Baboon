@@ -17,7 +17,7 @@ pub(in crate::app::model_preview) struct ParticleRules {
     pub(in crate::app::model_preview) reach_render_method: bool,
     /// Halo 4: drawn through the particle's own `actual material`; its
     /// `actual shader` is the deprecated render method's remains.
-    pub(in crate::app::model_preview) draws_through_material: bool,
+    pub(in crate::app::model_preview) read_material: Option<ParticleMaterialReader>,
     /// Reach and Halo 4: `c_particle_definition::postprocess` (tool
     /// 0x140DD6FA0) and `effect_postprocess` (0x140DD5070) seed the
     /// properties, controllers first.
@@ -37,27 +37,21 @@ pub(in crate::app::model_preview) struct ParticleRules {
     pub(in crate::app::model_preview) scales_axes: bool,
     /// Halo 4: the emitter's own terms past Reach's.
     pub(in crate::app::model_preview) h4_emitter_terms: bool,
+    /// Halo 2: a system's particle and emitters read as Halo 2 lays them
+    /// out, with its own LOD defaults.
+    pub(in crate::app::model_preview) own_system: Option<OwnParticleSystem>,
 }
 
-impl ParticleRules {
-    pub(in crate::app::model_preview) fn of(game: Option<GameId>) -> Self {
-        let reach = game == Some(GameId::HaloReach);
-        let halo4 = game == Some(GameId::Halo4);
-        // Halo 4's simulation is Reach's, with terms of its own.
-        let reach_on = reach || halo4;
-        Self {
-            reach_render_method: reach,
-            draws_through_material: halo4,
-            reach_postprocess_seeds: reach_on,
-            cheap_shader: reach_on,
-            adds_at_illum: reach_on,
-            reach_look: reach_on,
-            card_lerps: reach_on,
-            random_volume_velocities: reach_on,
-            scales_axes: reach_on,
-            h4_emitter_terms: halo4,
-        }
-    }
+/// A game whose particle systems read their own way.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::app::model_preview) struct OwnParticleSystem {
+    /// The system's look and emitters, from the system and its particle's
+    /// path.
+    pub(in crate::app::model_preview) read:
+        fn(&TagReader, TagStruct<'_>, &str) -> Option<(Arc<H3ParticleLook>, Vec<Arc<H3Emitter>>)>,
+    /// The postprocess' LOD: the raw four, whether it ignores the camera
+    /// mode, and the emitters' rates.
+    pub(in crate::app::model_preview) baked_lod: fn([f32; 4], bool, &mut dyn Iterator<Item = f32>) -> [f32; 4],
 }
 
 /// `global_gravity_get`, in world units a second squared.

@@ -89,6 +89,18 @@ impl H3ParticleAlbedo {
     }
 }
 
+/// What a game reads of a particle it draws through its own material, in
+/// place of quads: Halo 4's.
+pub(crate) trait ParticleMaterial: std::fmt::Debug + Send + Sync {
+    /// The material as itself, for its game's draw.
+    fn as_any(&self) -> &dyn std::any::Any;
+}
+
+/// A game's reader of a particle's own material, from its tag's root and
+/// its model's strip.
+pub(in crate::app::model_preview) type ParticleMaterialReader =
+    fn(&TagReader, TagStruct<'_>, Option<&blam_tags::ParticleModelStrip>) -> Result<Arc<dyn ParticleMaterial>, String>;
+
 /// A `.particle`.
 #[derive(Debug)]
 pub(crate) struct H3ParticleLook {
@@ -143,7 +155,7 @@ pub(crate) struct H3ParticleLook {
     pub(in crate::app::model_preview) palette: H3ParticleProperty,
     pub(crate) shader: Arc<H3SpriteShader>,
     /// Halo 4's: drawn through its material from packed state, not as quads.
-    pub(crate) h4: Option<Arc<super::super::h4::effects::particles::H4ParticleRender>>,
+    pub(crate) h4: Option<Arc<dyn ParticleMaterial>>,
     /// Halo 3's colours are light, and Halo 2's are what shows.
     pub(in crate::app::model_preview) exposed: bool,
     /// Reach's and Halo 4's own game time, lighting, exposure and shapes:
@@ -285,8 +297,8 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<H3ParticleLook
         None => None,
     };
     let rules = ParticleRules::of(reader.source.game());
-    let h4 = match rules.draws_through_material {
-        true => {
+    let h4 = match rules.read_material {
+        Some(read_material) => {
             // The GPU draws a model's strip whole, variant by variant.
             let strip = match root.read_tag_ref_path("Model").filter(|model| !model.is_empty()) {
                 Some(path) => {
@@ -295,9 +307,9 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<H3ParticleLook
                 }
                 None => None,
             };
-            Some(Arc::new(super::super::h4::effects::particles::read_h4_particle_render(reader, root, strip.as_ref()).ok()?))
+            Some(read_material(reader, root, strip.as_ref()).ok()?)
         }
-        false => None,
+        None => None,
     };
     let shader = root.descend("actual shader?");
     let flagged = |wanted: &str| has_flag(root, "appearance flags", wanted);
@@ -306,7 +318,7 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<H3ParticleLook
     let offset = root.read_point2d("center offset");
     let start = tag_function_at(&root.descend("frame index")?, "Mapping").map_or(0.0, |function| function.evaluate(0.0, 0.0));
     let one_shot = animated("frame animation one shot");
-    let (frames, corner) = match shader.filter(|_| !rules.draws_through_material) {
+    let (frames, corner) = match shader.filter(|_| rules.read_material.is_none()) {
         Some(shader) => read_frames(reader, shader, first, [offset.x, offset.y], start, one_shot),
         None => (vec![[0.0, 0.0, 1.0, 1.0]], [0.0, 0.0, 1.0, 1.0]),
     };
@@ -325,7 +337,7 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<H3ParticleLook
     };
     properties.iter_mut().for_each(|property| property.allocate(&mut seeds));
     let [aspect, color, intensity, alpha, frame, rate, palette] = properties;
-    let mut sprite_shader = match shader.filter(|_| !rules.draws_through_material) {
+    let mut sprite_shader = match shader.filter(|_| rules.read_material.is_none()) {
         Some(shader) => read_sprite_shader(reader, shader)?,
         None => H3SpriteShader::plain(H3Blend::Additive),
     };

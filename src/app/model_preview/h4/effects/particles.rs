@@ -5,6 +5,7 @@
 
 use crate::app::model_preview::load::TagReader;
 use blam_tags::TagStruct;
+use super::super::super::particles::ParticleMaterial;
 
 use super::super::super::common::fields::elements;
 use super::super::super::common::named_function::tag_function_at;
@@ -179,6 +180,21 @@ impl H4ParticleRender {
 
 /// `c_particle_definition::postprocess` and `postprocess_frame_animation`
 /// (X360 0x831F1FE0) for the particle at `root`.
+/// [`read_h4_particle_render`], as the particle reader's table holds it.
+pub(crate) fn read_h4_particle_material(
+    reader: &TagReader,
+    root: TagStruct<'_>,
+    model: Option<&blam_tags::ParticleModelStrip>,
+) -> Result<std::sync::Arc<dyn ParticleMaterial>, String> {
+    Ok(std::sync::Arc::new(read_h4_particle_render(reader, root, model)?))
+}
+
+impl ParticleMaterial for H4ParticleRender {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
 pub(crate) fn read_h4_particle_render(
     reader: &TagReader,
     root: TagStruct<'_>,

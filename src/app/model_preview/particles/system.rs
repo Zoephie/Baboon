@@ -63,11 +63,9 @@ pub(super) fn read_system_parts(reader: &TagReader, system: TagStruct<'_>) -> Op
         return None;
     }
     let path = system.read_tag_ref_path("particle").filter(|path| !path.is_empty())?;
-    let h2 = reader.source.game() == Some(GameId::Halo2);
-    let (look, emitters): (Arc<H3ParticleLook>, Vec<_>) = if h2 {
-        let (look, scale, rotation) = super::super::h2::particles::read_h2_look(reader, &path)?;
-        let read = |emitter: &TagStruct<'_>| super::super::h2::particles::read_h2_emitter(reader, *emitter, scale.clone(), rotation.clone(), &flagged);
-        (Arc::new(look), elements(system, "emitters").iter().filter_map(read).map(Arc::new).collect())
+    let own = ParticleRules::of(reader.source.game()).own_system;
+    let (look, emitters): (Arc<H3ParticleLook>, Vec<_>) = if let Some(own) = own {
+        (own.read)(reader, system, &path)?
     } else {
         let look = read_look(reader, &path).map(Arc::new)?;
         let size_scale = system.read_real("size scale").unwrap_or(1.0);
@@ -91,9 +89,9 @@ pub(super) fn read_system_parts(reader: &TagReader, system: TagStruct<'_>) -> Op
                 real("LOD feather out delta"),
             ];
             let any_camera = system.field("camera mode").is_some_and(|field| field.enum_is("independent of camera mode"));
-            let rates = emitters.iter().map(|emitter| emitter.rate.most());
-            if h2 {
-                Some(super::super::h2::particles::h2_baked_lod(raw, any_camera, rates))
+            let mut rates = emitters.iter().map(|emitter| emitter.rate.most());
+            if let Some(own) = own {
+                Some((own.baked_lod)(raw, any_camera, &mut rates))
             } else if !has_flag_labelled(system, "flags", &LOD_ALWAYS_ONE) {
                 Some(if look.reach { reach_baked_lod(raw) } else { baked_lod(raw, any_camera, rates) })
             } else {

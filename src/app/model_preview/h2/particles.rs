@@ -98,6 +98,23 @@ fn h2_particle_pass(template: &str) -> Option<(H3ParticleAlbedo, H3Blend, bool)>
 
 /// A Halo 2 `.particle`, and the two properties of a quad that Halo 3 moved to
 /// its emitters.
+/// A Halo 2 system's look and emitters, for the particle reader's table.
+pub(in crate::app::model_preview) fn read_h2_system_parts(
+    reader: &TagReader,
+    system: TagStruct<'_>,
+    path: &str,
+) -> Option<(Arc<H3ParticleLook>, Vec<Arc<H3Emitter>>)> {
+    let flagged = |wanted: &str| has_flag(system, "flags", wanted);
+    let (look, scale, rotation) = read_h2_look(reader, path)?;
+    let read = |emitter: &TagStruct<'_>| read_h2_emitter(reader, *emitter, scale.clone(), rotation.clone(), &flagged);
+    Some((Arc::new(look), elements(system, "emitters").iter().filter_map(read).map(Arc::new).collect()))
+}
+
+/// [`h2_baked_lod`], as the particle reader's table holds it.
+pub(in crate::app::model_preview) fn h2_baked_lod_of(raw: [f32; 4], any_camera: bool, rates: &mut dyn Iterator<Item = f32>) -> [f32; 4] {
+    h2_baked_lod(raw, any_camera, rates)
+}
+
 pub(in crate::app::model_preview) fn read_h2_look(reader: &TagReader, path: &str) -> Option<(H3ParticleLook, H3ParticleProperty, H3ParticleProperty)> {
     let tag = reader.load(path, "particle", b"prt3").ok()?;
     let root = tag.root();

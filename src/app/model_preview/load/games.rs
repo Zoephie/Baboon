@@ -2,6 +2,7 @@
 //! object, a model and a Halo CE object of its own.
 
 use super::*;
+use super::super::particles::{OwnParticleSystem, ParticleMaterialReader, ParticleRules};
 
 /// The object's change colors, functions and its game's own features, each
 /// noted if its reader crashes, by the kit's game.
@@ -68,4 +69,30 @@ pub(super) fn load_ce_object(
     settings: &PreviewLoadSettings,
 ) -> Result<ModelPreviewData, String> {
     super::super::ce::object::load_ce_object(model_tag, entry, reader, settings)
+}
+
+/// What each game's particles do differently.
+impl ParticleRules {
+    pub(in crate::app::model_preview) fn of(game: Option<GameId>) -> Self {
+        let reach = game == Some(GameId::HaloReach);
+        let halo4 = game == Some(GameId::Halo4);
+        // Halo 4's simulation is Reach's, with terms of its own.
+        let reach_on = reach || halo4;
+        Self {
+            reach_render_method: reach,
+            read_material: halo4.then_some(super::super::h4::effects::particles::read_h4_particle_material as ParticleMaterialReader),
+            reach_postprocess_seeds: reach_on,
+            cheap_shader: reach_on,
+            adds_at_illum: reach_on,
+            reach_look: reach_on,
+            card_lerps: reach_on,
+            random_volume_velocities: reach_on,
+            scales_axes: reach_on,
+            h4_emitter_terms: halo4,
+            own_system: (game == Some(GameId::Halo2)).then_some(OwnParticleSystem {
+                read: super::super::h2::particles::read_h2_system_parts,
+                baked_lod: super::super::h2::particles::h2_baked_lod_of,
+            }),
+        }
+    }
 }
