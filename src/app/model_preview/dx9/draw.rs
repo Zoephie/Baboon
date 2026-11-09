@@ -619,7 +619,7 @@ impl RenderCore {
                     let location = program.location(gl, "u_shadow_map");
                     PassState::new().sampler(H2_SHADOW_MAP_UNIT, glow::TEXTURE_2D, Some(map), location).apply(gl);
                 }
-                if let Some(normal) = self.h3_normal_target {
+                if let Some(normal) = style.normal {
                     let location = program.location(gl, "u_normal_target");
                     PassState::new().sampler(normal.unit, glow::TEXTURE_2D, Some(normal.texture), location).apply(gl);
                     let location = program.location(gl, "u_shadow_toward");

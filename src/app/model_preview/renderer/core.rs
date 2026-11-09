@@ -16,9 +16,6 @@ use eframe::glow;
 /// targets, and, until each game's drawing moves to its own folder, every
 /// game's own state too.
 pub(in crate::app::model_preview) struct RenderCore {
-    /// The normals the gen3 albedo pass laid down, which Halo 3's dx9
-    /// shadow apply reads: the gen3 targets' own, kept as they are remade.
-    pub(in crate::app::model_preview) h3_normal_target: Option<super::super::dx9::shadow::ShadowNormalTarget>,
     /// What a gen3 array sampler reads with nothing of its own.
     pub(in crate::app::model_preview) black_array: Option<glow::NativeTexture>,
     /// As `Dx9Gl::h2_bloom`.
@@ -122,7 +119,6 @@ impl RenderCore {
                 gen3_supported: !version.is_embedded && (version.major, version.minor) >= (4, 1),
                 black_flat,
                 black_array,
-                h3_normal_target: None,
                 sprite_gl: None,
                 shaders_supported: h2_context_supported(version.major, version.minor, version.is_embedded),
                 black_cube: upload_black_cube(gl),

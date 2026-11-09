@@ -508,3 +508,34 @@ fn shot() {
         std::fs::write(f[1], render(&gl, &mut renderer, &source, &shot, &options).pixels).unwrap();
     }
 }
+
+/// Halo 3's self shadow applies by its own pipeline's normals. Each gen3
+/// game keeps its own targets, so a Reach preview that made its own after
+/// Halo 3's leaves Halo 3's next shadow as it was.
+#[test]
+fn halo_3s_self_shadow_reads_its_own_normals_after_another_gen3_preview() {
+    let (Some(halo3), Some(reach)) =
+        (super::kit::kit_source(GameId::Halo3), super::kit::kit_source(GameId::HaloReach))
+    else {
+        return;
+    };
+    let shot = |model: &str, kind: &str| Shot {
+        model: model.to_owned(),
+        shaders: true,
+        lights: true,
+        yaw: 0.6,
+        pitch: 0.25,
+        kind: Some(kind.to_owned()),
+    };
+    let chief = shot("objects\\characters\\masterchief\\masterchief", "biped");
+    let warthog = shot("objects\\vehicles\\human\\warthog\\warthog", "vehicle");
+    let h3 = ShotOptions { shadow: true, ..ShotOptions::new(GameId::Halo3) };
+    let on_reach = ShotOptions { shadow: true, ..ShotOptions::new(GameId::HaloReach) };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let before = render(&gl, &mut renderer, &halo3, &chief, &h3).pixels;
+    let reach_drawn = render(&gl, &mut renderer, &reach, &warthog, &on_reach).pixels;
+    let after = render(&gl, &mut renderer, &halo3, &chief, &h3).pixels;
+    assert!(reach_drawn.iter().any(|byte| *byte != 0), "the Reach warthog drew");
+    assert!(before == after, "Halo 3's shadow read another pipeline's normals");
+}

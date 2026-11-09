@@ -28,6 +28,9 @@ pub(in crate::app::model_preview) struct ShadowStyle {
     /// The direction the shadow falls from, and the apply's strength.
     pub(in crate::app::model_preview) toward: [f32; 3],
     pub(in crate::app::model_preview) alpha: f32,
+    /// The normals the apply reads, for a gen3 shadow: its own pipeline's,
+    /// never another's.
+    pub(in crate::app::model_preview) normal: Option<ShadowNormalTarget>,
 }
 
 impl ShadowStyle {
@@ -35,7 +38,7 @@ impl ShadowStyle {
     /// key light.
     pub(in crate::app::model_preview) fn h2(frame: &ModelGpuFrame) -> Self {
         let toward = if frame.default_lights { h2_prt_lights()[0].direction } else { frame.h2_object_light() };
-        Self { map_size: H2_SHADOW_MAP_SIZE, bias: None, stencil_mask: true, toward, alpha: 1.0 }
+        Self { map_size: H2_SHADOW_MAP_SIZE, bias: None, stencil_mask: true, toward, alpha: 1.0, normal: None }
     }
 }
 

@@ -100,7 +100,7 @@ impl Gen3Game for H3Game {
         self.shadowed = cx.frame.self_shadow && unsafe {
             // Generated from the light, for the apply pass after the opaque one.
             cx.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
-            let drawn = cx.core.draw_h2_shadow(cx.gl, cx.frame, cx.slot, order, h3_shadow_style(cx.frame));
+            let drawn = cx.core.draw_h2_shadow(cx.gl, cx.frame, cx.slot, order, h3_shadow_style(cx.frame, cx.state.targets.as_ref()));
             cx.core.bind_slot_vertices(cx.gl, cx.slot);
             drawn
         };

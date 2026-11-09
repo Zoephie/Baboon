@@ -23,7 +23,7 @@ pub(in crate::app::model_preview) const H3_SHADOW_DEPTH_BIAS: f32 = 0.003;
 /// Halo 3's and ODST's self shadow through the dx9 passes: a smaller map,
 /// biased, from the dominant probe light, and applied after the opaque pass
 /// rather than masked in the stencil.
-pub(in crate::app::model_preview) fn h3_shadow_style(frame: &ModelGpuFrame) -> ShadowStyle {
+pub(in crate::app::model_preview) fn h3_shadow_style(frame: &ModelGpuFrame, targets: Option<&gen3::pipeline::Gen3Targets>) -> ShadowStyle {
     let (toward, alpha) = gen3::pipeline::h3_shadow_light(frame);
     ShadowStyle {
         map_size: H3_SHADOW_MAP_SIZE,
@@ -31,6 +31,11 @@ pub(in crate::app::model_preview) fn h3_shadow_style(frame: &ModelGpuFrame) -> S
         stencil_mask: false,
         toward,
         alpha,
+        normal: targets.map(|targets| super::super::dx9::shadow::ShadowNormalTarget {
+            texture: targets.normal,
+            unit: H3_NORMAL_TARGET_UNIT,
+            map_size: H3_SHADOW_MAP_SIZE,
+        }),
     }
 }
 
