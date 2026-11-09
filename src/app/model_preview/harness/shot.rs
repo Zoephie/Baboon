@@ -17,7 +17,7 @@
 use super::super::*;
 use eframe::glow::{self, HasContext as _};
 use std::sync::Arc;
-use super::gl::{headless_gl, headless_gl_recording, take_gl_log};
+use super::gl::{headless_gl, headless_gl_recording, take_feedback_loops, take_gl_log};
 use super::gl_state::gl_state;
 use crate::core::format::TagNameIndex;
 use crate::core::game::GameId;
@@ -457,6 +457,8 @@ pub(in crate::app::model_preview) struct Shown {
     pub(in crate::app::model_preview) gl_state: String,
     /// Every GL state call the shot made, in order: [`take_gl_log`].
     pub(in crate::app::model_preview) gl_calls: Vec<String>,
+    /// Each draw that sampled what it drew into: [`take_feedback_loops`].
+    pub(in crate::app::model_preview) feedback_loops: Vec<String>,
 }
 
 /// Takes each shot in one headless context, from the kit `source` reads.
@@ -471,13 +473,15 @@ pub(in crate::app::model_preview) fn shoot(source: &TagSource, shots: &[(Shot, S
             // after it is the shot's own, not the shots before it.
             unsafe { reset_bindings(&gl) };
             take_gl_log();
+            take_feedback_loops();
             let Rendered { pixels, geometry_id, gl_state } = render(&gl, &mut renderer, source, shot, options);
             let gl_calls = take_gl_log();
             let mut simulation = String::new();
             renderer.for_each_simulation(geometry_id, |name, state| {
                 super::super::gates::field_lines(&mut simulation, name, &state);
             });
-            Shown { pixels, simulation, gl_state, gl_calls }
+            let feedback_loops = take_feedback_loops();
+            Shown { pixels, simulation, gl_state, gl_calls, feedback_loops }
         })
         .collect()
 }

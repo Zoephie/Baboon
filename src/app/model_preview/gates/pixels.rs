@@ -216,6 +216,21 @@ fn gate_pixels() {
             images.len(),
             started.elapsed()
         );
+        // No draw may sample what it draws into: GL leaves that undefined,
+        // and its result can follow the GPU's timing.
+        let mut loops = std::collections::BTreeMap::new();
+        for (name, shown) in names.iter().zip(&images) {
+            for line in &shown.feedback_loops {
+                loops.entry(line.clone()).or_insert_with(Vec::new).push(name.clone());
+            }
+        }
+        if !loops.is_empty() {
+            let mut report = format!("{game:?} draws sample what they draw into:\n");
+            for (line, shots) in &loops {
+                let _ = writeln!(report, "  {line} ({} draws, first in {})", shots.len(), shots[0]);
+            }
+            failures.push(report);
+        }
         let mut snapshot = String::new();
         let mut simulations = String::new();
         let mut gl_states = String::new();
