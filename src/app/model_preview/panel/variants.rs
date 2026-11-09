@@ -1,7 +1,22 @@
 //! The panel's variant controls: the picker, the selector and the header
 //! actions that write a new variant to the tag.
 
-use super::*;
+use super::super::super::super::core::document::ops::{BlockOpKind, ModelVariantOp};
+use super::super::super::ui_kit::button_icons::{
+    ButtonIcon, close_menu, icon_button, icon_text_button, icon_text_dropdown_button,
+    selectable_text_button,
+};
+use super::super::super::ui_kit::style::{BUTTON_HEIGHT, bold_font, subtle_dark, text_dark};
+use super::super::{
+    BlockConfirm, FieldEditContext, ModelPreviewData, ModelPreviewState, ModelRegionSelection,
+    ModelVariantPreview, combo_scroll_next_index, default_permutation, detect_active_variant,
+    dropdown_wheel_delta, is_model_physics_overlay_region, normalized_new_variant_name,
+    picker_button, picker_popup_width, picker_results, picker_search_field,
+    reset_model_preview_selection, selected_variant_regions,
+};
+use crate::app::ui_kit::checkbox::CheckboxUi as _;
+use eframe::egui;
+use eframe::egui::{RichText, Ui, Vec2};
 
 pub(in crate::app::model_preview) fn draw_variant_controls(
     ui: &mut Ui,
@@ -287,7 +302,12 @@ pub(in crate::app::model_preview) fn draw_variant_header_actions(
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::super::ui_kit::style::{foundation_fonts, foundation_style};
+    use super::super::super::ModelVariantPreview;
     use super::*;
+    use eframe::egui;
+    use eframe::egui::Vec2;
+    use std::collections::HashMap;
 
     #[test]
     fn variant_picker_filters_and_preserves_none_and_original_indices() {

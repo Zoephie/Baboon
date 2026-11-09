@@ -1,6 +1,15 @@
 //! The viewport's size setting and the viewport with its stats footer.
 
-use super::*;
+use super::super::super::ui_kit::style::{
+    foundation_block_text, foundation_input_edge, foundation_section_bar, subtle_dark,
+};
+use super::super::{
+    MAX_MODEL_PREVIEW_SIZE, MIN_MODEL_PREVIEW_SIZE, MaterialTextures, ModelPreviewData,
+    ModelPreviewState, RenderModelPreviewMaterial, draw_model_viewport,
+};
+use super::section::MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
+use eframe::egui;
+use eframe::egui::{Align2, FontId, RichText, Sense, Stroke, Ui, Vec2};
 
 pub(in crate::app) fn draw_model_viewport_size_input(ui: &mut Ui, model_preview_size: &mut f32) {
     let mut percent = model_preview_size_percent(*model_preview_size);

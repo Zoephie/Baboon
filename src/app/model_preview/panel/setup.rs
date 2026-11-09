@@ -1,6 +1,17 @@
 //! The setup card: its header controls, its body and the scenario BSP list.
 
-use super::*;
+use super::super::super::ui_kit::button_icons::{ButtonIcon, icon_text_button};
+use super::super::super::ui_kit::style::{subtle_dark, text_dark};
+use super::super::{FieldEditContext, ModelPreviewData, ModelPreviewState, bsp_display_name};
+use super::functions::draw_object_functions;
+use super::layout::{PreviewPanel, SetupRequests};
+use super::section::{
+    MODEL_SETUP_EXTRA_HEADER_HEIGHT, MODEL_SETUP_INLINE_HEADER_MIN_WIDTH,
+    MODEL_SETUP_SHARED_CONTROLS_ROW_MIN_WIDTH,
+};
+use super::variants::{draw_variant_controls, draw_variant_header_actions, draw_variant_selector};
+use crate::app::ui_kit::checkbox::CheckboxUi as _;
+use eframe::egui::{RichText, Ui};
 
 /// The Model Setup card's header actions: the variant actions, then Refresh
 /// Model.

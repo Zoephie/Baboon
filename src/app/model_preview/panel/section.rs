@@ -1,6 +1,14 @@
 //! The section chrome the panel cards share with the bitmap editor: headers, sizing and the loading shells.
 
-use super::*;
+use super::super::super::ui_kit::style::{
+    bold_font, foundation_block_text, foundation_group_bg, foundation_group_edge,
+    foundation_section_bar,
+};
+use super::super::{MAX_MODEL_PREVIEW_SIZE, MIN_MODEL_PREVIEW_SIZE};
+use super::setup::model_setup_extra_header_height;
+use super::viewport_size::model_viewport_size;
+use eframe::egui;
+use eframe::egui::{RichText, Sense, Stroke, Ui, Vec2};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::app) enum ModelPreviewSectionPart {

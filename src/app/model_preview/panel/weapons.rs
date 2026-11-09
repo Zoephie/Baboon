@@ -1,6 +1,12 @@
 //! The weapon pickers: what a unit holds, in either hand.
 
-use super::*;
+use super::super::super::ui_kit::style::{subtle_dark, text_dark};
+use super::super::{
+    ModelPreviewData, ModelPreviewState, picker_button, picker_popup_width, picker_results,
+    picker_search_field,
+};
+use eframe::egui;
+use eframe::egui::{RichText, Ui};
 
 pub(in crate::app::model_preview) const WEAPON_PICKER_HEIGHT: f32 = 300.0;
 

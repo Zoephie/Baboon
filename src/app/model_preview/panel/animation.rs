@@ -1,6 +1,15 @@
 //! The animation player: the clip picker, the transport, the scrubber and its clock.
 
-use super::*;
+use super::super::super::ui_kit::button_icons::{ButtonIcon, selectable_icon_button};
+use super::super::super::ui_kit::style::{BUTTON_HEIGHT, subtle_dark, text_dark};
+use super::super::{
+    ANIMATION_FRAME_RATE, ModelPreviewState, PreviewAnimationEntry, PreviewAnimationPlayback,
+    picker_button, picker_popup_width, picker_results, picker_search_field,
+};
+use super::layout::PreviewPanel;
+use super::section::{ModelPreviewSectionPart, draw_model_preview_section};
+use eframe::egui;
+use eframe::egui::{Color32, FontId, RichText, Ui, Vec2};
 
 pub(in crate::app::model_preview) fn animation_frame_position(
     playback: &PreviewAnimationPlayback,

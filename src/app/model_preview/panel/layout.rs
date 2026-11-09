@@ -1,6 +1,24 @@
 //! The panel entry: the preview card and the setup card, side by side or stacked, and their headers.
 
-use super::*;
+use super::super::super::ui_kit::style::subtle_dark;
+use super::super::super::{GameId, TagEntry, TagNameIndex};
+use super::super::{
+    FieldEditContext, ModelPreviewData, ModelPreviewState, is_previewable_geometry_group_for_game,
+};
+use super::animation::draw_animation_player;
+use super::section::{
+    MODEL_PREVIEW_SECTION_GAP, MODEL_PREVIEW_STATS_FOOTER_HEIGHT, ModelPreviewSectionPart,
+    WIDE_MODEL_SETUP_MIN_WIDTH, draw_model_preview_loading_shells, draw_model_preview_section,
+    wide_model_preview_section_width,
+};
+use super::setup::{
+    draw_model_setup_header_controls, draw_setup_body, draw_setup_header_actions,
+    model_setup_extra_header_height,
+};
+use super::view_menu::draw_model_view_settings_menu;
+use super::viewport_size::{draw_model_viewport_with_stats, model_viewport_size};
+use blam_tags::TagFile;
+use eframe::egui::{Color32, RichText, Ui, Vec2};
 
 // The material resolver understands the render-method shaders validated for
 // H3EK, H3ODSTEK and HREK, Halo 2's template-and-parameters `shader`, and Halo CE's

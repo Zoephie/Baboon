@@ -1,7 +1,38 @@
+use super::super::super::ui_kit::button_icons::{
+    ButtonIcon, icon_text_button, icon_text_dropdown_button, selectable_icon_text_button,
+};
+use super::super::super::ui_kit::style::{
+    BUTTON_HEIGHT, ICON_BUTTON_SIZE, foundation_fonts, foundation_style,
+};
+use super::super::super::{Baboon, TagSource, locate_definitions_root};
+use super::super::{
+    ANIMATION_FRAME_RATE, MAX_MODEL_PREVIEW_SIZE, MIN_MODEL_PREVIEW_SIZE, ModelPreviewLayer,
+    ModelPreviewState, ModelRegionSelection, ModelRenderMode, PHYSICS_REGION,
+    PreviewAnimationEntry, PreviewAnimationPlayback, PreviewAnimationPose, RenderModelPreview,
+    RenderModelPreviewBatch, RenderModelPreviewRegion, build_render_preview, frame,
+    halo1_object_collision_overlay, is_model_physics_overlay_region,
+    load_referenced_tag_from_source, merge_preview_append, model_preview_data,
+    reset_model_preview_selection, selected_variant_regions,
+};
+use super::animation::{
+    advance_playback_clock, animation_header_group, draw_animation_combo, frame_tick_xs,
+};
 use super::model_preview_supports_textures;
+use super::setup::{draw_model_setup_header_controls, model_setup_extra_header_height};
+use super::variants::draw_variant_controls;
+use super::view_menu::{
+    ModelViewCheckboxIcon, draw_marker_filter_field, draw_model_view_settings_menu,
+    model_view_icon_checkbox, overlay_layer_available,
+};
+use super::weapons::{weapon_matches, weapon_picker_scrolls};
 use super::*;
 use crate::app::model_preview::harness::kit::kit_root;
+use crate::app::ui_kit::checkbox::CheckboxUi as _;
+use crate::app::ui_kit::radio::RadioUi as _;
 use crate::core::game::GameId;
+use blam_tags::TagFile;
+use eframe::egui;
+use eframe::egui::{Sense, Vec2};
 
 fn bitmap_header_control_rows(screen_width: f32, wrap_width: f32) -> (f32, f32) {
     let context = egui::Context::default();

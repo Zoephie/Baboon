@@ -1,6 +1,14 @@
 //! Chimp's standalone mesh viewer, which draws an Unreal mesh with no tag.
 
-use super::*;
+use super::super::super::ui_kit::checkbox::ThemedCheckbox;
+use super::super::super::ui_kit::style::subtle_dark;
+use super::super::{
+    MAX_PREVIEW_SCALE, ModelPreviewData, ModelPreviewState, ModelRenderMode, RenderModelPreview,
+    draw_model_viewport, min_preview_scale, model_preview_data,
+};
+use crate::app::ui_kit::checkbox::CheckboxUi as _;
+use eframe::egui;
+use eframe::egui::{RichText, Ui, Vec2};
 
 /// Build the renderer's camera-independent data for a standalone mesh, such as
 /// a Chimp StaticMesh/SkeletalMesh document.

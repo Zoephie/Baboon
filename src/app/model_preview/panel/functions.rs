@@ -1,6 +1,8 @@
 //! The object function controls: CE event effects, the function sliders and CE's function inputs.
 
-use super::*;
+use super::super::{ModelPreviewData, ModelPreviewState, ce, frame};
+use super::weapons::{draw_ce_weapon_picker, draw_h2_weapon_pickers};
+use eframe::egui::Ui;
 
 pub(in crate::app::model_preview) fn draw_object_functions(
     ui: &mut Ui,

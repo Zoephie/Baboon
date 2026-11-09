@@ -1,6 +1,26 @@
 //! The view menu: shading, layers, markers, errors, game shaders and the camera.
 
-use super::*;
+use super::super::super::GameId;
+use super::super::super::ui_kit::button_icons::{
+    ButtonIcon, icon_text_dropdown_button, paint_button_icon_at, paint_checkbox_row_hover,
+};
+use super::super::super::ui_kit::checkbox::ThemedCheckbox;
+use super::super::super::ui_kit::style::{
+    BUTTON_HEIGHT, foundation_input_edge, menu_control_margin, placeholder_text, subtle_dark,
+    text_dark,
+};
+use super::super::super::ui_kit::tag_icons::paint_tag_icon_at;
+use super::super::{
+    MAX_MODEL_PREVIEW_SIZE, MAX_PREVIEW_SCALE, MIN_MODEL_PREVIEW_SIZE, ModelPreviewData,
+    ModelPreviewLayer, ModelPreviewState, ModelRenderMode, is_object_family_group,
+    min_preview_scale,
+};
+use super::viewport_size::draw_model_viewport_size_input;
+use crate::app::ui_kit::checkbox::CheckboxUi as _;
+use crate::app::ui_kit::radio::RadioUi as _;
+use blam_tags::TagFile;
+use eframe::egui;
+use eframe::egui::{Frame, RichText, Sense, Stroke, Ui, Vec2};
 
 #[allow(clippy::too_many_arguments)]
 pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
