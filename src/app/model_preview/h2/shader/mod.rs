@@ -18,8 +18,11 @@ use crate::core::h2_pixel_shader::{
     translate,
 };
 
+mod layers;
 mod passes;
 pub(in crate::app::model_preview) mod resolve;
+mod stages;
+mod template;
 pub(in crate::app::model_preview) use passes::*;
 mod constants;
 pub(in crate::app::model_preview) use constants::*;

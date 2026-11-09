@@ -2,13 +2,14 @@
 
 use super::super::super::dx9::passes::{
     DEFAULT_AMBIENT, DEFAULT_DIRECT_COLOR, DEFAULT_DIRECT_VECTOR, DEFAULT_INDIRECT_COLOR,
-    DEFAULT_INDIRECT_VECTOR, Dx9Cull, Dx9DrawPass, Dx9DrawTexture, Dx9ParameterValue, Dx9Pass,
-    H2AnimatedRow, H2Animation, H2RowForm, PASS_GLSL_VERSION, fill_components, identity_rows,
+    DEFAULT_INDIRECT_VECTOR, Dx9Cull, Dx9DrawPass, Dx9DrawTexture, H2AnimatedRow, H2Animation,
+    H2RowForm, PASS_GLSL_VERSION, fill_components, identity_rows,
 };
 use super::passes::{
     ACTIVE_CAMO_AMOUNT, ACTIVE_CAMO_BUMP, CAMERA_FEEDS, FRAME_COPY, LIGHT_FALLOFF, LIGHT_GEL,
     TEXACCUM_TARGET, VECTOR_NORMALIZATION, WATER_REFRACTION, change_color_channel,
 };
+use super::template::{Dx9ParameterValue, Dx9Pass};
 use super::{
     ConstantBinding, DX9_TEXTURE_ROWS, Dx9VertexStage, Image, PixelShaderOptions, SamplerBinding,
     SamplerKind, TextureImage, has_flag, translate,

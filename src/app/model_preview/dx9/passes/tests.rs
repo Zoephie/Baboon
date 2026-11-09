@@ -107,16 +107,6 @@ fn only_a_non_constant_function_moves() {
 }
 
 #[test]
-fn the_lights_choose_between_the_game_s_two_lightmap_paths() {
-    assert_eq!(Dx9Layer::Lightmap.implementation(), 3);
-    assert_eq!(Dx9Layer::ObjectLightmap.implementation(), 2);
-    assert_eq!(
-        Dx9Layer::ObjectLightmap.tag_name(),
-        Dx9Layer::Lightmap.tag_name()
-    );
-}
-
-#[test]
 fn change_colors_filter_by_variant_and_fall_back_to_white() {
     let entry = |weight, value: f32, variant: &str| ChangePermutation {
         weight,
@@ -182,31 +172,6 @@ fn normalization_faces_hold_their_own_direction() {
     assert!(center(3, 33)[1] < 5, "-Y");
     assert!(center(4, 33)[2] > 250, "+Z");
     assert!(center(5, 33)[2] < 5, "-Z");
-}
-
-#[test]
-fn the_source_file_follows_the_pass_path() {
-    let pass = Dx9Pass {
-        path: "shaders\\shader_passes\\transparent\\lit".to_owned(),
-        implementation: 0,
-        vertex_shader: String::new(),
-        blend: None,
-        depth: Dx9Depth {
-            compare: None,
-            write: false,
-        },
-        channels: String::new(),
-        custom_channels: None,
-        alpha_test: None,
-        textures: Vec::new(),
-        parameters: Vec::new(),
-        vertex_constants: Vec::new(),
-        animations: Default::default(),
-    };
-    assert_eq!(
-        pass.pixel_shader_file(),
-        "shaders_shader_passes_transparent_lit_0.psh"
-    );
 }
 
 fn permutation(weight: f32, lower: [f32; 3], upper: [f32; 3]) -> ChangePermutation {

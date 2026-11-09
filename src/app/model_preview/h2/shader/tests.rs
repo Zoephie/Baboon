@@ -1,7 +1,7 @@
 use super::super::super::dx9::passes::{
-    Dx9BlendFactor, Dx9Compare, Dx9Depth, Dx9Layer, Dx9ParameterValue, Dx9Pass, Dx9PassTexture,
-    Dx9VertexConstant, animated_vector, elements, read_change_colors,
+    Dx9BlendFactor, Dx9Compare, Dx9Depth, Dx9Layer, animated_vector, elements, read_change_colors,
 };
+use super::template::{Dx9ParameterValue, Dx9Pass, Dx9PassTexture, Dx9VertexConstant};
 use super::*;
 use crate::app::model_preview::harness::kit::kit_root;
 use crate::core::game::GameId;
@@ -510,4 +510,64 @@ fn brute_hair_resolves_from_the_kit() {
             "c{register} is unset: {drawn:?}"
         );
     }
+}
+
+#[test]
+fn every_transparent_vertex_shader_has_a_stage() {
+    let dir = "rasterizer\\vertex_shaders_dx9\\";
+    for (name, stage) in [
+        ("transparent_generic_default", Dx9VertexStage::Default),
+        ("transparent_generic_reflection", Dx9VertexStage::Reflection),
+        (
+            "transparent_generic_reflection_sky",
+            Dx9VertexStage::Reflection,
+        ),
+        ("transparent_generic_offset", Dx9VertexStage::Offset),
+        ("stencil_env_bumped_tangentspace", Dx9VertexStage::Bumped),
+    ] {
+        assert_eq!(
+            Dx9VertexStage::from_path(&format!("{dir}{name}")),
+            Some(stage)
+        );
+    }
+    assert_eq!(Dx9VertexStage::from_path("rasterizer\\unknown"), None);
+    assert_eq!(
+        Dx9VertexStage::from_path("Rasterizer\\Hologram"),
+        Some(Dx9VertexStage::Hologram)
+    );
+}
+
+#[test]
+fn the_lights_choose_between_the_game_s_two_lightmap_paths() {
+    assert_eq!(Dx9Layer::Lightmap.implementation(), 3);
+    assert_eq!(Dx9Layer::ObjectLightmap.implementation(), 2);
+    assert_eq!(
+        Dx9Layer::ObjectLightmap.tag_name(),
+        Dx9Layer::Lightmap.tag_name()
+    );
+}
+
+#[test]
+fn the_source_file_follows_the_pass_path() {
+    let pass = Dx9Pass {
+        path: "shaders\\shader_passes\\transparent\\lit".to_owned(),
+        implementation: 0,
+        vertex_shader: String::new(),
+        blend: None,
+        depth: Dx9Depth {
+            compare: None,
+            write: false,
+        },
+        channels: String::new(),
+        custom_channels: None,
+        alpha_test: None,
+        textures: Vec::new(),
+        parameters: Vec::new(),
+        vertex_constants: Vec::new(),
+        animations: Default::default(),
+    };
+    assert_eq!(
+        pass.pixel_shader_file(),
+        "shaders_shader_passes_transparent_lit_0.psh"
+    );
 }

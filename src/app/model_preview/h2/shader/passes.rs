@@ -1,11 +1,11 @@
 //! Reading a Halo 2 shader template's passes: their externs, parameter levels, blend, depth and alpha test.
 
 use super::super::super::dx9::passes::{
-    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Depth, Dx9ParameterValue, Dx9Pass,
-    Dx9PassTexture, Dx9VertexConstant, H2Animation, H2AnimationKind, animation_function, elements,
-    rgb,
+    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Depth, H2Animation, H2AnimationKind,
+    animation_function, elements, rgb,
 };
 use super::constants::read_custom_channels;
+use super::template::{Dx9ParameterValue, Dx9Pass, Dx9PassTexture, Dx9VertexConstant};
 use super::{AlphaCompare, AlphaTest, has_flag, object_input};
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 use std::collections::HashMap;

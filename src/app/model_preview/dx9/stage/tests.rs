@@ -53,31 +53,6 @@ const STAGES: [Dx9VertexStage; 47] = [
     Dx9VertexStage::Bumped,
 ];
 
-#[test]
-fn every_transparent_vertex_shader_has_a_stage() {
-    let dir = "rasterizer\\vertex_shaders_dx9\\";
-    for (name, stage) in [
-        ("transparent_generic_default", Dx9VertexStage::Default),
-        ("transparent_generic_reflection", Dx9VertexStage::Reflection),
-        (
-            "transparent_generic_reflection_sky",
-            Dx9VertexStage::Reflection,
-        ),
-        ("transparent_generic_offset", Dx9VertexStage::Offset),
-        ("stencil_env_bumped_tangentspace", Dx9VertexStage::Bumped),
-    ] {
-        assert_eq!(
-            Dx9VertexStage::from_path(&format!("{dir}{name}")),
-            Some(stage)
-        );
-    }
-    assert_eq!(Dx9VertexStage::from_path("rasterizer\\unknown"), None);
-    assert_eq!(
-        Dx9VertexStage::from_path("Rasterizer\\Hologram"),
-        Some(Dx9VertexStage::Hologram)
-    );
-}
-
 /// Stages must link with what the translator produces, so a varying
 /// renamed on one side fails here rather than as a preview drawing nothing.
 #[test]
