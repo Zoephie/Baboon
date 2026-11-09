@@ -68,8 +68,8 @@ impl ObjectFunction {
         }
         if active && !self.turn_off_with.is_empty() {
             active = match owner.rules {
-                FunctionRules::Halo2 => owner.exported(&self.turn_off_with, inputs).1,
-                FunctionRules::Gen3 => {
+                FunctionRules::LastOfNameStands => owner.exported(&self.turn_off_with, inputs).1,
+                FunctionRules::FirstOfNameAnswers => {
                     let (magnitude, on) =
                         owner.value(&self.turn_off_with, inputs, scripted, clock, depth + 1);
                     on && (!self.flags.turn_off_with_uses_magnitude || magnitude != 0.0)
@@ -179,8 +179,8 @@ impl ObjectFunctions {
         }
         let named = |function: &&ObjectFunction| function.export == name;
         let answers = match self.rules {
-            FunctionRules::Halo2 => self.functions.iter().rev().find(named),
-            FunctionRules::Gen3 => self.functions.iter().find(named),
+            FunctionRules::LastOfNameStands => self.functions.iter().rev().find(named),
+            FunctionRules::FirstOfNameAnswers => self.functions.iter().find(named),
         };
         if let Some(function) = answers {
             return function.evaluate(self, inputs, scripted, clock, depth);

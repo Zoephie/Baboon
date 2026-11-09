@@ -32,7 +32,7 @@ impl RenderCore {
                 return;
             }
             self.draw_dx9_particles(frame, gl, slot);
-            let Some(h3) = self.begin_sprites(gl, frame, slot) else {
+            let Some(gen3) = self.begin_sprites(gl, frame, slot) else {
                 return;
             };
             let Some(flares) = self.sprite_gl.as_ref().and_then(Option::as_ref) else {
@@ -68,7 +68,7 @@ impl RenderCore {
                 frame,
                 bones,
                 &view,
-                h3,
+                gen3,
             );
             game.draw_own_sprites(&mut sprites);
             gl.color_mask(true, true, true, false);

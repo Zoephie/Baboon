@@ -154,7 +154,7 @@ pub(super) fn read_definition(
     if let Some(read) = rules.light_volume_reader {
         return read(reader, element);
     }
-    let reach = rules.light_volume_terms;
+    let own_terms = rules.light_volume_terms;
     let shader = element.descend("actual shader?")?;
     let definition = shader
         .read_tag_ref_path("definition")
@@ -174,7 +174,7 @@ pub(super) fn read_definition(
     let resolved_real =
         |name: &str, default: f32| inline_real(resolved.as_ref(), name).unwrap_or(default);
     // `lights__light_volume.hlsl` l.288–296; `albedo_circular.render_method_option`'s defaults.
-    let circular = (reach && chosen("albedo") == "circular").then(|| {
+    let circular = (own_terms && chosen("albedo") == "circular").then(|| {
         [
             resolved_real("center_offset", 1.1),
             resolved_real("falloff", 2.0),
@@ -206,10 +206,10 @@ pub(super) fn read_definition(
     let blend = definition.blend(&options);
     // `depth_fade_on.render_method_option`'s range. `biased`'s option tag is
     // not in the kit, and no volume uses it.
-    let depth_fade = (reach && chosen("depth_fade") == "on" && blend != Gen3Blend::Opaque)
+    let depth_fade = (own_terms && chosen("depth_fade") == "on" && blend != Gen3Blend::Opaque)
         .then(|| resolved_real("depth_fade_range", 0.1).max(1e-4));
     let flagged = |wanted: &str| has_flag(element, "flags", wanted);
-    let lod = if reach {
+    let lod = if own_terms {
         DistanceVolumeLod::read(element, flagged)
     } else {
         None
@@ -218,13 +218,13 @@ pub(super) fn read_definition(
     // The postprocess tests what the properties read before it narrows the
     // per-volume four's inputs.
     let most = max_profile_count(&properties.density, &properties.length);
-    let precompiled = reach && precompiles(flagged, &properties.all(), most);
+    let precompiled = own_terms && precompiles(flagged, &properties.all(), most);
     let mut volume = properties.postprocessed(element, |properties| Gen3VolumeDefinition {
         blend,
         sampler,
         bitmap,
         sort_layer: super::super::super::super::particles::gen3_sort_layer(shader),
-        own_terms: reach,
+        own_terms,
         circular,
         depth_fade,
         lod,

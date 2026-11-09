@@ -123,7 +123,7 @@ fn switched(
     let functions = ObjectFunctions {
         functions,
         switches,
-        rules: FunctionRules::Gen3,
+        rules: FunctionRules::FirstOfNameAnswers,
         exports: None,
     };
     let inputs: FunctionInputs = inputs
@@ -387,7 +387,7 @@ fn gen3(functions: Vec<ObjectFunction>, name: &str, inputs: &[(&str, f32)]) -> (
         .collect();
     let functions = ObjectFunctions {
         functions,
-        rules: FunctionRules::Gen3,
+        rules: FunctionRules::FirstOfNameAnswers,
         ..Default::default()
     };
     functions.value(name, &inputs, &FunctionValues::new(), Clock::default(), 0)

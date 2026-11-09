@@ -368,8 +368,8 @@ pub(in crate::app::model_preview) fn function_rules(
     generation: blam_tags::game::Game,
 ) -> FunctionRules {
     match generation {
-        blam_tags::game::Game::Halo2 => FunctionRules::Halo2,
-        _ => FunctionRules::Gen3,
+        blam_tags::game::Game::Halo2 => FunctionRules::LastOfNameStands,
+        _ => FunctionRules::FirstOfNameAnswers,
     }
 }
 

@@ -57,11 +57,11 @@ pub(in crate::app::model_preview) fn shader_input_names(
     let passes = owned
         .iter()
         .flat_map(|texture| texture.dx9_layers.iter().flatten());
-    let h3 = owned
+    let gen3 = owned
         .iter()
         .filter_map(|texture| texture.gen3.as_ref())
         .flat_map(|material| &material.animations);
-    let h3 = h3.flat_map(|animation| [animation.input.as_str(), animation.range.as_str()]);
+    let gen3 = gen3.flat_map(|animation| [animation.input.as_str(), animation.range.as_str()]);
     let extensions = owned
         .iter()
         .filter_map(|texture| texture.gen3.as_ref())
@@ -72,7 +72,7 @@ pub(in crate::app::model_preview) fn shader_input_names(
         .clone()
         .flat_map(|extension| extension.after_inputs())
         .collect();
-    let materials: Vec<&str> = h3
+    let materials: Vec<&str> = gen3
         .chain(extensions.flat_map(|extension| extension.inputs()))
         .chain(after)
         .filter(|name| !name.is_empty())
@@ -92,7 +92,7 @@ pub(in crate::app::model_preview) fn shader_input_names(
     let gen3_shield = owned
         .iter()
         .filter_map(|texture| texture.gen3.as_ref())
-        .any(|h3| h3.shield.is_some());
+        .any(|gen3| gen3.shield.is_some());
     let shield = data
         .preview
         .materials
@@ -167,12 +167,12 @@ pub(in crate::app::model_preview) fn function_values_for(
     time: f32,
 ) -> Option<super::super::functions::FunctionValues> {
     let features = data.preview.any_feature(|list| list.needs_values());
-    let h3 = data
+    let gen3 = data
         .textures
         .iter()
         .flat_map(|textures| textures.iter())
         .any(|texture| texture.gen3.is_some());
-    (data.object_functions.is_some() || features || h3)
+    (data.object_functions.is_some() || features || gen3)
         .then(|| object_function_values(data, set, time))
 }
 

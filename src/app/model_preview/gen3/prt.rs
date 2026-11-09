@@ -96,13 +96,13 @@ pub(in crate::app) fn read_gen3_prt(
         return None;
     }
     // The tags on disk leave the policy at 0; only its field marks the rules.
-    let reach = tag_meshes
+    let has_policy = tag_meshes
         .first()
         .is_some_and(|mesh| mesh.field("lighting policy").is_some());
     let mut per_mesh = Vec::with_capacity(meshes.len());
     for ((mesh, tag_mesh), element) in meshes.iter().zip(&tag_meshes).zip(&data) {
         let kind = Gen3PrtKind::from_tag(tag_mesh.read_int_any("PRT vertex type").unwrap_or(0));
-        let kind = if reach && kind != Gen3PrtKind::Ambient {
+        let kind = if has_policy && kind != Gen3PrtKind::Ambient {
             Gen3PrtKind::None
         } else {
             kind
@@ -128,7 +128,7 @@ pub(in crate::app) fn read_gen3_prt(
                         .map(|channel| word((channel * count + coefficient) * 4))
                         .sum();
                     *value = sum / CHANNELS as f32;
-                    if reach {
+                    if has_policy {
                         *value = value.clamp(0.0, 1.0);
                     }
                 }

@@ -198,7 +198,7 @@ impl CheapTypeTag {
     /// the depth range in `COLLISION.x`, and `size`'s bounds and the fade in
     /// row 3. No Halo 4 tool was at hand; the kit's shipped type texture
     /// agrees (`kit_halo_4s_type_table_matches_the_shipped_type_texture`).
-    pub(super) fn compiled(&self, own: usize, textures: usize, halo4: bool) -> CheapType {
+    pub(super) fn compiled(&self, own: usize, textures: usize, per_type: bool) -> CheapType {
         let texture = usize::try_from(self.texture)
             .ok()
             .filter(|texture| *texture < textures)
@@ -212,7 +212,7 @@ impl CheapTypeTag {
         rows[COLOR0] = [red * intensity, green * intensity, blue * intensity, alpha];
         let place = (texture as f32 + 0.5) / textures.max(1) as f32;
         rows[RENDER] = [place, self.size, self.stretch, facing * self.y_scale];
-        if !halo4 {
+        if !per_type {
             rows[PHYSICS] = [self.drag, self.gravity, self.turbulence, self.depth_range];
             rows[COLLISION] = [0.0, self.elasticity, self.death, change];
             rows[FADE] = [0.0, 0.0, 0.0, fade];
@@ -314,11 +314,11 @@ impl CheapLibrary {
         let textures = elements(root, "textures").len();
         let types = elements(root, "types");
         let map = |name: &str| root.read_tag_ref_path(name).filter(|path| !path.is_empty());
-        let halo4 = reader.rules().particles.cheap_turbulence_types;
+        let per_type = reader.rules().particles.cheap_turbulence_types;
         // Halo 4 binds `turbulenceTexture`, an array the tool builds from
         // these; the kit's is stale (8 layers for 4 types, none matching),
         // so each type's own map stands in [inferred].
-        let turbulence: Vec<CheapTurbulence> = if halo4 {
+        let turbulence: Vec<CheapTurbulence> = if per_type {
             let kinds = elements(root, "turbulence types");
             kinds
                 .iter()
@@ -335,12 +335,12 @@ impl CheapLibrary {
             types: types
                 .iter()
                 .enumerate()
-                .map(|(at, element)| CheapTypeTag::read(*element).compiled(at, textures, halo4))
+                .map(|(at, element)| CheapTypeTag::read(*element).compiled(at, textures, per_type))
                 .collect(),
             random: CheapTexels::read(reader, &map("random")?)?,
             turbulence,
             render: map("render_texture").and_then(|path| CheapRenderTexture::read(reader, &path)),
-            turbulence_per_type: halo4,
+            turbulence_per_type: per_type,
         })
     }
 

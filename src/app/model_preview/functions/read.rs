@@ -109,13 +109,13 @@ pub(in crate::app::model_preview) enum FunctionRules {
     /// Halo 2's `sub_86F2F0` and `sub_86ECD0`: the last function of a name
     /// stands, and `turn off with` reads what the type exports.
     #[default]
-    Halo2,
+    LastOfNameStands,
     /// Halo 3 (`halo3.dll` `sub_1803463B0`, `sub_180346118`) and Reach (the
     /// 360's `object_get_function_value` 0x82b4b2c0 and
     /// `object_function_get_function_value` 0x82b4b908): the first function
     /// of a name answers, and `turn off with` is looked up in full. ODST's
     /// are not read; it sits between two that agree.
-    Gen3,
+    FirstOfNameAnswers,
 }
 
 /// One of Halo 4's `function switches`: an export that answers with whichever

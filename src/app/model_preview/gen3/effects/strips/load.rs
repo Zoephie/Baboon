@@ -314,9 +314,9 @@ pub(super) fn read_strip_look(
     element: TagStruct<'_>,
     beam: bool,
 ) -> Option<StripLook> {
-    let reach = reader.rules().gen3.strip_terms;
+    let own_terms = reader.rules().gen3.strip_terms;
     let mut shader = read_sprite_shader(reader, element.descend("actual shader?")?)?;
-    if reach && beam {
+    if own_terms && beam {
         // `effects__beam.hlsl`'s `sample_diffuse` (l.373–458): the strip's one
         // texcoord, a `particle_alpha` of 1, and no palette shift.
         shader.palette_shift = None;
@@ -337,7 +337,7 @@ pub(super) fn read_strip_look(
     let tiling = element.read_vec2("uv tiling");
     let scroll = element.read_vec2("uv scrolling");
     let real = |name: &str| element.read_real(name).unwrap_or(0.0);
-    let by_range = reach && beam;
+    let by_range = own_terms && beam;
     let fade = |range: f32, cutoff: f32, scale: f32| strip_fade(range, cutoff, scale, by_range);
     let degrees = std::f32::consts::PI / 180.0;
     let [angle_range, angle_begin] = [real("angle fade range"), real("angle fade begin")];
@@ -351,12 +351,12 @@ pub(super) fn read_strip_look(
         edge_fade: fade(real("edge fade range"), real("edge fade cutoff"), degrees),
         angle_fade: (by_range && (angle_range != 0.0 || angle_begin != 0.0))
             .then_some([angle_range * degrees, angle_begin * degrees]),
-        sort_bias: if reach {
+        sort_bias: if own_terms {
             element.read_int_any("sort bias").unwrap_or(0) as f32 * SORT_BIAS_STEP
         } else {
             0.0
         },
-        own_terms: reach,
+        own_terms,
         shader: Arc::new(shader),
     })
 }

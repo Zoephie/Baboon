@@ -32,7 +32,7 @@ impl RenderCore {
         slot: usize,
     ) -> Option<bool> {
         unsafe {
-            let h3 = self.gen3_draws(frame);
+            let gen3 = self.gen3_draws(frame);
             let flares = self
                 .sprite_gl
                 .get_or_insert_with(|| link_sprite_gl(gl, self.program))
@@ -44,11 +44,11 @@ impl RenderCore {
             self.slots[slot].sync_sprite_textures(gl, frame);
             sprite_program_state(flares).apply(gl);
             gl.uniform_1_i32(flares.map.as_ref(), 0);
-            sprite_blending_state(h3).apply(gl);
+            sprite_blending_state(gen3).apply(gl);
             // Plain color times map, not what the last flare left set.
             gl.uniform_1_f32(flares.highlight.as_ref(), -1.0);
             gl.uniform_2_f32(flares.tint.as_ref(), 0.0, 0.0);
-            Some(h3)
+            Some(gen3)
         }
     }
 
@@ -83,7 +83,7 @@ fn sprite_program_state(flares: &SpriteGl) -> PassState {
 
 /// How sprites blend over the model: tested against its depth, not
 /// writing it, both sides drawn.
-fn sprite_blending_state(h3: bool) -> PassState {
+fn sprite_blending_state(gen3: bool) -> PassState {
     let state = PassState::new()
         .enable(glow::BLEND)
         .blend_equation(glow::FUNC_ADD)
@@ -96,7 +96,7 @@ fn sprite_blending_state(h3: bool) -> PassState {
         .disable(glow::CULL_FACE)
         // `global_shader_effect_alpha_blended`, among the model's depth.
         .blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-    if !h3 {
+    if !gen3 {
         return state;
     }
     // Halo 3's target is composited over the background by its alpha, so
@@ -256,12 +256,12 @@ pub(in crate::app::model_preview) unsafe fn draw_antennas(
     frame: &ModelGpuFrame,
     bones: Option<&[[f32; 4]]>,
     view: &ViewFrame,
-    h3: bool,
+    gen3: bool,
 ) {
     unsafe {
         // Antennas are depth tested as well: `antenna_render_proper`
         // draws as a transparent group, tested and not written.
-        if h3 {
+        if gen3 {
             gl.blend_func_separate(
                 glow::SRC_ALPHA,
                 glow::ONE_MINUS_SRC_ALPHA,
@@ -271,10 +271,10 @@ pub(in crate::app::model_preview) unsafe fn draw_antennas(
         } else {
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
         }
-        gl.color_mask(true, true, true, h3);
+        gl.color_mask(true, true, true, gen3);
         let tips = springs.advance(&frame.preview.antennas, bones, frame.time);
-        for (quads, texture, reach) in antenna_quads(frame, textures, bones, view, &tips) {
-            if reach {
+        for (quads, texture, spring) in antenna_quads(frame, textures, bones, view, &tips) {
+            if spring {
                 // `draw_textured_transparent_quad`'s blend mode 3: source
                 // alpha over its inverse, which Xenon sets for color alone;
                 // alpha is taken to blend the same. [inferred] Its
