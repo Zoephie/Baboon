@@ -1,6 +1,7 @@
-//! Halo 4: its material shaders and what each draw submits, object lighting
-//! and lights, flares, camo, shield, shadow, particles and tracers. Its passes
-//! are the renderer's.
+//! Halo 4: its material shaders and what each draw submits, its objects'
+//! features (lights, flares, camo, shield, shadow, particles, tracers and
+//! holograms), and its place in the gen3 pipeline (`render.rs`): its frame
+//! values and lighting, the passes of each, its bloom and composite.
 
 mod features;
 pub(in crate::app::model_preview) mod materials;

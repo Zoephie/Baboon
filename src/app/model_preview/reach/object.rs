@@ -4,8 +4,9 @@ use super::super::*;
 use blam_tags::TagFile;
 use super::super::common::marker::own_marker_frame;
 
-/// What a Reach object brings so far: its flares and lights. Its light
-/// volumes and effects read differently, and wait on their own readers.
+/// A Reach object's own shield, camo, shadow caster and IK markers, then
+/// what hangs on it: its lights, flares, light volumes, effects, antennas
+/// and cloth (`read_reach_attached_features`).
 pub(in crate::app::model_preview) fn read_reach_object_features(reader: &TagReader, model_tag: &TagFile, model: &TagFile, preview: &mut RenderModelPreview) {
     preview.reach.shield = super::super::reach::shield::read_reach_shield(reader, model);
     preview.reach.camo = super::super::reach::camo::ReachCamo::read(reader).map(std::sync::Arc::new);

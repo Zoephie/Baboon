@@ -1,5 +1,7 @@
-//! Reach: object lights, camo, shadow and shield, several of which Halo 4
-//! draws through too. Its lighting, bloom and passes are the renderer's.
+//! Reach: its objects' features (lights, cheap lights, camo, shadow and
+//! shield, several of which Halo 4 draws through too) and its place in the
+//! gen3 pipeline (`render.rs`): its frame values and lighting, the inline
+//! and screen lights, the self shadow, its bloom and composite.
 
 mod features;
 pub(in crate::app::model_preview) mod object;

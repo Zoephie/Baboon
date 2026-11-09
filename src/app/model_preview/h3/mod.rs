@@ -1,6 +1,8 @@
-//! Halo 3 and ODST: leaves, VISR, and the lights and flares the preview
-//! draws for them (Reach's flares read through here too). What Halo 3 shares
-//! with Reach and Halo 4 is in `gen3`; its draw and bloom are the renderer's.
+//! Halo 3 and ODST: their objects' features (lights, leaves, VISR and the
+//! motion suck) and their place in the gen3 pipeline (`render.rs`): the self
+//! shadow, the object lights, the picture effects, and their bloom and
+//! composite. Reach's flares read through `lights.rs` too. What Halo 3
+//! shares with Reach and Halo 4 is in `gen3`.
 
 mod features;
 pub(in crate::app::model_preview) mod object;

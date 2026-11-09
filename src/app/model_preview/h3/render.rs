@@ -1,6 +1,7 @@
 //! Halo 3's and ODST's place in the gen3 pipeline: their self shadow, from
 //! a map generated through dx9 shadow passes and applied after the opaque
-//! pass.
+//! pass; their object lights; VISR and the motion suck over the finished
+//! picture; their leaves; and their bloom and composite.
 
 use eframe::glow::{self, HasContext};
 
