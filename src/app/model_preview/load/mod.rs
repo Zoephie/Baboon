@@ -34,7 +34,7 @@ pub(in crate::app::model_preview) use games::{
     type_exports,
 };
 mod rules;
-pub(in crate::app::model_preview) use rules::GameRules;
+pub(in crate::app::model_preview) use rules::{GameRules, ObjectControls};
 mod object;
 pub(in crate::app::model_preview) use object::*;
 mod model;

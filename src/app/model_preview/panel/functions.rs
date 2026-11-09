@@ -1,7 +1,8 @@
-//! The object function controls: CE event effects, the function sliders and CE's function inputs.
+//! The object function controls: the game's own controls, the unit's
+//! weapons and the function sliders.
 
-use super::super::{ModelPreviewData, ModelPreviewState, ce, frame};
-use super::weapons::{draw_ce_weapon_picker, draw_unit_weapon_pickers};
+use super::super::{ModelPreviewData, ModelPreviewState, frame};
+use super::weapons::draw_unit_weapon_pickers;
 use eframe::egui::Ui;
 
 pub(in crate::app::model_preview) fn draw_object_functions(
@@ -9,22 +10,10 @@ pub(in crate::app::model_preview) fn draw_object_functions(
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
 ) {
-    draw_ce_weapon_picker(ui, data, state);
-    let held_name = |object: u8| {
-        let held = usize::from(object).checked_sub(1)?;
-        data.ce.attached.get(held).map(|held| held.name.clone())
-    };
-    let time = frame::preview_clock(ui);
-    let controls = ce::panel::CeEffectControls {
-        effects: &data.preview.ce.effects,
-        firing: &data.preview.ce.firing,
-        geometry: data.geometry_id,
-        counts: &mut state.ce.event_counts,
-        shots: &mut state.ce.shots,
-        scales: &mut state.ce.event_scales,
-        time,
-    };
-    ce::panel::draw_ce_event_effects(ui, controls, held_name);
+    let controls = super::super::load::rules(data.preview.game).object_controls;
+    if let Some(controls) = controls {
+        (controls.above)(ui, data, state);
+    }
     draw_unit_weapon_pickers(ui, data, state);
     if let Some(functions) = &data.object_functions {
         let time = ui.input(|input| input.time) as f32;
@@ -38,58 +27,7 @@ pub(in crate::app::model_preview) fn draw_object_functions(
             &frame::shader_input_names(data, 0),
         );
     }
-    let read = |object: u8| {
-        data.textures.as_ref().map(|textures| {
-            let mut read = [false; 4];
-            let owned = data.preview.materials.iter().zip(textures.iter());
-            let passes = owned
-                .filter(|(material, _)| material.object == object)
-                .flat_map(|(_, texture)| texture.h2_layers.iter().flatten());
-            for animation in passes.filter_map(|pass| pass.ce_animation.as_ref()) {
-                for (read, output) in read.iter_mut().zip(animation.outputs_read()) {
-                    *read |= output;
-                }
-            }
-            let preview = &data.preview;
-            ce::lights::mark_outputs_read(&preview.ce.lights, object, &mut read);
-            ce::functions::mark_outputs_read(&preview.ce.effects, object, &mut read);
-            ce::functions::mark_outputs_read(&preview.ce.contrails, object, &mut read);
-            ce::functions::mark_outputs_read(&preview.ce.particle_systems, object, &mut read);
-            ce::functions::mark_outputs_read(&preview.ce.light_volumes, object, &mut read);
-            ce::functions::mark_outputs_read(&preview.ce.lightning, object, &mut read);
-            ce::functions::mark_outputs_read(&preview.ce.glows, object, &mut read);
-            read
-        })
-    };
-    let attached = data
-        .ce
-        .attached
-        .iter()
-        .enumerate()
-        .filter_map(|(index, object)| {
-            let functions = object.functions.as_ref()?;
-            Some((index as u8 + 1, Some(object.name.as_str()), functions))
-        });
-    let own = data
-        .ce
-        .functions
-        .iter()
-        .map(|functions| (0, None, functions));
-    for (object, name, functions) in own.chain(attached) {
-        ce::panel::draw_ce_function_controls(
-            ui,
-            functions,
-            name,
-            (data.geometry_id, object),
-            &mut state.ce.function_inputs,
-            read(object),
-            ce::firing::fired_input(
-                &data.preview.ce.firing,
-                &state.ce.shots,
-                data.geometry_id,
-                object,
-                time,
-            ),
-        );
+    if let Some(controls) = controls {
+        (controls.below)(ui, data, state);
     }
 }

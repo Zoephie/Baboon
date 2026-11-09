@@ -119,41 +119,6 @@ pub(in crate::app::model_preview) fn carry_through_weapon_change(
     state.weapon_carry = Some((data.geometry_id, state.region_selections.clone()));
 }
 
-/// Which weapon a Halo CE biped holds. Changing it reloads the preview, so
-/// what should outlive that goes along with the state.
-pub(in crate::app::model_preview) fn draw_ce_weapon_picker(
-    ui: &mut Ui,
-    data: &ModelPreviewData,
-    state: &mut ModelPreviewState,
-) {
-    let Some(weapons) = data
-        .ce
-        .weapons
-        .as_ref()
-        .filter(|weapons| !weapons.equippable.is_empty())
-    else {
-        return;
-    };
-    let options: Vec<_> = weapons
-        .equippable
-        .iter()
-        .map(|weapon| super::super::weapons::WeaponOption {
-            path: weapon.path.clone(),
-            name: weapon.name.clone(),
-            class: weapon.class.clone(),
-        })
-        .collect();
-    let held = options
-        .iter()
-        .find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
-    let salt = ("ce_weapon_picker", data.render_model_path.as_str());
-    let chosen = weapon_dropdown(ui, "Weapon", salt, &options, held);
-    if let Some(choice) = chosen.filter(|choice| *choice != state.weapon) {
-        carry_through_weapon_change(data, state);
-        state.weapon = choice;
-    }
-}
-
 /// A Halo 2 unit's two hands. The left only opens for what can pair, and
 /// a primary that cannot pair empties it.
 pub(in crate::app::model_preview) fn draw_unit_weapon_pickers(

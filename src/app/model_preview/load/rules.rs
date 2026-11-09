@@ -44,7 +44,23 @@ pub(crate) struct GameRules {
     /// Whether the panel offers Default Lights, PRT, Bloom and Self Shadow,
     /// which change what its models draw.
     pub(crate) lit_options: bool,
+    /// The game's own object controls in the panel, around the shared ones.
+    pub(crate) object_controls: Option<ObjectControls>,
 }
+
+/// A game's own controls for an object, drawn around the shared weapon
+/// pickers and function sliders.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ObjectControls {
+    pub(crate) above: ObjectControlsDraw,
+    pub(crate) below: ObjectControlsDraw,
+}
+
+pub(crate) type ObjectControlsDraw = fn(
+    &mut eframe::egui::Ui,
+    &super::super::ModelPreviewData,
+    &mut super::super::ModelPreviewState,
+);
 
 /// A unit's own hand marker for a weapon: the unit, the weapon, and whether
 /// it goes in the left hand.
@@ -63,5 +79,6 @@ impl GameRules {
         gen3: Gen3Rules::DEFAULT,
         textures: false,
         lit_options: true,
+        object_controls: None,
     };
 }
