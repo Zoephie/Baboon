@@ -25,6 +25,7 @@ pub(in crate::app::model_preview) mod shadow_pass;
 pub(super) mod shield;
 pub(in crate::app::model_preview) mod slot;
 pub(super) mod tracers;
+pub(super) mod weapons;
 
 /// What only a Halo 4 object brings to its preview: its lights and their
 /// passes, flares, camo, shield, self shadow, tracers, colour grading and

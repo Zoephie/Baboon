@@ -1,6 +1,8 @@
 //! The one place the loader names a game: what each game reads of an
 //! object, a model and a Halo CE object of its own.
 
+use super::super::RenderModelPreviewMarker;
+use super::super::common::marker::MarkerFrame;
 use super::super::functions::TypeExporter;
 use super::super::particles::{OwnParticleSystem, ParticleMaterialReader, ParticleRules};
 use super::super::{
@@ -9,7 +11,7 @@ use super::super::{
 };
 use super::jobs::PreviewLoadSettings;
 use super::object::ObjectLoad;
-use super::{GameRules, TagReader, feature_into};
+use super::{GameRules, LoadCx, TagReader, feature_into};
 use std::sync::Arc;
 
 /// The kit's game's load rules: its own folder's.
@@ -103,6 +105,51 @@ pub(super) fn read_object_features(
             });
         }
         _ => {}
+    }
+}
+
+/// An attached object's own features, by its game's readers: Halo 4's and
+/// Reach's own (`Game::of` calls them `Halo3` too, and they read their
+/// attachments, lights and held weapons differently), the Halo 3 family's
+/// with the unit's extension weapons, or Halo 2's.
+pub(in crate::app::model_preview) fn read_attached_features<
+    F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
+>(
+    cx: &LoadCx<'_, F>,
+    attached: &RenderModelPreview,
+    preview: &mut RenderModelPreview,
+) {
+    let center = || {
+        std::array::from_fn(|axis| (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5)
+    };
+    match cx.reader.source.game() {
+        Some(GameId::Halo4) => {
+            super::super::h4::attached::read_h4_attached_features(cx, center(), preview);
+        }
+        Some(GameId::HaloReach) => {
+            super::super::reach::attached::read_reach_attached_features(cx, center(), preview);
+        }
+        _ if blam_tags::game::Game::of(cx.object) == blam_tags::game::Game::Halo3 => {
+            super::super::h3::attached::read_h3_attached_features(cx, preview);
+            super::super::weapons::attached::read_extension_weapons(cx, preview);
+        }
+        _ => super::super::h2::attached::read_h2_features(cx, preview),
+    }
+}
+
+/// What a unit's `extension of parent` weapon, `cx`'s object, plays at the
+/// unit's markers, by the weapon's own generation: the Halo 3 family's
+/// attached features, or Halo 2's effects.
+pub(in crate::app::model_preview) fn read_extension_weapon_features<
+    F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
+>(
+    cx: &LoadCx<'_, F>,
+    preview: &mut RenderModelPreview,
+) {
+    if blam_tags::game::Game::of(cx.object) == blam_tags::game::Game::Halo3 {
+        super::super::h3::attached::read_h3_attached_features(cx, preview);
+    } else {
+        super::super::h2::attached::read_h2_extension_weapon_features(cx, preview);
     }
 }
 

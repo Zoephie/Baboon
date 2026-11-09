@@ -1,47 +1,14 @@
 //! Attaching a held weapon to its marker.
 
-use super::super::super::{GameId, tag_path};
+use super::super::super::tag_path;
 use super::super::{RenderModelPreview, TagReader};
 use super::graph::{descendants, string_id_in};
 use super::unit::UnitWeapons;
 use super::{
     AttachedObject, MarkerFrame, WeaponIk, attach_point, attach_vector, build_render_preview,
-    elements, fold_attached, holder_of, object_variant, weapon_ik,
+    fold_attached, holder_of, object_variant, weapon_ik,
 };
 use blam_tags::TagFile;
-
-/// Halo 4's `unit_show_weapon_from_inventory` (X360 0x84AB9B40): the unit's
-/// `weapon specific markers` entry for the weapon's class and name gives the
-/// hand's marker before `right_hand_node` / `left_hand_node` do. No kit unit
-/// fills the block.
-fn h4_weapon_specific_marker(
-    reader: &TagReader,
-    unit: &TagFile,
-    weapon: &TagFile,
-    left_hand: bool,
-) -> Option<String> {
-    if reader.source.game() != Some(GameId::Halo4) {
-        return None;
-    }
-    let holder = holder_of(unit.root(), "weapon specific markers")?;
-    let (class, name) = (
-        string_id_in(weapon, "weapon class"),
-        string_id_in(weapon, "weapon name"),
-    );
-    let entry = elements(holder, "weapon specific markers")
-        .into_iter()
-        .find(|entry| {
-            entry.read_string_id("weapon class").unwrap_or_default() == class
-                && entry.read_string_id("weapon name").unwrap_or_default() == name
-        })?;
-    entry
-        .read_string_id(if left_hand {
-            "left hand marker"
-        } else {
-            "right hand marker"
-        })
-        .filter(|marker| !marker.is_empty())
-}
 
 /// `sub_88D990`, attaching a readied weapon: the unit's hand, to the unit's
 /// preferred gun marker if the weapon has one, or else its handle node.
@@ -60,7 +27,11 @@ pub(in crate::app::model_preview) fn attach_weapon(
     let render = model.root().read_tag_ref_path("render model")?;
     let render = reader.load(&render, "render_model", b"mode").ok()?;
     let attached = build_render_preview(&render).ok()?;
-    let hand = h4_weapon_specific_marker(reader, unit, &weapon, left_hand).unwrap_or_else(|| {
+    let rules = reader.rules();
+    let own_hand = rules
+        .weapon_hand_marker
+        .and_then(|marker| marker(unit, &weapon, left_hand));
+    let hand = own_hand.unwrap_or_else(|| {
         string_id_in(
             unit,
             if left_hand {
@@ -82,12 +53,7 @@ pub(in crate::app::model_preview) fn attach_weapon(
     };
     let parent = MarkerFrame::find(preview, &hand);
     let child = MarkerFrame::find(&attached, &grip);
-    // Reach's IK chains, and Halo 4's IK sets, reach for the held weapon's
-    // markers where they ride.
-    if matches!(
-        reader.source.game(),
-        Some(GameId::HaloReach | GameId::Halo4)
-    ) {
+    if rules.ik_markers_on_weapons {
         let place = |frame: &MarkerFrame| {
             (
                 frame.axes.map(|axis| attach_vector(&parent, &child, axis)),

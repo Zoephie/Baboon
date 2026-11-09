@@ -54,6 +54,39 @@ pub(in crate::app::model_preview) fn read_h2_features<
     super::super::weapons::attached::read_extension_weapons(cx, preview);
 }
 
+/// What a Halo 2 unit's `extension of parent` weapon (`cx`'s object) plays at
+/// the unit's markers: its particles, flares and lights, light volumes and
+/// contrails, under the name `cx` gives.
+pub(in crate::app::model_preview) fn read_h2_extension_weapon_features<
+    F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
+>(
+    cx: &LoadCx<'_, F>,
+    preview: &mut RenderModelPreview,
+) {
+    let LoadCx {
+        reader,
+        object: weapon,
+        owner,
+        markers,
+        frame,
+        name: within,
+    } = *cx;
+    let particles = super::super::particles::read_particles(reader, weapon, owner, markers, frame);
+    preview
+        .particles
+        .extend(named(particles, within).map(Arc::new));
+    let (flares, lights, gels) =
+        super::lights::read_h2_flares(reader, weapon, owner, markers, frame);
+    preview.h2.flares.extend(named(flares, within));
+    preview.h2.point_lights.extend(named(lights, within));
+    preview.h2.gel_lights.extend(named(gels, within));
+    let volumes =
+        super::light_volumes::read_h2_light_volumes(reader, weapon, owner, markers, frame);
+    preview.h2.light_volumes.extend(named(volumes, within));
+    let contrails = super::contrails::read_h2_contrails(reader, weapon, owner, markers, frame);
+    preview.h2.contrails.extend(named(contrails, within));
+}
+
 /// A Halo 2 object's own flares, lights, antennas, particles, light volumes,
 /// contrails, liquids, cloth and extension weapons.
 pub(in crate::app::model_preview) fn read_h2_object_features(

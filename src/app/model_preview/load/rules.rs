@@ -2,6 +2,8 @@
 //! folder defines its own, `load/games.rs` picks it by the kit's game, and the
 //! shared readers read its flags rather than naming a game.
 
+use blam_tags::TagFile;
+
 /// One game's choices, flag by flag.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct GameRules {
@@ -16,7 +18,18 @@ pub(crate) struct GameRules {
     /// Whether a variant's NONE instance group shows every instance, as Reach
     /// and Halo 4 (the 360's 0x8325C1B8) do.
     pub(crate) none_instance_takes_all: bool,
+    /// The hand marker a unit names for a weapon of its own, before its
+    /// `right_hand_node` / `left_hand_node`: Halo 4's `weapon specific
+    /// markers`.
+    pub(crate) weapon_hand_marker: Option<WeaponHandMarker>,
+    /// Whether the unit's IK reaches for its held weapon's markers where they
+    /// ride: Reach's IK chains and Halo 4's IK sets.
+    pub(crate) ik_markers_on_weapons: bool,
 }
+
+/// A unit's own hand marker for a weapon: the unit, the weapon, and whether
+/// it goes in the left hand.
+pub(crate) type WeaponHandMarker = fn(&TagFile, &TagFile, bool) -> Option<String>;
 
 impl GameRules {
     /// A game with none of its own: what the shared readers do unless told.
@@ -24,5 +37,7 @@ impl GameRules {
         unit_weapons: false,
         legacy_weapon_ik: true,
         none_instance_takes_all: false,
+        weapon_hand_marker: None,
+        ik_markers_on_weapons: false,
     };
 }

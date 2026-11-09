@@ -274,7 +274,8 @@ pub(super) fn accepts(graph: &[GraphEntry], class: &str, kind: &str) -> bool {
     })
 }
 
-pub(super) fn string_id_in(tag: &TagFile, name: &str) -> String {
+/// The string id `name` holds, wherever in `tag`'s object chain it is.
+pub(in crate::app::model_preview) fn string_id_in(tag: &TagFile, name: &str) -> String {
     holder_of(tag.root(), name)
         .and_then(|holder| holder.read_string_id(name))
         .unwrap_or_default()
