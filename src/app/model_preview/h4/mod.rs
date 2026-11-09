@@ -19,6 +19,7 @@ pub(in crate::app::model_preview) mod materials;
 pub(in crate::app::model_preview) mod object;
 pub(in crate::app::model_preview) mod pass_hooks;
 pub(in crate::app::model_preview) mod render;
+pub(in crate::app::model_preview) mod rules;
 pub(super) mod shadow;
 pub(in crate::app::model_preview) mod shadow_pass;
 pub(super) mod shield;

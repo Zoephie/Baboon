@@ -85,7 +85,6 @@ pub(in crate::app) use panel::{
 #[cfg(test)]
 use animation::PreviewAnimationPose;
 use animation::{ANIMATION_FRAME_RATE, animation_skinning_rows, armature_node_positions};
-use campaign_evolved::load_campaign_evolved_preview;
 use data::{MODEL_ERROR_FALLBACK_COLOR, NEXT_MODEL_GEOMETRY_ID, model_preview_data};
 pub(in crate::app) use data::{
     ModelErrorPoint, ModelErrorPrimitive, ModelErrorShape, ModelPreviewData, ModelPreviewLayer,

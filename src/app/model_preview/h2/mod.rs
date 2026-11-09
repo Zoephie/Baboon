@@ -16,6 +16,7 @@ pub(in crate::app::model_preview) mod overlays;
 pub(in crate::app::model_preview) mod particles;
 pub(in crate::app) mod prt;
 pub(in crate::app::model_preview) mod render;
+pub(in crate::app::model_preview) mod rules;
 pub(in crate::app::model_preview) mod shader;
 pub(in crate::app::model_preview) mod slot;
 

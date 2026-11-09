@@ -3,11 +3,42 @@
 
 use super::super::functions::TypeExporter;
 use super::super::particles::{OwnParticleSystem, ParticleMaterialReader, ParticleRules};
-use super::super::{GameId, ModelPreviewData, RenderModelPreview, TagEntry, TagFile, TagSource};
+use super::super::{
+    GameId, ModelPreviewData, RenderModelPreview, TagEntry, TagFile, TagSource,
+    is_object_family_group,
+};
 use super::jobs::PreviewLoadSettings;
 use super::object::ObjectLoad;
-use super::{TagReader, feature_into};
+use super::{GameRules, TagReader, feature_into};
 use std::sync::Arc;
+
+/// The kit's game's load rules: its own folder's.
+pub(in crate::app::model_preview) fn rules(game: Option<GameId>) -> &'static GameRules {
+    match game {
+        Some(GameId::HaloCe) => &super::super::ce::rules::RULES,
+        Some(GameId::Halo2) => &super::super::h2::rules::RULES,
+        Some(GameId::Halo3) => &super::super::h3::rules::RULES,
+        Some(GameId::Halo3Odst) => &super::super::h3::rules::ODST_RULES,
+        Some(GameId::HaloReach) => &super::super::reach::rules::RULES,
+        Some(GameId::Halo4) => &super::super::h4::rules::RULES,
+        Some(GameId::CampaignEvolved) => &super::super::campaign_evolved::rules::RULES,
+        _ => &GameRules::DEFAULT,
+    }
+}
+
+/// The game a model is previewed as: Halo CE's and Halo 2's by their tags'
+/// generation, the Halo 3 family's by the kit, which `Game::of` cannot tell
+/// apart.
+pub(super) fn game_of(
+    generation: blam_tags::game::Game,
+    source: Option<&TagSource>,
+) -> Option<GameId> {
+    match generation {
+        blam_tags::game::Game::Halo1 => Some(GameId::HaloCe),
+        blam_tags::game::Game::Halo2 => Some(GameId::Halo2),
+        blam_tags::game::Game::Halo3 => source.and_then(TagSource::game),
+    }
+}
 
 /// What `object`'s type exports to its functions, where its game's
 /// exporters are known: Halo 2's.
@@ -91,14 +122,38 @@ pub(super) fn add_overlay_shaders(model_tag: &TagFile, preview: &mut RenderModel
     super::super::h2::overlays::add_overlay_shaders(model_tag, preview);
 }
 
-/// A Halo CE object, which names its gbxmodel itself.
-pub(super) fn load_ce_object(
+/// An object whose game loads it its own way: a Halo CE object, which names
+/// its gbxmodel itself. `None` for any other tag.
+pub(super) fn load_own_object(
     model_tag: &TagFile,
     entry: &TagEntry,
     reader: Option<&TagReader>,
     settings: &PreviewLoadSettings,
-) -> Result<ModelPreviewData, String> {
-    super::super::ce::object::load_ce_object(model_tag, entry, reader, settings)
+) -> Option<Result<ModelPreviewData, String>> {
+    let object = is_object_family_group(
+        model_tag.header.group_tag,
+        reader.and_then(|reader| reader.source.game()),
+    );
+    (blam_tags::game::Game::of(model_tag) == blam_tags::game::Game::Halo1 && object)
+        .then(|| super::super::ce::object::load_ce_object(model_tag, entry, reader, settings))
+}
+
+/// A Halo: Campaign Evolved `.model`, which names no `render model`: its
+/// geometry is the UE5 SkeletalMeshes its `DA_MeshSynchronization` reaches,
+/// rebuilt as the cross-game `RenderModel` for the standard pipeline. `None`
+/// for any other tag.
+pub(super) fn load_unreal_model(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    reader: Option<&TagReader>,
+    settings: &PreviewLoadSettings,
+) -> Option<Result<ModelPreviewData, String>> {
+    super::super::campaign_evolved::load_campaign_evolved_preview(
+        model_tag,
+        entry,
+        reader,
+        settings.high_detail,
+    )
 }
 
 /// What each game's particles do differently.

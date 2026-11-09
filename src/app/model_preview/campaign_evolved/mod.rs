@@ -12,5 +12,6 @@ pub(in crate::app) use index::*;
 mod meshes;
 mod metahuman;
 mod packages;
+pub(in crate::app::model_preview) mod rules;
 #[cfg(test)]
 mod tests;

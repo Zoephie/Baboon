@@ -241,20 +241,21 @@ fn variant_instance_mask(
     groups: &[InstanceGroup],
     group: Option<usize>,
     placements: &[String],
-    reach: bool,
+    takes_all: bool,
 ) -> u128 {
     match group {
         Some(group) => instance_group_mask(groups, group, placements, 0),
-        None if reach => u128::MAX,
+        None if takes_all => u128::MAX,
         None => 0,
     }
 }
 
-/// What each variant chooses of `placements`, in the tag's order.
+/// What each variant chooses of `placements`, in the tag's order; a NONE
+/// group takes them all where `takes_all` (`GameRules::none_instance_takes_all`).
 pub(in crate::app::model_preview) fn read_variant_instances(
     tag: &TagFile,
     placements: &[String],
-    reach: bool,
+    takes_all: bool,
 ) -> Vec<u128> {
     let root = tag.root();
     let Some(variants) = root
@@ -287,7 +288,7 @@ pub(in crate::app::model_preview) fn read_variant_instances(
                 .element(index)
                 .and_then(|variant| variant.read_int_any("instance group"));
             let group = group.and_then(|group| usize::try_from(group).ok());
-            variant_instance_mask(&groups, group, placements, reach)
+            variant_instance_mask(&groups, group, placements, takes_all)
         })
         .collect()
 }

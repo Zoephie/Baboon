@@ -1,8 +1,8 @@
 //! Object tags: the model an object names, its features, its colours and functions, and the weapons a unit holds.
 
 use super::super::{
-    GameId, ModelPreviewData, RenderModelPreview, TagEntry, TagFile, TagNameIndex, TagSource,
-    object_default_variant, read_change_colors,
+    ModelPreviewData, RenderModelPreview, TagEntry, TagFile, TagNameIndex, object_default_variant,
+    read_change_colors,
 };
 use super::jobs::PreviewLoadSettings;
 use super::render_model::preview_model_tag;
@@ -37,19 +37,7 @@ pub(super) fn load_object(
         model,
     };
     object.read_features(&mut data, &mut notes);
-    let weapons_family = matches!(
-        &reader.source,
-        TagSource::LooseFolder {
-            game: Some(
-                GameId::Halo2
-                    | GameId::Halo3
-                    | GameId::Halo3Odst
-                    | GameId::HaloReach
-                    | GameId::Halo4
-            ),
-            ..
-        }
-    );
+    let weapons_family = reader.rules().unit_weapons;
     if weapons_family {
         object.attach_unit_weapons(&mut data, &mut notes, settings);
     }
@@ -116,10 +104,7 @@ impl ObjectLoad<'_> {
             object: model_tag,
             ..
         } = *self;
-        // Halo 4's kit graphs all use data-driven animation, which places the
-        // hands by IK sets and chains (`biped_postprocess_node_matrices`,
-        // X360 0x84B1A738), never the legacy `weapon ik`.
-        let legacy_weapon_ik = reader.source.game() != Some(GameId::Halo4);
+        let legacy_weapon_ik = reader.rules().legacy_weapon_ik;
         let known = settings.equippable.as_deref();
         let is_biped = model_tag.header.group_tag == u32::from_be_bytes(*b"bipd");
         let weapons = feature(notes, "the unit's weapons", || {

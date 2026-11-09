@@ -5,10 +5,7 @@ use super::common::geometry::{Overflow, VertexBase};
 use super::common::marker::{MarkerFrame, attach_point, attach_vector};
 use super::dx9::passes::h2_prt_lights;
 use super::h2::prt::read_h2_prt;
-use super::{
-    GameId, ModelPreviewData, TagEntry, TagFile, TagNameIndex, TagSource, is_object_family_group,
-    load_campaign_evolved_preview,
-};
+use super::{ModelPreviewData, TagEntry, TagFile, TagNameIndex, TagSource};
 use model::load_model;
 use std::sync::Arc;
 
@@ -32,8 +29,10 @@ mod render_model;
 pub(in crate::app) use render_model::build_render_preview;
 pub(in crate::app::model_preview) use render_model::*;
 mod games;
-pub(in crate::app::model_preview) use games::type_exports;
-use games::{add_overlay_shaders, load_ce_object};
+use games::{add_overlay_shaders, load_own_object, load_unreal_model};
+pub(in crate::app::model_preview) use games::{rules, type_exports};
+mod rules;
+pub(in crate::app::model_preview) use rules::GameRules;
 mod object;
 pub(in crate::app::model_preview) use object::*;
 mod model;
@@ -53,11 +52,7 @@ pub(super) fn load_model_preview(
     let reader = reader.as_ref();
     let mut data = load_tag_preview(model_tag, entry, names, reader, settings)?;
     let generation = blam_tags::game::Game::of(model_tag);
-    let game = match generation {
-        blam_tags::game::Game::Halo1 => Some(GameId::HaloCe),
-        blam_tags::game::Game::Halo2 => Some(GameId::Halo2),
-        blam_tags::game::Game::Halo3 => source.and_then(TagSource::game),
-    };
+    let game = games::game_of(generation, source);
     // Just built: no other handle shares it, so this does not copy.
     let preview = Arc::make_mut(&mut data.preview);
     preview.game = game;
@@ -85,15 +80,10 @@ fn load_tag_preview(
     if matches!(&group, b"mode" | b"mod2") {
         return load_render_tag(model_tag, entry);
     }
-    if blam_tags::game::Game::of(model_tag) == blam_tags::game::Game::Halo1
-        && is_object_family_group(
-            model_tag.header.group_tag,
-            reader.and_then(|reader| reader.source.game()),
-        )
-    {
-        return load_ce_object(model_tag, entry, reader, settings);
+    if let Some(result) = load_own_object(model_tag, entry, reader, settings) {
+        return result;
     }
-    if is_object_family_group(
+    if super::is_object_family_group(
         model_tag.header.group_tag,
         reader.and_then(|reader| reader.source.game()),
     ) {
@@ -108,12 +98,7 @@ fn load_tag_preview(
     if &group == b"scnr" {
         return load_scenario(model_tag, entry, reader, settings);
     }
-    // Halo: Campaign Evolved — the `.model` (hlmt) has no `render model` ref;
-    // geometry lives in UE5 SkeletalMeshes reached via `DA_MeshSynchronization`.
-    // Reconstruct the cross-game RenderModel and feed the standard pipeline.
-    if let Some(result) =
-        load_campaign_evolved_preview(model_tag, entry, reader, settings.high_detail)
-    {
+    if let Some(result) = load_unreal_model(model_tag, entry, reader, settings) {
         return result;
     }
     load_model(model_tag, entry, names, reader)

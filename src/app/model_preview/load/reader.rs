@@ -38,6 +38,11 @@ impl TagReader {
         }
     }
 
+    /// The kit's game's load rules.
+    pub(in crate::app::model_preview) fn rules(&self) -> &'static super::GameRules {
+        super::rules(self.source.game())
+    }
+
     /// A render method's definition, parsed once per load.
     pub(in crate::app::model_preview) fn render_method_definition(
         &self,

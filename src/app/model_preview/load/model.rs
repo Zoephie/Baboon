@@ -1,9 +1,9 @@
 //! Model tags: the render model a `.model` names, its variants and instance groups, and its overlay shaders.
 
 use super::super::{
-    GameId, ModelPreviewData, RenderModelPreview, TagEntry, TagEntryLocation, TagFile,
-    TagNameIndex, TagSource, file_entry_key, group_tag_to_extension, model_preview_data,
-    read_entry, resolve_tag_path,
+    ModelPreviewData, RenderModelPreview, TagEntry, TagEntryLocation, TagFile, TagNameIndex,
+    TagSource, file_entry_key, group_tag_to_extension, model_preview_data, read_entry,
+    resolve_tag_path,
 };
 use super::render_model::build_render_preview;
 use super::variants::{read_model_variants, read_variant_instances};
@@ -29,15 +29,9 @@ pub(super) fn load_model(
     // toggle would rebuild the merge each time. `maybe_request_model_overlays`
     // builds them once on a worker after this load lands, and the toggles are
     // draw-time filters from then on.
-    // Halo 4 shows every instance for a NONE group as Reach does (the 360's
-    // 0x8325C1B8).
-    let reach = reader.is_some_and(|reader| {
-        matches!(
-            reader.source.game(),
-            Some(GameId::HaloReach | GameId::Halo4)
-        )
-    });
-    preview.instances.variants = read_variant_instances(model_tag, &preview.instances.names, reach);
+    let takes_all = reader.is_some_and(|reader| reader.rules().none_instance_takes_all);
+    preview.instances.variants =
+        read_variant_instances(model_tag, &preview.instances.names, takes_all);
     let mut data = model_preview_data(
         render_entry.key,
         normalized,
@@ -47,21 +41,7 @@ pub(super) fn load_model(
     // The `.model` opened itself lists what its variants attach. An object
     // reaches here for its `.model` and attaches them once it has read its own.
     let opened = entry.group_tag == u32::from_be_bytes(*b"hlmt");
-    let reader = reader.filter(|reader| {
-        matches!(
-            &reader.source,
-            TagSource::LooseFolder {
-                game: Some(
-                    GameId::Halo2
-                        | GameId::Halo3
-                        | GameId::Halo3Odst
-                        | GameId::HaloReach
-                        | GameId::Halo4
-                ),
-                ..
-            }
-        )
-    });
+    let reader = reader.filter(|reader| reader.rules().unit_weapons);
     if let Some(reader) = reader.filter(|_| opened) {
         let preview = std::sync::Arc::make_mut(&mut data.preview);
         let variants = &mut data.variants;

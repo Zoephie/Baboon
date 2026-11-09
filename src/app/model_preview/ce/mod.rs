@@ -18,6 +18,7 @@ pub(super) mod panel;
 pub(super) mod particle_systems;
 pub(super) mod random;
 pub(in crate::app::model_preview) mod render;
+pub(in crate::app::model_preview) mod rules;
 pub(super) mod shaders;
 pub(in crate::app::model_preview) mod slot;
 pub(super) mod sprite_sheet;
