@@ -27,7 +27,7 @@ pub(in crate::app::model_preview) struct ParticleRules {
     /// Reach and Halo 4: the sprite adds its constant at illumination.
     pub(in crate::app::model_preview) adds_at_illum: bool,
     /// Reach and Halo 4: the look's own game time, lighting, exposure and
-    /// shapes (stored as `H3ParticleLook::reach`).
+    /// shapes (stored as `ParticleLook::reach`).
     pub(in crate::app::model_preview) reach_look: bool,
     /// Reach and Halo 4: a card's acceleration lerps between its ends.
     pub(in crate::app::model_preview) card_lerps: bool,
@@ -43,7 +43,7 @@ pub(in crate::app::model_preview) struct ParticleRules {
 }
 
 /// A system's look and its emitters.
-pub(in crate::app::model_preview) type SystemParts = (Arc<H3ParticleLook>, Vec<Arc<H3Emitter>>);
+pub(in crate::app::model_preview) type SystemParts = (Arc<ParticleLook>, Vec<Arc<H3Emitter>>);
 
 /// A game whose particle systems read their own way.
 #[derive(Debug, Clone, Copy)]
@@ -140,7 +140,7 @@ const SPEED_AT_REST: f32 = 0.25;
 
 /// A `particle_physics` entry, in the order `update_particles` runs them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app::model_preview) enum H3ParticleController {
+pub(in crate::app::model_preview) enum ParticleController {
     Physics,
     Collider,
     Flock,
@@ -149,7 +149,7 @@ pub(in crate::app::model_preview) enum H3ParticleController {
 /// Where an emitter's particles are updated, as tool's `effect_postprocess`
 /// decides it (`c_particle_emitter_definition::decide_whether_cpu_or_gpu`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app::model_preview) enum H3ParticleUpdate {
+pub(in crate::app::model_preview) enum ParticleUpdate {
     /// `c_particle_emitter::frame_advance`, with every movement.
     Cpu,
     /// `particle_update.hlsl`: no collision, and physics once per emitter.
@@ -168,16 +168,16 @@ pub(super) fn particle_update(
     system_flagged: impl Fn(&str) -> bool,
     any_attachments: bool,
     movement_flagged: impl Fn(&str) -> bool,
-) -> (H3ParticleUpdate, bool) {
+) -> (ParticleUpdate, bool) {
     let plain_movement = !(collides(&movement_flagged) || movement_flagged("swarm") || movement_flagged("wind"));
     if system_flagged("force cpu updating") {
-        (H3ParticleUpdate::Cpu, false)
+        (ParticleUpdate::Cpu, false)
     } else if system_flagged("force gpu updating") {
-        (H3ParticleUpdate::Gpu, false)
+        (ParticleUpdate::Gpu, false)
     } else if !any_attachments && plain_movement {
-        (H3ParticleUpdate::Gpu, true)
+        (ParticleUpdate::Gpu, true)
     } else {
-        (H3ParticleUpdate::Cpu, !any_attachments)
+        (ParticleUpdate::Cpu, !any_attachments)
     }
 }
 
@@ -185,11 +185,11 @@ pub(super) fn particle_update(
 /// keeps one for each kind its own flags name (adding any the tag lacks) and
 /// sorts them by `sub_140A846A0`'s table: physics, wind, swarm, collider. The
 /// preview has no wind.
-pub(super) fn flagged_controllers(flagged: impl Fn(&str) -> bool) -> Vec<H3ParticleController> {
+pub(super) fn flagged_controllers(flagged: impl Fn(&str) -> bool) -> Vec<ParticleController> {
     [
-        (flagged("physics"), H3ParticleController::Physics),
-        (flagged("swarm"), H3ParticleController::Flock),
-        (collides(&flagged), H3ParticleController::Collider),
+        (flagged("physics"), ParticleController::Physics),
+        (flagged("swarm"), ParticleController::Flock),
+        (collides(&flagged), ParticleController::Collider),
     ]
     .into_iter()
     .filter_map(|(on, controller)| on.then_some(controller))
@@ -220,7 +220,7 @@ pub(super) fn movement_parameter(
     kind: &str,
     id: i128,
     seeds: &mut SeedAllocator,
-) -> Option<H3ParticleProperty> {
+) -> Option<ParticleProperty> {
     movement_parameter_or(reader, movement, kind, id, 1.0, seeds)
 }
 
@@ -232,8 +232,8 @@ pub(super) fn movement_parameter_or(
     id: i128,
     default: f32,
     seeds: &mut SeedAllocator,
-) -> Option<H3ParticleProperty> {
-    chained_parameter(reader, movement, kind, id, seeds, MOST_TEMPLATES).or_else(|| H3ParticleProperty::fixed(default))
+) -> Option<ParticleProperty> {
+    chained_parameter(reader, movement, kind, id, seeds, MOST_TEMPLATES).or_else(|| ParticleProperty::fixed(default))
 }
 
 /// How deep a template chain is followed, against one that names itself.
@@ -246,12 +246,12 @@ fn chained_parameter(
     id: i128,
     seeds: &mut SeedAllocator,
     depth: usize,
-) -> Option<H3ParticleProperty> {
+) -> Option<ParticleProperty> {
     let of_kind = |entry: &TagStruct<'_>| entry.read_enum_option("type").as_deref() == Some(kind);
     let entry = elements(holder, "movements").into_iter().find(of_kind);
     let parameters = entry.map(|entry| elements(entry, "parameters")).unwrap_or_default();
     if let Some(found) = parameters.into_iter().find(|parameter| parameter.read_int_any("parameter id") == Some(id)) {
-        return H3ParticleProperty::named(found, "property", seeds);
+        return ParticleProperty::named(found, "property", seeds);
     }
     let path = holder.read_tag_ref_path("template").filter(|path| !path.is_empty() && depth > 0)?;
     let template = reader.load(&path, "particle_physics", b"pmov").ok()?;

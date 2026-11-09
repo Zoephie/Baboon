@@ -106,7 +106,7 @@ impl H3EmissionShape {
 
 /// `e_particle_attachment_type`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app::model_preview) enum H3ParticleTrigger {
+pub(in crate::app::model_preview) enum ParticleTrigger {
     Birth,
     Death,
     Collision,
@@ -117,14 +117,14 @@ pub(in crate::app::model_preview) enum H3ParticleTrigger {
 
 /// `emission_axis_enum`, for what turns about an axis of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app::model_preview) enum H3ParticleAxis {
+pub(in crate::app::model_preview) enum ParticleAxis {
     Constant,
     Cone,
     Disc,
     Globe,
 }
 
-impl H3ParticleAxis {
+impl ParticleAxis {
     pub(in crate::app::model_preview) fn named(name: &str) -> Self {
         match name {
             "cone" => Self::Cone,
@@ -159,7 +159,7 @@ impl H3ParticleAxis {
 
 #[derive(Debug)]
 pub(in crate::app::model_preview) struct H3Emitter {
-    pub(in crate::app::model_preview) update: H3ParticleUpdate,
+    pub(in crate::app::model_preview) update: ParticleUpdate,
     /// On the card, Reach's and Halo 4's self-acceleration is a straight lerp
     /// between its ends (Reach's `map_to_vector3d_range` has its slerp
     /// commented out; Halo 4's `ParticleMapToVector3dLerp`); Halo 3's and
@@ -171,33 +171,33 @@ pub(in crate::app::model_preview) struct H3Emitter {
     /// make one: Halo 2's `c_particle_emitter::pulse` (0x68d160) spawns while
     /// `count + 0.0001 >= 1`; Halo 3's floors it.
     pub(in crate::app::model_preview) spawn_slack: f32,
-    pub(in crate::app::model_preview) controllers: Vec<H3ParticleController>,
+    pub(in crate::app::model_preview) controllers: Vec<ParticleController>,
     pub(in crate::app::model_preview) shape: H3EmissionShape,
     pub(in crate::app::model_preview) points: Vec<H3CustomPoint>,
     pub(in crate::app::model_preview) scroll: [f32; 2],
-    pub(in crate::app::model_preview) axis: H3ParticleAxis,
+    pub(in crate::app::model_preview) axis: ParticleAxis,
     pub(in crate::app::model_preview) reference_axis: usize,
-    pub(in crate::app::model_preview) axis_angle: H3ParticleProperty,
-    pub(in crate::app::model_preview) offset: H3ParticleProperty,
-    pub(in crate::app::model_preview) direction: H3ParticleProperty,
-    pub(in crate::app::model_preview) radius: H3ParticleProperty,
-    pub(in crate::app::model_preview) angle: H3ParticleProperty,
-    pub(in crate::app::model_preview) starting: H3ParticleProperty,
-    pub(in crate::app::model_preview) most: H3ParticleProperty,
-    pub(in crate::app::model_preview) rate: H3ParticleProperty,
-    pub(in crate::app::model_preview) lifespan: H3ParticleProperty,
-    pub(in crate::app::model_preview) acceleration: H3ParticleProperty,
-    pub(in crate::app::model_preview) speed: H3ParticleProperty,
-    pub(in crate::app::model_preview) rotation: H3ParticleProperty,
-    pub(in crate::app::model_preview) rotation_rate: H3ParticleProperty,
-    pub(in crate::app::model_preview) size: H3ParticleProperty,
-    pub(in crate::app::model_preview) scale: H3ParticleProperty,
-    pub(in crate::app::model_preview) tint: H3ParticleProperty,
-    pub(in crate::app::model_preview) alpha: H3ParticleProperty,
-    pub(in crate::app::model_preview) black_point: H3ParticleProperty,
-    pub(in crate::app::model_preview) physics: Option<H3ParticlePhysics>,
-    pub(in crate::app::model_preview) flock: Option<H3ParticleFlock>,
-    pub(in crate::app::model_preview) collider: Option<H3ParticleCollider>,
+    pub(in crate::app::model_preview) axis_angle: ParticleProperty,
+    pub(in crate::app::model_preview) offset: ParticleProperty,
+    pub(in crate::app::model_preview) direction: ParticleProperty,
+    pub(in crate::app::model_preview) radius: ParticleProperty,
+    pub(in crate::app::model_preview) angle: ParticleProperty,
+    pub(in crate::app::model_preview) starting: ParticleProperty,
+    pub(in crate::app::model_preview) most: ParticleProperty,
+    pub(in crate::app::model_preview) rate: ParticleProperty,
+    pub(in crate::app::model_preview) lifespan: ParticleProperty,
+    pub(in crate::app::model_preview) acceleration: ParticleProperty,
+    pub(in crate::app::model_preview) speed: ParticleProperty,
+    pub(in crate::app::model_preview) rotation: ParticleProperty,
+    pub(in crate::app::model_preview) rotation_rate: ParticleProperty,
+    pub(in crate::app::model_preview) size: ParticleProperty,
+    pub(in crate::app::model_preview) scale: ParticleProperty,
+    pub(in crate::app::model_preview) tint: ParticleProperty,
+    pub(in crate::app::model_preview) alpha: ParticleProperty,
+    pub(in crate::app::model_preview) black_point: ParticleProperty,
+    pub(in crate::app::model_preview) physics: Option<ParticlePhysics>,
+    pub(in crate::app::model_preview) flock: Option<ParticleFlock>,
+    pub(in crate::app::model_preview) collider: Option<ParticleCollider>,
     /// Halo 2's `looping particle`: another only when none are left.
     pub(in crate::app::model_preview) one_at_a_time: bool,
     /// Halo 2's `persistent particle`: age comes round, and nothing dies of it.
@@ -212,7 +212,7 @@ pub(in crate::app::model_preview) struct H3Emitter {
     /// Reach's `axis scale`; ones elsewhere.
     pub(in crate::app::model_preview) axis_scale: [f32; 3],
     /// Reach's `turbulence` movement, which only the card runs.
-    pub(in crate::app::model_preview) turbulence: Option<H3ParticleTurbulence>,
+    pub(in crate::app::model_preview) turbulence: Option<ParticleTurbulence>,
     /// Halo 4's own update terms.
     pub(in crate::app::model_preview) h4: Option<H4EmitterTerms>,
 }
@@ -226,8 +226,8 @@ pub(in crate::app::model_preview) struct H4EmitterTerms {
     pub(super) live_forever: bool,
     pub(super) disable_velocity: bool,
     pub(super) size_scale: f32,
-    pub(super) scale: Option<[H3ParticleProperty; 2]>,
-    pub(super) white_point: Option<H3ParticleProperty>,
+    pub(super) scale: Option<[ParticleProperty; 2]>,
+    pub(super) white_point: Option<ParticleProperty>,
 }
 
 impl H4EmitterTerms {
@@ -247,7 +247,7 @@ impl H4EmitterTerms {
 
     /// `m_size`'s and `m_aspect`'s factors: scale y and the size scale, and
     /// scale x over scale y.
-    pub(super) fn size_and_aspect(&self, state: &H3ParticleState) -> [f32; 2] {
+    pub(super) fn size_and_aspect(&self, state: &ParticleState) -> [f32; 2] {
         let [x, y] = self.scale.as_ref().map_or([1.0; 2], |[x, y]| [x.scalar(state), y.scalar(state)]);
         let aspect = if y != 0.0 { x / y } else { 1.0 };
         [y * self.size_scale, aspect]
@@ -261,14 +261,14 @@ fn read_physics(
     emitter: TagStruct<'_>,
     flagged: impl Fn(&str) -> bool,
     seeds: &mut SeedAllocator,
-) -> Option<H3ParticlePhysics> {
+) -> Option<ParticlePhysics> {
     let movement = emitter.descend("particle movement").filter(|_| flagged("physics"))?;
     let mut parameter = |id: i128| movement_parameter(reader, movement, "physics", id, seeds);
-    Some(H3ParticlePhysics { gravity: parameter(0), air_friction: parameter(1), rotational_friction: parameter(2) })
+    Some(ParticlePhysics { gravity: parameter(0), air_friction: parameter(1), rotational_friction: parameter(2) })
 }
 
 /// A Halo 2 `particle_physics`' physics movement, its own or its template's.
-pub(in crate::app::model_preview) fn read_movement(reader: &TagReader, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticlePhysics> {
+pub(in crate::app::model_preview) fn read_movement(reader: &TagReader, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<ParticlePhysics> {
     let template = movement
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
@@ -279,9 +279,9 @@ pub(in crate::app::model_preview) fn read_movement(reader: &TagReader, movement:
     let by_id = |id: i128, seeds: &mut SeedAllocator| {
         let parameters = elements(physics, "parameters");
         let found = parameters.into_iter().find(|parameter| parameter.read_int_any("parameter id") == Some(id))?;
-        H3ParticleProperty::named(found, "property", seeds)
+        ParticleProperty::named(found, "property", seeds)
     };
-    Some(H3ParticlePhysics {
+    Some(ParticlePhysics {
         gravity: by_id(0, seeds),
         air_friction: by_id(1, seeds),
         rotational_friction: by_id(2, seeds),
@@ -329,7 +329,7 @@ pub(super) fn read_emitter(
     reader: &TagReader,
     emitter: TagStruct<'_>,
     system_flagged: impl Fn(&str) -> bool,
-    look: &H3ParticleLook,
+    look: &ParticleLook,
     size_scale: f32,
 ) -> Option<H3Emitter> {
     // Halo 4 seeds and moves as Reach does, with terms of its own.
@@ -397,7 +397,7 @@ pub(super) fn read_emitter(
         card_lerps: rules.card_lerps,
         card_at_rest,
         spawn_slack: 0.0,
-        axis: H3ParticleAxis::named(&emitter.read_enum_option("particle axis (for models)").unwrap_or_default()),
+        axis: ParticleAxis::named(&emitter.read_enum_option("particle axis (for models)").unwrap_or_default()),
         reference_axis: match emitter.read_enum_option("particle reference axis").as_deref() {
             Some("y") => 1,
             Some("z") => 2,
@@ -419,7 +419,7 @@ pub(super) fn read_emitter(
         turbulence,
         h4: rules.h4_emitter_terms.then(|| {
             // Read past Reach's allocation [inferred: their seeds follow].
-            let property = |name: &str| emitter.descend(name).and_then(|holder| H3ParticleProperty::unallocated(holder));
+            let property = |name: &str| emitter.descend(name).and_then(|holder| ParticleProperty::unallocated(holder));
             let scale = property("particle scale x").zip(property("particle scale y")).map(|(x, y)| [x, y]);
             H4EmitterTerms {
                 live_forever,

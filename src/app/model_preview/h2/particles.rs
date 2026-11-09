@@ -37,7 +37,7 @@ pub(in crate::app::model_preview) fn h2_baked_lod(raw: [f32; 4], any_camera: boo
 }
 
 /// A Halo 2 `particle_physics`' movements, its own or its template's.
-fn h2_controllers(reader: &TagReader, movement: TagStruct<'_>) -> Vec<H3ParticleController> {
+fn h2_controllers(reader: &TagReader, movement: TagStruct<'_>) -> Vec<ParticleController> {
     let template = movement
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
@@ -47,8 +47,8 @@ fn h2_controllers(reader: &TagReader, movement: TagStruct<'_>) -> Vec<H3Particle
     movements
         .into_iter()
         .filter_map(|entry| match entry.read_enum_option("type").as_deref() {
-            Some("physics") => Some(H3ParticleController::Physics),
-            Some("collider") => Some(H3ParticleController::Collider),
+            Some("physics") => Some(ParticleController::Physics),
+            Some("collider") => Some(ParticleController::Collider),
             _ => None,
         })
         .collect()
@@ -81,8 +81,8 @@ fn read_h2_frames(tag: &TagFile, first: usize) -> (Vec<[f32; 4]>, [f32; 4]) {
 
 /// `effect_shader_*`'s pixel stage and blend, by the template that names the
 /// pass, by name alone: the distortion one lives under `particle\` too.
-fn h2_particle_pass(template: &str) -> Option<(H3ParticleAlbedo, H3Blend, bool)> {
-    use H3ParticleAlbedo::{Diffuse, H2Distortion, H2MultiplyAdd, H2Tint};
+fn h2_particle_pass(template: &str) -> Option<(ParticleAlbedo, H3Blend, bool)> {
+    use ParticleAlbedo::{Diffuse, H2Distortion, H2MultiplyAdd, H2Tint};
     Some(match template.rsplit(['\\', '/']).next().unwrap_or_default() {
         "particle_additive" => (Diffuse, H3Blend::AddSrcTimesSrcAlpha, false),
         "particle_additive_tint" => (H2Tint, H3Blend::AddSrcTimesSrcAlpha, false),
@@ -103,7 +103,7 @@ pub(in crate::app::model_preview) fn read_h2_system_parts(
     reader: &TagReader,
     system: TagStruct<'_>,
     path: &str,
-) -> Option<(Arc<H3ParticleLook>, Vec<Arc<H3Emitter>>)> {
+) -> Option<(Arc<ParticleLook>, Vec<Arc<H3Emitter>>)> {
     let flagged = |wanted: &str| has_flag(system, "flags", wanted);
     let (look, scale, rotation) = read_h2_look(reader, path)?;
     let read = |emitter: &TagStruct<'_>| read_h2_emitter(reader, *emitter, scale.clone(), rotation.clone(), &flagged);
@@ -115,14 +115,14 @@ pub(in crate::app::model_preview) fn h2_baked_lod_of(raw: [f32; 4], any_camera: 
     h2_baked_lod(raw, any_camera, rates)
 }
 
-pub(in crate::app::model_preview) fn read_h2_look(reader: &TagReader, path: &str) -> Option<(H3ParticleLook, H3ParticleProperty, H3ParticleProperty)> {
+pub(in crate::app::model_preview) fn read_h2_look(reader: &TagReader, path: &str) -> Option<(ParticleLook, ParticleProperty, ParticleProperty)> {
     let tag = reader.load(path, "particle", b"prt3").ok()?;
     let root = tag.root();
     let template = root.read_tag_ref_path("shader template")?;
     let (albedo, blend, alpha_test) = h2_particle_pass(template.trim_end_matches(".shader_template"))?;
     let parameters = elements(root, "shader parameters");
     let parameter = |name: &str| parameters.iter().find(|entry| entry.read_string_id("name").as_deref() == Some(name));
-    let distorts = albedo == H3ParticleAlbedo::H2Distortion;
+    let distorts = albedo == ParticleAlbedo::H2Distortion;
     let map_name = if distorts { "bump_map" } else { "alpha_map_texture" };
     let map = parameter(map_name)?.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
     let plate = reader.load(&map, "bitmap", b"bitm").ok()?;
@@ -154,10 +154,10 @@ pub(in crate::app::model_preview) fn read_h2_look(reader: &TagReader, path: &str
     };
     let mut seeds = SeedAllocator::default();
     let billboard = H3Billboard::named(&root.read_enum_option("particle billboard style").unwrap_or_default());
-    let mut property = |name: &str| H3ParticleProperty::named(root, name, &mut seeds);
+    let mut property = |name: &str| ParticleProperty::named(root, name, &mut seeds);
     let (color, alpha, scale, rotation, frame) =
         (property("color")?, property("alpha")?, property("scale")?, property("rotation")?, property("frame index")?);
-    let look = H3ParticleLook {
+    let look = ParticleLook {
         billboard,
         still_moves: false,
         flip_u: flagged("random u mirror"),
@@ -175,7 +175,7 @@ pub(in crate::app::model_preview) fn read_h2_look(reader: &TagReader, path: &str
         // a collision's where it first struck (`sub_53DF20`). A material effect
         // needs the surface's material, which the preview's ground has none
         // of, and a sound draws nothing.
-        attachments: [("death effect", H3ParticleTrigger::Death), ("collision effect", H3ParticleTrigger::Collision)]
+        attachments: [("death effect", ParticleTrigger::Death), ("collision effect", ParticleTrigger::Collision)]
             .into_iter()
             .filter_map(|(field, trigger)| {
                 let (group, path) = root.read_tag_ref_with_group(field)?;
@@ -194,13 +194,13 @@ pub(in crate::app::model_preview) fn read_h2_look(reader: &TagReader, path: &str
         corner,
         frames,
         sequences,
-        aspect: H3ParticleProperty::fixed(1.0)?,
+        aspect: ParticleProperty::fixed(1.0)?,
         color,
-        intensity: H3ParticleProperty::fixed(1.0)?,
+        intensity: ParticleProperty::fixed(1.0)?,
         alpha,
         frame,
-        rate: H3ParticleProperty::fixed(0.0)?,
-        palette: H3ParticleProperty::fixed(0.0)?,
+        rate: ParticleProperty::fixed(0.0)?,
+        palette: ParticleProperty::fixed(0.0)?,
         shader: Arc::new(shader),
         h4: None,
         exposed: false,
@@ -216,13 +216,13 @@ pub(in crate::app::model_preview) fn read_h2_look(reader: &TagReader, path: &str
 pub(in crate::app::model_preview) fn read_h2_emitter(
     reader: &TagReader,
     emitter: TagStruct<'_>,
-    scale: H3ParticleProperty,
-    rotation: H3ParticleProperty,
+    scale: ParticleProperty,
+    rotation: ParticleProperty,
     flagged: &impl Fn(&str) -> bool,
 ) -> Option<H3Emitter> {
     let mut seeds = SeedAllocator::default();
     let shape = H3EmissionShape::named(&emitter.read_enum_option("emission shape").unwrap_or_default())?;
-    let mut property = |name: &str| H3ParticleProperty::named(emitter, name, &mut seeds);
+    let mut property = |name: &str| ParticleProperty::named(emitter, name, &mut seeds);
     let (radius, angle, rate, lifespan) = (
         property("emission radius")?,
         property("emission angle")?,
@@ -251,14 +251,14 @@ pub(in crate::app::model_preview) fn read_h2_emitter(
     let controllers = controllers
         .into_iter()
         .filter(|controller| match controller {
-            H3ParticleController::Physics => physics.is_some(),
-            H3ParticleController::Collider => collider.is_some(),
-            H3ParticleController::Flock => false,
+            ParticleController::Physics => physics.is_some(),
+            ParticleController::Collider => collider.is_some(),
+            ParticleController::Flock => false,
         })
         .collect();
     Some(H3Emitter {
         h4: None,
-        update: H3ParticleUpdate::Cpu,
+        update: ParticleUpdate::Cpu,
         card_lerps: false,
         card_at_rest: false,
         spawn_slack: 0.0001,
@@ -266,18 +266,18 @@ pub(in crate::app::model_preview) fn read_h2_emitter(
         shape,
         points: Vec::new(),
         scroll: [0.0; 2],
-        axis: H3ParticleAxis::named(""),
+        axis: ParticleAxis::named(""),
         reference_axis: 0,
-        axis_angle: H3ParticleProperty::fixed(0.0)?,
-        offset: H3ParticleProperty::fixed_vector([offset.x, offset.y, offset.z])?,
-        direction: H3ParticleProperty::fixed_vector([cos_yaw * cos_pitch, sin_yaw * cos_pitch, sin_pitch])?,
+        axis_angle: ParticleProperty::fixed(0.0)?,
+        offset: ParticleProperty::fixed_vector([offset.x, offset.y, offset.z])?,
+        direction: ParticleProperty::fixed_vector([cos_yaw * cos_pitch, sin_yaw * cos_pitch, sin_pitch])?,
         radius,
         angle,
-        starting: H3ParticleProperty::fixed(0.0)?,
-        most: H3ParticleProperty::fixed(0.0)?,
+        starting: ParticleProperty::fixed(0.0)?,
+        most: ParticleProperty::fixed(0.0)?,
         rate,
         lifespan,
-        acceleration: H3ParticleProperty::fixed_vector([0.0; 3])?,
+        acceleration: ParticleProperty::fixed_vector([0.0; 3])?,
         speed,
         rotation,
         rotation_rate,
@@ -285,7 +285,7 @@ pub(in crate::app::model_preview) fn read_h2_emitter(
         scale,
         tint,
         alpha,
-        black_point: H3ParticleProperty::fixed(0.0)?,
+        black_point: ParticleProperty::fixed(0.0)?,
         physics,
         flock: None,
         collider,
@@ -306,10 +306,10 @@ mod tests {
     #[test]
     fn halo_2_passes_come_from_their_templates_and_distortion_has_none() {
         let pass = |name: &str| h2_particle_pass(&format!("shaders\\shader_templates\\transparent\\{name}"));
-        assert_eq!(pass("particle_additive"), Some((H3ParticleAlbedo::Diffuse, H3Blend::AddSrcTimesSrcAlpha, false)));
-        assert_eq!(pass("particle_alpha_blend_tint"), Some((H3ParticleAlbedo::H2Tint, H3Blend::AlphaBlend, false)));
-        assert_eq!(pass("particle_alpha_multiply_add"), Some((H3ParticleAlbedo::H2MultiplyAdd, H3Blend::PreMultiplied, false)));
-        assert_eq!(pass("particle_alpha_blend_distortion"), Some((H3ParticleAlbedo::H2Distortion, H3Blend::AlphaBlend, false)));
+        assert_eq!(pass("particle_additive"), Some((ParticleAlbedo::Diffuse, H3Blend::AddSrcTimesSrcAlpha, false)));
+        assert_eq!(pass("particle_alpha_blend_tint"), Some((ParticleAlbedo::H2Tint, H3Blend::AlphaBlend, false)));
+        assert_eq!(pass("particle_alpha_multiply_add"), Some((ParticleAlbedo::H2MultiplyAdd, H3Blend::PreMultiplied, false)));
+        assert_eq!(pass("particle_alpha_blend_distortion"), Some((ParticleAlbedo::H2Distortion, H3Blend::AlphaBlend, false)));
     }
 
     #[test]

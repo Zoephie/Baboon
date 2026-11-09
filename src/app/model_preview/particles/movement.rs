@@ -4,22 +4,22 @@ use super::*;
 
 /// `set_shader_update_state`'s three, each off without a physics controller.
 #[derive(Debug)]
-pub(in crate::app::model_preview) struct H3ParticleFlock {
-    separation_distance: H3ParticleProperty,
-    separation_weight: H3ParticleProperty,
-    cohesion_distance: H3ParticleProperty,
-    cohesion_weight: H3ParticleProperty,
-    alignment_weight: H3ParticleProperty,
-    minimum_velocity: H3ParticleProperty,
-    maximum_velocity: H3ParticleProperty,
-    maximum_acceleration: H3ParticleProperty,
+pub(in crate::app::model_preview) struct ParticleFlock {
+    separation_distance: ParticleProperty,
+    separation_weight: ParticleProperty,
+    cohesion_distance: ParticleProperty,
+    cohesion_weight: ParticleProperty,
+    alignment_weight: ParticleProperty,
+    minimum_velocity: ParticleProperty,
+    maximum_velocity: ParticleProperty,
+    maximum_acceleration: ParticleProperty,
 }
 
 /// `update_particles_collider`'s two, against the preview's ground.
 #[derive(Debug)]
-pub(in crate::app::model_preview) struct H3ParticleCollider {
-    elasticity: H3ParticleProperty,
-    friction: H3ParticleProperty,
+pub(in crate::app::model_preview) struct ParticleCollider {
+    elasticity: ParticleProperty,
+    friction: ParticleProperty,
 }
 
 /// A Halo 3 or ODST emitter's `collider` movement, when it collides with
@@ -30,16 +30,16 @@ pub(super) fn read_collider(
     emitter: TagStruct<'_>,
     flagged: impl Fn(&str) -> bool,
     seeds: &mut SeedAllocator,
-) -> Option<H3ParticleCollider> {
+) -> Option<ParticleCollider> {
     let movement = emitter.descend("particle movement").filter(|_| flagged("collide with structure"))?;
     let friction = movement_parameter(reader, movement, "collider", 0, seeds)?;
-    Some(H3ParticleCollider { elasticity: movement_parameter(reader, movement, "collider", 1, seeds)?, friction })
+    Some(ParticleCollider { elasticity: movement_parameter(reader, movement, "collider", 1, seeds)?, friction })
 }
 
 /// A Halo 2 `particle_physics`' `collider` movement, its own or its
 /// template's, if it collides with structure: friction is parameter 0 and
 /// elasticity 1, as `sub_53DF20` reads them.
-pub(in crate::app::model_preview) fn read_collider_of(reader: &TagReader, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticleCollider> {
+pub(in crate::app::model_preview) fn read_collider_of(reader: &TagReader, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<ParticleCollider> {
     let template = movement
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
@@ -57,10 +57,10 @@ pub(in crate::app::model_preview) fn read_collider_of(reader: &TagReader, moveme
     let mut by_id = |id: i128| {
         let parameters = elements(entry, "parameters");
         let found = parameters.into_iter().find(|parameter| parameter.read_int_any("parameter id") == Some(id))?;
-        H3ParticleProperty::named(found, "property", seeds)
+        ParticleProperty::named(found, "property", seeds)
     };
     let friction = by_id(0)?;
-    Some(H3ParticleCollider { elasticity: by_id(1)?, friction })
+    Some(ParticleCollider { elasticity: by_id(1)?, friction })
 }
 
 /// What a particle does to itself where its step crosses the ground, which
@@ -96,10 +96,10 @@ pub(super) fn read_flock(
     emitter: TagStruct<'_>,
     flagged: impl Fn(&str) -> bool,
     seeds: &mut SeedAllocator,
-) -> Option<H3ParticleFlock> {
+) -> Option<ParticleFlock> {
     let movement = emitter.descend("particle movement").filter(|_| flagged("swarm"))?;
     let mut by_id = |id: i128| movement_parameter(reader, movement, "swarm", id, seeds);
-    Some(H3ParticleFlock {
+    Some(ParticleFlock {
         separation_distance: by_id(0)?,
         separation_weight: by_id(1)?,
         cohesion_distance: by_id(2)?,
@@ -111,19 +111,19 @@ pub(super) fn read_flock(
     })
 }
 
-impl H3ParticleCollider {
+impl ParticleCollider {
     /// `c_particle_controller::update_particles_collider`, on the preview's ground.
     pub(super) fn update(
         &self,
         particles: &mut [Particle],
-        state: H3ParticleState,
+        state: ParticleState,
         plane: ([f32; 3], f32),
         dies: bool,
         hits: &mut Vec<(u64, [f32; 3], [f32; 3])>,
         dt: f32,
     ) {
         for particle in particles.iter_mut().filter(|particle| !particle.resting) {
-            let state = H3ParticleState { age: particle.age, seeds: particle.seeds, rotation: particle.rotation, ..state };
+            let state = ParticleState { age: particle.age, seeds: particle.seeds, rotation: particle.rotation, ..state };
             let (elasticity, friction) = (self.elasticity.scalar(&state), self.friction.scalar(&state));
             match bounce(particle.position, particle.velocity, plane, dt, elasticity, friction) {
                 Some((place, velocity)) => {
@@ -145,12 +145,12 @@ impl H3ParticleCollider {
     }
 }
 
-impl H3ParticlePhysics {
+impl ParticlePhysics {
     /// `c_particle_emitter_gpu::set_shader_update_state`: gravity, air
     /// friction and rotational friction, once for the emitter at its system's
     /// states.
-    pub(super) fn on_card(&self, state: &H3ParticleState) -> [f32; 3] {
-        let read = |property: &Option<H3ParticleProperty>| property.as_ref().map(|property| property.scalar(state));
+    pub(super) fn on_card(&self, state: &ParticleState) -> [f32; 3] {
+        let read = |property: &Option<ParticleProperty>| property.as_ref().map(|property| property.scalar(state));
         [
             read(&self.gravity).unwrap_or(1.0) * GRAVITY,
             read(&self.air_friction).unwrap_or(1.0),
@@ -159,9 +159,9 @@ impl H3ParticlePhysics {
     }
 
     /// `c_particle_controller::update_particles_physics`.
-    pub(super) fn update(&self, particles: &mut [Particle], state: H3ParticleState, dt: f32) {
+    pub(super) fn update(&self, particles: &mut [Particle], state: ParticleState, dt: f32) {
         for particle in particles.iter_mut().filter(|particle| !particle.resting) {
-            let state = H3ParticleState {
+            let state = ParticleState {
                 age: particle.age,
                 seeds: particle.seeds,
                 system_seeds: particle.system_seeds,
@@ -169,7 +169,7 @@ impl H3ParticlePhysics {
                 rotation: particle.rotation,
                 ..state
             };
-            let read = |property: &Option<H3ParticleProperty>| property.as_ref().map(|property| property.scalar(&state));
+            let read = |property: &Option<ParticleProperty>| property.as_ref().map(|property| property.scalar(&state));
             particle.velocity[2] -= read(&self.gravity).unwrap_or(1.0) * GRAVITY * dt;
             let air = (read(&self.air_friction).unwrap_or(1.0) * dt).clamp(0.0, 1.0);
             particle.velocity = particle.velocity.map(|axis| axis - air * axis);
@@ -179,15 +179,15 @@ impl H3ParticlePhysics {
     }
 }
 
-impl H3ParticleFlock {
+impl ParticleFlock {
     /// `update_particles_flocking`, over the processor's particles: those
     /// moved to the card are off its list. Avoidance is of a world the
     /// preview lacks.
-    pub(super) fn update(&self, particles: &mut [Particle], base: H3ParticleState, home: [f32; 3], dt: f32) {
+    pub(super) fn update(&self, particles: &mut [Particle], base: ParticleState, home: [f32; 3], dt: f32) {
         let on_processor = |particle: &Particle| (!particle.on_card).then_some((particle.position, particle.velocity));
         let places: Vec<Option<([f32; 3], [f32; 3])>> = particles.iter().map(on_processor).collect();
         for (at, particle) in particles.iter_mut().enumerate().filter(|(_, particle)| !particle.on_card) {
-            let state = H3ParticleState { age: particle.age, seeds: particle.seeds, rotation: particle.rotation, ..base };
+            let state = ParticleState { age: particle.age, seeds: particle.seeds, rotation: particle.rotation, ..base };
             let distance_to = |other: &([f32; 3], [f32; 3])| {
                 let delta = minus(other.0, particle.position);
                 dot(delta, delta)
@@ -237,10 +237,10 @@ impl H3ParticleFlock {
 }
 
 #[derive(Debug)]
-pub(in crate::app::model_preview) struct H3ParticlePhysics {
-    pub(super) gravity: Option<H3ParticleProperty>,
-    pub(super) air_friction: Option<H3ParticleProperty>,
-    pub(super) rotational_friction: Option<H3ParticleProperty>,
+pub(in crate::app::model_preview) struct ParticlePhysics {
+    pub(super) gravity: Option<ParticleProperty>,
+    pub(super) air_friction: Option<ParticleProperty>,
+    pub(super) rotational_friction: Option<ParticleProperty>,
 }
 
 /// Reach's `turbulence` movement, which `particle_update.hlsl` runs on the
@@ -248,15 +248,15 @@ pub(in crate::app::model_preview) struct H3ParticlePhysics {
 /// texel of the movement's texture, picked by its birth time along u and its
 /// fifth seed along v.
 #[derive(Debug)]
-pub(in crate::app::model_preview) struct H3ParticleTurbulence {
+pub(in crate::app::model_preview) struct ParticleTurbulence {
     /// Parameter 0, read for each particle: `_index_emitter_movement_turbulence`,
     /// from `get_parameter_by_id_indexed(turbulence, 0)` in `populate_gpu_data`
     /// (the 360's 0x82EE8350).
-    pub(super) strength: H3ParticleProperty,
+    pub(super) strength: ParticleProperty,
     /// `c_particle_emitter_gpu::frame_advance<update>` (the 360's 0x826CAF88):
     /// parameters 3, 4, 1 and 2, read once a frame at the system's states, as
     /// u's and v's scale and then their offsets.
-    pub(super) xform: [H3ParticleProperty; 4],
+    pub(super) xform: [ParticleProperty; 4],
     /// The movement's `turbulence texture`, decoded once.
     pub(super) image: TextureImage,
 }
@@ -273,7 +273,7 @@ pub(super) fn read_turbulence(
     emitter: TagStruct<'_>,
     flagged: impl Fn(&str) -> bool,
     seeds: &mut SeedAllocator,
-) -> Option<H3ParticleTurbulence> {
+) -> Option<ParticleTurbulence> {
     let movement = emitter.descend("particle movement").filter(|_| flagged("turbulence"))?;
     let mut parameter = |id: i128, default: f32| movement_parameter_or(reader, movement, "turbulence", id, default, seeds);
     let strength = parameter(0, 1.0)?;
@@ -291,11 +291,11 @@ pub(super) fn read_turbulence(
         Image::Flat(image) if image.whole() && image.width > 0 && image.height > 0 => image,
         _ => return None,
     };
-    Some(H3ParticleTurbulence { strength, xform: [u_scale?, v_scale?, u_offset?, v_offset?], image })
+    Some(ParticleTurbulence { strength, xform: [u_scale?, v_scale?, u_offset?, v_offset?], image })
 }
 
-impl H3ParticleTurbulence {
-    pub(super) fn xform(&self, state: &H3ParticleState) -> [f32; 4] {
+impl ParticleTurbulence {
+    pub(super) fn xform(&self, state: &ParticleState) -> [f32; 4] {
         self.xform.each_ref().map(|property| property.scalar(state))
     }
 }

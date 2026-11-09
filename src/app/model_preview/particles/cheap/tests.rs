@@ -62,8 +62,8 @@ fn times(delay: f32, duration: f32) -> Arc<EffectTimes> {
     Arc::new(EffectTimes::of_events(&[([delay; 2], [duration; 2])], true))
 }
 
-fn emitter(definition: CheapEmitterDefinition, times: Arc<EffectTimes>) -> ReachCheapEmitterAt {
-    ReachCheapEmitterAt {
+fn emitter(definition: CheapEmitterDefinition, times: Arc<EffectTimes>) -> CheapEmitterAt {
+    CheapEmitterAt {
         object: 0,
         node: 0,
         position: [0.0; 3],
@@ -84,7 +84,7 @@ fn view() -> ViewFrame {
     ViewFrame { eye: [0.0, -10.0, 0.0], forward: [0.0, 1.0, 0.0], right: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0] }
 }
 
-fn live(field: &ReachCheapField) -> usize {
+fn live(field: &CheapField) -> usize {
     field.particles.iter().filter(|particle| particle.age.abs() < 1.0).count()
 }
 
@@ -362,7 +362,7 @@ fn the_update_drags_falls_and_turbulates_the_place_only() {
 #[test]
 fn a_long_frame_moves_particles_half_a_second() {
     let library = library(vec![kind(0.0, 0.0, 0.0)], [0.0; 4]);
-    let mut field = ReachCheapField::fresh(1);
+    let mut field = CheapField::fresh(1);
     field.particles[0] = CheapParticle { position: [0.0; 3], age: 0.1, velocity: [1.0, 0.0, 0.0], delta_age: 0.0, parameters: [0; 4] };
     field.update(&library, 2.0);
     assert_eq!(field.particles[0].position[0], 0.5, "not 2");
@@ -377,7 +377,7 @@ fn a_long_frame_moves_particles_half_a_second() {
 fn the_ring_overwrites_from_the_start() {
     let definition = definition(library(vec![kind(0.0, 0.0, 0.0)], [0.0; 4]));
     let at = emitter(definition, times(0.0, 100.0));
-    let mut field = ReachCheapField::fresh(1);
+    let mut field = CheapField::fresh(1);
     field.cursor = MOST_PARTICLES - 1;
     field.particles[0].age = 0.5;
     let submission = CheapSubmission { position: [9.0; 3], forward: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0], scale: 1.0 };
@@ -401,7 +401,7 @@ fn only_an_event_with_a_duration_submits_and_scales_as_asked() {
     let mut scaled = make(times(0.0, 1.0));
     scaled.scale_by = "power".to_owned();
     scaled.secondary_by = "heat".to_owned();
-    let scale = |at: &ReachCheapEmitterAt| at.submission(Some(&values), None, eye, 0.5, 0.0).map(|at| at.scale);
+    let scale = |at: &CheapEmitterAt| at.submission(Some(&values), None, eye, 0.5, 0.0).map(|at| at.scale);
     assert_eq!(scale(&scaled), Some(1.0), "the effect runs, but the part takes no scale");
     scaled.scaled = true;
     assert_eq!(scale(&scaled), Some(0.5));
@@ -419,7 +419,7 @@ fn no_more_than_200_emitters_spawn_a_frame() {
     let one = emitter(definition(library(vec![kind(0.0, 0.0, 0.0)], [0.0; 4])), times(0.0, 100.0));
     let count = |emitters: usize| {
         let all = vec![one.clone(); emitters];
-        let mut field = ReachCheapField::fresh(emitters);
+        let mut field = CheapField::fresh(emitters);
         field.time = Some(0.0);
         field.advance(&all, &[], |_| None, &mut EffectOnsets::default(), None, [0.0; 3], 1.0 / 60.0);
         live(&field)
@@ -437,13 +437,13 @@ fn a_quad_faces_its_velocity_or_the_screen() {
     moving.rows[RENDER] = [0.0, 1.0, 2.0, 1.0];
     let screen = kind(0.0, 0.0, 0.0);
     let library = library(vec![moving, screen], [0.0; 4]);
-    let mut field = ReachCheapField::fresh(0);
+    let mut field = CheapField::fresh(0);
     // Rotation (−63.5, 0): a unit along the basis's first axis.
     let particle = CheapParticle { position: [0.0; 3], age: 0.0, velocity: [0.0, 0.0, 3.0], delta_age: 0.0, parameters: [0, 127, -64, 0] };
     field.particles[0] = particle;
     let quad = field.vertices(&library, &view());
     assert_eq!(quad.len(), 6);
-    let span = |quad: &[ReachCheapVertex], axis: usize| {
+    let span = |quad: &[CheapVertex], axis: usize| {
         let values = quad.iter().map(|vertex| vertex.place[axis]);
         values.clone().fold(f32::MIN, f32::max) - values.fold(f32::MAX, f32::min)
     };
@@ -468,7 +468,7 @@ fn a_quads_colour_fades_from_its_fade_start() {
     let mut tag = CheapTypeTag { color: [1.0, 1.0, 1.0, 0.5], intensity: 2.0, size: 1.0, y_scale: 1.0, fade_start: 0.5, ..Default::default() };
     tag.change = -1;
     let library = library(vec![tag.compiled(0, 14, false)], [0.0; 4]);
-    let mut field = ReachCheapField::fresh(0);
+    let mut field = CheapField::fresh(0);
     let at = |age: f32| CheapParticle { position: [0.0; 3], age, velocity: [0.0; 3], delta_age: 0.0, parameters: [0, 127, -64, 0] };
     field.particles[0] = at(0.25);
     let full = field.vertices(&library, &view())[0].color;
@@ -520,11 +520,11 @@ fn halo_4_sizes_each_quad_between_its_bounds() {
     let tag = CheapTypeTag { size_lower: 1.0, size: 3.0, y_scale: 1.0, change: -1, color: [1.0; 4], ..Default::default() };
     let mut library = library(vec![tag.compiled(0, 14, true)], [0.0; 4]);
     library.halo4 = true;
-    let mut field = ReachCheapField::fresh(0);
+    let mut field = CheapField::fresh(0);
     let particle = CheapParticle { position: [0.0; 3], age: 0.0, velocity: [0.0; 3], delta_age: 0.0, parameters: [0, 127, -64, 0] };
     field.particles[0] = particle;
     field.particles[1] = particle;
-    let width = |quad: &[ReachCheapVertex]| {
+    let width = |quad: &[CheapVertex]| {
         let values = quad.iter().map(|vertex| vertex.place[0]);
         (values.clone().fold(f32::MIN, f32::max) - values.fold(f32::MAX, f32::min)) * 63.5 / 64.0
     };

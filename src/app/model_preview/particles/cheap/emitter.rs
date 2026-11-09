@@ -373,7 +373,7 @@ pub(super) struct CheapSubmission {
 /// A cheap particle emitter at a marker of the object an effect is attached
 /// to.
 #[derive(Debug, Clone)]
-pub(crate) struct ReachCheapEmitterAt {
+pub(crate) struct CheapEmitterAt {
     pub(crate) object: u8,
     pub(super) node: usize,
     pub(super) position: [f32; 3],
@@ -398,7 +398,7 @@ pub(in crate::app::model_preview) fn read_reach_cheap_emitters(
     owner: u8,
     markers: &[RenderModelPreviewMarker],
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
-) -> Vec<ReachCheapEmitterAt> {
+) -> Vec<CheapEmitterAt> {
     let mut emitters = Vec::new();
     let (mut definitions, mut libraries, mut maps) = (HashMap::new(), HashMap::new(), HashMap::new());
     for_each_attached_part(reader, object, |part| {
@@ -417,7 +417,7 @@ pub(in crate::app::model_preview) fn read_reach_cheap_emitters(
             let (place, node) = frame(marker);
             let (place, node) = part.placed(place, node);
             let place = part_frame(&place, offset, yaw, pitch);
-            emitters.push(ReachCheapEmitterAt {
+            emitters.push(CheapEmitterAt {
                 object: owner,
                 node,
                 position: place.position,
@@ -437,7 +437,7 @@ pub(in crate::app::model_preview) fn read_reach_cheap_emitters(
     emitters
 }
 
-impl ReachCheapEmitterAt {
+impl CheapEmitterAt {
     /// The functions it reads off its object: its effect's scales and its
     /// spawn rate's inputs.
     pub(crate) fn scale_names(&self) -> [&str; 4] {
@@ -479,4 +479,4 @@ impl ReachCheapEmitterAt {
     }
 }
 
-attached!(ReachCheapEmitterAt);
+attached!(CheapEmitterAt);

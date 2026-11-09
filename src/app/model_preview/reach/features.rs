@@ -11,4 +11,4 @@ features!(super::ReachFeatures {
 
 attached_feature!(super::lights::ReachLight, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
 
-attached_feature!(super::lights::ReachCheapLight, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
+attached_feature!(super::lights::CheapLight, moves: |at| at.animates(), inputs: |at| at.inputs().collect());

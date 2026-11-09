@@ -18,7 +18,7 @@ pub(in crate::app::model_preview) struct SeedAllocator {
 /// yet taken, and once none is left, the next of a table of reuses.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ReachSeeds {
-    /// The states taken, by [`H3ParticleInput::state_bit`].
+    /// The states taken, by [`ParticleInput::state_bit`].
     pub(super) used: u32,
     /// `dword_1428F5DE4`, shared by both tables. The shipped tool starts it at
     /// 4 and never resets it, so it counts every run-out of every tag a run
@@ -31,21 +31,21 @@ pub(super) struct ReachSeeds {
 }
 
 /// `particle random`'s seeds, highest state first: 25 to 22, then 7 to 4.
-const REACH_PARTICLE_SEEDS: [H3ParticleInput; 8] = {
-    use H3ParticleInput::Seed;
+const REACH_PARTICLE_SEEDS: [ParticleInput; 8] = {
+    use ParticleInput::Seed;
     [Seed(7), Seed(6), Seed(5), Seed(4), Seed(3), Seed(2), Seed(1), Seed(0)]
 };
 
 /// The particle reuse table (tool 0x141FFF3C0): states 22, 7, 23, 6, 24, 5, 25, 4.
-const REACH_PARTICLE_REUSE: [H3ParticleInput; 8] = {
-    use H3ParticleInput::Seed;
+const REACH_PARTICLE_REUSE: [ParticleInput; 8] = {
+    use ParticleInput::Seed;
     [Seed(4), Seed(3), Seed(5), Seed(2), Seed(6), Seed(1), Seed(7), Seed(0)]
 };
 
 /// `system random`'s seeds, highest state first, which is also the system
 /// reuse table (tool 0x141FFF3E0): states 27, 26, 9, 8.
-const REACH_SYSTEM_SEEDS: [H3ParticleInput; 4] = {
-    use H3ParticleInput::SystemSeed;
+const REACH_SYSTEM_SEEDS: [ParticleInput; 4] = {
+    use ParticleInput::SystemSeed;
     [SystemSeed(3), SystemSeed(2), SystemSeed(1), SystemSeed(0)]
 };
 
@@ -55,7 +55,7 @@ const REACH_SYSTEM_SEEDS: [H3ParticleInput; 4] = {
 pub(super) const REACH_ALLOCATED_STATES: u32 = 0x0FFF_FFF3;
 
 impl ReachSeeds {
-    fn take(&mut self, seeds: &[H3ParticleInput], reuse: &[H3ParticleInput]) -> H3ParticleInput {
+    fn take(&mut self, seeds: &[ParticleInput], reuse: &[ParticleInput]) -> ParticleInput {
         let free = seeds.iter().copied().find(|seed| self.used & seed.state_bit() == 0);
         let seed = free.unwrap_or_else(|| {
             let seed = reuse[self.reuse % reuse.len()];
@@ -92,17 +92,17 @@ impl SeedAllocator {
         self.reach.map_or(0, |reach| reach.used)
     }
 
-    pub(super) fn allocate(&mut self, input: &mut H3ParticleInput) {
+    pub(super) fn allocate(&mut self, input: &mut ParticleInput) {
         match (*input, self.reach.as_mut()) {
-            (H3ParticleInput::Rotation, _) if self.rotation_unread => *input = H3ParticleInput::Other,
-            (H3ParticleInput::Random, Some(reach)) => *input = reach.take(&REACH_PARTICLE_SEEDS, &REACH_PARTICLE_REUSE),
-            (H3ParticleInput::SystemRandom, Some(reach)) => *input = reach.take(&REACH_SYSTEM_SEEDS, &REACH_SYSTEM_SEEDS),
-            (H3ParticleInput::Random, None) => {
-                *input = H3ParticleInput::Seed(self.particle % SEEDS);
+            (ParticleInput::Rotation, _) if self.rotation_unread => *input = ParticleInput::Other,
+            (ParticleInput::Random, Some(reach)) => *input = reach.take(&REACH_PARTICLE_SEEDS, &REACH_PARTICLE_REUSE),
+            (ParticleInput::SystemRandom, Some(reach)) => *input = reach.take(&REACH_SYSTEM_SEEDS, &REACH_SYSTEM_SEEDS),
+            (ParticleInput::Random, None) => {
+                *input = ParticleInput::Seed(self.particle % SEEDS);
                 self.particle += 1;
             }
-            (H3ParticleInput::SystemRandom, None) => {
-                *input = H3ParticleInput::SystemSeed(self.system % SYSTEM_SEEDS);
+            (ParticleInput::SystemRandom, None) => {
+                *input = ParticleInput::SystemSeed(self.system % SYSTEM_SEEDS);
                 self.system += 1;
             }
             _ => {}

@@ -36,7 +36,7 @@ impl H3Billboard {
 
 /// How `sample_diffuse` reads the maps, by the `albedo` option's name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum H3ParticleAlbedo {
+pub(crate) enum ParticleAlbedo {
     Diffuse = 0,
     DiffuseBillboardAlpha = 1,
     DiffuseSpriteAlpha = 2,
@@ -72,7 +72,7 @@ pub(crate) struct H3AlbedoConstants {
     pub(crate) second_xform: [f32; 4],
 }
 
-impl H3ParticleAlbedo {
+impl ParticleAlbedo {
     pub(super) fn named(name: &str) -> Self {
         match name {
             "diffuse_plus_billboard_alpha" => Self::DiffuseBillboardAlpha,
@@ -103,7 +103,7 @@ pub(in crate::app::model_preview) type ParticleMaterialReader =
 
 /// A `.particle`.
 #[derive(Debug)]
-pub(crate) struct H3ParticleLook {
+pub(crate) struct ParticleLook {
     /// `dies at rest`.
     pub(in crate::app::model_preview) dies_at_rest: bool,
     /// Whether a speed of none is nudged to a little.
@@ -116,7 +116,7 @@ pub(crate) struct H3ParticleLook {
     pub(in crate::app::model_preview) one_shot: bool,
     pub(in crate::app::model_preview) backwards: bool,
     /// `attachments`: effects its particles start, by what starts them.
-    pub(in crate::app::model_preview) attachments: Vec<(H3ParticleTrigger, String)>,
+    pub(in crate::app::model_preview) attachments: Vec<(ParticleTrigger, String)>,
     /// Whether the tag lists any attachment at all, which is what keeps its
     /// emitters off the card (`c_particle_definition::postprocess`).
     pub(in crate::app::model_preview) any_attachments: bool,
@@ -146,13 +146,13 @@ pub(crate) struct H3ParticleLook {
     /// Halo 2's `select random sequence`: each sequence's frames and corner,
     /// one of which a particle takes at birth. Empty for one sequence.
     pub(in crate::app::model_preview) sequences: Vec<(Vec<[f32; 4]>, [f32; 4])>,
-    pub(in crate::app::model_preview) aspect: H3ParticleProperty,
-    pub(in crate::app::model_preview) color: H3ParticleProperty,
-    pub(in crate::app::model_preview) intensity: H3ParticleProperty,
-    pub(in crate::app::model_preview) alpha: H3ParticleProperty,
-    pub(in crate::app::model_preview) frame: H3ParticleProperty,
-    pub(in crate::app::model_preview) rate: H3ParticleProperty,
-    pub(in crate::app::model_preview) palette: H3ParticleProperty,
+    pub(in crate::app::model_preview) aspect: ParticleProperty,
+    pub(in crate::app::model_preview) color: ParticleProperty,
+    pub(in crate::app::model_preview) intensity: ParticleProperty,
+    pub(in crate::app::model_preview) alpha: ParticleProperty,
+    pub(in crate::app::model_preview) frame: ParticleProperty,
+    pub(in crate::app::model_preview) rate: ParticleProperty,
+    pub(in crate::app::model_preview) palette: ParticleProperty,
     pub(crate) shader: Arc<H3SpriteShader>,
     /// Halo 4's: drawn through its material from packed state, not as quads.
     pub(crate) h4: Option<Arc<dyn ParticleMaterial>>,
@@ -171,7 +171,7 @@ pub(crate) struct H3ParticleLook {
 
 /// The `lighting` option.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app::model_preview) enum H3ParticleLighting {
+pub(in crate::app::model_preview) enum ParticleLighting {
     None,
     Ambient,
     Directional,
@@ -184,7 +184,7 @@ pub(in crate::app::model_preview) enum H3ParticleLighting {
 
 /// `ravi_order_0` and `ravi_order_3`, of `calculate_and_set_ravi_constants`'
 /// ten: the ambient, or what comes from `normal`.
-pub(super) fn ravi(lighting: H3ParticleLighting, normal: [f32; 3], constants: &[[f32; 4]; 10]) -> [f32; 3] {
+pub(super) fn ravi(lighting: ParticleLighting, normal: [f32; 3], constants: &[[f32; 4]; 10]) -> [f32; 3] {
     const C1: f32 = 0.429_043;
     const C2: f32 = 0.511_664;
     const C4: f32 = 0.886_227;
@@ -192,7 +192,7 @@ pub(super) fn ravi(lighting: H3ParticleLighting, normal: [f32; 3], constants: &[
     let [x, y, z] = normal;
     std::array::from_fn(|channel| {
         let ambient = C4 * constants[0][channel];
-        let value = if lighting == H3ParticleLighting::Ambient {
+        let value = if lighting == ParticleLighting::Ambient {
             ambient
         } else {
             let linear = product(normal, constants[1 + channel]);
@@ -289,7 +289,7 @@ fn read_particle_mesh(reader: &TagReader, path: &str) -> Option<Vec<Vec<blam_tag
     (!meshes.is_empty()).then_some(meshes)
 }
 
-pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<H3ParticleLook> {
+pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> {
     let tag = reader.load(path, "particle", b"prt3").ok()?;
     let root = tag.root();
     let model = match root.read_tag_ref_path("Model").filter(|model| !model.is_empty()) {
@@ -346,11 +346,11 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<H3ParticleLook
     if cheap {
         // `particle_render_fast.hlsl` warps nothing and lights no pixel.
         sprite_shader.sphere_warp = None;
-        if sprite_shader.lighting == H3ParticleLighting::ReachSmooth {
-            sprite_shader.lighting = H3ParticleLighting::None;
+        if sprite_shader.lighting == ParticleLighting::ReachSmooth {
+            sprite_shader.lighting = ParticleLighting::None;
         }
     }
-    Some(H3ParticleLook {
+    Some(ParticleLook {
         billboard,
         still_moves: still_particles_move(reader.source.game(), billboard),
         flip_u: flagged("random u mirror"),
@@ -367,9 +367,9 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<H3ParticleLook
             .iter()
             .filter_map(|attachment| {
                 let trigger = match attachment.read_enum_option("trigger").as_deref() {
-                    Some("birth") => H3ParticleTrigger::Birth,
-                    Some("death") => H3ParticleTrigger::Death,
-                    Some("collision") => H3ParticleTrigger::Collision,
+                    Some("birth") => ParticleTrigger::Birth,
+                    Some("death") => ParticleTrigger::Death,
+                    Some("collision") => ParticleTrigger::Collision,
                     _ => return None,
                 };
                 let (group, path) = attachment.read_tag_ref_with_group("type")?;
@@ -410,12 +410,12 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<H3ParticleLook
 }
 
 /// `holder`'s properties of these names, none yet seeded; none if any is missing.
-pub(super) fn unallocated_properties<const N: usize>(holder: TagStruct<'_>, names: [&str; N]) -> Option<[H3ParticleProperty; N]> {
-    let read = names.map(|name| H3ParticleProperty::unallocated(holder.descend(name)?));
+pub(super) fn unallocated_properties<const N: usize>(holder: TagStruct<'_>, names: [&str; N]) -> Option<[ParticleProperty; N]> {
+    let read = names.map(|name| ParticleProperty::unallocated(holder.descend(name)?));
     read.into_iter().collect::<Option<Vec<_>>>()?.try_into().ok()
 }
 
 /// What a definition's properties read, by Reach's state bits.
-pub(super) fn used_states_of(properties: &[H3ParticleProperty]) -> u32 {
+pub(super) fn used_states_of(properties: &[ParticleProperty]) -> u32 {
     properties.iter().fold(0, |used, property| used | property.used_states())
 }

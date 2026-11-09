@@ -8,7 +8,7 @@ use super::super::gl::target::H2Target;
 use super::super::gl::link::link;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::ColorTarget;
-use super::super::particles::{H3ParticleGl, ReachCheapGl};
+use super::super::particles::{ParticleGl, CheapGl};
 use super::super::dx9::draw::Dx9Gl;
 use eframe::glow;
 
@@ -24,9 +24,9 @@ pub(in crate::app::model_preview) struct RenderCore {
     /// As `Dx9Gl::h2_bloom`.
     pub(in crate::app::model_preview) sprite_gl: Option<Option<SpriteGl>>,
     /// As `Dx9Gl::h2_bloom`.
-    pub(in crate::app::model_preview) particle_gl: Option<Option<H3ParticleGl>>,
+    pub(in crate::app::model_preview) particle_gl: Option<Option<ParticleGl>>,
     /// As `Dx9Gl::h2_bloom`.
-    pub(in crate::app::model_preview) reach_cheap_gl: Option<Option<ReachCheapGl>>,
+    pub(in crate::app::model_preview) reach_cheap_gl: Option<Option<CheapGl>>,
     /// Particles step once a frame, however many calls draw them.
     pub(in crate::app::model_preview) sprites_advanced: bool,
     /// Halo 2's `target_particle_distortion`, copied from the frame.

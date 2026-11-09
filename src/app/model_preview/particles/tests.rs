@@ -92,17 +92,17 @@ fn a_particles_axes_look_along_it_and_a_still_one_gets_a_default() {
 
 #[test]
 fn an_older_tags_names_read_as_the_same_inputs() {
-    assert_eq!(H3ParticleInput::named("emitter age"), H3ParticleInput::SystemAge);
-    assert_eq!(H3ParticleInput::named("emitter random"), H3ParticleInput::SystemRandom);
-    assert_eq!(H3ParticleInput::named("emitter correlation 2"), H3ParticleInput::SystemSeed(1));
-    assert_eq!(H3ParticleInput::named("system lod"), H3ParticleInput::Lod);
-    assert_eq!(H3ParticleInput::named("no such input"), H3ParticleInput::Other);
+    assert_eq!(ParticleInput::named("emitter age"), ParticleInput::SystemAge);
+    assert_eq!(ParticleInput::named("emitter random"), ParticleInput::SystemRandom);
+    assert_eq!(ParticleInput::named("emitter correlation 2"), ParticleInput::SystemSeed(1));
+    assert_eq!(ParticleInput::named("system lod"), ParticleInput::Lod);
+    assert_eq!(ParticleInput::named("no such input"), ParticleInput::Other);
 }
 
 #[test]
 fn a_scale_multiplies_what_a_property_reads() {
-    let state = H3ParticleState::default();
-    let rate = H3ParticleProperty::fixed(2.0).unwrap();
+    let state = ParticleState::default();
+    let rate = ParticleProperty::fixed(2.0).unwrap();
     assert_eq!(rate.scalar(&state), 2.0);
     assert_eq!(rate.scaled(30.0).scalar(&state), 60.0);
 }
@@ -165,9 +165,9 @@ fn a_turn_about_x_carries_y_to_z_and_leaves_x() {
 #[test]
 fn a_reference_axis_rotates_the_picked_axis_round() {
     let mut random = Random(1);
-    assert_eq!(H3ParticleAxis::Constant.pick(0, 0.0, &mut random), [1.0, 0.0, 0.0]);
-    assert_eq!(H3ParticleAxis::Constant.pick(1, 0.0, &mut random), [0.0, 1.0, 0.0]);
-    assert_eq!(H3ParticleAxis::Constant.pick(2, 0.0, &mut random), [0.0, 0.0, 1.0]);
+    assert_eq!(ParticleAxis::Constant.pick(0, 0.0, &mut random), [1.0, 0.0, 0.0]);
+    assert_eq!(ParticleAxis::Constant.pick(1, 0.0, &mut random), [0.0, 1.0, 0.0]);
+    assert_eq!(ParticleAxis::Constant.pick(2, 0.0, &mut random), [0.0, 0.0, 1.0]);
 }
 
 #[test]
@@ -190,10 +190,10 @@ fn a_narrow_sprite_narrows_and_a_wide_plate_widens() {
 
 #[test]
 fn inputs_read_by_their_names_with_or_without_the_second_spelling() {
-    assert_eq!(H3ParticleInput::named("system age{emitter age}"), H3ParticleInput::SystemAge);
-    assert_eq!(H3ParticleInput::named("system age"), H3ParticleInput::SystemAge);
-    assert_eq!(H3ParticleInput::named("particle correlation 3"), H3ParticleInput::Seed(2));
-    assert_eq!(H3ParticleInput::named("no such state"), H3ParticleInput::Other);
+    assert_eq!(ParticleInput::named("system age{emitter age}"), ParticleInput::SystemAge);
+    assert_eq!(ParticleInput::named("system age"), ParticleInput::SystemAge);
+    assert_eq!(ParticleInput::named("particle correlation 3"), ParticleInput::Seed(2));
+    assert_eq!(ParticleInput::named("no such state"), ParticleInput::Other);
 }
 
 #[test]
@@ -203,10 +203,10 @@ fn randoms_take_seeds_in_turn_and_wrap() {
         seeds.allocate(&mut input);
         input
     };
-    assert_eq!(take(H3ParticleInput::Random), H3ParticleInput::Seed(0));
-    assert_eq!(take(H3ParticleInput::Random), H3ParticleInput::Seed(1));
-    assert_eq!(take(H3ParticleInput::SystemRandom), H3ParticleInput::SystemSeed(0));
-    assert_eq!(take(H3ParticleInput::Age), H3ParticleInput::Age);
+    assert_eq!(take(ParticleInput::Random), ParticleInput::Seed(0));
+    assert_eq!(take(ParticleInput::Random), ParticleInput::Seed(1));
+    assert_eq!(take(ParticleInput::SystemRandom), ParticleInput::SystemSeed(0));
+    assert_eq!(take(ParticleInput::Age), ParticleInput::Age);
 }
 
 #[test]
@@ -250,7 +250,7 @@ fn the_same_seed_runs_the_same() {
 /// attachments moves to the card when it rests unless something was forced.
 #[test]
 fn tool_puts_an_emitter_on_the_card_only_when_nothing_needs_the_processor() {
-    use H3ParticleUpdate::{Cpu, Gpu};
+    use ParticleUpdate::{Cpu, Gpu};
     // The set options, as has_flag names them.
     let named = |names: &'static [&'static str]| move |wanted: &str| names.contains(&wanted);
     let decide = |system: &'static [&'static str], attachments, movement: &'static [&'static str]| {
@@ -272,7 +272,7 @@ fn tool_puts_an_emitter_on_the_card_only_when_nothing_needs_the_processor() {
 /// whatever order the tag lists them in.
 #[test]
 fn movements_follow_the_flags_in_tools_order() {
-    use H3ParticleController::{Collider, Flock, Physics};
+    use ParticleController::{Collider, Flock, Physics};
     // The set options, as has_flag names them.
     let named = |names: &'static [&'static str]| move |wanted: &str| names.contains(&wanted);
     assert_eq!(flagged_controllers(named(&["collide with bipeds", "swarm", "physics"])), [Physics, Flock, Collider]);
@@ -299,14 +299,14 @@ fn kit_emitter(root: &std::path::Path, path: &str) -> Arc<H3Emitter> {
 fn kit_emitters_update_where_tool_puts_them_and_move_as_their_flags_say() {
     let Some(root) = kit_root(GameId::Halo3) else { return };
     let plain = kit_emitter(&root, "fx\\cinematics\\120lc_activation\\02\\shot_03\\halochunk_impact");
-    assert_eq!(plain.update, H3ParticleUpdate::Gpu);
-    assert_eq!(plain.controllers, [H3ParticleController::Physics]);
-    let state = H3ParticleState { system_age: 0.5, effect_a: 1.0, effect_b: 1.0, lod: 1.0, ..Default::default() };
+    assert_eq!(plain.update, ParticleUpdate::Gpu);
+    assert_eq!(plain.controllers, [ParticleController::Physics]);
+    let state = ParticleState { system_age: 0.5, effect_a: 1.0, effect_b: 1.0, lod: 1.0, ..Default::default() };
     let physics = plain.physics.as_ref().map(|physics| physics.on_card(&state));
     assert_eq!(physics, Some([0.0, 2.0, 1.0]), "gravity, air and rotational friction");
     let colliding = kit_emitter(&root, "fx\\cinematics\\100ld_confront_truth\\07\\shot_04\\tentacle_erupt");
-    assert_eq!(colliding.update, H3ParticleUpdate::Cpu);
-    assert!(colliding.controllers.contains(&H3ParticleController::Collider));
+    assert_eq!(colliding.update, ParticleUpdate::Cpu);
+    assert!(colliding.controllers.contains(&ParticleController::Collider));
     // `_default`'s physics, with none of the emitter's own flags set.
     let unflagged = kit_emitter(&root, "fx\\cinematics\\040lb_cov_flee\\08\\shot_4\\flood_spew");
     assert!(unflagged.controllers.is_empty(), "{:?}", unflagged.controllers);
@@ -343,7 +343,7 @@ fn a_particle_on_the_card_waits_a_frame_then_moves_before_it_accelerates() {
         system_seeds: [0.0; SYSTEM_SEEDS],
     };
     let (mut particles, mut ended, dt) = (vec![particle], Vec::new(), 1.0 / 60.0);
-    let state = H3ParticleState { system_age: 0.5, effect_a: 1.0, effect_b: 1.0, lod: 1.0, ..Default::default() };
+    let state = ParticleState { system_age: 0.5, effect_a: 1.0, effect_b: 1.0, lod: 1.0, ..Default::default() };
     emitter.step(state, &mut particles, dt, [0.0; 3], &mut ended, None, false);
     assert_eq!((particles[0].position, particles[0].age), ([0.0; 3], 0.0), "the spawn frame");
     emitter.step(state, &mut particles, dt, [0.0; 3], &mut ended, None, false);
@@ -358,7 +358,7 @@ fn a_particle_on_the_card_waits_a_frame_then_moves_before_it_accelerates() {
 fn a_particle_at_rest_moves_to_the_card_and_drifts() {
     let Some(root) = kit_root(GameId::Halo3) else { return };
     let emitter = kit_emitter(&root, "fx\\cinematics\\100ld_confront_truth\\07\\shot_04\\tentacle_erupt");
-    assert_eq!((emitter.update, emitter.card_at_rest), (H3ParticleUpdate::Cpu, true));
+    assert_eq!((emitter.update, emitter.card_at_rest), (ParticleUpdate::Cpu, true));
     let particle = Particle {
         id: 1,
         colliding: false,
@@ -382,7 +382,7 @@ fn a_particle_at_rest_moves_to_the_card_and_drifts() {
         system_seeds: [0.0; SYSTEM_SEEDS],
     };
     let (mut particles, mut ended, dt) = (vec![particle], Vec::new(), 1.0 / 60.0);
-    let state = H3ParticleState { system_age: 0.5, effect_a: 1.0, effect_b: 1.0, lod: 1.0, ..Default::default() };
+    let state = ParticleState { system_age: 0.5, effect_a: 1.0, effect_b: 1.0, lod: 1.0, ..Default::default() };
     emitter.step(state, &mut particles, dt, [0.0; 3], &mut ended, None, true);
     let rested = particles[0].clone();
     assert!(rested.on_card && rested.rotation_rate == 0.0, "{rested:?}");
@@ -401,9 +401,9 @@ fn a_particle_at_rest_moves_to_the_card_and_drifts() {
 #[test]
 fn only_halo_2_reads_a_particles_rotation() {
     let resolved = |mut seeds: SeedAllocator, name: &str| {
-        let mut input = H3ParticleInput::named(name);
+        let mut input = ParticleInput::named(name);
         seeds.allocate(&mut input);
-        input.of(&H3ParticleState { rotation: 0.25, ..Default::default() })
+        input.of(&ParticleState { rotation: 0.25, ..Default::default() })
     };
     assert_eq!(resolved(SeedAllocator::default(), "particle rotation"), 0.25, "Halo 2");
     assert_eq!(resolved(SeedAllocator::halo3(), "particle rotation{physics rotation}"), 0.0);
@@ -412,17 +412,17 @@ fn only_halo_2_reads_a_particles_rotation() {
 
 /// A property whose function is not constant, reading `input` (and
 /// `range`, ranged or not).
-fn varying(input: H3ParticleInput, range: H3ParticleInput, ranged: bool) -> H3ParticleProperty {
+fn varying(input: ParticleInput, range: ParticleInput, ranged: bool) -> ParticleProperty {
     use blam_tags::tag_function::{FunctionEncoding, FunctionType, H2Function};
     let mut function = H2Function::new(FunctionType::Identity);
     function.set_clamp_range(0.0, 1.0).unwrap();
     function.set_ranged(ranged);
     let function = TagFunction::parse_encoded(FunctionEncoding::H2, &function.to_bytes()).unwrap();
     assert!(function.as_constant().is_none() && function.is_ranged() == ranged);
-    H3ParticleProperty { input, range, function: Arc::new(function), ..H3ParticleProperty::fixed(0.0).unwrap() }
+    ParticleProperty { input, range, function: Arc::new(function), ..ParticleProperty::fixed(0.0).unwrap() }
 }
 
-fn seeded(seeds: &mut SeedAllocator, mut input: H3ParticleInput) -> H3ParticleInput {
+fn seeded(seeds: &mut SeedAllocator, mut input: ParticleInput) -> ParticleInput {
     seeds.allocate(&mut input);
     input
 }
@@ -431,14 +431,14 @@ fn seeded(seeds: &mut SeedAllocator, mut input: H3ParticleInput) -> H3ParticleIn
 /// by name only in Reach's schema; 17 to 19 have no writer.
 #[test]
 fn reach_reads_a_tenth_of_the_speed_as_particle_velocity() {
-    assert_eq!(H3ParticleInput::named("particle velocity"), H3ParticleInput::Velocity);
+    assert_eq!(ParticleInput::named("particle velocity"), ParticleInput::Velocity);
     for unwritten in ["distance from emitter", "particle simulation a", "particle simulation b"] {
-        assert_eq!(H3ParticleInput::named(unwritten), H3ParticleInput::Other, "{unwritten}");
+        assert_eq!(ParticleInput::named(unwritten), ParticleInput::Other, "{unwritten}");
     }
     let particle = Particle { velocity: [3.0, 0.0, 4.0], ..test_particle() };
-    let state = particle.state(H3ParticleState::default());
-    assert_eq!(H3ParticleInput::Velocity.of(&state), 0.5);
-    assert_eq!(H3ParticleInput::Velocity.of(&H3ParticleState::default()), 0.0, "nothing at a spawn");
+    let state = particle.state(ParticleState::default());
+    assert_eq!(ParticleInput::Velocity.of(&state), 0.5);
+    assert_eq!(ParticleInput::Velocity.of(&ParticleState::default()), 0.0, "nothing at a spawn");
 }
 
 /// `g_render_time+0x18`: seconds summed, not Halo 3's fraction of one,
@@ -455,7 +455,7 @@ fn reach_game_time_runs_in_seconds_and_comes_round_at_two_hours() {
 /// eight are taken, the reuse table from its fifth entry on.
 #[test]
 fn reach_hands_out_the_highest_free_seed_then_reuses_from_the_fifth() {
-    use H3ParticleInput::{Random, Seed};
+    use ParticleInput::{Random, Seed};
     let mut seeds = SeedAllocator::reach(0);
     let taken: Vec<_> = (0..10).map(|_| seeded(&mut seeds, Random)).collect();
     let expected = [Seed(7), Seed(6), Seed(5), Seed(4), Seed(3), Seed(2), Seed(1), Seed(0), Seed(6), Seed(1)];
@@ -468,8 +468,8 @@ fn reach_hands_out_the_highest_free_seed_then_reuses_from_the_fifth() {
 /// around it rather than reading the same stream.
 #[test]
 fn reach_steps_around_a_seed_read_by_name() {
-    use H3ParticleInput::{Random, Seed, SystemRandom, SystemSeed};
-    let explicit = H3ParticleInput::named("particle correlation 4").state_bit();
+    use ParticleInput::{Random, Seed, SystemRandom, SystemSeed};
+    let explicit = ParticleInput::named("particle correlation 4").state_bit();
     let mut seeds = SeedAllocator::reach(explicit);
     let taken: Vec<_> = (0..8).map(|_| seeded(&mut seeds, Random)).collect();
     assert_eq!(taken[3..], [Seed(4), Seed(2), Seed(1), Seed(0), Seed(6)], "seed 4 skipped");
@@ -477,14 +477,14 @@ fn reach_steps_around_a_seed_read_by_name() {
     let systems: Vec<_> = (0..5).map(|_| seeded(&mut seeds, SystemRandom)).collect();
     let expected = [SystemSeed(3), SystemSeed(2), SystemSeed(1), SystemSeed(0), SystemSeed(3)];
     assert_eq!(systems, expected, "27, 26, 9, 8, then the four-long table's fifth, 27");
-    assert_eq!(seeded(&mut seeds, H3ParticleInput::Rotation), H3ParticleInput::Other, "Reach writes 0 there");
+    assert_eq!(seeded(&mut seeds, ParticleInput::Rotation), ParticleInput::Other, "Reach writes 0 there");
 }
 
 /// Reach's `used_states` and allocation read a range only when the
 /// function is ranged; Halo 3's allocate it whatever.
 #[test]
 fn reach_seeds_a_range_only_when_the_function_is_ranged() {
-    use H3ParticleInput::{Random, Seed};
+    use ParticleInput::{Random, Seed};
     let flat = varying(Random, Random, false);
     assert_eq!(flat.used_states(), Random.state_bit());
     let mut reach = flat.clone();
@@ -503,12 +503,12 @@ fn reach_seeds_a_range_only_when_the_function_is_ranged() {
 /// name, so its random modifier cannot take it too.
 #[test]
 fn a_reach_controller_marks_each_parameter_before_seeding_it() {
-    use H3ParticleInput::{SystemRandom, SystemSeed};
-    let named = H3ParticleInput::named("system correlation 2");
+    use ParticleInput::{SystemRandom, SystemSeed};
+    let named = ParticleInput::named("system correlation 2");
     let parameters = [
         varying(SystemRandom, SystemRandom, false),
         varying(SystemRandom, SystemRandom, false),
-        H3ParticleProperty { adds: Some(true), modifier: SystemRandom, ..varying(named, SystemRandom, false) },
+        ParticleProperty { adds: Some(true), modifier: SystemRandom, ..varying(named, SystemRandom, false) },
     ];
     let run = |mut seeds: SeedAllocator| {
         let mut parameters = parameters.clone();
@@ -527,7 +527,7 @@ fn a_reach_controller_marks_each_parameter_before_seeding_it() {
 #[test]
 fn reach_seeds_the_emission_axis_angle_fifth_and_halo_3_last() {
     let seeded = |reach: bool| {
-        let random = || varying(H3ParticleInput::Random, H3ParticleInput::Other, false);
+        let random = || varying(ParticleInput::Random, ParticleInput::Other, false);
         let mut properties: [_; 18] = std::array::from_fn(|_| random());
         let mut seeds = if reach { SeedAllocator::reach(0) } else { SeedAllocator::halo3() };
         for at in emitter_seed_order(reach) {
@@ -536,9 +536,9 @@ fn reach_seeds_the_emission_axis_angle_fifth_and_halo_3_last() {
         properties.map(|property| property.input)
     };
     assert_eq!(EMITTER_PROPERTIES[4], "emission axis angle");
-    assert_eq!(seeded(true)[4], H3ParticleInput::Seed(3), "the fifth: state 7");
-    assert_eq!(seeded(false)[4], H3ParticleInput::Seed(17 % SEEDS), "the eighteenth, counted");
-    assert_eq!(seeded(false)[5], H3ParticleInput::Seed(4));
+    assert_eq!(seeded(true)[4], ParticleInput::Seed(3), "the fifth: state 7");
+    assert_eq!(seeded(false)[4], ParticleInput::Seed(17 % SEEDS), "the eighteenth, counted");
+    assert_eq!(seeded(false)[5], ParticleInput::Seed(4));
     assert_eq!(emitter_seed_order(false)[17], 4);
 }
 
@@ -612,19 +612,19 @@ fn velocity_moves_by_the_size_scale_unless_disabled() {
 /// into the aspect; with neither the size scale alone.
 #[test]
 fn scale_x_and_y_bake_into_size_and_aspect() {
-    let base = H3ParticleState::default();
+    let base = ParticleState::default();
     let none = h4_terms(false, false, 3.0);
     assert_eq!(none.size_and_aspect(&base), [3.0, 1.0]);
-    let constant = |value: f32| H3ParticleProperty::fixed(value).unwrap();
+    let constant = |value: f32| ParticleProperty::fixed(value).unwrap();
     let scaled = H4EmitterTerms { scale: Some([constant(2.0), constant(0.5)]), ..h4_terms(false, false, 1.0) };
     assert_eq!(scaled.size_and_aspect(&base), [0.5, 4.0]);
 }
 
 fn test_emitter(shape: H3EmissionShape) -> H3Emitter {
-    let fixed = || H3ParticleProperty::fixed(0.0).unwrap();
+    let fixed = || ParticleProperty::fixed(0.0).unwrap();
     H3Emitter {
         h4: None,
-        update: H3ParticleUpdate::Gpu,
+        update: ParticleUpdate::Gpu,
         card_lerps: false,
         card_at_rest: false,
         spawn_slack: 0.0,
@@ -632,7 +632,7 @@ fn test_emitter(shape: H3EmissionShape) -> H3Emitter {
         shape,
         points: Vec::new(),
         scroll: [0.0; 2],
-        axis: H3ParticleAxis::Constant,
+        axis: ParticleAxis::Constant,
         reference_axis: 0,
         axis_angle: fixed(),
         offset: fixed(),
@@ -643,7 +643,7 @@ fn test_emitter(shape: H3EmissionShape) -> H3Emitter {
         most: fixed(),
         rate: fixed(),
         lifespan: fixed(),
-        acceleration: H3ParticleProperty::fixed_vector([0.0; 3]).unwrap(),
+        acceleration: ParticleProperty::fixed_vector([0.0; 3]).unwrap(),
         speed: fixed(),
         rotation: fixed(),
         rotation_rate: fixed(),
@@ -732,17 +732,17 @@ fn turbulence_pushes_by_a_wrapped_blended_texel_less_a_half() {
 /// before it accelerates, and not on its spawn frame.
 #[test]
 fn a_turbulent_particle_on_the_card_is_pushed_after_it_moves() {
-    let turbulence = H3ParticleTurbulence {
-        strength: H3ParticleProperty::fixed(2.0).unwrap(),
-        xform: [1.0, 0.3, 0.25, 0.0].map(|value| H3ParticleProperty::fixed(value).unwrap()),
+    let turbulence = ParticleTurbulence {
+        strength: ParticleProperty::fixed(2.0).unwrap(),
+        xform: [1.0, 0.3, 0.25, 0.0].map(|value| ParticleProperty::fixed(value).unwrap()),
         image: turbulence_image(),
     };
     let emitter = H3Emitter { turbulence: Some(turbulence), ..test_emitter(H3EmissionShape::Sprayer) };
     let particle = Particle { spawned_this_frame: true, velocity: [1.0, 0.0, 0.0], ..test_particle() };
     let (mut particles, mut ended, dt) = (vec![particle], Vec::new(), 0.5);
-    emitter.step(H3ParticleState::default(), &mut particles, dt, [0.0; 3], &mut ended, None, false);
+    emitter.step(ParticleState::default(), &mut particles, dt, [0.0; 3], &mut ended, None, false);
     assert_eq!(particles[0].position, [0.0; 3], "the spawn frame");
-    emitter.step(H3ParticleState::default(), &mut particles, dt, [0.0; 3], &mut ended, None, false);
+    emitter.step(ParticleState::default(), &mut particles, dt, [0.0; 3], &mut ended, None, false);
     let [x, y, z] = particles[0].position;
     // Moved a half along x, then pushed by the left texel less a half,
     // (0.5, -0.5, 0.002), at a strength of 2 over half a second.
@@ -750,7 +750,7 @@ fn a_turbulent_particle_on_the_card_is_pushed_after_it_moves() {
     assert!(near, "{:?}", particles[0].position);
     let calm = test_emitter(H3EmissionShape::Sprayer);
     let mut particles = vec![Particle { velocity: [1.0, 0.0, 0.0], ..test_particle() }];
-    calm.step(H3ParticleState::default(), &mut particles, dt, [0.0; 3], &mut ended, None, false);
+    calm.step(ParticleState::default(), &mut particles, dt, [0.0; 3], &mut ended, None, false);
     assert_eq!(particles[0].position, [0.5, 0.0, 0.0], "none without the movement");
 }
 
@@ -761,12 +761,12 @@ fn a_turbulent_particle_on_the_card_is_pushed_after_it_moves() {
 #[test]
 fn reach_and_halo_4_lerp_opposite_accelerations_on_the_card() {
     let ends = [[-0.1, 0.1, 0.0], [0.1, -0.1, 0.0]];
-    let acceleration = H3ParticleProperty { ends, ..H3ParticleProperty::fixed(0.25).unwrap() };
-    assert!(acceleration.around(&H3ParticleState::default()).iter().any(|axis| axis.is_nan()), "the turn fails");
+    let acceleration = ParticleProperty { ends, ..ParticleProperty::fixed(0.25).unwrap() };
+    assert!(acceleration.around(&ParticleState::default()).iter().any(|axis| axis.is_nan()), "the turn fails");
     let emitter = H3Emitter { card_lerps: true, acceleration, ..test_emitter(H3EmissionShape::Sprayer) };
     let mut particles = vec![Particle { velocity: [1.0, 0.0, 0.0], ..test_particle() }];
     let mut ended = Vec::new();
-    emitter.step(H3ParticleState::default(), &mut particles, 1.0, [0.0; 3], &mut ended, None, false);
+    emitter.step(ParticleState::default(), &mut particles, 1.0, [0.0; 3], &mut ended, None, false);
     let [x, y, z] = particles[0].velocity;
     let near = (x - 0.95).abs() < 1e-6 && (y - 0.05).abs() < 1e-6 && z == 0.0;
     assert!(near, "a quarter of the way from one end to the other: {:?}", particles[0].velocity);
@@ -834,7 +834,7 @@ fn kit_reach_particles_read_their_own_options_and_seeds() {
     let Some(source) = kit_source(GameId::HaloReach) else { return };
     let plasma = read_look(&crate::app::model_preview::load::TagReader::new(&source), "fx\\particles\\plasma\\plasma_blue_medium").unwrap();
     assert!(plasma.reach && !plasma.cheap);
-    assert_eq!(plasma.shader.albedo, H3ParticleAlbedo::Palette2dPlasma);
+    assert_eq!(plasma.shader.albedo, ParticleAlbedo::Palette2dPlasma);
     assert!(plasma.shader.plasma_second_sprite);
     assert_eq!(plasma.shader.sphere_warp, Some(0.2));
     assert_eq!(plasma.shader.depth_fade, Some(0.25));
@@ -857,7 +857,7 @@ fn kit_reach_swarm_emits_from_a_flattened_plane_with_turbulence() {
     let emitters: Vec<_> = parts.flat_map(|parts| parts.emitters).collect();
     let plane = emitters.iter().find(|emitter| emitter.shape == H3EmissionShape::Plane).expect("a plane emitter");
     assert_eq!(plane.axis_scale, [0.0, 2.0, 2.0]);
-    assert_eq!(plane.update, H3ParticleUpdate::Gpu);
+    assert_eq!(plane.update, ParticleUpdate::Gpu);
     let turbulence = plane.turbulence.as_ref().expect("its turbulence");
     assert!(turbulence.image.width > 0 && turbulence.image.whole());
 }

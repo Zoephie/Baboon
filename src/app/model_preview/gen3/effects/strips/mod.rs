@@ -14,7 +14,7 @@ use super::super::super::functions::FunctionValues;
 use super::super::super::common::named_function::tag_function_at;
 use super::super::super::effects::{EffectOnsets, EffectTimes, for_each_attached_part, part_frame, read_part_placement};
 use super::super::super::particles::{
-    H3ParticleVertex, H3SpriteShader, lightmap_tint, particle_exposure, read_ends, read_sprite_shader, slerped,
+    ParticleCorner, H3SpriteShader, lightmap_tint, particle_exposure, read_ends, read_sprite_shader, slerped,
 };
 use super::super::super::*;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};

@@ -24,7 +24,7 @@ pub(super) mod shield;
 pub(crate) struct ReachFeatures {
     /// Reach's attached `light`s and `cheap_light`s.
     pub lights: Vec<super::reach::lights::ReachLight>,
-    pub cheap_lights: Vec<super::reach::lights::ReachCheapLight>,
+    pub cheap_lights: Vec<super::reach::lights::CheapLight>,
     /// `light_apply`, `_frustum`, `_specular` and `_frustum_specular`, by
     /// `combo` (frustum 1, specular 2), for its screen-space lights.
     pub light_passes: Vec<Option<std::sync::Arc<super::gen3::shaders::H3Pass>>>,

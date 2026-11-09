@@ -331,8 +331,8 @@ macro_rules! attached_feature {
 
 pub(in crate::app::model_preview) use attached_feature;
 
-attached_feature!(super::super::particles::H3ParticleSystem, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
-attached_feature!(super::super::particles::cheap::ReachCheapEmitterAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
+attached_feature!(super::super::particles::ParticleSystem, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
+attached_feature!(super::super::particles::cheap::CheapEmitterAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
 
 impl Feature for super::super::antennas::Antenna {
     fn only_under(&self) -> Option<&(String, String)> {

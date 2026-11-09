@@ -4,7 +4,7 @@ use super::*;
 
 /// A system in an event of an attached effect, at a marker.
 #[derive(Debug)]
-pub(crate) struct H3ParticleSystem {
+pub(crate) struct ParticleSystem {
     pub(super) node: usize,
     pub(super) position: [f32; 3],
     pub(super) axes: [[f32; 3]; 3],
@@ -20,10 +20,10 @@ pub(crate) struct H3ParticleSystem {
     pub(super) near_cutoff: f32,
     pub(super) times: Arc<EffectTimes>,
     pub(super) event: usize,
-    pub(crate) look: Arc<H3ParticleLook>,
+    pub(crate) look: Arc<ParticleLook>,
     pub(super) emitters: Vec<Arc<H3Emitter>>,
     /// What its particles start: how far along the list each system lies.
-    pub(super) attached: Vec<(H3ParticleTrigger, usize)>,
+    pub(super) attached: Vec<(ParticleTrigger, usize)>,
     /// Started by a particle, at the particle: nothing of its own runs it.
     pub(super) child: bool,
     /// `use parent position but world orientation`: its axes do not turn.
@@ -47,7 +47,7 @@ pub(super) struct H3SystemParts {
     world: bool,
     near_range: f32,
     near_cutoff: f32,
-    look: Arc<H3ParticleLook>,
+    look: Arc<ParticleLook>,
     pub(super) emitters: Vec<Arc<H3Emitter>>,
 }
 
@@ -64,7 +64,7 @@ pub(super) fn read_system_parts(reader: &TagReader, system: TagStruct<'_>) -> Op
     }
     let path = system.read_tag_ref_path("particle").filter(|path| !path.is_empty())?;
     let own = ParticleRules::of(reader.source.game()).own_system;
-    let (look, emitters): (Arc<H3ParticleLook>, Vec<_>) = if let Some(own) = own {
+    let (look, emitters): (Arc<ParticleLook>, Vec<_>) = if let Some(own) = own {
         (own.read)(reader, system, &path)?
     } else {
         let look = read_look(reader, &path).map(Arc::new)?;
@@ -110,8 +110,8 @@ pub(super) fn read_system_parts(reader: &TagReader, system: TagStruct<'_>) -> Op
 /// The systems of the effects a look's particles start, and their events.
 fn read_attached_parts(
     reader: &TagReader,
-    look: &H3ParticleLook,
-) -> Vec<(H3ParticleTrigger, H3SystemParts, Arc<EffectTimes>, usize)> {
+    look: &ParticleLook,
+) -> Vec<(ParticleTrigger, H3SystemParts, Arc<EffectTimes>, usize)> {
     let mut parts = Vec::new();
     for (trigger, path) in &look.attachments {
         let Ok(effect) = reader.load(path, "effect", b"effe") else {
@@ -131,7 +131,7 @@ fn read_attached_parts(
         let lasting = Arc::new(EffectTimes::lasting());
         for system in elements(tag.root(), "attached particle systems") {
             if let Some(read) = read_system_parts(reader, system) {
-                parts.push((H3ParticleTrigger::Carried, read, Arc::clone(&lasting), 0));
+                parts.push((ParticleTrigger::Carried, read, Arc::clone(&lasting), 0));
             }
         }
     }
@@ -140,7 +140,7 @@ fn read_attached_parts(
 
 /// The contrails these systems' particles start, each once: a system at many
 /// markers shares its own.
-pub(in crate::app::model_preview) fn carried_strips(systems: &[Arc<H3ParticleSystem>]) -> Vec<Arc<H3StripAt>> {
+pub(in crate::app::model_preview) fn carried_strips(systems: &[Arc<ParticleSystem>]) -> Vec<Arc<H3StripAt>> {
     let mut strips: Vec<Arc<H3StripAt>> = Vec::new();
     for strip in systems.iter().flat_map(|system| &system.carried) {
         if !strips.iter().any(|known| Arc::ptr_eq(known, strip)) {
@@ -150,7 +150,7 @@ pub(in crate::app::model_preview) fn carried_strips(systems: &[Arc<H3ParticleSys
     strips
 }
 
-impl H3ParticleSystem {
+impl ParticleSystem {
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
     }
@@ -168,7 +168,7 @@ pub(in crate::app::model_preview) fn read_h3_particles(
     owner: u8,
     markers: &[RenderModelPreviewMarker],
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
-) -> Vec<H3ParticleSystem> {
+) -> Vec<ParticleSystem> {
     let mut systems = Vec::new();
     for object_effect in object_effects(reader, object) {
         let Ok(effect) = reader.load(&object_effect.path, "effect", b"effe") else {
@@ -192,7 +192,7 @@ pub(in crate::app::model_preview) fn read_h3_particles(
                     .look
                     .attachments
                     .iter()
-                    .filter(|(trigger, _)| *trigger == H3ParticleTrigger::Birth)
+                    .filter(|(trigger, _)| *trigger == ParticleTrigger::Birth)
                     .flat_map(|(_, path)| read_carried_strips(reader, path))
                     .map(Arc::new)
                     .collect();
@@ -200,7 +200,7 @@ pub(in crate::app::model_preview) fn read_h3_particles(
                     let (place, node) = frame(marker);
                     let attached = children.iter().enumerate().map(|(at, child)| (child.0, at + 1)).collect();
                     let parts = parts.clone();
-                    systems.push(H3ParticleSystem {
+                    systems.push(ParticleSystem {
                         node,
                         position: place.position,
                         axes: place.axes,
@@ -227,7 +227,7 @@ pub(in crate::app::model_preview) fn read_h3_particles(
                     });
                     for (_, parts, times, event) in &children {
                         let parts = parts.clone();
-                        systems.push(H3ParticleSystem {
+                        systems.push(ParticleSystem {
                             node,
                             position: place.position,
                             axes: place.axes,
@@ -260,7 +260,7 @@ pub(in crate::app::model_preview) fn read_h3_particles(
     systems
 }
 
-impl H3ParticleSystem {
+impl ParticleSystem {
     /// Its sort position, nudged by its tag: `add_element`'s `sort_bias`.
     pub(crate) fn distance(&self, bones: Option<&[[f32; 4]]>, view: &ViewFrame) -> f32 {
         let (origin, _) = location(self, bones);
@@ -270,4 +270,4 @@ impl H3ParticleSystem {
 
 }
 
-attached!(H3ParticleSystem);
+attached!(ParticleSystem);

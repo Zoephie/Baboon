@@ -98,7 +98,7 @@ pub(super) struct ParticleType {
     pub(super) initial_physics: CreationPhysics,
     pub(super) constants: [f32; 3],
     pub(super) states: Vec<TypeState>,
-    pub(super) particle_states: Vec<ParticleState>,
+    pub(super) particle_states: Vec<CeParticleState>,
 }
 
 /// A `particle_system` tag.
@@ -208,7 +208,7 @@ pub(in crate::app::model_preview) fn read_pctl_def(reader: &TagReader, path: &st
                 }
             };
             let real = |name: &str| state.read_real(name).unwrap_or(0.0);
-            particle_states.push(ParticleState {
+            particle_states.push(CeParticleState {
                 duration: bounds_of(state, "duration bounds"),
                 transition: bounds_of(state, "transition time bounds"),
                 sheet: sheets[sheet_index].clone(),

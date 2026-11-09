@@ -16,14 +16,14 @@ pub(crate) struct H4EmitterDraw {
     pub(crate) black_or_white: bool,
 }
 
-impl H3ParticleField {
+impl ParticleField {
     /// Halo 4: each emitter of `system`'s particles as `pack_particle_state`
     /// writes them, for its material to draw.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn h4_draws(
         &self,
         index: usize,
-        system: &H3ParticleSystem,
+        system: &ParticleSystem,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &ViewFrame,
@@ -49,7 +49,7 @@ impl H3ParticleField {
     }
 }
 
-impl H3ParticleSystem {
+impl ParticleSystem {
     /// `particle_update.fx`'s outputs for each live particle of a location,
     /// packed.
     fn h4_draws_at(
@@ -65,7 +65,7 @@ impl H3ParticleSystem {
         let system = self;
         let look = &*system.look;
         for (emitter, running) in system.emitters.iter().zip(running) {
-            let base = H3ParticleState {
+            let base = ParticleState {
                 system_age: system.times.age(system.event, time - onset).unwrap_or(1.0),
                 game_time: particle_game_time(look.reach, time),
                 effect_a: system_state(system, values, time, time - onset).map_or(0.0, |state| state.effect_a),

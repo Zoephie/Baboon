@@ -3,7 +3,7 @@
 //! effect's parts submit while their event runs. Here they run on the
 //! processor a preview frame at a time, and draw as one batch after every
 //! other transparent. They collide only with what is on screen, which the
-//! preview leaves out (see [`ReachCheapField::update`]).
+//! preview leaves out (see [`CheapField::update`]).
 
 use std::collections::HashMap;
 use std::sync::Arc;

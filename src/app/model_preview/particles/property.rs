@@ -5,7 +5,7 @@ use super::*;
 /// `game_state_type_enum`, by option name. Those with a `{` carry another
 /// name after it, which a tag's own schema may spell the first way only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum H3ParticleInput {
+pub(super) enum ParticleInput {
     Age,
     SystemAge,
     Random,
@@ -32,7 +32,7 @@ pub(super) enum H3ParticleInput {
     Other,
 }
 
-impl H3ParticleInput {
+impl ParticleInput {
     pub(super) fn named(name: &str) -> Self {
         match name.split('{').next().unwrap_or_default() {
             "particle age" => Self::Age,
@@ -63,7 +63,7 @@ impl H3ParticleInput {
         }
     }
 
-    pub(super) fn of(self, state: &H3ParticleState) -> f32 {
+    pub(super) fn of(self, state: &ParticleState) -> f32 {
         match self {
             Self::Age => state.age,
             Self::SystemAge => state.system_age,
@@ -111,7 +111,7 @@ impl H3ParticleInput {
 
 /// `c_particle_state_list`.
 #[derive(Debug, Clone, Copy, Default)]
-pub(super) struct H3ParticleState {
+pub(super) struct ParticleState {
     pub(super) age: f32,
     pub(super) system_age: f32,
     pub(super) seeds: [f32; SEEDS],
@@ -146,11 +146,11 @@ pub(in crate::app::model_preview) fn lod_amount(lod: Option<[f32; 4]>, distance:
 
 /// `c_editable_property_base`, with what `interpolate` runs between.
 #[derive(Debug, Clone)]
-pub(in crate::app::model_preview) struct H3ParticleProperty {
-    pub(super) input: H3ParticleInput,
-    pub(super) range: H3ParticleInput,
+pub(in crate::app::model_preview) struct ParticleProperty {
+    pub(super) input: ParticleInput,
+    pub(super) range: ParticleInput,
     pub(super) adds: Option<bool>,
-    pub(super) modifier: H3ParticleInput,
+    pub(super) modifier: ParticleInput,
     pub(super) function: Arc<TagFunction>,
     pub(super) ends: [[f32; 3]; 2],
     /// What the game multiplies a value by on reading it: Halo 2's rates are
@@ -158,7 +158,7 @@ pub(in crate::app::model_preview) struct H3ParticleProperty {
     pub(super) scale: f32,
 }
 
-impl H3ParticleProperty {
+impl ParticleProperty {
     /// A property as its tag gives it, its inputs allocated as read: what
     /// Halo 3's and Halo 2's postprocesses do, and Reach's controllers.
     fn read(property: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<Self> {
@@ -170,7 +170,7 @@ impl H3ParticleProperty {
     /// A property with its randoms not yet given seeds, for Reach, which
     /// gathers what a definition's properties read before allocating any.
     pub(super) fn unallocated(property: TagStruct<'_>) -> Option<Self> {
-        let input = |field: &str| H3ParticleInput::named(&property.read_enum_option(field).unwrap_or_default());
+        let input = |field: &str| ParticleInput::named(&property.read_enum_option(field).unwrap_or_default());
         let adds = match property.read_enum_option("Output Modifier").as_deref() {
             Some("Plus") => Some(true),
             Some("Times") => Some(false),
@@ -221,10 +221,10 @@ impl H3ParticleProperty {
         let mut function = H2Function::new(FunctionType::Identity);
         function.set_clamp_range(value, value).ok()?;
         Some(Self {
-            input: H3ParticleInput::Other,
-            range: H3ParticleInput::Other,
+            input: ParticleInput::Other,
+            range: ParticleInput::Other,
             adds: None,
-            modifier: H3ParticleInput::Other,
+            modifier: ParticleInput::Other,
             function: Arc::new(TagFunction::parse_encoded(FunctionEncoding::H2, &function.to_bytes()).ok()?),
             ends: [[0.0; 3]; 2],
             scale: 1.0,
@@ -243,11 +243,11 @@ impl H3ParticleProperty {
         Self::read(holder.descend(name)?, seeds)
     }
 
-    pub(super) fn scalar(&self, state: &H3ParticleState) -> f32 {
+    pub(super) fn scalar(&self, state: &ParticleState) -> f32 {
         self.unscaled(state) * self.scale
     }
 
-    fn unscaled(&self, state: &H3ParticleState) -> f32 {
+    fn unscaled(&self, state: &ParticleState) -> f32 {
         let value = self.function.evaluate(self.input.of(state), self.range.of(state));
         match self.adds {
             Some(true) => value + self.modifier.of(state),
@@ -256,18 +256,18 @@ impl H3ParticleProperty {
         }
     }
 
-    pub(super) fn color(&self, state: &H3ParticleState) -> [f32; 3] {
+    pub(super) fn color(&self, state: &ParticleState) -> [f32; 3] {
         let color = self.function.evaluate_color(self.input.of(state), self.range.of(state));
         [color.red, color.green, color.blue]
     }
 
-    pub(super) fn vector(&self, state: &H3ParticleState) -> [f32; 3] {
+    pub(super) fn vector(&self, state: &ParticleState) -> [f32; 3] {
         let t = self.scalar(state);
         std::array::from_fn(|axis| self.ends[0][axis] + (self.ends[1][axis] - self.ends[0][axis]) * t)
     }
 
     /// `get_interpolated_value` for what a direction is: around, not across.
-    pub(super) fn around(&self, state: &H3ParticleState) -> [f32; 3] {
+    pub(super) fn around(&self, state: &ParticleState) -> [f32; 3] {
         slerped(self.ends, self.scalar(state))
     }
 

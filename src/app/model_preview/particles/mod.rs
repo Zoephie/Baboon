@@ -7,7 +7,7 @@
 pub(super) mod cheap;
 mod gl;
 pub(in crate::app::model_preview) use gl::*;
-pub(in crate::app::model_preview) use cheap::{CHEAP_FLOATS, ReachCheapGl, reach_cheap_gl, upload_cheap_render_texture};
+pub(in crate::app::model_preview) use cheap::{CHEAP_FLOATS, CheapGl, reach_cheap_gl, upload_cheap_render_texture};
 
 use std::sync::Arc;
 

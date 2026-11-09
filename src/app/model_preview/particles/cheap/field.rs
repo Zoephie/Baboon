@@ -4,7 +4,7 @@ use super::*;
 
 /// The pool every emitter writes, as the card holds it.
 #[derive(Debug)]
-pub(crate) struct ReachCheapField {
+pub(crate) struct CheapField {
     pub(super) time: Option<f32>,
     pub(super) particles: Vec<CheapParticle>,
     /// `spawn_offset`.
@@ -16,7 +16,7 @@ pub(crate) struct ReachCheapField {
     pub(super) phases: Vec<[f32; 2]>,
 }
 
-impl Default for ReachCheapField {
+impl Default for CheapField {
     fn default() -> Self {
         Self::fresh(0)
     }
@@ -24,14 +24,14 @@ impl Default for ReachCheapField {
 
 /// A cheap particle's quad corner, in world space.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ReachCheapVertex {
+pub(crate) struct CheapVertex {
     pub(crate) place: [f32; 3],
     /// u, v and the render texture's layer.
     pub(crate) texcoord: [f32; 3],
     pub(crate) color: [f32; 4],
 }
 
-impl ReachCheapField {
+impl CheapField {
     pub(super) fn fresh(emitters: usize) -> Self {
         Self {
             time: None,
@@ -49,7 +49,7 @@ impl ReachCheapField {
     /// pre-roll short, so a held pose has particles in flight.
     pub(crate) fn advance(
         &mut self,
-        emitters: &[ReachCheapEmitterAt],
+        emitters: &[CheapEmitterAt],
         shown: &[bool],
         values: impl Fn(u8) -> Option<FunctionValues>,
         onsets: &mut EffectOnsets,
@@ -130,7 +130,7 @@ impl ReachCheapField {
     /// each at the next ring slot, over whatever was there.
     pub(super) fn spawn(
         &mut self,
-        at: &ReachCheapEmitterAt,
+        at: &CheapEmitterAt,
         submission: &CheapSubmission,
         values: Option<&FunctionValues>,
         time: f32,
@@ -161,7 +161,7 @@ impl ReachCheapField {
     /// triangles each: facing along the velocity, stretched by its speed, or
     /// the screen; coloured by the type's colour, its fade and the packed
     /// lighting. There is no fog to scatter in.
-    pub(crate) fn vertices(&self, library: &CheapLibrary, view: &ViewFrame) -> Vec<ReachCheapVertex> {
+    pub(crate) fn vertices(&self, library: &CheapLibrary, view: &ViewFrame) -> Vec<CheapVertex> {
         let mut vertices = Vec::new();
         for (index, particle) in self.particles.iter().enumerate() {
             if particle.age.abs() > 1.0 {
@@ -206,7 +206,7 @@ impl ReachCheapField {
             let corner = |[x, y]: [f32; 2]| {
                 let (across, down) = (x - 0.5, y - 0.5);
                 let offset = [across * local[0] - down * local[1], across * local[1] + down * local[0]];
-                ReachCheapVertex {
+                CheapVertex {
                     place: std::array::from_fn(|axis| place[axis] + offset[0] * basis[0][axis] + offset[1] * basis[1][axis]),
                     texcoord: [x, (y - 0.5) * y_scale + 0.5, found.texture as f32],
                     color,

@@ -38,7 +38,7 @@ fn strip_vertices(
     uv_offset: [f32; 2],
     origin_fade: impl Fn(&Profile, [f32; 3]) -> f32,
     edge_view: impl Fn([f32; 3]) -> [f32; 3],
-) -> Vec<H3ParticleVertex> {
+) -> Vec<ParticleCorner> {
     let shape = look.shape;
     let vertex = |profile: &Profile, strip: usize, offset: usize| {
         let world = world_basis(profile.direction);
@@ -78,7 +78,7 @@ fn strip_vertices(
         if let Some([range, cutoff]) = look.angle_fade {
             color[3] *= angle_fade(place, profile, view.eye, range, cutoff);
         }
-        H3ParticleVertex {
+        ParticleCorner {
             place,
             sprite: uv,
             next_sprite: uv,
@@ -198,7 +198,7 @@ impl H3StripAt {
         time: f32,
         onset: f32,
         stops: f32,
-    ) -> Vec<H3ParticleVertex> {
+    ) -> Vec<ParticleCorner> {
         let Some(mut state) = self.state(values, time, onset) else {
             return Vec::new();
         };
@@ -267,7 +267,7 @@ impl H3StripAt {
         time: f32,
         onset: f32,
         stops: f32,
-    ) -> Vec<H3ParticleVertex> {
+    ) -> Vec<ParticleCorner> {
         if running.profiles.len() < 2 {
             return Vec::new();
         }

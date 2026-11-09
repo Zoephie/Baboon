@@ -24,7 +24,7 @@ pub(super) struct TypeState {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct ParticleState {
+pub(super) struct CeParticleState {
     pub(super) duration: [f32; 2],
     pub(super) transition: [f32; 2],
     pub(super) sheet: Arc<CeSpriteSheet>,
@@ -160,7 +160,7 @@ pub(crate) struct CeParticleSystemField {
 
 /// `randomize_particle_variables`: scale, rates and alpha at random, the
 /// color's channels together.
-fn randomize(state: &ParticleState, random: &mut Random) -> ParticleVariables {
+fn randomize(state: &CeParticleState, random: &mut Random) -> ParticleVariables {
     let together = random.range(0.0, 1.0);
     let animation = random.range(state.animation_rate[0], state.animation_rate[1]);
     let rotation = random.range(state.rotation_rate[0], state.rotation_rate[1]);

@@ -5,7 +5,7 @@
 
 use eframe::glow::{self, HasContext as _};
 
-use super::super::particles::{H3ParticleGl, h3_particle_gl, particle_floats};
+use super::super::particles::{ParticleGl, h3_particle_gl, particle_floats};
 
 use super::super::gl::buffer::slice_bytes;
 
@@ -248,7 +248,7 @@ pub(in crate::app::model_preview) struct ParticleTargets<'a> {
 /// 2's, Halo 3's and Reach's.
 pub(in crate::app::model_preview) unsafe fn draw_particle_system(
     gl: &glow::Context,
-    particles: &H3ParticleGl,
+    particles: &ParticleGl,
     uploaded: &mut ModelGpuSlot,
     frame: &ModelGpuFrame,
     index: usize,
@@ -278,7 +278,7 @@ pub(in crate::app::model_preview) unsafe fn draw_particle_system(
         }
         let vertices = particle_floats(camera, &drawn);
         let mut textures = uploaded.particle_textures.get(index).copied().unwrap_or_default();
-        if system.look.shader.albedo == particles::H3ParticleAlbedo::H2Distortion {
+        if system.look.shader.albedo == particles::ParticleAlbedo::H2Distortion {
             // `sub_915630`: before a pass that reads `GLOBAL particle
             // distortion`, the frame as it stands is copied there.
             textures[2] = copy_frame(gl, targets.distortion_copy);

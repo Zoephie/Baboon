@@ -42,7 +42,7 @@ pub(in crate::app::model_preview) fn read_ends(property: TagStruct<'_>) -> [[f32
 /// What particles, beams and contrails ask of a shader alike.
 #[derive(Debug)]
 pub(crate) struct H3SpriteShader {
-    pub(crate) albedo: H3ParticleAlbedo,
+    pub(crate) albedo: ParticleAlbedo,
     pub(crate) blend: H3Blend,
     pub(crate) black_point: bool,
     pub(crate) frame_blend: bool,
@@ -63,7 +63,7 @@ pub(crate) struct H3SpriteShader {
     pub(crate) sort_layer: i32,
     /// `distortion_scale`, for what bends the scene instead of covering it.
     pub(crate) distortion: Option<f32>,
-    pub(in crate::app::model_preview) lighting: H3ParticleLighting,
+    pub(in crate::app::model_preview) lighting: ParticleLighting,
     /// `starting_uv_scale` and `ending_uv_scale`.
     pub(in crate::app::model_preview) uv_scale: [f32; 2],
     pub(crate) base_map: Option<H3Bitmap>,
@@ -95,13 +95,13 @@ impl H3SpriteShader {
 
     /// Reach's `per_pixel_smooth` contrast, when its pixels are lit so.
     pub(crate) fn smooth_contrast(&self) -> Option<[f32; 2]> {
-        (self.lighting == H3ParticleLighting::ReachSmooth).then_some(self.contrast)
+        (self.lighting == ParticleLighting::ReachSmooth).then_some(self.contrast)
     }
 
     /// What a leaf draws with: only a map, cut out at half its alpha.
     pub(in crate::app::model_preview) fn plain(blend: H3Blend) -> Self {
         Self {
-            albedo: H3ParticleAlbedo::Diffuse,
+            albedo: ParticleAlbedo::Diffuse,
             blend,
             black_point: false,
             frame_blend: false,
@@ -113,7 +113,7 @@ impl H3SpriteShader {
             lit_pixels: false,
             sort_layer: 2,
             distortion: None,
-            lighting: H3ParticleLighting::None,
+            lighting: ParticleLighting::None,
             uv_scale: [1.0; 2],
             base_map: None,
             alpha_map: None,
@@ -185,7 +185,7 @@ pub(in crate::app::model_preview) fn read_sprite_shader(reader: &TagReader, shad
     // `compute_depth_fade`: Reach's `low_res` is `on` on DirectX 11, its
     // four taps being the 360's alone, and `palette_shift` fades as `on` does.
     let fades = if reach_method { matches!(depth_fade.as_str(), "on" | "low_res" | "palette_shift") } else { depth_fade == "on" };
-    let albedo = H3ParticleAlbedo::named(&chosen("albedo"));
+    let albedo = ParticleAlbedo::named(&chosen("albedo"));
     Some(H3SpriteShader {
         albedo,
         blend: definition.blend(&options),
@@ -215,14 +215,14 @@ pub(in crate::app::model_preview) fn read_sprite_shader(reader: &TagReader, shad
                 .map_or(1.0, |function| function.evaluate(0.0, 0.0))
         }),
         lighting: match chosen("lighting").as_str() {
-            "per_vertex_ravi_order_0" => H3ParticleLighting::Ambient,
-            "per_pixel_ravi_order_3" => H3ParticleLighting::Directional,
-            "per_vertex_ambient" => H3ParticleLighting::ReachAmbient,
-            "per_pixel_smooth" => H3ParticleLighting::ReachSmooth,
+            "per_vertex_ravi_order_0" => ParticleLighting::Ambient,
+            "per_pixel_ravi_order_3" => ParticleLighting::Directional,
+            "per_vertex_ambient" => ParticleLighting::ReachAmbient,
+            "per_pixel_smooth" => ParticleLighting::ReachSmooth,
             // `smoke_lighting` draws normals into the low-res transparency
             // buffer, and `lit_particle_overdraw_apply.hlsl` lights that in a
             // pass of its own, whose compositing was not read: it draws unlit.
-            _ => H3ParticleLighting::None,
+            _ => ParticleLighting::None,
         },
         uv_scale: ["starting_uv_scale", "ending_uv_scale"].map(|name| {
             parameter(shader, name)
@@ -242,7 +242,7 @@ pub(in crate::app::model_preview) fn read_sprite_shader(reader: &TagReader, shad
         sphere_warp: (reach_method && chosen("warp") == "sphere").then(|| resolved_real("sphere_warp_scale", 0.41)),
         // `depth_fade_palette_shift.render_method_option`'s default.
         palette_shift: (reach_method && depth_fade == "palette_shift").then(|| resolved_real("palette_shift_amount", 0.5)),
-        plasma_second_sprite: reach_method && matches!(albedo, H3ParticleAlbedo::PalettePlasma | H3ParticleAlbedo::Palette2dPlasma),
+        plasma_second_sprite: reach_method && matches!(albedo, ParticleAlbedo::PalettePlasma | ParticleAlbedo::Palette2dPlasma),
     })
 }
 
@@ -336,7 +336,7 @@ fn read_albedo_constants(shader: TagStruct<'_>, resolved: Option<&ResolvedRender
 /// One corner of a quad, as the particle program reads it.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct H3ParticleVertex {
+pub(crate) struct ParticleCorner {
     pub(crate) place: [f32; 3],
     pub(crate) sprite: [f32; 2],
     pub(crate) next_sprite: [f32; 2],

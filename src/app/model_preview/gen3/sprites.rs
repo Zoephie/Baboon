@@ -9,13 +9,13 @@ use super::state::Gen3State;
 use super::super::common::sprites::{
     ParticleTargets, advance_sprite_simulations, begin_flares, draw_antennas, draw_particle_system, draw_sprite_quad,
 };
-use super::super::particles::{CHEAP_FLOATS, H3ParticleGl, ReachCheapGl, particle_floats, reach_cheap_gl};
+use super::super::particles::{CHEAP_FLOATS, ParticleGl, CheapGl, particle_floats, reach_cheap_gl};
 use super::super::common::sprite_gl::{SpriteGl, ce_flare_occlusion, draw_flare_sprites};
 use super::super::common::view::ce_flare_view;
 use super::super::*;
 use super::super::common::view::ViewFrame;
 use super::super::super::effects::EffectOnsets;
-use super::super::particles::H3ParticleField;
+use super::super::particles::ParticleField;
 use super::super::gl::pass_state::PassState;
 use super::pipeline::{h3_lighting_constants, h3_set_blend};
 use crate::app::model_preview::common::sprites::h3_layered_distance;
@@ -185,7 +185,7 @@ struct SpritePass<'a> {
     gl: &'a glow::Context,
     frame: &'a ModelGpuFrame,
     flares: &'a SpriteGl,
-    particle_gl: Option<&'a H3ParticleGl>,
+    particle_gl: Option<&'a ParticleGl>,
     /// The map an unmapped stage samples.
     no_map: Option<glow::NativeTexture>,
     stops: f32,
@@ -397,7 +397,7 @@ impl SpritePass<'_> {
     unsafe fn draw_cheap_particles(
         &self,
         uploaded: &mut ModelGpuSlot,
-        cheap_gl: &mut Option<Option<ReachCheapGl>>,
+        cheap_gl: &mut Option<Option<CheapGl>>,
         program: glow::NativeProgram,
     ) {
         let (gl, frame, camera) = (self.gl, self.frame, self.camera);
@@ -493,10 +493,10 @@ pub(in crate::app::model_preview) struct Gen3Sprites<'a> {
     /// When each effect began.
     pub(in crate::app::model_preview) onsets: &'a mut EffectOnsets,
     /// Every game's particle systems.
-    pub(in crate::app::model_preview) particles: &'a mut H3ParticleField,
+    pub(in crate::app::model_preview) particles: &'a mut ParticleField,
     /// The particle program, the map an unmapped stage samples, and the
     /// exposure stops.
-    pub(in crate::app::model_preview) particle_gl: Option<&'a H3ParticleGl>,
+    pub(in crate::app::model_preview) particle_gl: Option<&'a ParticleGl>,
     pub(in crate::app::model_preview) no_map: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) stops: f32,
     /// The scene's depth, for the soft fade, and the targets' size.

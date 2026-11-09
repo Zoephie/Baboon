@@ -236,7 +236,7 @@ pub(in crate::app::model_preview) unsafe fn sprite_maps(
     )
 }
 
-pub(in crate::app::model_preview) fn particle_floats(camera: &ModelGpuCamera, drawn: &[particles::H3ParticleVertex]) -> Vec<[f32; PARTICLE_FLOATS]> {
+pub(in crate::app::model_preview) fn particle_floats(camera: &ModelGpuCamera, drawn: &[particles::ParticleCorner]) -> Vec<[f32; PARTICLE_FLOATS]> {
     drawn
         .iter()
         .map(|vertex| {
@@ -257,7 +257,7 @@ pub(in crate::app::model_preview) fn particle_floats(camera: &ModelGpuCamera, dr
 }
 
 /// What Halo 3's particles draw with, made on first use.
-pub(in crate::app::model_preview) struct H3ParticleGl {
+pub(in crate::app::model_preview) struct ParticleGl {
     program: glow::NativeProgram,
     vertex_array: glow::NativeVertexArray,
     buffer: glow::NativeBuffer,
@@ -287,7 +287,7 @@ pub(in crate::app::model_preview) struct H3ParticleGl {
     unit_particle_alpha: Option<glow::NativeUniformLocation>,
 }
 
-impl H3ParticleGl {
+impl ParticleGl {
     pub(in crate::app::model_preview) unsafe fn draw(
         &self,
         gl: &glow::Context,
@@ -318,7 +318,7 @@ impl H3ParticleGl {
             gl.uniform_1_f32(self.fade.as_ref(), range);
             gl.uniform_4_f32_slice(self.depth.as_ref(), &scene_depth_terms(camera));
             gl.uniform_1_i32(self.albedo.as_ref(), look.albedo as i32);
-            if look.albedo == particles::H3ParticleAlbedo::H2Distortion {
+            if look.albedo == particles::ParticleAlbedo::H2Distortion {
                 let mut viewport = [0; 4];
                 gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
                 let [x, y, width, height] = viewport.map(|value| value as f32);
@@ -370,7 +370,7 @@ impl H3ParticleGl {
     }
 }
 
-pub(in crate::app::model_preview) unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<H3ParticleGl> {
+pub(in crate::app::model_preview) unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<ParticleGl> {
     unsafe {
         let program = link_h2_program(gl, main, PARTICLE_VERTEX, PARTICLE_FRAGMENT)
             .map_err(|error| eprintln!("model preview: {error}"))
@@ -390,7 +390,7 @@ pub(in crate::app::model_preview) unsafe fn h3_particle_gl(gl: &glow::Context, m
         for (unit, name) in ["u_base", "u_alpha", "u_palette", "u_scene_depth", "u_base2"].into_iter().enumerate() {
             gl.uniform_1_i32(gl.get_uniform_location(program, name).as_ref(), unit as i32);
         }
-        Some(H3ParticleGl {
+        Some(ParticleGl {
             program,
             vertex_array,
             buffer,

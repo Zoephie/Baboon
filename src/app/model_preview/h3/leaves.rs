@@ -8,7 +8,7 @@ use blam_tags::TagFile;
 use super::super::common::fields::{elements, object_block};
 use super::super::cloth::{H3Wind, away_from_pole, turned_about};
 use super::super::effects::marker_name;
-use super::super::particles::{H3ParticleVertex, H3SpriteShader};
+use super::super::particles::{ParticleCorner, H3SpriteShader};
 use super::super::gen3::shaders::H3Blend;
 use super::super::gen3::materials::read_h3_bitmap;
 use super::super::gen3::pipeline::EXPOSURE as H3_EXPOSURE;
@@ -525,7 +525,7 @@ impl H3LeafField {
         index: usize,
         system: &H3LeavesAt,
         lighting: &[[f32; 4]; 10],
-    ) -> Vec<H3ParticleVertex> {
+    ) -> Vec<ParticleCorner> {
         let mut vertices = Vec::new();
         let Some(running) = self.running.get(index) else {
             return vertices;
@@ -561,7 +561,7 @@ impl H3LeafField {
             for corner in TRIANGLES.iter().flatten() {
                 let [y, z] = VERTICES[*corner];
                 let uv = [(right - left) * (y + 1.0) * 0.5 + left, (bottom - top) * (z + 1.0) * 0.5 + top];
-                vertices.push(H3ParticleVertex {
+                vertices.push(ParticleCorner {
                     place: places[*corner],
                     sprite: uv,
                     next_sprite: uv,

@@ -322,9 +322,9 @@ fn kit_reach_focus_rifle_beams_take_one_texcoord_and_an_angle_fade() {
         return;
     };
     let beams = looks_of(&source, "objects\\weapons\\rifle\\focus_rifle\\fx\\projectile_3p", "beam_system", b"beam", "beams");
-    use super::super::super::super::particles::H3ParticleAlbedo;
-    assert_eq!(beams[1].shader.albedo, H3ParticleAlbedo::Palette2dPlasma);
-    assert_eq!(beams[2].shader.albedo, H3ParticleAlbedo::PalettePlasma);
+    use super::super::super::super::particles::ParticleAlbedo;
+    assert_eq!(beams[1].shader.albedo, ParticleAlbedo::Palette2dPlasma);
+    assert_eq!(beams[2].shader.albedo, ParticleAlbedo::PalettePlasma);
     for plasma in &beams[1..3] {
         assert!(plasma.reach && plasma.shader.unit_particle_alpha && !plasma.shader.plasma_second_sprite);
         assert!(plasma.shader.palette_shift.is_none());

@@ -113,7 +113,7 @@ pub(crate) struct CePctlQuad {
 
 /// What one draw of a particle takes.
 struct Shown<'a> {
-    state: &'a ParticleState,
+    state: &'a CeParticleState,
     /// The game's time, for the second map's animation.
     time: f32,
     /// The current state's radius multiplier.

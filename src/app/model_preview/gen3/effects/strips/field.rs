@@ -97,7 +97,7 @@ impl H3StripField {
         time: f32,
         onset: f32,
         stops: f32,
-    ) -> Vec<H3ParticleVertex> {
+    ) -> Vec<ParticleCorner> {
         match &*strip.kind {
             StripKind::Contrail(contrail) if strip.carried => {
                 let followers = self.carried.get(index).into_iter().flatten();

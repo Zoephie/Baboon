@@ -43,7 +43,7 @@ void main() {
 pub(in crate::app::model_preview) const CHEAP_FLOATS: usize = 11;
 
 /// Reach's cheap particle program and its stream.
-pub(in crate::app::model_preview) struct ReachCheapGl {
+pub(in crate::app::model_preview) struct CheapGl {
     program: glow::NativeProgram,
     vertex_array: glow::NativeVertexArray,
     buffer: glow::NativeBuffer,
@@ -51,7 +51,7 @@ pub(in crate::app::model_preview) struct ReachCheapGl {
     self_illum: Option<glow::NativeUniformLocation>,
 }
 
-impl ReachCheapGl {
+impl CheapGl {
     /// `render_particles` (the 360's 0x82DB3B58): `set_alpha_blend_mode(5)`,
     /// ONE and INVSRCALPHA, tested and not written against depth, at
     /// `g_exposure.x` for the area screen effects' `stops`. The game writes
@@ -81,7 +81,7 @@ impl ReachCheapGl {
     }
 }
 
-pub(in crate::app::model_preview) unsafe fn reach_cheap_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<ReachCheapGl> {
+pub(in crate::app::model_preview) unsafe fn reach_cheap_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<CheapGl> {
     use particles::cheap::{CHEAP_PARTICLE_FRAGMENT, CHEAP_PARTICLE_VERTEX};
     unsafe {
         let program = link_h2_program(gl, main, CHEAP_PARTICLE_VERTEX, CHEAP_PARTICLE_FRAGMENT)
@@ -100,7 +100,7 @@ pub(in crate::app::model_preview) unsafe fn reach_cheap_gl(gl: &glow::Context, m
         }
         gl.use_program(Some(program));
         gl.uniform_1_i32(gl.get_uniform_location(program, "u_render").as_ref(), 0);
-        Some(ReachCheapGl { program, vertex_array, buffer, exposure: gl.get_uniform_location(program, "u_exposure"), self_illum: gl.get_uniform_location(program, "u_self_illum") })
+        Some(CheapGl { program, vertex_array, buffer, exposure: gl.get_uniform_location(program, "u_exposure"), self_illum: gl.get_uniform_location(program, "u_self_illum") })
     }
 }
 

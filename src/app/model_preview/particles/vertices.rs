@@ -101,7 +101,7 @@ fn sprite_uv(frame: [f32; 4], uv: [f32; 2], scroll: [f32; 2], scale: f32) -> [f3
     ]
 }
 
-impl H3ParticleSystem {
+impl ParticleSystem {
     /// A location's quads, at the end of `vertices`.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn vertices_at(
@@ -113,7 +113,7 @@ impl H3ParticleSystem {
         lighting: &[[f32; 4]; 10],
         time: f32,
         stops: f32,
-        vertices: &mut Vec<H3ParticleVertex>,
+        vertices: &mut Vec<ParticleCorner>,
     ) {
         let system = self;
         let look = &*system.look;
@@ -131,7 +131,7 @@ impl H3ParticleSystem {
         // `particle_render_fast.hlsl`: no aspect, no blur, no quarter turn.
         let style = if look.cheap { cheap_billboard(look.billboard) } else { look.billboard };
         for (emitter, running) in system.emitters.iter().zip(running) {
-            let base = H3ParticleState {
+            let base = ParticleState {
                 system_age: system.times.age(system.event, time - onset).unwrap_or(1.0),
                 game_time: particle_game_time(look.reach, time),
                 effect_a: system_state(system, values, time, time - onset).map_or(0.0, |state| state.effect_a),
@@ -190,7 +190,7 @@ impl H3ParticleSystem {
                 let shading = look.shader.lighting;
                 let normal_at = |planar: [f32; 2], spun: [[f32; 3]; 2]| -> [f32; 3] {
                     let normal = clamped_unit(cross(spun[0], spun[1]));
-                    if shading == H3ParticleLighting::None {
+                    if shading == ParticleLighting::None {
                         return normal;
                     }
                     let tangent = (look.curvature * std::f32::consts::FRAC_PI_2).tan();
@@ -207,8 +207,8 @@ impl H3ParticleSystem {
                 // Reach's `per_vertex_ambient` is the probe's ambient, whatever
                 // the normal.
                 let lit_by = |normal: [f32; 3]| match shading {
-                    H3ParticleLighting::Ambient => ravi(shading, normal, lighting),
-                    H3ParticleLighting::ReachAmbient => ambient,
+                    ParticleLighting::Ambient => ravi(shading, normal, lighting),
+                    ParticleLighting::ReachAmbient => ambient,
                     _ => [1.0; 3],
                 };
                 let (frames, corner) = match look.sequences.get(particle.sequence) {
@@ -251,7 +251,7 @@ impl H3ParticleSystem {
                     } else {
                         (sprite_uv(first, uv, scroll, first_scale), sprite_uv(second, uv, scroll, second_scale))
                     };
-                    H3ParticleVertex {
+                    ParticleCorner {
                         place: spot,
                         sprite,
                         next_sprite,

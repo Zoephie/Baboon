@@ -162,7 +162,7 @@ pub(crate) struct ReachLight {
 
 /// A `cheap_light` at a marker.
 #[derive(Debug, Clone)]
-pub(crate) struct ReachCheapLight {
+pub(crate) struct CheapLight {
     pub(crate) object: u8,
     node: usize,
     position: [f32; 3],
@@ -313,7 +313,7 @@ impl ReachLight {
     }
 }
 
-impl ReachCheapLight {
+impl CheapLight {
     pub(crate) fn inputs(&self) -> impl Iterator<Item = &str> {
         [&self.scale_by, &self.secondary_by].into_iter().map(String::as_str)
     }
@@ -391,7 +391,7 @@ pub(crate) fn read_reach_lights(
     owner: u8,
     markers: &[RenderModelPreviewMarker],
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
-) -> (Vec<ReachLight>, Vec<ReachCheapLight>) {
+) -> (Vec<ReachLight>, Vec<CheapLight>) {
     let (mut lights, mut cheap) = (Vec::new(), Vec::new());
     let light_group = u32::from_be_bytes(*b"ligh");
     let cheap_group = u32::from_be_bytes(*b"gldf");
@@ -419,7 +419,7 @@ pub(crate) fn read_reach_lights(
         } else if let Some(read) = read_cheap_light(reader, &path) {
             for marker in part_markers(markers, &name, false) {
                 let (place, node) = frame(&marker);
-                cheap.push(ReachCheapLight {
+                cheap.push(CheapLight {
                     object: owner,
                     node,
                     position: place.position,
@@ -435,11 +435,11 @@ pub(crate) fn read_reach_lights(
     (lights, cheap)
 }
 
-fn read_cheap_light(reader: &TagReader, path: &str) -> Option<ReachCheapLight> {
+fn read_cheap_light(reader: &TagReader, path: &str) -> Option<CheapLight> {
     let tag = reader.load(path, "cheap_light", b"gldf").ok()?;
     let root = tag.root();
     let function = |name: &str| root.descend(name).and_then(|holder| tag_function_at(&holder, "Mapping")).map(Arc::new);
-    Some(ReachCheapLight {
+    Some(CheapLight {
         object: 0,
         node: 0,
         position: [0.0; 3],
@@ -465,7 +465,7 @@ pub(crate) fn inline_rows(lit: &[ReachLitLight]) -> Vec<[[f32; 4]; 5]> {
         .collect()
 }
 
-attached!(ReachLight, ReachCheapLight);
+attached!(ReachLight, CheapLight);
 
 #[cfg(test)]
 mod tests {
