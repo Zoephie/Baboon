@@ -12,7 +12,7 @@ use super::draw::{
     ce_sorts_transparents, draw_ce_group, draw_ce_transparents,
 };
 use super::slot::CeSlot;
-use crate::app::model_preview::common::sprite_gl::{ce_flare_occlusion, draw_flare_sprites};
+use crate::app::model_preview::common::sprite_gl::{sprite_occlusion, draw_flare_sprites};
 use eframe::glow::{self, HasContext as _};
 
 /// Halo CE's own part of the dx9 shading: its flags and effects, its
@@ -146,7 +146,7 @@ impl Dx9Game for CeGame {
                 let Some(patch) = light.occlusion_patch(&outputs, &colors, bones, view) else {
                     continue;
                 };
-                let Some(occlusion) = ce_flare_occlusion(gl, flares, camera, view, &patch) else {
+                let Some(occlusion) = sprite_occlusion(gl, flares, camera, view, &patch) else {
                     continue;
                 };
                 let sprites = light.sprites(&outputs, &colors, bones, view, frame.time, occlusion);
@@ -162,7 +162,7 @@ impl Dx9Game for CeGame {
                 let Some(patch) = light.occlusion_patch(&outputs, &colors, bones, view) else {
                     continue;
                 };
-                let Some(occlusion) = ce_flare_occlusion(gl, flares, camera, view, &patch) else {
+                let Some(occlusion) = sprite_occlusion(gl, flares, camera, view, &patch) else {
                     continue;
                 };
                 let sprites = light.sprites(&outputs, &colors, bones, view, frame.time, occlusion);

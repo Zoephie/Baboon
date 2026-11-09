@@ -15,7 +15,7 @@ use super::super::common::sprite_gl::{SpriteGl, link_sprite_gl};
 
 use super::super::gl::pass_state::PassState;
 use super::super::{
-    ModelGpuCamera, ModelGpuFrame, ModelGpuSlot, RenderCore, antennas, ce_flare_clip, gen3, gl,
+    ModelGpuCamera, ModelGpuFrame, ModelGpuSlot, RenderCore, antennas, clip_position, gen3, gl,
     particles,
 };
 use super::view::ViewFrame;
@@ -162,7 +162,7 @@ pub(in crate::app::model_preview) unsafe fn draw_sprite_quad(
 ) {
     unsafe {
         let vertices = corners.map(|[x, y, z, u, v]| {
-            let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
+            let [a, b, c, d] = clip_position(camera, [x, y, z]);
             [a, b, c, d, u, v]
         });
         gl.buffer_data_u8_slice(
@@ -276,7 +276,7 @@ pub(in crate::app::model_preview) unsafe fn draw_antennas(
         }
         gl.color_mask(true, true, true, h3);
         let tips = springs.advance(&frame.preview.antennas, bones, frame.time);
-        for (quads, texture, reach) in h2_antennas(frame, textures, bones, view, &tips) {
+        for (quads, texture, reach) in antenna_quads(frame, textures, bones, view, &tips) {
             if reach {
                 // `draw_textured_transparent_quad`'s blend mode 3: source
                 // alpha over its inverse, which Xenon sets for color alone;
@@ -410,7 +410,7 @@ mod layer_tests {
 /// Halo 2's, 3's and Reach's antennas, whose maps follow Halo CE's in the
 /// slot's, each with whether it is Reach's; Reach's far ends are at `tips`.
 /// Those on a permutation not shown are left out.
-pub(in crate::app::model_preview) fn h2_antennas(
+pub(in crate::app::model_preview) fn antenna_quads(
     frame: &ModelGpuFrame,
     textures: &[Option<glow::NativeTexture>],
     bones: Option<&[[f32; 4]]>,

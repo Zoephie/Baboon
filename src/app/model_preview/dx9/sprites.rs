@@ -9,7 +9,7 @@ use super::super::common::sprites::{
     ParticleTargets, advance_sprite_simulations, begin_flares, draw_antennas, draw_particle_system,
 };
 use super::super::common::view::ViewFrame;
-use super::super::common::view::ce_flare_view;
+use super::super::common::view::camera_view_frame;
 use super::super::effects::EffectOnsets;
 use super::super::frame::ModelGpuFrame;
 use super::super::gl::pass_state::PassState;
@@ -40,7 +40,7 @@ impl RenderCore {
             };
             let uploaded = &mut self.slots[slot];
             let camera = &frame.camera;
-            let view = ce_flare_view(camera);
+            let view = camera_view_frame(camera);
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
             // `rasterizer_light_volume_draw_sprites` sets its widget state
             // with `sub_936910(0, 3, 2)`: depth tested, less or equal, not
@@ -90,7 +90,7 @@ impl RenderCore {
         unsafe {
             let particle_gl = self.particle_gl.as_ref().and_then(Option::as_ref);
             let uploaded = &mut self.slots[slot];
-            let view = ce_flare_view(&frame.camera);
+            let view = camera_view_frame(&frame.camera);
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
             gl.color_mask(true, true, true, false);
             advance_sprite_simulations(uploaded, frame, bones, &view, &mut self.sprites_advanced);

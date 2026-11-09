@@ -69,8 +69,8 @@ pub(in crate::app) use load::build_render_preview;
 // Started by the source loader when a Campaign Evolved install mounts.
 pub(in crate::app) use campaign_evolved::prewarm_ce_mesh_sync_index;
 use common::camera::{
-    DEPTH_UNITS, MAX_PREVIEW_SCALE, ModelGpuCamera, PreviewCamera, camera_light, ce_flare_clip,
-    ce_flare_pixels, eye_position, min_preview_scale, preview_center_radius, rotate_view_vector,
+    DEPTH_UNITS, MAX_PREVIEW_SCALE, ModelGpuCamera, PreviewCamera, camera_light, clip_position,
+    sprite_pixels, eye_position, min_preview_scale, preview_center_radius, rotate_view_vector,
     scene_depth_terms, unrotate_view_vector,
 };
 use common::clock::{frame_steps, resume_point};

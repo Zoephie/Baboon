@@ -33,7 +33,7 @@ pub(in crate::app::model_preview) fn posed_on(
     )
 }
 
-pub(in crate::app::model_preview) fn ce_flare_view(camera: &ModelGpuCamera) -> ViewFrame {
+pub(in crate::app::model_preview) fn camera_view_frame(camera: &ModelGpuCamera) -> ViewFrame {
     let along = |vector| unrotate_view_vector(camera.yaw, camera.pitch, vector);
     ViewFrame {
         eye: eye_position(camera),

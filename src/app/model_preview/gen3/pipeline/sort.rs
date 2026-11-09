@@ -1,7 +1,7 @@
 //! The order blended batches draw in.
 
 use super::super::super::{ModelGpuFrame, RenderModelPreviewBatch};
-use super::ce_flare_view;
+use super::camera_view_frame;
 
 /// How far along the view a batch's middle lies, as sprites measure theirs.
 pub(super) fn batch_distance(frame: &ModelGpuFrame, batch: &RenderModelPreviewBatch) -> f32 {
@@ -19,7 +19,7 @@ pub(super) fn batch_distance(frame: &ModelGpuFrame, batch: &RenderModelPreviewBa
         sum = std::array::from_fn(|axis| sum[axis] + vertex.position[axis]);
         count += 1.0;
     }
-    let view = ce_flare_view(&frame.camera);
+    let view = camera_view_frame(&frame.camera);
     let middle: [f32; 3] = sum.map(|axis| axis / f32::max(count, 1.0));
     (0..3)
         .map(|axis| (middle[axis] - view.eye[axis]) * view.forward[axis])

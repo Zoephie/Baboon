@@ -11,7 +11,7 @@ use super::targets::Gen3Targets;
 use super::uniforms::{camera_to_world, set_value, view_matrix, view_projection};
 use super::{
     Gen3Batch, Gen3Blend, Gen3Cx, Gen3Dialect, Gen3Game, Gen3Material, Gen3Pass, Gen3Shield,
-    Gen3State, Gen3Value, SpriteStage, TextureKind, ce_flare_view, layered_distance,
+    Gen3State, Gen3Value, SpriteStage, TextureKind, camera_view_frame, layered_distance,
     model_draw_range,
 };
 use crate::app::model_preview::gen3;
@@ -606,7 +606,7 @@ impl Gen3State {
             let (screen, shaders) = {
                 let uploaded = &mut core.slots[slot];
                 let values = |object: u8| frame.function_values_of_object(object);
-                let view = ce_flare_view(&frame.camera);
+                let view = camera_view_frame(&frame.camera);
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                 let effects = &frame.preview.gen3.screen_effects;
                 gen3::effects::screen::gen3_screen_settings(

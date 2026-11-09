@@ -7,15 +7,15 @@ use super::super::gl::buffer::slice_bytes;
 use super::super::gl::glsl::{VIEW_DEPTH, fill};
 #[cfg(test)]
 use super::super::reach;
-use super::super::{ModelGpuCamera, ce_flare_clip, link_pass_program};
+use super::super::{ModelGpuCamera, clip_position, link_pass_program};
 use crate::app::model_preview::common;
 
 /// The vertex stream of Halo CE's lens flares: clip position, then texcoord.
-pub(in crate::app::model_preview) const CE_FLARE_STRIDE: i32 = 6 * 4;
+pub(in crate::app::model_preview) const SPRITE_STRIDE: i32 = 6 * 4;
 
-pub(in crate::app::model_preview) const CE_FLARE_VERTEX: &str = include_str!("shaders/flare.vert");
+pub(in crate::app::model_preview) const SPRITE_VERTEX: &str = include_str!("shaders/flare.vert");
 
-pub(in crate::app::model_preview) fn ce_flare_fragment() -> String {
+pub(in crate::app::model_preview) fn sprite_fragment() -> String {
     fill(
         include_str!("shaders/flare.frag"),
         &[("view_depth", &VIEW_DEPTH)],
@@ -42,14 +42,14 @@ pub(in crate::app::model_preview) struct SpriteGl {
 }
 
 /// A sprite's four corners, all at the depth of its center.
-pub(in crate::app::model_preview) fn ce_flare_quad(
+pub(in crate::app::model_preview) fn sprite_quad(
     camera: &ModelGpuCamera,
     view: &common::view::ViewFrame,
     sprite: &crate::app::model_preview::common::flares::FlareSprite,
 ) -> [[f32; 6]; 4] {
     let (sine, cosine) = sprite.rotation.sin_cos();
     let center = sprite.center;
-    let depth = ce_flare_clip(camera, center);
+    let depth = clip_position(camera, center);
     [
         [0.0, 0.0, -1.0, -1.0],
         [1.0, 0.0, 1.0, -1.0],
@@ -66,7 +66,7 @@ pub(in crate::app::model_preview) fn ce_flare_quad(
         let corner = std::array::from_fn(|axis| {
             center[axis] + view.right[axis] * right + view.up[axis] * up
         });
-        let clip = ce_flare_clip(camera, corner);
+        let clip = clip_position(camera, corner);
         let scale = depth[3] / clip[3];
         [
             clip[0] * scale,
@@ -80,7 +80,7 @@ pub(in crate::app::model_preview) fn ce_flare_quad(
 }
 
 /// How much of `patch` the model leaves showing, if any of it is on screen.
-pub(in crate::app::model_preview) unsafe fn ce_flare_occlusion(
+pub(in crate::app::model_preview) unsafe fn sprite_occlusion(
     gl: &glow::Context,
     flares: &SpriteGl,
     camera: &ModelGpuCamera,
@@ -88,7 +88,7 @@ pub(in crate::app::model_preview) unsafe fn ce_flare_occlusion(
     patch: &crate::app::model_preview::common::flares::FlareSprite,
 ) -> Option<f32> {
     unsafe {
-        let vertices = ce_flare_quad(camera, view, patch);
+        let vertices = sprite_quad(camera, view, patch);
         gl.buffer_data_u8_slice(
             glow::ARRAY_BUFFER,
             slice_bytes(&vertices),
@@ -133,7 +133,7 @@ pub(in crate::app::model_preview) unsafe fn draw_flare_sprites(
             let Some(texture) = textures.get(sprite.image).copied().flatten() else {
                 continue;
             };
-            let vertices = ce_flare_quad(camera, view, sprite);
+            let vertices = sprite_quad(camera, view, sprite);
             gl.buffer_data_u8_slice(
                 glow::ARRAY_BUFFER,
                 slice_bytes(&vertices),
@@ -160,7 +160,7 @@ pub(in crate::app::model_preview) unsafe fn link_sprite_gl(
     main: glow::NativeProgram,
 ) -> Option<SpriteGl> {
     unsafe {
-        let program = link_pass_program(gl, main, CE_FLARE_VERTEX, &ce_flare_fragment())
+        let program = link_pass_program(gl, main, SPRITE_VERTEX, &sprite_fragment())
             .map_err(|error| eprintln!("model preview: {error}"))
             .ok()?;
         let vertex_array = gl.create_vertex_array().ok()?;
@@ -168,9 +168,9 @@ pub(in crate::app::model_preview) unsafe fn link_sprite_gl(
         gl.bind_vertex_array(Some(vertex_array));
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
         gl.enable_vertex_attrib_array(0);
-        gl.vertex_attrib_pointer_f32(0, 4, glow::FLOAT, false, CE_FLARE_STRIDE, 0);
+        gl.vertex_attrib_pointer_f32(0, 4, glow::FLOAT, false, SPRITE_STRIDE, 0);
         gl.enable_vertex_attrib_array(1);
-        gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, CE_FLARE_STRIDE, 16);
+        gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, SPRITE_STRIDE, 16);
         Some(SpriteGl {
             program,
             vertex_array,
@@ -200,7 +200,7 @@ mod tests {
     fn the_flare_and_reach_composite_programs_compile_under_glslang() {
         assert_compiles_under_glslang(
             "flare",
-            &[("vert", CE_FLARE_VERTEX), ("frag", &ce_flare_fragment())],
+            &[("vert", SPRITE_VERTEX), ("frag", &sprite_fragment())],
         );
         assert_compiles_under_glslang(
             "reach_composite",

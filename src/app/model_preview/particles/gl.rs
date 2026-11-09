@@ -4,7 +4,7 @@ use super::super::gen3::shaders::Gen3Blend;
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::glsl::{VIEW_DEPTH, fill};
 use super::super::reach::lighting::reach_particle_light;
-use super::super::{ModelGpuCamera, ce_flare_clip, gen3, link_pass_program, scene_depth_terms};
+use super::super::{ModelGpuCamera, clip_position, gen3, link_pass_program, scene_depth_terms};
 use crate::app::model_preview::particles;
 use eframe::glow::{self, HasContext as _};
 
@@ -92,13 +92,13 @@ pub(in crate::app::model_preview) fn particle_floats(
     drawn
         .iter()
         .map(|vertex| {
-            let [a, b, c, d] = ce_flare_clip(camera, vertex.place);
+            let [a, b, c, d] = clip_position(camera, vertex.place);
             let ([e, f], [g, h], [i, j]) = (vertex.sprite, vertex.next_sprite, vertex.billboard);
             let [k, l, m, n] = vertex.color;
             let [o, p, q] = vertex.extra;
             let lean = vertex.lean.map(|side| {
                 let reach: [f32; 3] = std::array::from_fn(|axis| vertex.place[axis] + side[axis]);
-                let [x, y, _, w] = ce_flare_clip(camera, reach);
+                let [x, y, _, w] = clip_position(camera, reach);
                 [(x / w - a / d) * 0.5, (y / w - b / d) * 0.5]
             });
             let [[r, s], [t, u]] = lean;

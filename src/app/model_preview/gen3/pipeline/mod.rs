@@ -15,7 +15,7 @@ use super::shaders::{
     Gen3Animated, Gen3Blend, Gen3Dialect, Gen3Material, Gen3Pass, Gen3Shield, Gen3Value,
 };
 
-use super::super::common::view::ce_flare_view;
+use super::super::common::view::camera_view_frame;
 use super::super::gl::buffer::model_draw_range;
 #[cfg(test)]
 use super::super::gl::texture::signed_bytes;

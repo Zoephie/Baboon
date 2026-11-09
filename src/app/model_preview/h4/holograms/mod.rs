@@ -17,7 +17,7 @@ use super::render::H4Game;
 
 use super::super::gen3::pipeline::{gen3_set_cull, set_value};
 
-use super::super::common::view::ce_flare_view;
+use super::super::common::view::camera_view_frame;
 use super::super::gen3::shaders::{Gen3Material, Gen3Pass, Gen3Value};
 use super::super::gl::target::{Made, Sampling, Texels};
 use super::bloom::H4BloomSettings;

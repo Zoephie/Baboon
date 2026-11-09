@@ -1,6 +1,6 @@
 //! The hologram pass: the screen maps uploaded and the hologram drawn.
 
-use super::super::super::{ModelGpuFrame, RenderCore, RenderModelPreviewBatch, ce_flare_clip};
+use super::super::super::{ModelGpuFrame, RenderCore, RenderModelPreviewBatch, clip_position};
 use super::super::lighting::h4_frame_values;
 use super::screen::{
     H4Holograms, HologramPicture, IDENTITY_CURVE, hologram_screen, hologram_sphere,
@@ -8,7 +8,7 @@ use super::screen::{
 };
 use super::{
     DrawnObject, Gen3Material, Gen3Pass, Gen3State, Gen3Value, H4BloomSettings, H4Draw, H4Game,
-    H4HologramPost, H4ScreenMaterial, ce_flare_view, gen3_set_cull, set_value, upload_image_linear,
+    H4HologramPost, H4ScreenMaterial, camera_view_frame, gen3_set_cull, set_value, upload_image_linear,
 };
 use crate::app::model_preview::gl::blit::blit_depth;
 use eframe::glow;
@@ -40,9 +40,9 @@ impl H4Game {
             .get(first.material_index as usize)
             .map_or(0, |material| material.object);
         let (center, radius) = hologram_sphere(frame);
-        let view = ce_flare_view(&frame.camera);
+        let view = camera_view_frame(&frame.camera);
         let window = |point: [f32; 3]| {
-            let clip = ce_flare_clip(&frame.camera, point);
+            let clip = clip_position(&frame.camera, point);
             let depth: f32 = (0..3)
                 .map(|axis| (point[axis] - view.eye[axis]) * view.forward[axis])
                 .sum();
@@ -66,7 +66,7 @@ impl H4Game {
             std::array::from_fn(|axis| view.eye[axis] + view.forward[axis] * depth.max(1e-3));
         let raised: [f32; 3] = std::array::from_fn(|axis| ahead[axis] + view.up[axis]);
         let reach = |point| {
-            let clip = ce_flare_clip(&frame.camera, point);
+            let clip = clip_position(&frame.camera, point);
             clip[1] / clip[3].max(1e-6)
         };
         let ndc = (reach(raised) - reach(ahead)).abs().max(1e-6);

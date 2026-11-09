@@ -302,7 +302,7 @@ pub(in crate::app::model_preview) fn depth_map_coefficients(eye: Option<f32>) ->
 }
 
 /// The vertex shader's `clip_position`.
-pub(in crate::app::model_preview) fn ce_flare_clip(
+pub(in crate::app::model_preview) fn clip_position(
     camera: &ModelGpuCamera,
     point: [f32; 3],
 ) -> [f32; 4] {
@@ -319,13 +319,13 @@ pub(in crate::app::model_preview) fn ce_flare_clip(
 /// How many pixels wide plus high a screen-facing sprite of `half` extents
 /// is at `center`: `lens_flare_project_billboard`'s half extents across the
 /// viewport, as Reach's `lens_flare_render_internal` measures them.
-pub(in crate::app::model_preview) fn ce_flare_pixels(
+pub(in crate::app::model_preview) fn sprite_pixels(
     camera: &ModelGpuCamera,
     viewport: [i32; 2],
     center: [f32; 3],
     half: [f32; 2],
 ) -> f32 {
-    let w = ce_flare_clip(camera, center)[3];
+    let w = clip_position(camera, center)[3];
     if w <= 0.0 {
         return 0.0;
     }

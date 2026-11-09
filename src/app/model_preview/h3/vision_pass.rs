@@ -4,7 +4,7 @@
 
 use eframe::glow::{self, HasContext as _};
 
-use super::super::common::view::ce_flare_view;
+use super::super::common::view::camera_view_frame;
 use super::super::frame::ModelGpuFrame;
 use super::super::gen3::effects::screen::Gen3ScreenSettings;
 use super::super::gen3::pipeline::{PictureCopies, view_projection};
@@ -169,7 +169,7 @@ impl H3Game {
             let (Some(program), Some(mask)) = (self.vision_program, self.vision_mask) else {
                 return;
             };
-            let view = ce_flare_view(&frame.camera);
+            let view = camera_view_frame(&frame.camera);
             gl.use_program(Some(program));
             let spot = |name: &str| gl.get_uniform_location(program, name);
             gl.active_texture(glow::TEXTURE0);

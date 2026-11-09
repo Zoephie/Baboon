@@ -7,19 +7,19 @@ use super::state::Gen3State;
 use eframe::glow::{self, HasContext as _};
 
 use super::super::super::effects::EffectOnsets;
-use super::super::common::sprite_gl::{SpriteGl, ce_flare_occlusion, draw_flare_sprites};
+use super::super::common::sprite_gl::{SpriteGl, sprite_occlusion, draw_flare_sprites};
 use super::super::common::sprites::{
     ParticleTargets, advance_sprite_simulations, begin_flares, draw_antennas, draw_particle_system,
     draw_sprite_quad,
 };
 use super::super::common::view::ViewFrame;
-use super::super::common::view::ce_flare_view;
+use super::super::common::view::camera_view_frame;
 use super::super::gl::pass_state::PassState;
 use super::super::particles::ParticleField;
 use super::super::particles::{CHEAP_FLOATS, CheapGl, ParticleGl, particle_floats, link_cheap_gl};
 use super::super::reach::lighting::reach_exposure;
 use super::super::{
-    ModelGpuCamera, ModelGpuFrame, ModelGpuSlot, RenderCore, ce_flare_clip, ce_flare_pixels, h4,
+    ModelGpuCamera, ModelGpuFrame, ModelGpuSlot, RenderCore, clip_position, sprite_pixels, h4,
     scene_depth_terms,
 };
 use super::pipeline::{gen3_lighting_constants, gen3_set_blend};
@@ -84,7 +84,7 @@ impl Gen3State {
                 slot,
                 uploads: uploaded.uploads(),
                 camera,
-                view: ce_flare_view(camera),
+                view: camera_view_frame(camera),
                 bones: frame.bones.as_ref().map(|bones| bones.as_slice()),
             };
             if matches!(stage, SpriteStage::Rest) {
@@ -546,7 +546,7 @@ impl SpritePass<'_> {
                 let vertices: Vec<[f32; CHEAP_FLOATS]> = drawn
                     .iter()
                     .map(|vertex| {
-                        let [a, b, c, d] = ce_flare_clip(camera, vertex.place);
+                        let [a, b, c, d] = clip_position(camera, vertex.place);
                         let ([e, f, g], [h, i, j, k]) = (vertex.texcoord, vertex.color);
                         [a, b, c, d, e, f, g, h, i, j, k]
                     })
@@ -583,7 +583,7 @@ impl SpritePass<'_> {
             &self.view,
         );
         let pixels =
-            |center: [f32; 3], half: [f32; 2]| ce_flare_pixels(camera, viewport, center, half);
+            |center: [f32; 3], half: [f32; 2]| sprite_pixels(camera, viewport, center, half);
         for (index, at) in frame.preview.gen3.flares.iter().enumerate() {
             if !frame
                 .shown
@@ -611,7 +611,7 @@ impl SpritePass<'_> {
             let occlusion =
                 match at.occlusion_patch(light, values, bones, view, event_time, &pixels) {
                     None => Some(1.0),
-                    Some(patch) => unsafe { ce_flare_occlusion(gl, flares, camera, view, &patch) },
+                    Some(patch) => unsafe { sprite_occlusion(gl, flares, camera, view, &patch) },
                 };
             let Some(occlusion) = occlusion else {
                 continue;

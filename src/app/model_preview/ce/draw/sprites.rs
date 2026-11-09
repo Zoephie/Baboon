@@ -5,7 +5,7 @@ use super::super::super::dx9::draw::{gl_blend_equation, gl_blend_factor};
 use super::super::super::gl::buffer::slice_bytes;
 use super::super::super::gl::texture::upload_image;
 use super::super::super::{
-    ModelGpuCamera, ModelGpuFrame, RenderModelPreview, ce_flare_clip, common,
+    ModelGpuCamera, ModelGpuFrame, RenderModelPreview, clip_position, common,
 };
 use super::effect_gl::{CE_EFFECT_FLOATS, CeEffectGl, ce_effect_gl};
 use crate::app::model_preview::ce;
@@ -235,8 +235,8 @@ pub(in crate::app::model_preview) fn ce_groups(
     let half_width = viewport[2].max(1) as f32 * 0.5;
     // `render_frustum_sphere_diameter_in_pixels`.
     let pixels = |center: [f32; 3], radius: f32| {
-        let middle = ce_flare_clip(camera, center);
-        let side = ce_flare_clip(
+        let middle = clip_position(camera, center);
+        let side = clip_position(
             camera,
             std::array::from_fn(|axis| center[axis] + view.right[axis] * radius),
         );
@@ -535,7 +535,7 @@ pub(in crate::app::model_preview) unsafe fn draw_ce_group(
                 gl.bind_texture(glow::TEXTURE_2D, Some(texture));
                 for quad in quads {
                     let vertices = quad.corners.map(|[x, y, z, u, v]| {
-                        let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
+                        let [a, b, c, d] = clip_position(camera, [x, y, z]);
                         [a, b, c, d, u, v]
                     });
                     gl.buffer_data_u8_slice(
@@ -618,7 +618,7 @@ unsafe fn draw_ce_sprites(
                 .zip(corners.into_iter().zip(units))
                 .zip(colors)
             {
-                let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
+                let [a, b, c, d] = clip_position(camera, [x, y, z]);
                 *vertex = [a, b, c, d, u, v, unit[0], unit[1], red, green, blue, alpha];
             }
             gl.buffer_data_u8_slice(

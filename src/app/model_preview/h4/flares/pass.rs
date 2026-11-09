@@ -11,9 +11,9 @@ use eframe::glow::{self, HasContext};
 
 use super::super::super::gen3::shaders::Gen3Value;
 
-use super::super::super::common::camera::{ModelGpuCamera, ce_flare_clip};
+use super::super::super::common::camera::{ModelGpuCamera, clip_position};
 use super::super::super::common::sprite_gl::link_sprite_gl;
-use super::super::super::common::view::ce_flare_view;
+use super::super::super::common::view::camera_view_frame;
 use super::super::super::frame::ModelGpuFrame;
 use super::super::super::gl::buffer::slice_bytes;
 use super::super::super::renderer::RenderCore;
@@ -30,7 +30,7 @@ fn project(
     forward: [f32; 3],
     point: [f32; 3],
 ) -> Option<([f32; 2], [f32; 2])> {
-    let clip = ce_flare_clip(camera, point);
+    let clip = clip_position(camera, point);
     let depth: f32 = (0..3)
         .map(|axis| (point[axis] - eye[axis]) * forward[axis])
         .sum();
@@ -102,7 +102,7 @@ impl H4Game {
                 return;
             };
             let camera = &frame.camera;
-            let view = ce_flare_view(camera);
+            let view = camera_view_frame(camera);
             let viewport = state
                 .targets
                 .as_ref()
@@ -146,7 +146,7 @@ impl H4Game {
                     .occlusion_patch(values, &colors, bones, &flare_view, frame.time)
                     .map(|patch| {
                         let [a, b, c, d] = patch.corners.map(|corner| {
-                            let [x, y, z, w] = ce_flare_clip(camera, corner);
+                            let [x, y, z, w] = clip_position(camera, corner);
                             [x, y, z, w, 0.0, 0.0]
                         });
                         let strip = [a, d, b, c];
@@ -158,7 +158,7 @@ impl H4Game {
                         gl.begin_query(glow::SAMPLES_PASSED, flares.queries[0]);
                         gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
                         gl.end_query(glow::SAMPLES_PASSED);
-                        // As `ce_flare_occlusion`: the core entry point, no
+                        // As `sprite_occlusion`: the core entry point, no
                         // query buffer bound, so the offset is the destination.
                         let mut samples = 0_u64;
                         let result = &raw mut samples as usize;

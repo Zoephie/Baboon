@@ -2,7 +2,7 @@
 //! effects' sprite groups, far to near, as `render_transparent_geometry` has them.
 
 use super::super::super::common::sprite_gl::link_sprite_gl;
-use super::super::super::common::view::ce_flare_view;
+use super::super::super::common::view::camera_view_frame;
 use super::super::super::dx9::passes::Dx9Layer;
 use super::super::super::{ModelGpuFrame, RenderCore, common};
 use super::effect_gl::CeEffectGl;
@@ -26,7 +26,7 @@ pub(in crate::app::model_preview) unsafe fn draw_ce_transparents(
         Group(CeGroup),
     }
     unsafe {
-        let view = ce_flare_view(&frame.camera);
+        let view = camera_view_frame(&frame.camera);
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let mut groups = Vec::new();
         if core.draws_object_sprites(frame) && ce_has_groups(&frame.preview) {
