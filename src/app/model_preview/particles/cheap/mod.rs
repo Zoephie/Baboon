@@ -13,7 +13,7 @@ use super::super::effects::{
     read_part_placement,
 };
 use super::super::functions::FunctionValues;
-use super::super::reach::lights::object_value;
+use super::super::functions::object_value;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::marker::MarkerFrame;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};

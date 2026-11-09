@@ -12,7 +12,7 @@ use super::super::common::view::{ViewFrame, posed_on};
 use super::super::effects::marker_name;
 use super::super::effects::{for_each_attached_part, part_markers};
 use super::super::functions::FunctionValues;
-use super::super::materials::decode_image;
+use super::super::materials::{decode_image, read_glow};
 use super::super::{RenderModelPreviewMarker, TagReader};
 use super::effect_part::H2EffectPart;
 use crate::app::model_preview::common::attached::attached;
@@ -168,17 +168,6 @@ fn read_volume(
         aspect,
         bitmap,
     })
-}
-
-/// `globals`' `rasterizer data`, whose `glow` stands in for a volume's bitmap.
-pub(in crate::app::model_preview) fn read_glow(reader: &TagReader) -> Option<Arc<Image>> {
-    let globals = reader.load("globals\\globals", "globals", b"matg").ok()?;
-    let data = elements(globals.root(), "rasterizer data");
-    let path = data
-        .first()?
-        .read_tag_ref_path("glow")
-        .filter(|path| !path.is_empty())?;
-    decode_image(reader, &path, SamplerKind::Texture2D, 0).map(Arc::new)
 }
 
 pub(in crate::app::model_preview) fn read_h2_bitmap(

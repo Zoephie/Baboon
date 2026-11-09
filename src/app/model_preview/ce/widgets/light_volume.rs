@@ -96,7 +96,7 @@ fn read_light_volume(
                 });
             Arc::new(decode_image(reader, &map, SamplerKind::Texture2D, index)?)
         }
-        None => super::super::super::h2::light_volumes::read_glow(reader)?,
+        None => super::super::super::materials::read_glow(reader)?,
     };
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let mut brightness = [

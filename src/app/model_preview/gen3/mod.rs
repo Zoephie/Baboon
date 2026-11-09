@@ -4,6 +4,7 @@
 
 pub(crate) mod effects;
 mod features;
+pub(in crate::app::model_preview) mod lights;
 pub(in crate::app::model_preview) mod materials;
 pub(in crate::app::model_preview) mod pipeline;
 pub(in crate::app) mod prt;

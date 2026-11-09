@@ -19,14 +19,12 @@ use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::image::Image;
 use super::super::common::named_function::NamedFunction;
 use super::super::gen3::effects::flares::{Gen3EffectScale, Gen3Flare, read_h3_flare};
+use super::super::gen3::lights::SHADOWS_AND_GELS;
 use super::super::{RenderModelPreviewMarker, TagReader, decode_image};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::math::{cross, dot};
 use crate::core::h2_pixel_shader::SamplerKind;
 
-/// `allow shadows and gels`, and what older layouts label it.
-pub(in crate::app::model_preview) const SHADOWS_AND_GELS: [&str; 3] =
-    ["allow shadows and gels", "allow shadows", "expensive light"];
 /// What `add_simple_light_to_draw_list` falls back on.
 const FALLBACK_DISTANCE: f32 = 5.0;
 const FALLBACK_CONE: f32 = 0.5;

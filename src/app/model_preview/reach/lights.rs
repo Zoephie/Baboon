@@ -13,7 +13,8 @@ use super::super::common::named_function::{NamedFunction, tag_function_at};
 use super::super::common::view::posed_on;
 use super::super::effects::part_markers;
 use super::super::functions::FunctionValues;
-use super::super::h3::lights::SHADOWS_AND_GELS;
+use super::super::functions::object_value;
+use super::super::gen3::lights::SHADOWS_AND_GELS;
 use super::super::{RenderModelPreviewMarker, TagReader};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
@@ -40,21 +41,6 @@ pub(crate) enum ReachLightMethod {
     /// Shadow-mapped, re-rendering what it lights. No attached object light
     /// in the kit uses it, and it is not drawn.
     Rerender,
-}
-
-/// `object_get_function_value_simple`: no name reads full, and a name the
-/// object does not answer, nothing.
-pub(in crate::app::model_preview) fn object_value(
-    values: Option<&FunctionValues>,
-    name: &str,
-) -> f32 {
-    if name.is_empty() || name == "one" {
-        return 1.0;
-    }
-    values
-        .and_then(|values| values.get(name))
-        .copied()
-        .unwrap_or(0.0)
 }
 
 /// A `light` as the game has it after `light_definition_version_update` and

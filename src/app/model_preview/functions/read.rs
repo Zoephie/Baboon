@@ -20,6 +20,21 @@ pub(in crate::app::model_preview) trait TypeExporter:
     fn idle(&self, name: &str) -> Option<f32>;
 }
 
+/// `object_get_function_value_simple`: no name reads full, and a name the
+/// object does not answer, nothing.
+pub(in crate::app::model_preview) fn object_value(
+    values: Option<&FunctionValues>,
+    name: &str,
+) -> f32 {
+    if name.is_empty() || name == "one" {
+        return 1.0;
+    }
+    values
+        .and_then(|values| values.get(name))
+        .copied()
+        .unwrap_or(0.0)
+}
+
 /// A function's `flags`, by option name.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct FunctionFlags {

@@ -2,6 +2,7 @@
 
 use super::super::super::{GameId, TagNameIndex, TagSource};
 use super::super::ce::shaders::resolve::resolve_ce_shader;
+use super::super::common::fields::elements;
 use super::super::h2::shader::resolve::resolve_h2_shader;
 use super::super::{
     MaterialTextures, RenderModelPreviewMaterial, ResolveCaches, TagReader, TextureImage,
@@ -260,6 +261,18 @@ fn resolve_one_material(
         }
     }
     textures
+}
+
+/// `globals`' `rasterizer data`, whose `glow` stands in for a Halo CE or
+/// Halo 2 light volume's bitmap.
+pub(in crate::app::model_preview) fn read_glow(reader: &TagReader) -> Option<Arc<Image>> {
+    let globals = reader.load("globals\\globals", "globals", b"matg").ok()?;
+    let data = elements(globals.root(), "rasterizer data");
+    let path = data
+        .first()?
+        .read_tag_ref_path("glow")
+        .filter(|path| !path.is_empty())?;
+    decode_image(reader, &path, SamplerKind::Texture2D, 0).map(Arc::new)
 }
 
 /// Decode a map in the shape its sampler asks for.
