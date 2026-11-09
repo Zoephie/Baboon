@@ -2,7 +2,6 @@
 //! and applies: the casters, `render_shadow_generate`'s biased depth, the
 //! scene's depth, and an apply blended by its least into the mask.
 
-use super::super::dx9::shadow::ShadowStyle;
 use super::super::gl::pass_state::PassState;
 use super::super::{ModelGpuFrame, RenderCore, RenderModelPreviewBatch};
 use super::shaders::{Gen3Material, Gen3Pass};
@@ -10,42 +9,6 @@ use super::state::Gen3State;
 use crate::app::model_preview::gen3;
 use eframe::glow::{self, HasContext as _};
 use std::sync::Arc;
-
-/// Where Halo 3's and ODST's shadow apply reads the albedo pass's normals.
-pub(in crate::app::model_preview) const H3_NORMAL_TARGET_UNIT: u32 = 9;
-
-/// `c_rasterizer::render_globals.k_shadow_resolution`.
-pub(in crate::app::model_preview) const H3_SHADOW_MAP_SIZE: i32 = 512;
-
-/// `set_shadow_generate_mode`'s bias, the second in depth units.
-pub(in crate::app::model_preview) const H3_SHADOW_SLOPE_BIAS: f32 = 1.414;
-
-pub(in crate::app::model_preview) const H3_SHADOW_DEPTH_BIAS: f32 = 0.003;
-
-/// Halo 3's and ODST's self shadow through the dx9 passes: a smaller map,
-/// biased, from the dominant probe light, and applied after the opaque pass
-/// rather than masked in the stencil.
-pub(in crate::app::model_preview) fn h3_shadow_style(
-    frame: &ModelGpuFrame,
-    targets: Option<&gen3::pipeline::Gen3Targets>,
-) -> ShadowStyle {
-    let (toward, alpha) = gen3::pipeline::h3_shadow_light(frame);
-    ShadowStyle {
-        map_size: H3_SHADOW_MAP_SIZE,
-        bias: Some((
-            H3_SHADOW_SLOPE_BIAS,
-            H3_SHADOW_DEPTH_BIAS * (1 << 24) as f32,
-        )),
-        stencil_mask: false,
-        toward,
-        alpha,
-        normal: targets.map(|targets| super::super::dx9::shadow::ShadowNormalTarget {
-            texture: targets.normal,
-            unit: H3_NORMAL_TARGET_UNIT,
-            map_size: H3_SHADOW_MAP_SIZE,
-        }),
-    }
-}
 
 /// A batch that casts, its material, and that material's `shadow_generate`.
 pub(in crate::app::model_preview) type ShadowCaster<'a> = (
@@ -211,11 +174,3 @@ impl Gen3State {
         }
     }
 }
-
-pub(in crate::app::model_preview) const H3_SHADOW_APPLY_BIAS: f32 = -0.00002;
-
-/// `shadow_apply_bilinear`'s pixel shader in the preview's box: one object
-/// filling the map. `FASTER_SHADOWS` at `DX_VERSION` 11 leaves no slope to bias
-/// by, that being the shadow generate's own.
-pub(in crate::app::model_preview) const H3_SHADOW_APPLY: &str =
-    include_str!("shaders/shadow_apply.glsl");

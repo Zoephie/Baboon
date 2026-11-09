@@ -14,11 +14,11 @@ use super::super::gen3::pipeline::gen3_lighting_constants;
 use super::super::gen3::pipeline::gen3_set_cull;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
-use super::super::gen3::shadow::h3_shadow_style;
 use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
 use super::super::particles::particle_floats;
 use super::bloom::H3Bloom;
 use super::light_pass::draw_dynamic_lights;
+use super::shadow::h3_shadow_style;
 use super::slot::H3Slot;
 
 /// Halo 3's and ODST's hooks: the pipeline's defaults, the self shadow, and

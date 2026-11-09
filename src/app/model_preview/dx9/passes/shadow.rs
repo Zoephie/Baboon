@@ -8,7 +8,6 @@ use super::pass::{
     Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass,
     PASS_GLSL_VERSION, identity_rows,
 };
-use crate::app::model_preview::gen3::shadow::{H3_SHADOW_APPLY, H3_SHADOW_APPLY_BIAS};
 
 /// The passes behind the preview's own key light shadow. Under the default
 /// lights the game draws no shadows at all: layers 10 and 11 only run for a
@@ -107,3 +106,11 @@ pub(crate) fn dx9_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
         ),
     ]
 }
+
+pub(in crate::app::model_preview) const H3_SHADOW_APPLY_BIAS: f32 = -0.00002;
+
+/// `shadow_apply_bilinear`'s pixel shader in the preview's box: one object
+/// filling the map. `FASTER_SHADOWS` at `DX_VERSION` 11 leaves no slope to bias
+/// by, that being the shadow generate's own.
+pub(in crate::app::model_preview) const H3_SHADOW_APPLY: &str =
+    include_str!("shaders/shadow_apply.glsl");

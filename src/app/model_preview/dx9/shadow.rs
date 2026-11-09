@@ -14,7 +14,7 @@ pub(in crate::app::model_preview) const H2_SHADOW_MAP_SIZE: i32 = 2048;
 pub(in crate::app::model_preview) const H2_SHADOW_MAP_UNIT: u32 = 8;
 
 /// How a game draws the self shadow through these passes: Halo 2's own, or
-/// Halo 3's and ODST's (`gen3::shadow::h3_shadow_style`).
+/// Halo 3's and ODST's (`h3::shadow::h3_shadow_style`).
 #[derive(Clone, Copy)]
 pub(in crate::app::model_preview) struct ShadowStyle {
     /// The square of the map the caster draws into.

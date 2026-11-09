@@ -13,6 +13,7 @@ mod light_pass;
 pub(crate) mod lights;
 pub(in crate::app::model_preview) mod object;
 pub(in crate::app::model_preview) mod render;
+pub(in crate::app::model_preview) mod shadow;
 pub(in crate::app::model_preview) mod slot;
 pub(crate) mod vision;
 mod vision_pass;

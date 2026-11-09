@@ -49,7 +49,9 @@ pub(super) fn lighting_constants(probe: &[[f32; 9]; 3]) -> [[f32; 4]; 10] {
 
 /// `calculate_dominant_light_from_lightprobe`: the probe's first order, by
 /// luminance, and how much of the probe lies along it.
-pub(super) fn dominant_light(probe: &[[f32; 9]; 3]) -> ([f32; 4], [f32; 4], f32) {
+pub(in crate::app::model_preview) fn dominant_light(
+    probe: &[[f32; 9]; 3],
+) -> ([f32; 4], [f32; 4], f32) {
     let [r, g, b] = probe;
     let weighted = |at: usize| 0.212_656 * r[at] + 0.715_158 * g[at] + 0.072_185_6 * b[at];
     let toward = [-weighted(3), -weighted(1), weighted(2)];
@@ -103,14 +105,7 @@ pub(super) fn dominant_light(probe: &[[f32; 9]; 3]) -> ([f32; 4], [f32; 4], f32)
     )
 }
 
-/// Which way an object's shadow falls from and how dark it is: the dominant
-/// light, whose shadow fades out as the probe grows even.
-pub(in crate::app::model_preview) fn h3_shadow_light(frame: &ModelGpuFrame) -> ([f32; 3], f32) {
-    let ([x, y, z, _], _, contrast) = dominant_light(&frame_probe(frame));
-    ([x, y, z], gen3_shadow_alpha(contrast))
-}
-
-pub(super) fn gen3_shadow_alpha(contrast: f32) -> f32 {
+pub(in crate::app::model_preview) fn gen3_shadow_alpha(contrast: f32) -> f32 {
     (contrast.clamp(2.0, 8.0) - 2.0) / 6.0
 }
 
@@ -137,7 +132,7 @@ fn probe_heading() -> f32 {
 
 /// The probe an object is lit by. With the light following the camera it
 /// turns to come from over the viewer's shoulder; this is the preview's own.
-pub(super) fn frame_probe(frame: &ModelGpuFrame) -> [[f32; 9]; 3] {
+pub(in crate::app::model_preview) fn frame_probe(frame: &ModelGpuFrame) -> [[f32; 9]; 3] {
     if !frame.light_follows_camera {
         return DEFAULT_PROBE;
     }
