@@ -3,7 +3,7 @@
 use super::super::super::gl::glsl::fill;
 use super::Dx9VertexStage;
 use super::layer::Dx9Layer;
-use super::lights::H2_SHADOW_BIAS;
+use super::lights::SHADOW_BIAS;
 use super::pass::{
     Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass,
     PASS_GLSL_VERSION, identity_rows,
@@ -61,7 +61,7 @@ pub(crate) fn dx9_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
                     include_str!("shaders/shadow_mask.frag"),
                     &[
                         ("version", &PASS_GLSL_VERSION),
-                        ("bias", &format!("{H2_SHADOW_BIAS:.4}")),
+                        ("bias", &format!("{SHADOW_BIAS:.4}")),
                     ],
                 ),
                 Dx9Compare::Equal,

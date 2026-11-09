@@ -19,7 +19,7 @@ fn an_attachment_scale_reads_the_object_then_its_idle_input() {
 
 #[test]
 fn a_frustum_takes_the_combined_pass_only_with_specular_to_show() {
-    let light = |specular| H2DefaultLight {
+    let light = |specular| Dx9Light {
         position: [0.0; 3],
         color: [1.0; 3],
         specular,
@@ -377,7 +377,7 @@ fn a_light_with_no_function_value_is_out_and_no_name_is_on() {
 
 #[test]
 fn a_bright_light_is_scaled_down_and_drawn_again() {
-    let light = |color| H2DefaultLight {
+    let light = |color| Dx9Light {
         position: [0.0; 3],
         color,
         specular: [0.0; 3],
@@ -389,7 +389,7 @@ fn a_bright_light_is_scaled_down_and_drawn_again() {
     assert_eq!((dim.color, draws), ([1.0, 0.5, 0.25], 2));
     let (dim, draws) = overbrighten(&light([4.0, 2.0, 1.0]));
     assert_eq!((dim.color, draws), ([1.0, 0.5, 0.25], 4));
-    let brighter_specular = H2DefaultLight {
+    let brighter_specular = Dx9Light {
         specular: [3.0; 3],
         ..light([1.0; 3])
     };

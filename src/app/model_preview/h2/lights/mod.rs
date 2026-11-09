@@ -10,7 +10,7 @@ use super::super::common::fields::{
 use super::super::common::image::Image;
 use super::super::common::named_function::tag_function_at;
 use super::super::common::view::{ViewFrame, posed_on};
-use super::super::dx9::passes::{Dx9Layer, H2DefaultLight};
+use super::super::dx9::passes::{Dx9Layer, Dx9Light};
 use super::super::effects::{for_each_attached_part, part_markers};
 use super::super::functions::FunctionValues;
 use super::super::functions::object_input;

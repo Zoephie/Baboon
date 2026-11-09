@@ -66,7 +66,7 @@ impl Dx9Game for H2Game {
             if value(name) > 0.0 {
                 unsafe {
                     cx.core
-                        .draw_h2_passes(cx.gl, frame, cx.slot, order, layer, None)
+                        .draw_dx9_layer(cx.gl, frame, cx.slot, order, layer, None)
                 };
             }
         }

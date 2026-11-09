@@ -1,11 +1,11 @@
 //! What one paint of a preview draws: the frame snapshot the panel builds
 //! from its state, the visibility it derives and the function values.
 
-use super::dx9::passes::{Dx9Layer, h2_object_light_direction};
+use super::dx9::passes::Dx9Layer;
 use super::functions::change_colors_for;
 use super::{
     MaterialTextures, ModelGpuCamera, ModelPreviewData, ModelPreviewState, ModelRenderMode,
-    PreviewCamera, RenderModelPreview, animation_skinning_rows, camera_light, ce, common,
+    PreviewCamera, RenderModelPreview, animation_skinning_rows, ce, common,
 };
 use eframe::egui;
 use eframe::egui::Ui;
@@ -238,15 +238,6 @@ impl ModelGpuFrame {
             .map_or([[1.0; 3]; 4], |state| state.change_colors)
     }
 
-    /// Transparent passes draw whether or not game shaders are on.
-    pub(in crate::app::model_preview) fn h2_draws(&self, layer: Dx9Layer) -> bool {
-        match layer {
-            Dx9Layer::Transparent => true,
-            Dx9Layer::ActiveCamo => self.active_camo,
-            _ => self.game_shaders,
-        }
-    }
-
     /// Whether anything in the frame changes over time, so the view keeps
     /// redrawing: an effect or simulation that runs, or a pass that animates.
     pub(in crate::app::model_preview) fn moves(&self) -> bool {
@@ -271,7 +262,7 @@ impl ModelGpuFrame {
                 .is_some_and(|material| {
                     Dx9Layer::ALL
                         .iter()
-                        .filter(|layer| self.h2_draws(**layer))
+                        .filter(|layer| self.dx9_draws(**layer))
                         .flat_map(|layer| &material.h2_layers[*layer as usize])
                         .any(|pass| {
                             let outputs = self.outputs_of(batch.material_index as usize);
@@ -281,22 +272,5 @@ impl ModelGpuFrame {
                         })
                 })
         })
-    }
-
-    pub(in crate::app::model_preview) fn h2_lightmap_layer(&self) -> Dx9Layer {
-        if self.default_lights {
-            Dx9Layer::Lightmap
-        } else {
-            Dx9Layer::ObjectLightmap
-        }
-    }
-
-    /// Which way the object path's direct light lies from a surface.
-    pub(in crate::app::model_preview) fn h2_object_light(&self) -> [f32; 3] {
-        if self.light_follows_camera {
-            camera_light(self.camera.yaw, self.camera.pitch)
-        } else {
-            h2_object_light_direction()
-        }
     }
 }

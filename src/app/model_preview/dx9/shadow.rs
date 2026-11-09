@@ -1,14 +1,14 @@
 //! The DX9 self shadow: the shadow map, its light matrix and the shadow pass, which
 //! Halo 2 draws and Halo 3 and ODST borrow.
 
-use super::super::dx9::passes::{Dx9Layer, h2_prt_lights};
+use super::super::dx9::passes::{DEFAULT_LIGHTS, Dx9Layer, light_direction};
 use super::super::gl::pass_state::PassState;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::{Made, Sampling, Texels};
 use super::super::{ModelGpuFrame, RenderCore, RenderModelPreview};
 use eframe::glow::{self, HasContext as _};
 
-pub(in crate::app::model_preview) const H2_SHADOW_MAP_SIZE: i32 = 2048;
+pub(in crate::app::model_preview) const SHADOW_MAP_SIZE: i32 = 2048;
 
 /// Past the units a pass's own samplers take.
 pub(in crate::app::model_preview) const H2_SHADOW_MAP_UNIT: u32 = 8;
@@ -34,16 +34,16 @@ pub(in crate::app::model_preview) struct ShadowStyle {
 }
 
 impl ShadowStyle {
-    /// Halo 2's: the whole map, unbiased, masked in the stencil, from the
-    /// key light.
-    pub(in crate::app::model_preview) fn h2(frame: &ModelGpuFrame) -> Self {
+    /// The dx9 passes': the whole map, unbiased, masked in the stencil,
+    /// from the key light.
+    pub(in crate::app::model_preview) fn dx9(frame: &ModelGpuFrame) -> Self {
         let toward = if frame.default_lights {
-            h2_prt_lights()[0].direction
+            light_direction(&DEFAULT_LIGHTS[0])
         } else {
-            frame.h2_object_light()
+            frame.dx9_object_light()
         };
         Self {
-            map_size: H2_SHADOW_MAP_SIZE,
+            map_size: SHADOW_MAP_SIZE,
             bias: None,
             stencil_mask: true,
             toward,
@@ -70,7 +70,7 @@ pub(in crate::app::model_preview) unsafe fn h2_shadow_map(
         let draw = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
         let read = gl.get_parameter_framebuffer(glow::READ_FRAMEBUFFER_BINDING);
         let mut made = Made::new(gl);
-        let size = [H2_SHADOW_MAP_SIZE; 2];
+        let size = [SHADOW_MAP_SIZE; 2];
         let map = made.depth(
             size,
             Texels::DEPTH24,
@@ -167,7 +167,7 @@ impl RenderCore {
                     .polygon_offset(slope, depth)
                     .apply(gl);
             }
-            self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::ShadowCaster, None);
+            self.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::ShadowCaster, None);
             PassState::new()
                 .disable(glow::POLYGON_OFFSET_FILL)
                 .apply(gl);
@@ -180,7 +180,7 @@ impl RenderCore {
             gl.enable(glow::STENCIL_TEST);
             gl.stencil_func(glow::ALWAYS, 1, 0xFF);
             gl.stencil_op(glow::KEEP, glow::KEEP, glow::REPLACE);
-            self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::ShadowMask, None);
+            self.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::ShadowMask, None);
             gl.disable(glow::STENCIL_TEST);
             true
         }

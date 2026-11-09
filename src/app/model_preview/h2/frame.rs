@@ -1,7 +1,7 @@
 //! What a frame holds of Halo 2's.
 
-use super::super::dx9::passes::h2_prt_object_lights;
 use super::super::frame::ModelGpuFrame;
+use super::prt::h2_prt_object_lights;
 
 /// What a frame holds of Halo 2's.
 #[derive(Clone, Default)]
@@ -22,7 +22,7 @@ fn object_prt_clusters(frame: &ModelGpuFrame) -> Option<[Vec<[f32; 4]>; 2]> {
         .prt
         .as_ref()
         .filter(|_| frame.prt && frame.game_shaders && !frame.default_lights)?;
-    let (lights, ambient) = h2_prt_object_lights(frame.h2_object_light());
+    let (lights, ambient) = h2_prt_object_lights(frame.dx9_object_light());
     Some([
         prt.clusters_lit_by(&lights, ambient),
         prt.clusters_lit_by(&lights[..1], ambient),

@@ -4,7 +4,7 @@
 use super::super::dx9::passes::H2Clock;
 use super::super::dx9::passes::{
     DX9_REFLECTION_SCALE, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9DrawPass,
-    Dx9Layer, H2DefaultLight, PASS_GLSL_VERSION, normalization_face,
+    Dx9Layer, Dx9Light, PASS_GLSL_VERSION, normalization_face,
 };
 use super::super::dx9::stage::Dx9VertexStage;
 use super::super::gl::buffer::model_draw_range;
@@ -280,7 +280,7 @@ impl RenderCore {
     }
 
     /// Whether the model is camouflaged: camo needs the model's shader for it.
-    pub(in crate::app::model_preview) fn h2_camo_on(&self, frame: &ModelGpuFrame) -> bool {
+    pub(in crate::app::model_preview) fn dx9_camo_on(&self, frame: &ModelGpuFrame) -> bool {
         frame.active_camo
             && (0..frame.preview.materials.len())
                 .any(|material| self.h2_material_ready(frame, material, Dx9Layer::ActiveCamo))
@@ -302,13 +302,13 @@ impl RenderCore {
         if self.h2_material_ready(frame, material, Dx9Layer::Transparent) {
             return true;
         }
-        if self.h2_camo_on(frame) {
+        if self.dx9_camo_on(frame) {
             return self.h2_material_ready(frame, material, Dx9Layer::ActiveCamo);
         }
         if !frame.game_shaders {
             return false;
         }
-        let lightmap = frame.h2_lightmap_layer();
+        let lightmap = frame.dx9_lightmap_layer();
         self.h2_material_ready(frame, material, lightmap)
             || self.h2_material_ready(frame, material, Dx9Layer::Prt)
             || (Self::h2_passes(frame, material, lightmap).is_empty()
@@ -372,7 +372,7 @@ impl RenderCore {
 
     /// Draw every texaccum pass into the target, sized to the live viewport,
     /// and put the framebuffer, viewport and scissor back exactly as found.
-    pub(in crate::app::model_preview) unsafe fn fill_h2_texaccum(
+    pub(in crate::app::model_preview) unsafe fn fill_dx9_texaccum(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -424,8 +424,8 @@ impl RenderCore {
                 } else {
                     glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT
                 });
-                self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::Texaccum, None);
-                self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::LightAlbedo, None);
+                self.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::Texaccum, None);
+                self.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::LightAlbedo, None);
             }
             state.restore(gl);
         }
@@ -433,7 +433,7 @@ impl RenderCore {
 
     /// Keep what lies behind the model, for what shows through it: as
     /// `sub_6BD480` does, before anything of the model has drawn.
-    pub(in crate::app::model_preview) unsafe fn copy_h2_frame(
+    pub(in crate::app::model_preview) unsafe fn copy_dx9_frame(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -488,18 +488,18 @@ impl RenderCore {
 
     /// Draw Halo 2 materials through their passes, in `order`. Leaves the GL
     /// state the wireframe pass and the UI expect.
-    pub(in crate::app::model_preview) unsafe fn draw_h2_passes(
+    pub(in crate::app::model_preview) unsafe fn draw_dx9_layer(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
         order: &[usize],
         layer: Dx9Layer,
-        light: Option<&H2DefaultLight>,
+        light: Option<&Dx9Light>,
     ) {
         let eye = eye_position(&frame.camera);
         let mut drew = false;
-        let camouflaged = self.h2_camo_on(frame);
+        let camouflaged = self.dx9_camo_on(frame);
         for &batch_index in order {
             let Some(batch) = frame.preview.batches.get(batch_index) else {
                 continue;
@@ -612,7 +612,7 @@ impl RenderCore {
         program: &Linked,
         pass: &Dx9DrawPass,
         eye: [f32; 3],
-        light: Option<&H2DefaultLight>,
+        light: Option<&Dx9Light>,
     ) {
         unsafe {
             if matches!(
@@ -635,7 +635,7 @@ impl RenderCore {
             ) {
                 let location = program.location(gl, "u_shadow_matrix");
                 // Set by the shadow pass these stages draw within or after.
-                let style = self.dx9.shadow.unwrap_or_else(|| ShadowStyle::h2(frame));
+                let style = self.dx9.shadow.unwrap_or_else(|| ShadowStyle::dx9(frame));
                 let (toward, shadow_alpha) = (style.toward, style.alpha);
                 let matrix = h2_shadow_matrix(&frame.preview, toward);
                 gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
@@ -693,7 +693,7 @@ impl RenderCore {
                     };
                     gl.uniform_4_f32_slice(location.as_ref(), clusters.as_flattened());
                     let direction = if frame.h2.prt_clusters.is_some() {
-                        frame.h2_object_light()
+                        frame.dx9_object_light()
                     } else {
                         prt.light
                     };
@@ -724,7 +724,7 @@ impl RenderCore {
             let direct = if !follows && (frame.default_lights || !pass.stage.is_lightmap()) {
                 pass.light_direct
             } else {
-                frame.h2_object_light().map(|value| -value)
+                frame.dx9_object_light().map(|value| -value)
             };
             gl.uniform_3_f32_slice(location.as_ref(), &direct);
             let location = program.location(gl, "u_light_indirect");

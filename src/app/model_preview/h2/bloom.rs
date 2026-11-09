@@ -188,7 +188,7 @@ pub(in crate::app::model_preview) unsafe fn draw_h2_bloom(
         gl.clear_color(0.0, 0.0, 0.0, 0.0);
         gl.clear(glow::COLOR_BUFFER_BIT);
         PassState::new().color_mask([true; 4]).apply(gl);
-        core.draw_h2_passes(gl, frame, slot, order, Dx9Layer::Bloom, None);
+        core.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::Bloom, None);
         // `sub_6C18F0`: the hologram shader draws while its control is up.
         let hologram = frame
             .preview
@@ -203,7 +203,7 @@ pub(in crate::app::model_preview) unsafe fn draw_h2_bloom(
                     .is_some_and(|value| *value > 0.0)
             });
         if hologram {
-            core.draw_h2_passes(gl, frame, slot, order, Dx9Layer::HologramBloom, None);
+            core.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::HologramBloom, None);
         }
         if let Some(bloom) = made.get_or_insert_with(|| H2Bloom::new(gl, PASS_GLSL_VERSION)) {
             bloom.apply(gl, framebuffer, color, size, frame.show_backfaces);

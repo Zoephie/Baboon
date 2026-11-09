@@ -7,6 +7,10 @@ use std::collections::HashMap;
 
 use blam_tags::{RenderMesh, RenderModel, TagFile, TagStruct};
 
+use super::super::dx9::passes::{
+    DEFAULT_AMBIENT, DEFAULT_DIRECT_COLOR, DEFAULT_INDIRECT_COLOR, DEFAULT_INDIRECT_VECTOR,
+    DEFAULT_LIGHTS, light_direction,
+};
 use super::super::load::preview_mesh_order;
 
 /// `info->m_sh_order` is asserted to be 3 in the game.
@@ -151,12 +155,7 @@ pub(in crate::app::model_preview) fn read_model_prt(
     model: &RenderModel,
     meshes: &[RenderMesh],
 ) -> Option<H2Prt> {
-    read_h2_prt(
-        tag,
-        model,
-        meshes,
-        &super::super::dx9::passes::h2_prt_lights(),
-    )
+    read_h2_prt(tag, model, meshes, &h2_prt_lights())
 }
 
 /// Read a Halo 2 render_model's PRT data, walking `meshes` in the order the
@@ -233,6 +232,36 @@ pub(in crate::app) fn read_h2_prt(
         clusters,
         light: lights.first()?.direction,
         basis: all_basis,
+    })
+}
+
+/// The object path's lighting as a PRT pass takes it: the indirect light,
+/// then the direct one from `direction`. The game samples a level's probes
+/// here, which a preview stands in for with the same colors the other passes
+/// light by. The indirect light alone is what a shadow leaves.
+pub(crate) fn h2_prt_object_lights(direction: [f32; 3]) -> ([H2PrtLight; 2], [f32; 3]) {
+    let channels = |[r, g, b, _]: [f32; 4]| [r, g, b];
+    let [x, y, z, _] = DEFAULT_INDIRECT_VECTOR;
+    let lights = [
+        H2PrtLight {
+            direction: [-x, -y, -z],
+            color: channels(DEFAULT_INDIRECT_COLOR),
+        },
+        H2PrtLight {
+            direction,
+            color: channels(DEFAULT_DIRECT_COLOR),
+        },
+    ];
+    (lights, channels(DEFAULT_AMBIENT))
+}
+
+/// What a model's `sh prt` passes are lit by. The game samples the level's
+/// light probes here, and with none it falls back on a stand-in from straight
+/// below; a preview uses its own lights instead.
+pub(crate) fn h2_prt_lights() -> [H2PrtLight; 2] {
+    DEFAULT_LIGHTS.map(|light| H2PrtLight {
+        direction: light_direction(&light),
+        color: light.color,
     })
 }
 

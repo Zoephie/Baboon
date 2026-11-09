@@ -620,7 +620,7 @@ impl RenderCore {
                     .map(|[r, g, b]| Color32::from_rgb(r, g, b))
                     .unwrap_or_else(|| material_color(batch.material_index))
             };
-            // Passes draw after every opaque batch; see `draw_h2_passes`.
+            // Passes draw after every opaque batch; see `draw_dx9_layer`.
             let index = batch.material_index as usize;
             if !wire && replaced(self, index) {
                 continue;

@@ -7,7 +7,7 @@ use super::place::{
     second_field_int,
 };
 use super::{
-    Dx9Layer, FunctionValues, H2DefaultLight, H2EffectLight, Image, SamplerKind, UNSET, attached,
+    Dx9Layer, Dx9Light, FunctionValues, H2EffectLight, Image, SamplerKind, UNSET, attached,
     ce_color_interpolate, ce_color_interpolation, cross, decode_image, has_flag, posed_on,
 };
 use blam_tags::{TagFunction, TagStruct};
@@ -287,7 +287,7 @@ impl H2PointLight {
         bones: Option<&[[f32; 4]]>,
         time: f32,
         onset: f32,
-    ) -> Option<H2DefaultLight> {
+    ) -> Option<Dx9Light> {
         let value = light_value(
             &self.light,
             self.effect.as_ref(),
@@ -311,7 +311,7 @@ impl H2PointLight {
             return None;
         }
         let (position, _) = posed_on(self.node, self.position, [1.0, 0.0, 0.0], bones);
-        Some(H2DefaultLight {
+        Some(Dx9Light {
             position,
             color: diffuse.map(|channel| (channel * brightness).min(BRIGHTEST)),
             specular: specular.map(|channel| (channel * brightness).min(BRIGHTEST)),
@@ -378,7 +378,7 @@ impl H2GelLight {
         bones: Option<&[[f32; 4]]>,
         time: f32,
         onset: f32,
-    ) -> Option<(H2DefaultLight, H2GelRows)> {
+    ) -> Option<(Dx9Light, H2GelRows)> {
         let value = light_value(
             &self.light,
             self.effect.as_ref(),
@@ -403,7 +403,7 @@ impl H2GelLight {
         );
         let specular = specular.map(|channel| (channel * brightness).min(BRIGHTEST));
         Some((
-            H2DefaultLight {
+            Dx9Light {
                 position: rows.apex,
                 color,
                 specular,
@@ -415,14 +415,14 @@ impl H2GelLight {
 }
 
 /// `rasterizer_render_light`'s flag 1: whether a frustum takes implementation 0.
-pub(crate) fn has_specular(light: &H2DefaultLight) -> bool {
+pub(crate) fn has_specular(light: &Dx9Light) -> bool {
     light.specular.iter().any(|channel| *channel > 0.01)
 }
 
 /// `sub_946960`: a color past 1 goes to the pass halved or quartered, for a
 /// variant that scales its output back up, as passes saturate on the way. The
 /// preview keeps the first variant: the same pass drawn again is the same sum.
-pub(crate) fn overbrighten(light: &H2DefaultLight) -> (H2DefaultLight, usize) {
+pub(crate) fn overbrighten(light: &Dx9Light) -> (Dx9Light, usize) {
     let brightest = light
         .color
         .iter()
@@ -435,7 +435,7 @@ pub(crate) fn overbrighten(light: &H2DefaultLight) -> (H2DefaultLight, usize) {
         _ => (0.25, 4),
     };
     let scaled = |color: [f32; 3]| color.map(|channel| (channel * scale).clamp(0.0, 1.0));
-    let dimmed = H2DefaultLight {
+    let dimmed = Dx9Light {
         color: scaled(light.color),
         specular: scaled(light.specular),
         ..*light

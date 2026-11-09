@@ -9,7 +9,6 @@ use super::super::common::named_function::tag_function_at;
 use super::super::functions::FunctionValues;
 
 use super::super::common::image::Image;
-use super::super::h2::prt::H2PrtLight;
 use super::stage::{DX9_TEXTURE_ROWS, Dx9VertexStage};
 use crate::core::h2_pixel_shader::SamplerKind;
 

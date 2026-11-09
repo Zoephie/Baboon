@@ -150,7 +150,7 @@ impl Gen3Game for H3Game {
         let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
         unsafe {
             cx.core
-                .draw_h2_passes(gl, frame, slot, order, Dx9Layer::ShadowApply, None);
+                .draw_dx9_layer(gl, frame, slot, order, Dx9Layer::ShadowApply, None);
             gl.bind_vertex_array(Some(cx.core.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);

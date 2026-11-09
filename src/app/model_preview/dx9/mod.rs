@@ -2,6 +2,7 @@
 //! the vertex stages that feed them.
 
 pub(in crate::app::model_preview) mod draw;
+mod frame;
 pub(in crate::app) mod passes;
 pub(in crate::app::model_preview) mod pipeline;
 pub(in crate::app::model_preview) mod render;

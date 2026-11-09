@@ -65,7 +65,7 @@ pub(in crate::app::model_preview) unsafe fn draw_ce_transparents(
                     } else {
                         gl.enable(glow::CULL_FACE);
                     }
-                    core.draw_h2_passes(gl, frame, slot, &[index], Dx9Layer::Transparent, None);
+                    core.draw_dx9_layer(gl, frame, slot, &[index], Dx9Layer::Transparent, None);
                 }
                 Transparent::Group(group) => {
                     let Some(flares) = core.sprite_gl.as_ref().and_then(Option::as_ref) else {

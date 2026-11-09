@@ -74,7 +74,7 @@ impl Dx9Game for CeGame {
                 let ce = self.slots.of(cx.slot, cx.core.slot_uploads(cx.slot));
                 draw_ce_transparents(cx.core, cx.gl, cx.frame, cx.slot, ce, &mut self.effect_gl);
             } else {
-                cx.core.draw_h2_passes(
+                cx.core.draw_dx9_layer(
                     cx.gl,
                     cx.frame,
                     cx.slot,
