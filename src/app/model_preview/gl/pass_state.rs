@@ -21,6 +21,7 @@ pub(in crate::app::model_preview) enum StateCall {
     BindBuffer(u32, Option<glow::NativeBuffer>),
     ActiveTexture(u32),
     BindTexture(u32, Option<glow::NativeTexture>),
+    PolygonOffset(f32, f32),
     /// A sampler's unit, set on the program in use.
     Uniform1i(Option<glow::NativeUniformLocation>, i32),
 }
@@ -100,6 +101,10 @@ impl PassState {
         self.with(StateCall::BindTexture(target, texture))
     }
 
+    pub(in crate::app::model_preview) fn polygon_offset(self, factor: f32, units: f32) -> Self {
+        self.with(StateCall::PolygonOffset(factor, units))
+    }
+
     pub(in crate::app::model_preview) fn uniform_1_i32(self, location: Option<glow::NativeUniformLocation>, value: i32) -> Self {
         self.with(StateCall::Uniform1i(location, value))
     }
@@ -170,6 +175,7 @@ impl PassState {
                     StateCall::BindBuffer(target, buffer) => gl.bind_buffer(target, buffer),
                     StateCall::ActiveTexture(unit) => gl.active_texture(unit),
                     StateCall::BindTexture(target, texture) => gl.bind_texture(target, texture),
+                    StateCall::PolygonOffset(factor, units) => gl.polygon_offset(factor, units),
                     StateCall::Uniform1i(location, value) => gl.uniform_1_i32(location.as_ref(), value),
                 }
             }

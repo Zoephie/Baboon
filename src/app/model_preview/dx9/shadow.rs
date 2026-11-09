@@ -3,6 +3,7 @@
 
 use super::super::*;
 use super::super::gl::scope::PostScope;
+use super::super::gl::pass_state::PassState;
 use super::super::gl::target::{Made, Sampling, Texels};
 use super::super::dx9::passes::{Dx9Layer, h2_prt_lights};
 use eframe::glow::{self, HasContext as _};
@@ -117,17 +118,15 @@ impl RenderCore {
             let size = style.map_size;
             let state = PostScope::capture(gl);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            gl.disable(glow::SCISSOR_TEST);
-            gl.depth_mask(true);
+            PassState::new().disable(glow::SCISSOR_TEST).depth_mask(true).apply(gl);
             gl.clear_depth_f32(1.0);
             gl.clear(glow::DEPTH_BUFFER_BIT);
             gl.viewport(0, 0, size, size);
             if let Some((slope, depth)) = style.bias {
-                gl.enable(glow::POLYGON_OFFSET_FILL);
-                gl.polygon_offset(slope, depth);
+                PassState::new().enable(glow::POLYGON_OFFSET_FILL).polygon_offset(slope, depth).apply(gl);
             }
             self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::ShadowCaster, None);
-            gl.disable(glow::POLYGON_OFFSET_FILL);
+            PassState::new().disable(glow::POLYGON_OFFSET_FILL).apply(gl);
             state.restore(gl);
             if !style.stencil_mask {
                 return true;
