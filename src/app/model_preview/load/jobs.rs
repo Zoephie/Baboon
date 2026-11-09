@@ -386,12 +386,9 @@ impl Baboon {
                         *kept = selection;
                     }
                 }
-                if let Some(inputs) = state.ce.function_inputs.get(&(geometry_id, 0)).copied() {
-                    state
-                        .ce
-                        .function_inputs
-                        .insert((data.geometry_id, 0), inputs);
-                }
+                state
+                    .ce
+                    .carry_function_inputs(geometry_id, data.geometry_id);
                 // Halo 2's, by name. A name only the old weapon had is
                 // carried too, and reads nothing.
                 let carried: Vec<_> = state

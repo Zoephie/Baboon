@@ -30,6 +30,21 @@ impl CeFrame {
             plays: event_plays(data, &panel.event_counts, panel.event_scales),
         }
     }
+
+    /// `object`'s `A out` to `D out` this frame; none for one it has not.
+    pub(in crate::app::model_preview) fn outputs_of(&self, object: u8) -> Option<[f32; 4]> {
+        self.objects.get(object as usize).map(|state| state.outputs)
+    }
+
+    /// `object`'s change colors this frame; none for one it has not.
+    pub(in crate::app::model_preview) fn change_colors_of(
+        &self,
+        object: u8,
+    ) -> Option<[[f32; 3]; 4]> {
+        self.objects
+            .get(object as usize)
+            .map(|state| state.change_colors)
+    }
 }
 
 /// The frame's point lights, once the rest of it is set.

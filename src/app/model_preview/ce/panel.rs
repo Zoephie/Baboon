@@ -20,6 +20,16 @@ pub(in crate::app) struct CePanelState {
     pub(in crate::app) shots: super::firing::CeShots,
 }
 
+impl CePanelState {
+    /// A weapon change carries the opened object's function inputs from the
+    /// unit as it was, `from`, to the unit as it loads, `to`.
+    pub(in crate::app::model_preview) fn carry_function_inputs(&mut self, from: u64, to: u64) {
+        if let Some(inputs) = self.function_inputs.get(&(from, 0)).copied() {
+            self.function_inputs.insert((to, 0), inputs);
+        }
+    }
+}
+
 impl Default for CePanelState {
     fn default() -> Self {
         Self {

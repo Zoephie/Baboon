@@ -172,10 +172,7 @@ impl ModelGpuFrame {
             .materials
             .get(material)
             .map_or(0, |material| material.object);
-        self.ce
-            .objects
-            .get(object as usize)
-            .map_or([0.0; 4], |state| state.outputs)
+        self.ce.outputs_of(object).unwrap_or([0.0; 4])
     }
 
     /// The function values of the object that owns `material`.
@@ -231,10 +228,7 @@ impl ModelGpuFrame {
         {
             return *colors;
         }
-        self.ce
-            .objects
-            .get(object as usize)
-            .map_or([[1.0; 3]; 4], |state| state.change_colors)
+        self.ce.change_colors_of(object).unwrap_or([[1.0; 3]; 4])
     }
 
     /// Whether anything in the frame changes over time, so the view keeps
