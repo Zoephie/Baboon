@@ -40,10 +40,11 @@ fn a_custom_shape_picks_its_point_by_radius_and_strays_by_angle() {
 
 #[test]
 fn only_odst_and_reach_let_a_particle_that_faces_nothing_stay_still() {
+    let rules = |game| ParticleRules::of(Some(game));
     let (halo3, odst, reach) = (
-        Some(GameId::Halo3),
-        Some(GameId::Halo3Odst),
-        Some(GameId::HaloReach),
+        &rules(GameId::Halo3),
+        &rules(GameId::Halo3Odst),
+        &rules(GameId::HaloReach),
     );
     assert!(still_particles_move(halo3, Billboard::ScreenFacing));
     assert!(!still_particles_move(odst, Billboard::ScreenFacing));

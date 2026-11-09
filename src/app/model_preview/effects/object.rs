@@ -193,7 +193,7 @@ pub(in crate::app::model_preview) fn object_effects(
 ) -> Vec<ObjectEffect> {
     let mut effects = Vec::new();
     let effect_group = u32::from_be_bytes(*b"effe");
-    let reach = reader.source.game() == Some(crate::core::game::GameId::HaloReach);
+    let vectors = reader.rules().effect_vectors;
     if let Some(block) = object_block(object, "attachments") {
         for attachment in elements(block, "attachments") {
             let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
@@ -211,7 +211,7 @@ pub(in crate::app::model_preview) fn object_effects(
                         .unwrap_or_default(),
                     change_color: function_slot_of(attachment, "change color"),
                     once: false,
-                    vectors: reach,
+                    vectors,
                 });
             }
         }

@@ -17,7 +17,7 @@ pub(in crate::app::model_preview) const MOST_FRAMES: usize = 15;
 
 /// What each game's particles do differently, from the game once. Each rule
 /// holds for the games named on it.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub(in crate::app::model_preview) struct ParticleRules {
     /// Reach: a sprite system's options read their parameters through the
     /// resolver, with Reach's depth fade, warp, palette shift and plasma.
@@ -47,6 +47,37 @@ pub(in crate::app::model_preview) struct ParticleRules {
     /// Halo 2: a system's particle and emitters read as Halo 2 lays them
     /// out, with its own LOD defaults.
     pub(in crate::app::model_preview) own_system: Option<OwnParticleSystem>,
+    /// ODST and Reach (the 360's 0x82EE3C98): `initialize_particle` nudges
+    /// a still particle to a speed only where it faces its velocity; Halo 3
+    /// nudges every one.
+    pub(in crate::app::model_preview) only_facing_still_particles_move: bool,
+    /// Halo 4: a cheap particle library binds its per-type turbulence, rows,
+    /// sizes and exposure.
+    pub(in crate::app::model_preview) cheap_turbulence_types: bool,
+}
+
+impl ParticleRules {
+    /// A game's with none of its own.
+    pub(in crate::app::model_preview) const DEFAULT: Self = Self {
+        reach_render_method: false,
+        read_material: None,
+        reach_postprocess_seeds: false,
+        cheap_shader: false,
+        adds_at_illum: false,
+        reach_look: false,
+        card_lerps: false,
+        random_volume_velocities: false,
+        scales_axes: false,
+        h4_emitter_terms: false,
+        own_system: None,
+        only_facing_still_particles_move: false,
+        cheap_turbulence_types: false,
+    };
+
+    /// The kit's game's, by its rules.
+    pub(in crate::app::model_preview) fn of(game: Option<GameId>) -> Self {
+        super::super::load::rules(game).particles
+    }
 }
 
 /// A system's look and its emitters.
@@ -310,12 +341,11 @@ pub(super) fn starting_rotation(
 }
 
 /// `initialize_particle`'s nudge to a speed of none, which what faces its
-/// velocity needs one to have. Halo 3 gives it to everything, ODST and Reach
-/// (the 360's 0x82EE3C98) only to those.
-pub(super) fn still_particles_move(game: Option<GameId>, billboard: Billboard) -> bool {
+/// velocity needs one to have; see
+/// [`ParticleRules::only_facing_still_particles_move`].
+pub(super) fn still_particles_move(rules: &ParticleRules, billboard: Billboard) -> bool {
     use Billboard::{ScreenParallel, ScreenPerpendicular, VelocityHorizontal};
-    let only_facing = matches!(game, Some(GameId::Halo3Odst | GameId::HaloReach));
-    !only_facing
+    !rules.only_facing_still_particles_move
         || matches!(
             billboard,
             ScreenParallel | ScreenPerpendicular | VelocityHorizontal

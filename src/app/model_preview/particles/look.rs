@@ -427,7 +427,7 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
     }
     Some(ParticleLook {
         billboard,
-        still_moves: still_particles_move(reader.source.game(), billboard),
+        still_moves: still_particles_move(&rules, billboard),
         flip_u: flagged("random u mirror"),
         flip_v: flagged("random v mirror"),
         random_rotation: flagged("random starting rotation"),

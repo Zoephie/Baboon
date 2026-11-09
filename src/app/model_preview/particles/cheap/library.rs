@@ -1,6 +1,6 @@
 //! The global cheap particle library: its types, render textures and turbulence, read once per game.
 
-use super::super::super::{GameId, TagReader};
+use super::super::super::TagReader;
 use super::{COLLISION, COLOR0, FADE, PHYSICS, RENDER, elements};
 use blam_tags::{TagFieldData, TagStruct};
 
@@ -314,7 +314,7 @@ impl CheapLibrary {
         let textures = elements(root, "textures").len();
         let types = elements(root, "types");
         let map = |name: &str| root.read_tag_ref_path(name).filter(|path| !path.is_empty());
-        let halo4 = reader.source.game() == Some(GameId::Halo4);
+        let halo4 = reader.rules().particles.cheap_turbulence_types;
         // Halo 4 binds `turbulenceTexture`, an array the tool builds from
         // these; the kit's is stale (8 layers for 4 types, none matching),
         // so each type's own map stands in [inferred].

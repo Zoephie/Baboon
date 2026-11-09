@@ -3,7 +3,6 @@
 
 use super::super::common::marker::MarkerFrame;
 use super::super::functions::TypeExporter;
-use super::super::particles::{OwnParticleSystem, ParticleMaterialReader, ParticleRules};
 use super::super::{
     GameId, ModelPreviewData, RenderModelPreview, TagEntry, TagFile, TagSource,
     is_object_family_group,
@@ -286,34 +285,5 @@ pub(in crate::app::model_preview) fn resolve_own_shader(
             super::super::h2::shader::resolve::resolve_h2_shader(reader, shader, caches),
         ),
         _ => None,
-    }
-}
-
-/// What each game's particles do differently.
-impl ParticleRules {
-    pub(in crate::app::model_preview) fn of(game: Option<GameId>) -> Self {
-        let reach = game == Some(GameId::HaloReach);
-        let halo4 = game == Some(GameId::Halo4);
-        // Halo 4's simulation is Reach's, with terms of its own.
-        let reach_on = reach || halo4;
-        Self {
-            reach_render_method: reach,
-            read_material: halo4.then_some(
-                super::super::h4::effects::particles::read_h4_particle_material
-                    as ParticleMaterialReader,
-            ),
-            reach_postprocess_seeds: reach_on,
-            cheap_shader: reach_on,
-            adds_at_illum: reach_on,
-            reach_look: reach_on,
-            card_lerps: reach_on,
-            random_volume_velocities: reach_on,
-            scales_axes: reach_on,
-            h4_emitter_terms: halo4,
-            own_system: (game == Some(GameId::Halo2)).then_some(OwnParticleSystem {
-                read: super::super::h2::particles::read_h2_system_parts,
-                baked_lod: super::super::h2::particles::h2_baked_lod_of,
-            }),
-        }
     }
 }
