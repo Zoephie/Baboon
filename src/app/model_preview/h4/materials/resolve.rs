@@ -5,14 +5,7 @@ use super::*;
 /// A full-screen triangle for an explicit shader's pass, its texcoord running
 /// up the picture as GL's targets do: v is GL's t. The hologram's screen
 /// rectangles are handed over in the same terms (see `h4_holograms.rs`).
-const SCREEN_VERTEX: &str = "#version 410 core
-out vec2 v_TEXCOORD0;
-void main() {
-    vec2 corner = vec2(gl_VertexID & 1, gl_VertexID >> 1) * 4.0 - 1.0;
-    gl_Position = vec4(corner, 0.0, 1.0);
-    v_TEXCOORD0 = corner * 0.5 + 0.5;
-}
-";
+const SCREEN_VERTEX: &str = include_str!("shaders/screen.vert");
 
 /// [`SCREEN_VERTEX`], for the light passes.
 pub(in crate::app::model_preview) fn h4_screen_vertex() -> &'static str {

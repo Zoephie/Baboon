@@ -20,98 +20,18 @@ use super::shadow::{DEPTH_BIAS, FADE, H4ShadowCamera, SLOPE_BIAS, VSM};
 
 /// `HorizontalBlurVariancePS`: five depths across, weighted by
 /// `ps_gaussian_parameters[0]`, and their squares.
-const HORIZONTAL_FRAGMENT: &str = "#version 410 core
-uniform sampler2D depth_map;
-uniform vec4 gaussian;
-out vec4 color;
-void main() {
-    ivec2 at = ivec2(gl_FragCoord.xy);
-    float d[5];
-    for (int tap = 0; tap < 5; tap++) {
-        d[tap] = texelFetch(depth_map, clamp(at + ivec2(tap - 2, 0), ivec2(0), textureSize(depth_map, 0) - 1), 0).r;
-    }
-    vec4 weights = vec4(gaussian.x, gaussian.y, gaussian.z, gaussian.y);
-    float z = dot(vec4(d[0], d[1], d[2], d[3]), weights) + d[4] * gaussian.x;
-    float z2 = dot(vec4(d[0], d[1], d[2], d[3]) * vec4(d[0], d[1], d[2], d[3]), weights) + d[4] * d[4] * gaussian.x;
-    color = vec4(z, z2, 0.0, 0.0);
-}
-";
+const HORIZONTAL_FRAGMENT: &str = include_str!("shaders/shadow_horizontal.frag");
 
 /// `VerticalBlurVariancePS`: four filtered reads down at
 /// `ps_gaussian_parameters[1]`, weighted (2, 6, 6, 2) / 16.
-const VERTICAL_FRAGMENT: &str = "#version 410 core
-uniform sampler2D source_map;
-uniform vec4 offsets;
-out vec4 color;
-void main() {
-    vec2 uv = gl_FragCoord.xy / vec2(textureSize(source_map, 0));
-    vec2 t0 = texture(source_map, uv + vec2(0.0, offsets.x)).xy;
-    vec2 t1 = texture(source_map, uv + vec2(0.0, offsets.y)).xy;
-    vec2 t2 = texture(source_map, uv + vec2(0.0, offsets.z)).xy;
-    vec2 t3 = texture(source_map, uv + vec2(0.0, offsets.w)).xy;
-    vec4 weights = vec4(2.0, 6.0, 6.0, 2.0) / 16.0;
-    color = vec4(dot(vec4(t0.x, t1.x, t2.x, t3.x), weights), dot(vec4(t0.y, t1.y, t2.y, t3.y), weights), 0.0, 0.0);
-}
-";
+const VERTICAL_FRAGMENT: &str = include_str!("shaders/shadow_vertical.frag");
 
 /// `shadow_apply.fx`'s `default_ps` with `shadow_apply_variance.fx`'s
 /// `ComputeVarianceAttenuation` (`FASTER_SHADOWS`, `VARIANCE`). The pixels it
 /// touches are the scene's inside the shadow's box, which the game finds
 /// with a stencil over the box's faces. It returns `(darken, knockout +
 /// darken, darken, 0)`, of which the game keeps G and B, the least of each.
-const APPLY_FRAGMENT: &str = "#version 410 core
-uniform sampler2D scene_depth;
-uniform sampler2D normals;
-uniform sampler2D variance;
-uniform mat4 screen_to_world;
-uniform mat4 shadow_view_projection;
-uniform vec3 shadow_direction;
-uniform float shadow_alpha;
-uniform vec2 fade;
-uniform vec3 vsm;
-uniform float knockout;
-uniform int normal_test;
-out vec4 color;
-void main() {
-    ivec2 at = ivec2(gl_FragCoord.xy);
-    float depth = texelFetch(scene_depth, at, 0).r;
-    if (depth >= 1.0) {
-        discard;
-    }
-    vec4 world = screen_to_world * vec4(gl_FragCoord.xy, depth, 1.0);
-    world /= world.w;
-    vec4 clip = shadow_view_projection * vec4(world.xyz, 1.0);
-    if (any(greaterThan(abs(clip.xyz), vec3(1.0)))) {
-        discard;
-    }
-    vec3 shadow = vec3(clip.xy * 0.5 + 0.5, clip.z * 0.5 + 0.5);
-    float falloff = max(shadow.z * fade.x + fade.y, 0.0);
-    falloff = falloff * falloff / 2.25;
-    float darkness = shadow_alpha * (1.0 - falloff);
-    // `DecodeNormal`, into the space the normal buffer was written in.
-    vec2 expanded = texelFetch(normals, at, 0).xy * 2.0 - 1.0;
-    float f = dot(expanded, expanded);
-    vec3 normal = vec3(expanded * sqrt(max(4.0 - 4.0 * f, 0.0)), 1.0 - 2.0 * f);
-    float cosine = dot(normal, shadow_direction);
-    if (normal_test != 0) {
-        darkness *= clamp(0.65 + cosine * 5.0, 0.0, 1.0);
-    }
-    float darken = 1.0;
-    if (darkness > 0.001) {
-        shadow.z = min(shadow.z, 0.99);
-        vec2 moments = texture(variance, shadow.xy).xy;
-        float closer = 1.0;
-        if (shadow.z > moments.x) {
-            float spread = clamp(moments.y - moments.x * moments.x + vsm.x, 0.0, 1.0);
-            float d2 = pow(shadow.z - moments.x, vsm.y);
-            closer = pow(spread / (spread + d2), vsm.z);
-        }
-        darken = clamp(1.01 - darkness + closer * darkness, 0.0, 1.0);
-        darken *= darken;
-    }
-    color = vec4(darken, knockout + darken, darken, 0.0);
-}
-";
+const APPLY_FRAGMENT: &str = include_str!("shaders/shadow_apply.frag");
 
 /// The depth map, its two blurs, and the mask, kept between frames.
 pub(in crate::app::model_preview) struct H4ShadowTargets {
