@@ -12,7 +12,7 @@ use super::super::super::common::view::{ViewFrame, posed_on};
 use super::super::super::effects::{EffectOnsets, EffectTimes, for_each_attached_part};
 use super::super::super::functions::FunctionValues;
 use super::super::super::{
-    GameId, RenderModelPreview, RenderModelPreviewMarker, RenderModelPreviewMaterial, TagReader,
+    RenderModelPreview, RenderModelPreviewMarker, RenderModelPreviewMaterial, TagReader,
 };
 use crate::app::model_preview::common::marker::MarkerFrame;
 
@@ -497,7 +497,7 @@ fn read_definition(
     delay: f32,
 ) -> Option<Gen3ScreenDefinition> {
     let flagged = |labels: &[&str]| has_flag_labelled(element, "flags", labels);
-    let reach = reader.source.game() == Some(GameId::HaloReach);
+    let reach = reader.rules().gen3.screen_effect_terms;
     // The preview's camera is a third person's, on nothing.
     let shows = if reach {
         shows_to_no_unit(flagged)
@@ -660,7 +660,7 @@ pub(in crate::app::model_preview) fn read_h3_screen_effects(
         let Ok(tag) = reader.load(&part.path, "area_screen_effect", b"sefc") else {
             return;
         };
-        let odst = reader.source.game() == Some(GameId::Halo3Odst);
+        let odst = reader.rules().gen3.screen_object_falloff;
         let mut definitions = read_definitions(reader, tag.root());
         definitions.retain(|definition| {
             shows_on_object(odst, definition.predates_object_falloff, part.unattached)

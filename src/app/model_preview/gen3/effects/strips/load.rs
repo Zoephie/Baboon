@@ -1,6 +1,6 @@
 //! Reading beams and contrails: their properties, shapes, looks and definitions, and the strips on an object.
 
-use super::super::super::super::{GameId, RenderModelPreviewMarker, TagReader};
+use super::super::super::super::{RenderModelPreviewMarker, TagReader};
 use super::{
     EffectTimes, MarkerFrame, SpriteShader, elements, for_each_attached_part, has_flag,
     high24_over_2_24, lcg_step, part_frame, read_ends, read_part_placement, read_sprite_shader,
@@ -314,7 +314,7 @@ pub(super) fn read_strip_look(
     element: TagStruct<'_>,
     beam: bool,
 ) -> Option<StripLook> {
-    let reach = reader.source.game() == Some(GameId::HaloReach);
+    let reach = reader.rules().gen3.strip_terms;
     let mut shader = read_sprite_shader(reader, element.descend("actual shader?")?)?;
     if reach && beam {
         // `effects__beam.hlsl`'s `sample_diffuse` (l.373–458): the strip's one

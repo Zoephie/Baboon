@@ -9,11 +9,13 @@ pub(in crate::app::model_preview) const RULES: GameRules = GameRules {
     ..GameRules::DEFAULT
 };
 
-/// ODST's: Halo 3's, but for its clocks.
+/// ODST's: Halo 3's, but for its clocks and its screen effects' object
+/// falloff.
 pub(in crate::app::model_preview) const ODST_RULES: GameRules = GameRules {
     gen3: Gen3Rules {
         clock: Gen3Clock::Odst,
         screen_clock: Gen3Clock::OdstScreen,
+        screen_object_falloff: true,
         ..RULES.gen3
     },
     ..RULES

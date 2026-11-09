@@ -1,6 +1,6 @@
 //! Reading a light volume definition, and the volumes on an object's markers.
 
-use super::super::super::super::{GameId, RenderModelPreviewMarker, TagReader};
+use super::super::super::super::{RenderModelPreviewMarker, TagReader};
 use super::lod::{ReachVolumeLod, max_profile_count, precompiles};
 use super::property::{Gen3VolumeProperty, Gen3VolumeState, SEEDS, VolumeProperties, volume_seeds};
 use super::{
@@ -150,10 +150,11 @@ pub(super) fn read_definition(
     reader: &TagReader,
     element: TagStruct<'_>,
 ) -> Option<Gen3VolumeDefinition> {
-    if reader.source.game() == Some(GameId::Halo4) {
-        return read_h4_definition(reader, element);
+    let rules = reader.rules().gen3;
+    if let Some(read) = rules.light_volume_reader {
+        return read(reader, element);
     }
-    let reach = reader.source.game() == Some(GameId::HaloReach);
+    let reach = rules.light_volume_terms;
     let shader = element.descend("actual shader?")?;
     let definition = shader
         .read_tag_ref_path("definition")
@@ -241,7 +242,10 @@ pub(super) fn read_definition(
 /// 0x1403ABF50): Reach's, through the `actual material`, and never
 /// precompiled, which MCC clears every time and could not draw ("not
 /// implemented for D3D11").
-fn read_h4_definition(reader: &TagReader, element: TagStruct<'_>) -> Option<Gen3VolumeDefinition> {
+pub(in crate::app::model_preview) fn read_h4_definition(
+    reader: &TagReader,
+    element: TagStruct<'_>,
+) -> Option<Gen3VolumeDefinition> {
     let material =
         blam_tags::material::Material::from_struct(&element.descend("actual material?")?);
     let resolved = resolve_h4_effect_material(reader, &material, "light_volume")

@@ -17,6 +17,9 @@ pub(in crate::app::model_preview) const RULES: GameRules = GameRules {
         shadow_generate: true,
         camo_pass: Some(super::camo::camo_pass),
         environment_maps: true,
+        screen_effect_terms: true,
+        strip_terms: true,
+        light_volume_terms: true,
         ..Gen3Rules::DEFAULT
     },
     ..GameRules::DEFAULT
