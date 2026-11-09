@@ -11,7 +11,7 @@ use super::super::frame::ModelGpuFrame;
 use super::super::renderer::{FrameCx, GameRender, RenderCore};
 use super::effects::screen::Gen3ScreenSettings;
 use super::pipeline::{FrameValues, Gen3PassHooks, NoPassHooks, PictureCopies, halo3_frame_values};
-use super::shaders::Gen3Material;
+use super::shaders::{Gen3Material, Gen3ShieldSettings, Gen3Texture};
 use super::sprites::{Gen3Sprite, Gen3Sprites};
 use super::state::Gen3State;
 
@@ -105,6 +105,18 @@ pub(in crate::app::model_preview) trait Gen3Game {
 
     /// Shield passes after the shared shield impact.
     unsafe fn shield(&mut self, _cx: &mut Gen3Cx<'_>) {}
+
+    /// The textures of the game's own shield, uploaded ahead of the shared
+    /// shield impact's.
+    fn shield_textures<'a>(&self, _frame: &'a ModelGpuFrame) -> Vec<&'a Gen3Texture> {
+        Vec::new()
+    }
+
+    /// The shield impact's settings the object names itself, ahead of any a
+    /// material carries.
+    fn shield_settings<'a>(&self, _frame: &'a ModelGpuFrame) -> Option<&'a Gen3ShieldSettings> {
+        None
+    }
 
     /// Sprites after the rest, before the bloom.
     unsafe fn late_sprites(&mut self, _cx: &mut Gen3Cx<'_>) {}

@@ -558,7 +558,7 @@ impl Gen3State {
             let (albedo_target, accumulation_target) =
                 (targets.albedo_framebuffer, targets.accumulation_framebuffer);
             let accumulation = targets.accumulation;
-            self.upload(core, gl, frame, slot);
+            self.upload(core, game, gl, frame, slot);
             core.move_cloth(gl, frame, slot);
             if frame.active_camo {
                 // What the object hides, before anything of it lands. The copy

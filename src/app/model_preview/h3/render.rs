@@ -39,6 +39,14 @@ pub(in crate::app::model_preview) struct H3Game {
 }
 
 impl Gen3Game for H3Game {
+    /// The `shield_impact` the object's model names.
+    fn shield_settings<'a>(
+        &self,
+        frame: &'a ModelGpuFrame,
+    ) -> Option<&'a super::super::gen3::shaders::Gen3ShieldSettings> {
+        frame.preview.h3.shield.as_deref()
+    }
+
     /// The leaves step on, and their maps follow the slot's geometry.
     unsafe fn advance_own_sprites(&mut self, cx: &mut Gen3Sprites<'_>) {
         let h3 = self.slots.of(cx.slot, cx.uploads);

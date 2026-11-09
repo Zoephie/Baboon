@@ -4,6 +4,7 @@ use super::super::super::{
     HashMap, ModelGpuCamera, ModelGpuFrame, RenderCore, RenderModelPreviewBatch, eye_position,
     rotate_view_vector, unrotate_view_vector,
 };
+use super::super::render::Gen3Game;
 use super::lighting::{
     DOMINANT_DIRECTION, DOMINANT_INTENSITY, EXPOSURE, dominant_light, frame_probe,
     lighting_constants,
@@ -214,6 +215,7 @@ impl Gen3State {
     pub(super) unsafe fn upload(
         &mut self,
         core: &mut RenderCore,
+        game: &dyn Gen3Game,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
@@ -240,25 +242,10 @@ impl Gen3State {
             let global = shields
                 .filter_map(|texture| texture.h3.as_ref()?.shield.as_ref())
                 .next();
-            let settings = frame
-                .preview
-                .h3
-                .shield
-                .as_ref()
-                .or(global.map(|shield| &shield.settings));
-            let reach = frame
-                .preview
-                .reach
-                .shield
-                .as_ref()
-                .map(|shield| shield.settings.textures.iter());
-            let h4 = frame
-                .preview
-                .h4
-                .shield
-                .as_ref()
-                .map(|shield| shield.textures.iter());
-            for texture in reach.into_iter().flatten().chain(h4.into_iter().flatten()) {
+            let settings = game
+                .shield_settings(frame)
+                .or(global.map(|shield| &*shield.settings));
+            for texture in game.shield_textures(frame) {
                 if let Some(found) = upload_image_linear(
                     gl,
                     &texture.image,

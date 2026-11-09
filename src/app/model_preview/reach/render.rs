@@ -31,6 +31,20 @@ pub(in crate::app::model_preview) struct ReachGame {
 }
 
 impl Gen3Game for ReachGame {
+    /// Its `shield_impact`'s maps.
+    fn shield_textures<'a>(
+        &self,
+        frame: &'a super::super::frame::ModelGpuFrame,
+    ) -> Vec<&'a super::super::gen3::shaders::Gen3Texture> {
+        frame
+            .preview
+            .reach
+            .shield
+            .iter()
+            .flat_map(|shield| &shield.settings.textures)
+            .collect()
+    }
+
     fn pass_hooks(&self) -> Box<dyn super::super::gen3::pipeline::Gen3PassHooks> {
         Box::new(super::pass_hooks::ReachPassHooks)
     }

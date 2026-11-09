@@ -50,6 +50,20 @@ pub(in crate::app::model_preview) struct H4Game {
 }
 
 impl Gen3Game for H4Game {
+    /// Its shield's maps.
+    fn shield_textures<'a>(
+        &self,
+        frame: &'a ModelGpuFrame,
+    ) -> Vec<&'a super::super::gen3::shaders::Gen3Texture> {
+        frame
+            .preview
+            .h4
+            .shield
+            .iter()
+            .flat_map(|shield| &shield.textures)
+            .collect()
+    }
+
     fn pass_hooks(&self) -> Box<dyn super::super::gen3::pipeline::Gen3PassHooks> {
         Box::new(super::pass_hooks::H4PassHooks::default())
     }
