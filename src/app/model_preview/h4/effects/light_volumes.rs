@@ -10,7 +10,7 @@ use super::super::super::gen3::effects::light_volumes::{
 use super::super::super::gen3::effects::light_volumes::{
     Gen3VolumeDefinition, read_material_definition,
 };
-use super::super::super::h4::materials::resolve_h4_effect_material;
+use super::super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
 use super::super::super::load::TagReader;
 use super::particles::{f32_to_f16, pack_argb8};
 use blam_tags::TagStruct;
@@ -29,7 +29,14 @@ pub(in crate::app::model_preview) fn read_h4_definition(
         .ok()?;
     let appearance = element.read_int_any("appearance flags").unwrap_or(0) as u32;
     let sort_layer = i32::from(material.sort_layer).clamp(1, 3);
-    read_material_definition(element, sort_layer, (resolved, appearance))
+    read_material_definition(element, sort_layer, (Box::new(resolved), appearance))
+}
+
+impl Gen3LightVolumeAt {
+    /// Halo 4's material, when it is Halo 4's.
+    pub(crate) fn h4_material(&self) -> Option<&H4EffectMaterial> {
+        self.effect_material()
+    }
 }
 
 /// `light_volume_state_input_enum`'s order, the order of

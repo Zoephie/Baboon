@@ -4,10 +4,9 @@ use super::super::super::super::{RenderModelPreviewMarker, TagReader};
 use super::lod::{ReachVolumeLod, max_profile_count, precompiles};
 use super::property::{Gen3VolumeProperty, Gen3VolumeState, SEEDS, VolumeProperties, volume_seeds};
 use super::{
-    EffectTimes, Gen3Bitmap, Gen3Blend, H3_EXPOSURE, H4EffectMaterial, MarkerFrame, Sampler,
-    SamplerKind, elements, for_each_attached_part, has_flag, inline_real, part_frame,
-    reach_alt_exposure, read_h3_bitmap, read_h3_definition, read_part_placement,
-    resolve_embedded_method,
+    EffectTimes, Extension, Gen3Bitmap, Gen3Blend, H3_EXPOSURE, MarkerFrame, Sampler, SamplerKind,
+    elements, for_each_attached_part, has_flag, inline_real, part_frame, reach_alt_exposure,
+    read_h3_bitmap, read_h3_definition, read_part_placement, resolve_embedded_method,
 };
 use blam_tags::TagStruct;
 use std::sync::Arc;
@@ -50,7 +49,7 @@ pub(crate) struct Gen3VolumeDefinition {
     pub(super) precompiled: Option<Vec<([f32; 3], f32)>>,
     /// Halo 4's: the `actual material` it draws through, and its
     /// `appearance flags`.
-    pub(in crate::app::model_preview) effect_material: Option<(H4EffectMaterial, u32)>,
+    pub(in crate::app::model_preview) effect_material: Option<(Box<dyn Extension>, u32)>,
 }
 
 impl Gen3VolumeDefinition {
@@ -239,12 +238,12 @@ pub(super) fn read_definition(
 }
 
 /// A volume drawn through an effect material rather than a render method:
-/// Reach's terms with no precompiled rows, sorted in `sort_layer`. Halo 4's
-/// reader resolves the material.
+/// Reach's terms with no precompiled rows, sorted in `sort_layer`. The
+/// game's reader resolves the material, which only its drawing reads.
 pub(in crate::app::model_preview) fn read_material_definition(
     element: TagStruct<'_>,
     sort_layer: i32,
-    material: (H4EffectMaterial, u32),
+    material: (Box<dyn Extension>, u32),
 ) -> Option<Gen3VolumeDefinition> {
     let flagged = |wanted: &str| has_flag(element, "flags", wanted);
     let lod = ReachVolumeLod::read(element, flagged);

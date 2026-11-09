@@ -4,8 +4,8 @@ use super::load::{Gen3LightVolumeAt, MOST_PROFILES};
 use super::lod::lod_amount;
 use super::property::{Gen3VolumeInput, Gen3VolumeState};
 use super::{
-    AntennaQuad, FunctionValues, Gen3Bitmap, Gen3Blend, H4EffectMaterial, Sampler, ViewFrame,
-    attached, clamped_unit, cross, length, posed_on,
+    AntennaQuad, FunctionValues, Gen3Bitmap, Gen3Blend, Sampler, ViewFrame, attached, clamped_unit,
+    cross, length, posed_on,
 };
 
 /// What a volume's frame lays out before its profiles.
@@ -190,12 +190,11 @@ impl Gen3LightVolumeAt {
         })
     }
 
-    /// Halo 4's material, when it is Halo 4's.
-    pub(crate) fn h4_material(&self) -> Option<&H4EffectMaterial> {
-        self.definition
-            .effect_material
-            .as_ref()
-            .map(|(material, _)| material)
+    /// The material it draws through, when it draws through one: the
+    /// game's own, a `T`.
+    pub(crate) fn effect_material<T: 'static>(&self) -> Option<&T> {
+        let (material, _) = self.definition.effect_material.as_ref()?;
+        (**material).of()
     }
 
     /// Each profile's quad this frame, nearest the marker first, at the area

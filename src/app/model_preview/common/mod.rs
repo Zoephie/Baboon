@@ -8,6 +8,7 @@ pub(in crate::app::model_preview) mod attached;
 pub(in crate::app::model_preview) mod camera;
 pub(in crate::app::model_preview) mod clock;
 pub(in crate::app::model_preview) mod color;
+pub(in crate::app::model_preview) mod extension;
 pub(in crate::app::model_preview) mod features;
 pub(in crate::app::model_preview) mod fields;
 pub(in crate::app::model_preview) mod flares;

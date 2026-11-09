@@ -537,6 +537,9 @@ fn kit_halo_4_volumes_draw_through_their_material() {
     )
     .expect(path);
     let (material, _) = volume.effect_material.as_ref().expect("a material");
+    let material = (**material)
+        .of::<super::super::super::super::h4::materials::H4EffectMaterial>()
+        .expect("Halo 4's material");
     assert!(
         material
             .pass
