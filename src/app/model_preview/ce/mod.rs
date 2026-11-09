@@ -10,6 +10,7 @@ pub(super) mod effects;
 mod features;
 pub(super) mod firing;
 pub(super) mod flags;
+pub(in crate::app::model_preview) mod frame;
 pub(super) mod functions;
 pub(super) mod lights;
 pub(in crate::app::model_preview) mod object;

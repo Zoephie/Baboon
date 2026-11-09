@@ -33,7 +33,7 @@ pub(in crate::app::model_preview) fn advance_ce_effects(
     frame: &ModelGpuFrame,
     bones: Option<&[[f32; 4]]>,
 ) {
-    let states = &frame.object_states;
+    let states = &frame.ce.objects;
     let inputs = |object: u8| {
         let state = states.get(object as usize);
         ce::effects::CeObjectInputs {
@@ -52,7 +52,7 @@ pub(in crate::app::model_preview) fn advance_ce_effects(
     let effects = &frame.preview.ce.effects;
     ce.simulations.particles.advance(
         effects,
-        &frame.ce_plays,
+        &frame.ce.plays,
         inputs,
         bones,
         ground,
@@ -223,7 +223,7 @@ pub(in crate::app::model_preview) fn ce_groups(
 ) -> Vec<CeGroup> {
     let camera = &frame.camera;
     let effects = &frame.preview.ce.effects;
-    let states = &frame.object_states;
+    let states = &frame.ce.objects;
     let lowest = frame
         .preview
         .vertices

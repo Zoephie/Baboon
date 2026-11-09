@@ -140,7 +140,7 @@ impl Dx9Game for CeGame {
         let ce = self.slots.of(slot, uploads);
         unsafe {
             for (index, light) in frame.preview.ce.lights.iter().enumerate() {
-                let state = frame.object_states.get(usize::from(light.object));
+                let state = frame.ce.objects.get(usize::from(light.object));
                 let outputs = state.map_or([0.0; 4], |state| state.outputs);
                 let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);
                 let Some(patch) = light.occlusion_patch(&outputs, &colors, bones, view) else {
@@ -156,7 +156,7 @@ impl Dx9Game for CeGame {
                 draw_flare_sprites(gl, flares, camera, view, &sprites, textures);
             }
             for (effect, def, light) in ce.simulations.particles.lights(&frame.preview.ce.effects) {
-                let state = frame.object_states.get(usize::from(light.object));
+                let state = frame.ce.objects.get(usize::from(light.object));
                 let outputs = state.map_or([0.0; 4], |state| state.outputs);
                 let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);
                 let Some(patch) = light.occlusion_patch(&outputs, &colors, bones, view) else {

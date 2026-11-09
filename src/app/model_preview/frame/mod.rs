@@ -1,7 +1,7 @@
 //! What one paint of a preview draws: the frame snapshot the panel builds
 //! from its state, the visibility it derives and the function values.
 
-use super::dx9::passes::{Dx9Layer, h2_object_light_direction, h2_prt_object_lights};
+use super::dx9::passes::{Dx9Layer, h2_object_light_direction};
 use super::functions::change_colors_for;
 use super::{
     MaterialTextures, ModelGpuCamera, ModelPreviewData, ModelPreviewState, ModelRenderMode,
@@ -86,15 +86,13 @@ pub(in crate::app::model_preview) fn build_frame(
         prt: state.prt,
         light_follows_camera: state.light_follows_camera,
         time,
-        h2_prt_clusters: None,
-        object_states: object_states(data, &state.ce.function_inputs, &state.ce.shots, time),
+        h2: Default::default(),
+        ce: ce::frame::CeFrame::of(data, &state.ce, time),
         object_moves: object_moves(data, &state.function_inputs, time, function_values.as_ref()),
         function_values,
         attached_values: attached_values(data, time),
         attached_colors: attached_colors(data),
         shown: common::features::FeatureShown::of(&data.preview, &state.region_selections),
-        ce_points: Vec::new(),
-        ce_plays: ce_event_plays(data, &state.ce.event_counts, state.ce.event_scales),
         change_colors: change_colors_for(
             &data.change_colors,
             state
@@ -103,8 +101,8 @@ pub(in crate::app::model_preview) fn build_frame(
                 .map_or("", |variant| variant.name.as_str()),
         ),
     };
-    frame.h2_prt_clusters = frame.h2_object_prt_clusters();
-    frame.ce_points = frame.ce_point_lights();
+    super::h2::frame::prepare(&mut frame);
+    ce::frame::prepare(&mut frame);
     frame
 }
 
@@ -133,9 +131,8 @@ pub(in crate::app::model_preview) struct ModelGpuFrame {
     pub(in crate::app::model_preview) bones: Option<Arc<Vec<[f32; 4]>>>,
     /// The selected variant's change colors, for the game's passes.
     pub(in crate::app::model_preview) change_colors: [[f32; 3]; 4],
-    /// Halo CE: each object's `A out` to `D out` and change colors this frame,
-    /// the opened one first. Empty with none.
-    pub(in crate::app::model_preview) object_states: Vec<CeObjectState>,
+    /// Halo CE's: each object's state, point lights and the panel's plays.
+    pub(in crate::app::model_preview) ce: ce::frame::CeFrame,
     /// Whether those change by themselves.
     pub(in crate::app::model_preview) object_moves: bool,
     /// What the game's shaders can read of the object's functions.
@@ -146,10 +143,6 @@ pub(in crate::app::model_preview) struct ModelGpuFrame {
     pub(in crate::app::model_preview) attached_colors: Vec<(u8, [[f32; 3]; 4])>,
     /// Which of each feature show under the chosen regions.
     pub(in crate::app::model_preview) shown: common::features::FeatureShown,
-    /// Each object's point lights this frame, in step with `object_states`.
-    pub(in crate::app::model_preview) ce_points: Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>,
-    /// The panel's plays of Halo CE's event effects.
-    pub(in crate::app::model_preview) ce_plays: ce::effects::CeEventPlays,
     /// Draw materials through the game's own passes.
     pub(in crate::app::model_preview) game_shaders: bool,
     pub(in crate::app::model_preview) default_lights: bool,
@@ -160,8 +153,8 @@ pub(in crate::app::model_preview) struct ModelGpuFrame {
     pub(in crate::app::model_preview) light_follows_camera: bool,
     /// Seconds, for what the game's shaders animate.
     pub(in crate::app::model_preview) time: f32,
-    /// A PRT model's constants on the object path: lit, then in shadow.
-    pub(in crate::app::model_preview) h2_prt_clusters: Option<[Vec<[f32; 4]>; 2]>,
+    /// Halo 2's: a PRT model's constants.
+    pub(in crate::app::model_preview) h2: super::h2::frame::H2Frame,
 }
 
 /// Wrapped to keep a frame time precise in the `f32` the shaders take.
@@ -172,63 +165,6 @@ pub(in crate::app::model_preview) fn preview_clock(ui: &Ui) -> f32 {
     ui.input(|input| input.time % TIME_WRAP) as f32
 }
 
-/// What the parts an object owns draw with.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::app::model_preview) struct CeObjectState {
-    pub(in crate::app::model_preview) outputs: [f32; 4],
-    /// Which outputs are on, as `object_get_function_value` answers.
-    pub(in crate::app::model_preview) active: [bool; 4],
-    pub(in crate::app::model_preview) change_colors: [[f32; 3]; 4],
-}
-
-/// The opened object's functions, then those of what is attached to it.
-fn object_functions(
-    data: &ModelPreviewData,
-) -> impl Iterator<Item = &ce::functions::CeObjectFunctions> {
-    data.ce.functions.iter().chain(
-        data.ce
-            .attached
-            .iter()
-            .filter_map(|object| object.functions.as_ref()),
-    )
-}
-
-pub(in crate::app::model_preview) fn object_states(
-    data: &ModelPreviewData,
-    set: &ce::functions::CeFunctionInputs,
-    shots: &ce::firing::CeShots,
-    time: f32,
-) -> Vec<CeObjectState> {
-    let state = |functions: Option<&ce::functions::CeObjectFunctions>, object, colors| {
-        let (outputs, active) = functions.map_or(([0.0; 4], [false; 4]), |functions| {
-            let fired = ce::firing::fired_input(
-                &data.preview.ce.firing,
-                shots,
-                data.geometry_id,
-                object,
-                time,
-            );
-            let inputs =
-                functions.with_fired(functions.inputs_for(set, (data.geometry_id, object)), fired);
-            functions.outputs_active(&inputs, ce::functions::object_time(time, object))
-        });
-        CeObjectState {
-            outputs,
-            active,
-            change_colors: ce::functions::ce_change_colors(colors),
-        }
-    };
-    let mut states = vec![state(data.ce.functions.as_ref(), 0, &data.change_colors)];
-    for (index, object) in data.ce.attached.iter().enumerate() {
-        states.push(state(
-            object.functions.as_ref(),
-            index as u8 + 1,
-            &object.change_colors,
-        ));
-    }
-    states
-}
-
 impl ModelGpuFrame {
     /// The outputs of the object that owns `material`.
     pub(in crate::app::model_preview) fn outputs_of(&self, material: usize) -> [f32; 4] {
@@ -237,7 +173,8 @@ impl ModelGpuFrame {
             .materials
             .get(material)
             .map_or(0, |material| material.object);
-        self.object_states
+        self.ce
+            .objects
             .get(object as usize)
             .map_or([0.0; 4], |state| state.outputs)
     }
@@ -295,7 +232,8 @@ impl ModelGpuFrame {
         {
             return *colors;
         }
-        self.object_states
+        self.ce
+            .objects
             .get(object as usize)
             .map_or([[1.0; 3]; 4], |state| state.change_colors)
     }
@@ -307,64 +245,6 @@ impl ModelGpuFrame {
             Dx9Layer::ActiveCamo => self.active_camo,
             _ => self.game_shaders,
         }
-    }
-
-    pub(in crate::app::model_preview) fn h2_object_prt_clusters(
-        &self,
-    ) -> Option<[Vec<[f32; 4]>; 2]> {
-        let prt = self
-            .preview
-            .h2
-            .prt
-            .as_ref()
-            .filter(|_| self.prt && self.game_shaders && !self.default_lights)?;
-        let (lights, ambient) = h2_prt_object_lights(self.h2_object_light());
-        Some([
-            prt.clusters_lit_by(&lights, ambient),
-            prt.clusters_lit_by(&lights[..1], ambient),
-        ])
-    }
-
-    /// `lights_prepare_for_object_dynamic`, for the opened object and what it
-    /// holds, as one sphere around the model.
-    pub(in crate::app::model_preview) fn ce_point_lights(
-        &self,
-    ) -> Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]> {
-        self.ce_point_lights_with(&[])
-    }
-
-    /// The same, with lights the object's effects have made besides.
-    pub(in crate::app::model_preview) fn ce_point_lights_with(
-        &self,
-        made: &[ce::lights::CeLight],
-    ) -> Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]> {
-        if self.preview.ce.lights.is_empty() && made.is_empty() {
-            return Vec::new();
-        }
-        let lights: std::borrow::Cow<'_, [ce::lights::CeLight]> = if made.is_empty() {
-            std::borrow::Cow::Borrowed(&self.preview.ce.lights)
-        } else {
-            std::borrow::Cow::Owned(self.preview.ce.lights.iter().chain(made).cloned().collect())
-        };
-        let (low, high) = (self.preview.bounds_min, self.preview.bounds_max);
-        let center: [f32; 3] = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
-        let reach = (0..3)
-            .map(|axis| (high[axis] - center[axis]).powi(2))
-            .sum::<f32>()
-            .sqrt();
-        let bones = self.bones.as_ref().map(|bones| bones.as_slice());
-        let state = |object: u8| {
-            let state = self.object_states.get(usize::from(object));
-            (
-                state.map_or([0.0; 4], |state| state.outputs),
-                state.map_or([[1.0; 3]; 4], |state| state.change_colors),
-            )
-        };
-        (0..self.object_states.len().max(1) as u8)
-            .map(|object| {
-                ce::lights::point_light_rows(&lights, object, center, reach, state, bones)
-            })
-            .collect()
     }
 
     /// Whether anything in the frame changes over time, so the view keeps
@@ -418,19 +298,5 @@ impl ModelGpuFrame {
         } else {
             h2_object_light_direction()
         }
-    }
-}
-
-/// The panel's plays of `data`'s event effects, by index among its effects.
-pub(in crate::app::model_preview) fn ce_event_plays(
-    data: &ModelPreviewData,
-    counts: &ce::functions::CeEventCounts,
-    scales: [f32; 2],
-) -> ce::effects::CeEventPlays {
-    let effects = &data.preview.ce.effects;
-    let count = |index| counts.get(&(data.geometry_id, index)).copied().unwrap_or(0);
-    ce::effects::CeEventPlays {
-        counts: (0..effects.len()).map(count).collect(),
-        scales,
     }
 }

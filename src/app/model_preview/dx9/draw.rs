@@ -625,7 +625,7 @@ impl RenderCore {
                     .get(material)
                     .map_or(0, |material| material.object);
                 let location = program.location(gl, "u_ce_point");
-                let points = self.dx9.ce_points_now.as_ref().unwrap_or(&frame.ce_points);
+                let points = self.dx9.ce_points_now.as_ref().unwrap_or(&frame.ce.points);
                 let rows = points.get(usize::from(object)).copied().unwrap_or_default();
                 gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             }
@@ -681,7 +681,7 @@ impl RenderCore {
             if let Some(prt) = &frame.preview.h2.prt {
                 let location = program.location(gl, "u_prt");
                 if location.is_some() {
-                    let clusters = match &frame.h2_prt_clusters {
+                    let clusters = match &frame.h2.prt_clusters {
                         Some([lit, shadowed]) => {
                             if light.is_some() {
                                 shadowed
@@ -692,7 +692,7 @@ impl RenderCore {
                         None => &prt.clusters,
                     };
                     gl.uniform_4_f32_slice(location.as_ref(), clusters.as_flattened());
-                    let direction = if frame.h2_prt_clusters.is_some() {
+                    let direction = if frame.h2.prt_clusters.is_some() {
                         frame.h2_object_light()
                     } else {
                         prt.light

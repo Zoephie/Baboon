@@ -504,7 +504,7 @@ pub(super) fn render(
                     effect.and_then(|at| data.preview.ce.effects[at].event.as_ref())
                 );
                 if let Some(effect) = effect {
-                    frame.ce_plays.counts[effect] += 1;
+                    frame.ce.plays.counts[effect] += 1;
                 }
             }
             for (index, effect) in data.preview.ce.effects.iter().enumerate() {
@@ -514,7 +514,7 @@ pub(super) fn render(
                     .filter(|event| !fire && event.name.contains(text))
                 {
                     eprintln!("NOTE playing {}", event.name);
-                    frame.ce_plays.counts[index] += 1;
+                    frame.ce.plays.counts[index] += 1;
                 }
             }
             // Step to the shot a frame at a time, as the app would.
@@ -522,16 +522,17 @@ pub(super) fn render(
             while at < end {
                 at = (at + 1.0 / 60.0).min(end);
                 frame.time = at;
-                frame.object_states =
+                frame.ce.objects =
                     object_states(&data, &state.ce.function_inputs, &state.ce.shots, at);
-                frame.ce_points = frame.ce_point_lights();
+                frame.ce.points = frame.ce_point_lights();
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
                 renderer.paint(gl, &frame);
             }
             eprintln!(
                 "NOTE states {:?}",
                 frame
-                    .object_states
+                    .ce
+                    .objects
                     .iter()
                     .map(|state| state.outputs)
                     .collect::<Vec<_>>()

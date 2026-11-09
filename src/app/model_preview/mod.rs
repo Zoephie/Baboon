@@ -85,6 +85,8 @@ pub(in crate::app) use panel::{
 #[cfg(test)]
 use animation::PreviewAnimationPose;
 use animation::{ANIMATION_FRAME_RATE, animation_skinning_rows, armature_node_positions};
+#[cfg(test)]
+use ce::frame::object_states;
 use data::{MODEL_ERROR_FALLBACK_COLOR, NEXT_MODEL_GEOMETRY_ID, model_preview_data};
 pub(in crate::app) use data::{
     ModelErrorPoint, ModelErrorPrimitive, ModelErrorShape, ModelPreviewData, ModelPreviewLayer,
@@ -92,9 +94,9 @@ pub(in crate::app) use data::{
     RenderModelPreviewMaterial, RenderModelPreviewNode, RenderModelPreviewRegion,
     RenderModelPreviewVertex,
 };
-use frame::{ModelGpuFrame, build_frame, model_layer_visible, preview_clock};
 #[cfg(test)]
-use frame::{object_states, visible_batch_indices};
+use frame::visible_batch_indices;
+use frame::{ModelGpuFrame, build_frame, model_layer_visible, preview_clock};
 use load::{
     PHYSICS_REGION, PreviewLoadSettings, TagReader, bsp_display_name, loose_weapon_paths,
     preview_mesh_order, preview_model_tag, read_model_variants, render_model_to_preview,
