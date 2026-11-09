@@ -192,13 +192,13 @@ impl Gen3State {
             let reach = frame.preview.reach.shield.as_ref().map(|shield| shield.settings.textures.iter());
             let h4 = frame.preview.h4.shield.as_ref().map(|shield| shield.textures.iter());
             for texture in reach.into_iter().flatten().chain(h4.into_iter().flatten()) {
-                if let Some(found) = upload_h2_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
+                if let Some(found) = upload_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
                     uploaded.shield.insert(texture.uniform.clone(), found);
                 }
             }
             if let Some(settings) = settings {
                 for texture in &settings.textures {
-                    if let Some(found) = upload_h2_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
+                    if let Some(found) = upload_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
                         uploaded.shield.insert(texture.uniform.clone(), found);
                     }
                 }
@@ -207,17 +207,17 @@ impl Gen3State {
                 .preview
                 .h3.lights
                 .iter()
-                .map(|light| light.gel.as_ref().and_then(|gel| upload_h2_image_linear(gl, gel, H3Texels::Srgb, &[], None)))
+                .map(|light| light.gel.as_ref().and_then(|gel| upload_image_linear(gl, gel, ImageTexels::Srgb, &[], None)))
                 .collect();
             for textures in frame.textures.iter().flat_map(|textures| textures.iter()) {
                 let mut map = HashMap::new();
                 if let Some(material) = &textures.h3 {
                     for texture in &material.textures {
-                        if let Some(uploaded) = upload_h2_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
+                        if let Some(uploaded) = upload_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
                             map.insert(texture.uniform.clone(), uploaded);
                         }
                         for (at, image) in texture.frames.iter().enumerate() {
-                            if let Some(uploaded) = upload_h2_image_linear(gl, image, texture.texels, &[], texture.sampler) {
+                            if let Some(uploaded) = upload_image_linear(gl, image, texture.texels, &[], texture.sampler) {
                                 map.insert(frame_key(&texture.uniform, at), uploaded);
                             }
                         }

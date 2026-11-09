@@ -25,7 +25,7 @@ pub(crate) struct H3VolumeDefinition {
     pub(super) blend: H3Blend,
     /// None for Reach's `circular`, which samples no map.
     pub(super) bitmap: Option<H3Bitmap>,
-    pub(super) sampler: Option<H3Sampler>,
+    pub(super) sampler: Option<Sampler>,
     pub(super) sort_layer: i32,
     /// Reach's: its own colour, exposure and level of detail.
     pub(super) reach: bool,

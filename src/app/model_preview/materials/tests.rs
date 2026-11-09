@@ -425,7 +425,7 @@ fn a_halo_ce_permutation_picks_the_image_and_wraps() {
         .image
         .as_deref()
     {
-        Some(H2Image::Flat(image)) => image.rgba.clone(),
+        Some(Image::Flat(image)) => image.rgba.clone(),
         _ => panic!("no base map"),
     };
     let (first, second, wrapped) = (resolve(0), resolve(1), resolve(count));
@@ -529,7 +529,7 @@ fn untextured_materials_say_why() {
 fn h2_cube_faces_join_at_their_edges() {
     let Some(source) = kit_source(GameId::Halo2) else { return };
     let path = "objects\\bitmaps\\reflection_maps\\vehicle_glass";
-    let Some(H2Image::Cube { size, faces }) = decode_h2_image(&crate::app::model_preview::load::TagReader::new(&source), path, SamplerKind::Cube, 0)
+    let Some(Image::Cube { size, faces }) = decode_image(&crate::app::model_preview::load::TagReader::new(&source), path, SamplerKind::Cube, 0)
     else {
         panic!("{path} should decode as a cube");
     };
@@ -573,7 +573,7 @@ fn every_h2_shader_takes_the_global_active_camo() {
     assert_eq!(chief.len(), 1);
     assert_eq!(brute.len(), 1);
     let bump = |passes: &[H2DrawPass]| match passes[0].textures[0].image.as_deref() {
-        Some(H2Image::Flat(image)) => image.rgba.clone(),
+        Some(Image::Flat(image)) => image.rgba.clone(),
         other => panic!("the bump should be a flat map: {other:?}"),
     };
     assert_ne!(bump(&chief), bump(&brute), "each shader brings its own bump");
@@ -583,8 +583,8 @@ fn every_h2_shader_takes_the_global_active_camo() {
 #[test]
 fn h2_volumes_decode_every_slice() {
     let Some(source) = kit_source(GameId::Halo2) else { return };
-    let Some(H2Image::Volume { width, height, depth, rgba }) =
-        decode_h2_image(&crate::app::model_preview::load::TagReader::new(&source), "rasterizer\\plasma_shield_noise", SamplerKind::Volume, 0)
+    let Some(Image::Volume { width, height, depth, rgba }) =
+        decode_image(&crate::app::model_preview::load::TagReader::new(&source), "rasterizer\\plasma_shield_noise", SamplerKind::Volume, 0)
     else {
         panic!("the plasma noise should decode as a volume");
     };
@@ -601,7 +601,7 @@ fn h2_volumes_decode_every_slice() {
 fn kit_an_arrays_layers_are_whole_chains_apart() {
     let Some(source) = kit_source(GameId::HaloReach) else { return };
     let path = "globals\\global_render_texture";
-    let Some(H2Image::Volume { width, height, depth, rgba }) = decode_h2_image(&crate::app::model_preview::load::TagReader::new(&source), path, SamplerKind::Volume, 0)
+    let Some(Image::Volume { width, height, depth, rgba }) = decode_image(&crate::app::model_preview::load::TagReader::new(&source), path, SamplerKind::Volume, 0)
     else {
         panic!("the render texture should decode as layers");
     };

@@ -17,7 +17,7 @@ use super::super::super::effects::{
 use super::super::super::functions::FunctionValues;
 use blam_tags::tag_function::transition_function_evaluate;
 
-use super::super::super::common::image::H2Image;
+use super::super::super::common::image::Image;
 use super::super::super::common::named_function::tag_function_at;
 use super::super::pipeline::EXPOSURE;
 use super::super::super::gen3::materials::{H3Bitmap, read_h3_bitmap};
@@ -223,7 +223,7 @@ pub(in crate::app::model_preview) fn read_h3_flare(reader: &TagReader, path: &st
     let index = reflection.read_int_any("bitmap index").unwrap_or(0).max(0) as usize;
     let bitmap = read_h3_bitmap(reader, &bitmap, index as i16, SamplerKind::Texture2D)?;
     let (width, height) = match &*bitmap.0 {
-        H2Image::Flat(image) => (image.width as f32, image.height as f32),
+        Image::Flat(image) => (image.width as f32, image.height as f32),
         _ => (1.0, 1.0),
     };
     // `lens_flare_get_bitmap_aspect_ratio`.

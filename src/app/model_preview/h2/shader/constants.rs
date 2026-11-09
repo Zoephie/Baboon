@@ -82,7 +82,7 @@ pub(in crate::app) fn prepare_draw_pass(
     psh: &str,
     cases: HashMap<String, i32>,
     specular_brightness: f32,
-    mut bitmap: impl FnMut(&str, SamplerKind) -> Option<std::sync::Arc<H2Image>>,
+    mut bitmap: impl FnMut(&str, SamplerKind) -> Option<std::sync::Arc<Image>>,
     scale: impl Fn(&str) -> [f32; 2],
 ) -> Result<H2DrawPass, String> {
     let stage = H2VertexStage::from_path(&pass.vertex_shader)
@@ -205,7 +205,7 @@ fn pixel_constants(pass: &H2Pass, bindings: &[ConstantBinding], specular_brightn
 fn draw_textures(
     pass: &H2Pass,
     samplers: &[SamplerBinding],
-    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<std::sync::Arc<H2Image>>,
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<std::sync::Arc<Image>>,
 ) -> Vec<H2DrawTexture> {
     samplers
         .iter()
@@ -214,7 +214,7 @@ fn draw_textures(
             let image = match value {
                 Some(H2ParameterValue::Bitmap(path)) => bitmap(path.as_str(), sampler.kind),
                 Some(H2ParameterValue::Extern(name)) if CAMERA_FEEDS.contains(&name.as_str()) => {
-                    Some(std::sync::Arc::new(H2Image::Flat(TextureImage {
+                    Some(std::sync::Arc::new(Image::Flat(TextureImage {
                         rgba: vec![0, 0, 0, 255],
                         width: 1,
                         height: 1,

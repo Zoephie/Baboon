@@ -3,7 +3,7 @@
 use super::*;
 use std::cell::RefCell;
 use super::super::super::dx9::draw::{gl_blend_equation, gl_blend_factor};
-use super::super::super::gl::texture::upload_h2_image;
+use super::super::super::gl::texture::upload_image;
 use super::super::super::gl::buffer::slice_bytes;
 use super::super::super::common::sprite_gl::SpriteGl;
 use eframe::glow::{self, HasContext as _};
@@ -372,7 +372,7 @@ unsafe fn draw_ce_sprites(
             let secondary = secondary.as_ref().and_then(|draw| {
                 let key = Arc::as_ptr(&draw.map) as usize;
                 if !ce.textures.secondary.contains_key(&key)
-                    && let Some(made) = upload_h2_image(gl, &draw.map.image)
+                    && let Some(made) = upload_image(gl, &draw.map.image)
                 {
                     ce.textures.secondary.insert(key, made);
                 }

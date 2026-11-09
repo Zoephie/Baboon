@@ -89,7 +89,7 @@ pub(in crate::app::model_preview) fn resolve_h4_effect_material(
         } else {
             Vec::new()
         };
-        let sampler = H3Sampler { address: [h4_address(texture.address_u), h4_address(texture.address_v)], filter: h4_filter(texture.filter) };
+        let sampler = Sampler { address: [h4_address(texture.address_u), h4_address(texture.address_v)], filter: h4_filter(texture.filter) };
         textures.push(H3Texture { uniform: uniform.to_owned(), image, texels, mips, sampler: Some(sampler), frames });
     }
     let first_bitmap = baked.textures.first().map(|texture| texture.bitmap.clone()).filter(|path| !path.is_empty());

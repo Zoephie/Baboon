@@ -89,7 +89,7 @@ pub(crate) struct CeGlow {
     rect: [f32; 4],
     registration: [f32; 2],
     image_width: f32,
-    pub(crate) image: Arc<H2Image>,
+    pub(crate) image: Arc<Image>,
 }
 
 /// The `n`th field named `name`, as an integer.
@@ -130,7 +130,7 @@ fn read_glow(reader: &TagReader, path: &str, owner: u8, markers: &[RenderModelPr
         .get(index)
         .map_or(1.0, |image| image.read_int_any("width").unwrap_or(1).max(1) as f32);
     let dimension = ((rect[1] - rect[0]) * image_width).trunc();
-    let image = Arc::new(decode_h2_image(reader, &bitmap_path, SamplerKind::Texture2D, index)?);
+    let image = Arc::new(decode_image(reader, &bitmap_path, SamplerKind::Texture2D, index)?);
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let attachment = |n: usize| function_slot(root.fields().filter(|field| field.name() == "attachment").nth(n));
     let [color_low, color_high] = [argb(root, "color_bound_0"), argb(root, "color_bound_1")];

@@ -58,7 +58,7 @@ pub(crate) struct H2Flare {
     pub(super) synchronized: bool,
     /// `falloff function`: how an effect's flare dims over its event.
     pub(super) falloff: u8,
-    pub(crate) images: Vec<Arc<H2Image>>,
+    pub(crate) images: Vec<Arc<Image>>,
 }
 
 /// What makes a flare that is no attachment of its own: a light an effect
@@ -114,7 +114,7 @@ pub(super) fn read_h2_flare(reader: &TagReader, path: &str) -> Option<H2Flare> {
     for reflection in elements(root, "reflections") {
         let index = reflection.read_int_any("bitmap index").unwrap_or(0).max(0) as usize;
         let image = indices.iter().position(|known| *known == index).or_else(|| {
-            let image = decode_h2_image(reader, &bitmap, SamplerKind::Texture2D, index)?;
+            let image = decode_image(reader, &bitmap, SamplerKind::Texture2D, index)?;
             images.push(Arc::new(image));
             indices.push(index);
             Some(images.len() - 1)

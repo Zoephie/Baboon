@@ -20,22 +20,22 @@ pub(in crate::app::model_preview) fn h3_image(
 }
 
 /// One image of a bitmap, what its texels mean, and its stored mips.
-pub(in crate::app::model_preview) type H3Bitmap = (Arc<H2Image>, H3Texels, Arc<Vec<H2Image>>);
+pub(in crate::app::model_preview) type H3Bitmap = (Arc<Image>, ImageTexels, Arc<Vec<Image>>);
 
 /// Levels past the top, as the tag stores them. None when `image` was not
 /// decoded at the tag's own size, since these would not continue it.
-fn h3_stored_mips(tag: &TagFile, index: usize, image: &H2Image) -> Option<Vec<H2Image>> {
+fn h3_stored_mips(tag: &TagFile, index: usize, image: &Image) -> Option<Vec<Image>> {
     let bitmap = blam_tags::bitmap::Bitmap::new(tag).ok()?;
     let stored = bitmap.image(index)?;
     let (width, height) = (stored.width(), stored.height());
     let side = |size: u32, level: u32| (size >> level).max(1) as usize;
     let levels = 1..stored.mipmap_levels();
     match image {
-        H2Image::Flat(top) if top.width == width as usize && top.height == height as usize => levels
+        Image::Flat(top) if top.width == width as usize && top.height == height as usize => levels
             .map(|level| {
                 let data = crate::app::editor::build_bitmap_preview(tag, index, level as usize).ok()?;
                 let (width, height) = (side(width, level), side(height, level));
-                (data.width as usize == width && data.height as usize == height).then_some(H2Image::Flat(
+                (data.width as usize == width && data.height as usize == height).then_some(Image::Flat(
                     TextureImage {
                         rgba: data.rgba,
                         width,
@@ -47,7 +47,7 @@ fn h3_stored_mips(tag: &TagFile, index: usize, image: &H2Image) -> Option<Vec<H2
                 ))
             })
             .collect(),
-        H2Image::Cube { size, .. } if *size == width as usize => {
+        Image::Cube { size, .. } if *size == width as usize => {
             let format = stored.format().ok()?;
             levels
                 .map(|level| {
@@ -58,7 +58,7 @@ fn h3_stored_mips(tag: &TagFile, index: usize, image: &H2Image) -> Option<Vec<H2
                         blam_tags::bitmap::decode::decode_to_rgba8(format, edge as u32, edge as u32, data, palette).ok()
                     };
                     let faces = [face(0)?, face(1)?, face(2)?, face(3)?, face(4)?, face(5)?];
-                    Some(H2Image::Cube { size: edge, faces })
+                    Some(Image::Cube { size: edge, faces })
                 })
                 .collect()
         }
@@ -70,17 +70,17 @@ fn h3_stored_mips(tag: &TagFile, index: usize, image: &H2Image) -> Option<Vec<H2
 /// Reach (`haloreach.dll` 0x180A32D70) upload it as `DXGI_FORMAT_A8_UNORM`,
 /// which reads black with its alpha. Reach's `color_black` change-color map is
 /// one, and two_change_color reads its red and green.
-fn alpha_only(image: &mut H2Image) {
+fn alpha_only(image: &mut Image) {
     let blacken = |rgba: &mut Vec<u8>| rgba.chunks_exact_mut(4).for_each(|texel| texel[..3].fill(0));
     match image {
-        H2Image::Flat(flat) => blacken(&mut flat.rgba),
-        H2Image::Cube { faces, .. } => faces.iter_mut().for_each(blacken),
-        H2Image::Volume { rgba, .. } => blacken(rgba),
+        Image::Flat(flat) => blacken(&mut flat.rgba),
+        Image::Cube { faces, .. } => faces.iter_mut().for_each(blacken),
+        Image::Volume { rgba, .. } => blacken(rgba),
     }
 }
 
 /// What an R8_UNORM texel samples as: (r, 0, 0, 1).
-fn red_only(image: &mut H2Image) {
+fn red_only(image: &mut Image) {
     let keep_red = |rgba: &mut Vec<u8>| {
         rgba.chunks_exact_mut(4).for_each(|texel| {
             texel[1] = 0;
@@ -89,9 +89,9 @@ fn red_only(image: &mut H2Image) {
         })
     };
     match image {
-        H2Image::Flat(flat) => keep_red(&mut flat.rgba),
-        H2Image::Cube { faces, .. } => faces.iter_mut().for_each(keep_red),
-        H2Image::Volume { rgba, .. } => keep_red(rgba),
+        Image::Flat(flat) => keep_red(&mut flat.rgba),
+        Image::Cube { faces, .. } => faces.iter_mut().for_each(keep_red),
+        Image::Volume { rgba, .. } => keep_red(rgba),
     }
 }
 
@@ -100,7 +100,7 @@ pub(in crate::app::model_preview) fn read_h3_bitmap(reader: &TagReader, path: &s
     // `render_method_submit`: an index past the last image takes the last.
     let images = tag.as_ref().map_or(1, |tag| elements(tag.root(), "bitmaps*").len());
     let index = (index.max(0) as usize).min(images.saturating_sub(1)) as i16;
-    let image = decode_h2_image(reader, path, kind, index as usize);
+    let image = decode_image(reader, path, kind, index as usize);
     image.map(|mut image| {
         // `c_rasterizer_texture_ref::allocate`: xRGB and sRGB curves.
         let curve = tag.as_ref().and_then(|tag| {
@@ -110,16 +110,16 @@ pub(in crate::app::model_preview) fn read_h3_bitmap(reader: &TagReader, path: &s
             blam_tags::bitmap::Bitmap::new(tag).ok()?.image(index.max(0) as usize)?.format().ok()
         });
         let halo4 = reader.source.game() == Some(crate::core::game::GameId::Halo4);
-        let texels = format.map_or(H3Texels::Linear, |format| {
+        let texels = format.map_or(ImageTexels::Linear, |format| {
             if halo4 {
-                return H3Texels::of_halo4(format, curve.unwrap_or(0));
+                return ImageTexels::of_halo4(format, curve.unwrap_or(0));
             }
             let srgb = if matches!(curve, None | Some(0)) {
-                H3Texels::default_srgb(format)
+                ImageTexels::default_srgb(format)
             } else {
                 matches!(curve, Some(1 | 5))
             };
-            H3Texels::of(format, srgb)
+            ImageTexels::of(format, srgb)
         });
         let mut mips = tag.as_ref().and_then(|tag| h3_stored_mips(tag, index.max(0) as usize, &image)).unwrap_or_default();
         if format == Some(blam_tags::bitmap::BitmapFormat::A8) {

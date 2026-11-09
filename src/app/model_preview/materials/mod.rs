@@ -20,7 +20,7 @@ use super::dx9::stage::H2VertexStage;
 use super::dx9::passes::{
     H2DrawPass, H2Layer, H2_LAYER_COUNT, h2_shadow_passes,
 };
-use super::common::image::H2Image;
+use super::common::image::Image;
 use crate::core::h2_pixel_shader::SamplerKind;
 use std::sync::Arc;
 use std::collections::HashMap;

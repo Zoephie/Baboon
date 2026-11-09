@@ -10,8 +10,8 @@ use crate::app::model_preview::common::fields::argb;
 use super::super::common::fields::{elements, object_block};
 use super::super::common::math::dot;
 use super::super::common::view::{ViewFrame, posed_on};
-use super::super::common::image::H2Image;
-use super::super::materials::decode_h2_image;
+use super::super::common::image::Image;
+use super::super::materials::decode_image;
 use super::super::*;
 use super::{ANTENNA_TRIM, AntennaSprite, antenna_sprite};
 use super::super::common::sprites::AntennaQuad;
@@ -41,7 +41,7 @@ pub(crate) struct CeAntenna {
     /// `antenna_render_proper`'s alpha for every sprite; see
     /// [`ANTENNA_FADE_PIXELS`].
     fade: f32,
-    pub(crate) image: Arc<H2Image>,
+    pub(crate) image: Arc<Image>,
 }
 
 /// What `antenna_render_proper` measures an antenna's `falloff pixels` and
@@ -113,7 +113,7 @@ fn read_antenna(reader: &TagReader, path: &str, owner: u8, markers: &[RenderMode
             scale: length / covered,
         });
     }
-    let image = decode_h2_image(reader, &bitmap_path, SamplerKind::Texture2D, image_index?)?;
+    let image = decode_image(reader, &bitmap_path, SamplerKind::Texture2D, image_index?)?;
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let (falloff, cutoff) = (real("falloff pixels"), real("cutoff pixels"));
     let fade = (ANTENNA_FADE_PIXELS - cutoff) / (falloff - cutoff);
@@ -168,7 +168,7 @@ mod tests {
             forward: [0.0, 0.0, 2.0],
             segments: vec![segment.clone(), segment],
             fade: 1.0,
-            image: Arc::new(H2Image::Flat(crate::app::model_preview::materials::TextureImage {
+            image: Arc::new(Image::Flat(crate::app::model_preview::materials::TextureImage {
                 rgba: Vec::new(),
                 width: 0,
                 height: 0,

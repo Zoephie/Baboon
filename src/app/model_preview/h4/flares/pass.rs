@@ -11,7 +11,7 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use super::super::super::gen3::shaders::H3Value;
 
-use crate::app::model_preview::common::image::H3Sampler;
+use crate::app::model_preview::common::image::Sampler;
 use super::super::flares::{H4FlareDraw, H4FlareView};
 use super::super::super::renderer::RenderCore;
 use super::super::super::frame::ModelGpuFrame;
@@ -47,7 +47,7 @@ pub(in crate::app::model_preview) unsafe fn h4_flare_images(
     frame: &ModelGpuFrame,
 ) -> Vec<Vec<Option<glow::NativeTexture>>> {
     // `rasterizer_draw_screen_facing_lens_flare`: clamped, bilinear.
-    let sampler = H3Sampler {
+    let sampler = Sampler {
         address: [BitmapAddressMode::Clamp; 2],
         filter: BitmapFilterMode::Bilinear,
     };
@@ -60,7 +60,7 @@ pub(in crate::app::model_preview) unsafe fn h4_flare_images(
                 .images
                 .iter()
                 .map(|(image, texels, mips)| unsafe {
-                    crate::app::model_preview::gl::texture::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
+                    crate::app::model_preview::gl::texture::upload_image_linear(gl, image, *texels, mips, Some(sampler))
                 })
                 .collect()
         })

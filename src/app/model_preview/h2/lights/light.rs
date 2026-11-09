@@ -46,7 +46,7 @@ pub(super) struct H2Frustum {
     pub(super) half_view: f32,
     pub(super) falloff: f32,
     pub(super) cutoff: f32,
-    pub(super) gel: Option<Arc<H2Image>>,
+    pub(super) gel: Option<Arc<Image>>,
 }
 
 /// A frustum light at its marker, which only a gel pass draws.
@@ -171,10 +171,10 @@ fn read_h2_frustum(reader: &TagReader, root: TagStruct<'_>) -> Option<H2Frustum>
     }
     let gel = root.read_tag_ref_path("gel map").filter(|gel| !gel.is_empty());
     let gel = gel
-        .and_then(|gel| decode_h2_image(reader, &gel, SamplerKind::Texture2D, 0))
+        .and_then(|gel| decode_image(reader, &gel, SamplerKind::Texture2D, 0))
         .map(Arc::new);
     let aspect = gel.as_deref().map_or(1.0, |image| match image {
-        H2Image::Flat(image) => image.height as f32 / image.width as f32,
+        Image::Flat(image) => image.height as f32 / image.width as f32,
         _ => 1.0,
     });
     let stretch = root.read_real("height stretch").filter(|stretch| *stretch != 0.0).unwrap_or(1.0);
@@ -308,7 +308,7 @@ impl H2GelLight {
         self.light.brightness_animation.is_some() || self.light.color_animation.is_some()
     }
 
-    pub(crate) fn gel(&self) -> Option<&Arc<H2Image>> {
+    pub(crate) fn gel(&self) -> Option<&Arc<Image>> {
         self.frustum.gel.as_ref()
     }
 

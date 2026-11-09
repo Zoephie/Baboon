@@ -145,7 +145,7 @@ fn transparent_stage(first_map: i32, screenspace: bool) -> H2VertexStage {
 fn read_transparent_maps(
     maps: Option<&TagBlock<'_>>,
     cube_first: bool,
-    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
 ) -> (Vec<H2DrawTexture>, Vec<CeMapAnimation>) {
     let mut textures = Vec::new();
     let mut animations = Vec::new();
@@ -163,11 +163,11 @@ fn read_transparent_maps(
             .and_then(|path| bitmap(&path, kind));
         let has = |flag: &str| has_flag(element, "flags", flag);
         let image = match image.as_deref() {
-            Some(H2Image::Flat(flat)) if has("u-clamped") || has("v-clamped") => {
+            Some(Image::Flat(flat)) if has("u-clamped") || has("v-clamped") => {
                 let mut clamped = flat.clone();
                 clamped.repeat_x = !has("u-clamped");
                 clamped.repeat_y = !has("v-clamped");
-                Some(Arc::new(H2Image::Flat(clamped)))
+                Some(Arc::new(Image::Flat(clamped)))
             }
             _ => image,
         };
@@ -252,7 +252,7 @@ fn generic_pass(
     directory: &std::path::Path,
     root: TagStruct<'_>,
     flags: &ShaderFlags<'_>,
-    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
 ) -> Result<H2DrawPass, String> {
     let first_map = option_index(root, "first map type", &GENERIC_FIRST_MAP_TYPES);
     let maps = root.field("maps").and_then(|field| field.as_block());
@@ -324,7 +324,7 @@ fn chicago_pass(
     root: TagStruct<'_>,
     flags: &ShaderFlags<'_>,
     field: &str,
-    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
 ) -> Result<H2DrawPass, String> {
     let first_map = option_index(root, "first map type", &FIRST_MAP_TYPES);
     let maps = root.field(field).and_then(|field| field.as_block());
@@ -386,7 +386,7 @@ pub(in crate::app::model_preview) fn ce_transparent_passes(
     reader: &TagReader,
     root: TagStruct<'_>,
     group: &[u8; 4],
-    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
 ) -> Vec<H2DrawPass> {
     let Some(directory) = shader_directory(reader) else {
         return Vec::new();

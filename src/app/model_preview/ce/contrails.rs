@@ -12,8 +12,8 @@ use super::super::common::fields::{elements, function_slot_of, has_flag, object_
 use super::super::common::view::{ViewFrame, posed_on};
 use crate::app::model_preview::common::point_physics::CePointPhysics;
 use crate::app::model_preview::common::fields::argb;
-use super::super::common::image::H2Image;
-use super::super::materials::decode_h2_image;
+use super::super::common::image::Image;
+use super::super::materials::decode_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_up};
@@ -176,7 +176,7 @@ pub(crate) struct CeContrailDef {
     pub(crate) sort_bias: bool,
     states: Vec<PointState>,
     /// Every image of its bitmap, by index.
-    pub(crate) images: Vec<Option<Arc<H2Image>>>,
+    pub(crate) images: Vec<Option<Arc<Image>>>,
 }
 
 /// A contrail at the markers of its attachment's name.
@@ -215,7 +215,7 @@ fn read_contrail(reader: &TagReader, path: &str) -> Option<CeContrailDef> {
                     .collect();
                 let count = elements(bitmap.root(), "bitmaps").len();
                 let images = (0..count)
-                    .map(|index| decode_h2_image(reader, path, SamplerKind::Texture2D, index).map(Arc::new))
+                    .map(|index| decode_image(reader, path, SamplerKind::Texture2D, index).map(Arc::new))
                     .collect();
                 (sequences, images)
             }

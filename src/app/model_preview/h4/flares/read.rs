@@ -145,9 +145,9 @@ pub(crate) struct H4LensFlare {
     pub(crate) images: Vec<H3Bitmap>,
 }
 
-fn aspect_of(image: &H2Image) -> [f32; 2] {
+fn aspect_of(image: &Image) -> [f32; 2] {
     let (width, height) = match image {
-        H2Image::Flat(image) => (image.width as f32, image.height as f32),
+        Image::Flat(image) => (image.width as f32, image.height as f32),
         _ => (1.0, 1.0),
     };
     if width > height {

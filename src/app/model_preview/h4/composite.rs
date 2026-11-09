@@ -5,11 +5,11 @@ use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::state::Gen3State;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
-use super::super::common::image::H2Image;
-use crate::app::model_preview::common::image::{H3Sampler, H3Texels};
+use super::super::common::image::Image;
+use crate::app::model_preview::common::image::{Sampler, ImageTexels};
 use super::super::gen3::pipeline::{H3_SHIELD_DAMAGE, HALF_LENS};
 use crate::app::model_preview::gl::screen::screen_program;
-use crate::app::model_preview::gl::texture::upload_h2_image_linear;
+use crate::app::model_preview::gl::texture::upload_image_linear;
 use eframe::glow::{self, HasContext};
 use std::sync::Arc;
 use super::render::H4Game;
@@ -57,12 +57,12 @@ impl H4Game {
                     gl.delete_texture(texture);
                 }
                 // Sampler 8: bilinear, clamped.
-                let sampler = H3Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Bilinear };
-                let uploaded = image.and_then(|image| upload_h2_image_linear(gl, image, H3Texels::Linear, &[], Some(sampler)));
+                let sampler = Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Bilinear };
+                let uploaded = image.and_then(|image| upload_image_linear(gl, image, ImageTexels::Linear, &[], Some(sampler)));
                 self.grading = image.cloned().zip(uploaded);
             }
             let size = match grading.map(|(image, ..)| &**image) {
-                Some(H2Image::Volume { width, height, depth, .. }) => [*width, *height, *depth],
+                Some(Image::Volume { width, height, depth, .. }) => [*width, *height, *depth],
                 _ => return None,
             };
             let (scale, offset) = super::composite::h4_grading_scale_offset(size);
@@ -120,7 +120,7 @@ impl H4Game {
 
 /// Whether the uploaded grading lookup is `now`'s: the same image, not one
 /// equal to it, since another load's image can differ after an edit.
-fn grading_is_current(held: Option<&Arc<H2Image>>, now: Option<&Arc<H2Image>>) -> bool {
+fn grading_is_current(held: Option<&Arc<Image>>, now: Option<&Arc<Image>>) -> bool {
     match (held, now) {
         (Some(held), Some(now)) => Arc::ptr_eq(held, now),
         (None, None) => true,
@@ -180,8 +180,8 @@ pub(in crate::app::model_preview) fn h4_grading_scale_offset(size: [usize; 3]) -
 mod tests {
     use super::*;
 
-    fn image() -> Arc<H2Image> {
-        Arc::new(H2Image::Volume { width: 1, height: 1, depth: 1, rgba: vec![0; 4] })
+    fn image() -> Arc<Image> {
+        Arc::new(Image::Volume { width: 1, height: 1, depth: 1, rgba: vec![0; 4] })
     }
 
     #[test]

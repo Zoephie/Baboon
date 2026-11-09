@@ -270,7 +270,7 @@ fn prepare_h2_passes(
                 if let Some(cached) = caches.h2_images.get(&key) {
                     return cached.clone();
                 }
-                let decoded = decode_h2_image(reader, path, kind, 0).map(Arc::new);
+                let decoded = decode_image(reader, path, kind, 0).map(Arc::new);
                 caches.h2_images.insert(key, decoded.clone());
                 decoded
             },

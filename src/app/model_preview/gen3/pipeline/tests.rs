@@ -71,11 +71,11 @@ fn a_turn_moves_the_bright_side_and_keeps_the_sky_and_the_energy() {
 
 #[test]
 fn signed_texels_lose_the_engines_bias() {
-    assert_eq!(&*signed_bytes(&[128, 255, 0, 1], H3Texels::Signed), &[0, 127, 128, 129]);
+    assert_eq!(&*signed_bytes(&[128, 255, 0, 1], ImageTexels::Signed), &[0, 127, 128, 129]);
 }
 
 #[test]
 fn other_texels_pass_through_untouched() {
-    assert_eq!(&*signed_bytes(&[128, 255], H3Texels::Linear), &[128, 255]);
-    assert_eq!(&*signed_bytes(&[128, 255], H3Texels::Srgb), &[128, 255]);
+    assert_eq!(&*signed_bytes(&[128, 255], ImageTexels::Linear), &[128, 255]);
+    assert_eq!(&*signed_bytes(&[128, 255], ImageTexels::Srgb), &[128, 255]);
 }

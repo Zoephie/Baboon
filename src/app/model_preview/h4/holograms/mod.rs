@@ -21,7 +21,7 @@ use eframe::glow::{self, HasContext};
 
 use super::super::gen3::pipeline::{h3_set_cull, set_value};
 
-use crate::app::model_preview::gl::texture::upload_h2_image_linear;
+use crate::app::model_preview::gl::texture::upload_image_linear;
 use super::super::gl::target::{Made, Sampling, Texels};
 use super::super::gen3::shaders::{H3Material, H3Pass, H3Value};
 use super::bloom::H4BloomSettings;

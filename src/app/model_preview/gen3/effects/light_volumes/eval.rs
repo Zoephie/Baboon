@@ -62,7 +62,7 @@ impl H3LightVolumeAt {
         posed_on(self.node, self.position, self.forward, bones).0
     }
 
-    pub(crate) fn sampler(&self) -> Option<H3Sampler> {
+    pub(crate) fn sampler(&self) -> Option<Sampler> {
         self.definition.sampler
     }
 

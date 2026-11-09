@@ -39,11 +39,11 @@ pub(in crate::app::model_preview) fn read_h3_shield_settings(reader: &TagReader,
         ("Shield Impact Noise Texture 2", "shield_impact_noise_texture2"),
     ] {
         let bitmap = root.read_tag_ref_path(field).filter(|bitmap| !bitmap.is_empty())?;
-        let image = Arc::new(decode_h2_image(reader, &bitmap, SamplerKind::Texture2D, 0)?);
+        let image = Arc::new(decode_image(reader, &bitmap, SamplerKind::Texture2D, 0)?);
         textures.push(H3Texture {
             uniform: uniform.to_owned(),
             image,
-            texels: H3Texels::Linear,
+            texels: ImageTexels::Linear,
             mips: Arc::default(),
             sampler: None,
             frames: Vec::new(),

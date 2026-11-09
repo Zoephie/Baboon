@@ -44,8 +44,8 @@ pub(super) const ALPHA_REFERENCE: f32 = 0.5;
 
 /// What a map defaults to, as `rasterizer_set_texture_for_effect`'s usage has
 /// it: the shape of `global_rasterizer_data`'s default bitmaps.
-pub(super) fn flat(value: u8) -> Arc<H2Image> {
-    Arc::new(H2Image::Flat(super::super::super::materials::TextureImage {
+pub(super) fn flat(value: u8) -> Arc<Image> {
+    Arc::new(Image::Flat(super::super::super::materials::TextureImage {
         rgba: vec![value, value, value, value],
         width: 1,
         height: 1,
@@ -59,7 +59,7 @@ pub(super) const WHITE: u8 = 255;
 
 pub(super) const GREY: u8 = 128;
 
-pub(super) fn texture(slot: u32, kind: SamplerKind, image: Option<Arc<H2Image>>) -> H2DrawTexture {
+pub(super) fn texture(slot: u32, kind: SamplerKind, image: Option<Arc<Image>>) -> H2DrawTexture {
     H2DrawTexture {
         slot,
         kind,
@@ -147,8 +147,8 @@ pub(super) fn normalization(slot: u32) -> H2DrawTexture {
 }
 
 /// A flat normal, as the default vector bitmap has it.
-pub(super) fn flat_normal() -> Arc<H2Image> {
-    Arc::new(H2Image::Flat(super::super::super::materials::TextureImage {
+pub(super) fn flat_normal() -> Arc<Image> {
+    Arc::new(Image::Flat(super::super::super::materials::TextureImage {
         rgba: vec![128, 128, 255, 255],
         width: 1,
         height: 1,

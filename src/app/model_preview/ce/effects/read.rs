@@ -118,7 +118,7 @@ pub(crate) struct CeParticleDef {
     pub(super) sprite_scale: f32,
     pub(super) sequences: Vec<Vec<CeSpriteFrame>>,
     pub(super) image_widths: Vec<f32>,
-    pub(crate) images: Vec<Option<Arc<H2Image>>>,
+    pub(crate) images: Vec<Option<Arc<Image>>>,
     /// `collision effect` and `death effect`, where they are effects: a
     /// sound in their place makes nothing to see.
     pub(super) collision_effect: Option<Arc<CeEffectDef>>,

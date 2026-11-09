@@ -45,7 +45,7 @@ pub(crate) struct CeLightning {
     pub(crate) nonlinear_tint: bool,
     /// `shader flags`' `sort bias`: sorted a quarter unit nearer.
     pub(crate) sort_bias: bool,
-    pub(crate) image: Arc<H2Image>,
+    pub(crate) image: Arc<Image>,
 }
 
 /// A segment of a bolt: corners (place then u, v) and color.
@@ -98,7 +98,7 @@ fn read_lightning(reader: &TagReader, path: &str, owner: u8, markers: &[RenderMo
         return None;
     }
     let bitmap = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
-    let image = Arc::new(decode_h2_image(reader, &bitmap, SamplerKind::Texture2D, 0)?);
+    let image = Arc::new(decode_image(reader, &bitmap, SamplerKind::Texture2D, 0)?);
     let shader = elements(root, "shader").first().copied();
     let (blend, nonlinear_tint, sort_bias) = match shader {
         Some(shader) => (

@@ -26,7 +26,7 @@ use super::particle_systems::{
 };
 use crate::app::model_preview::common::fields::argb;
 use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
-use super::super::common::image::H2Image;
+use super::super::common::image::Image;
 use super::super::*;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 use crate::app::model_preview::common::random::{high24_over_2_24, high_bits, lcg_step};

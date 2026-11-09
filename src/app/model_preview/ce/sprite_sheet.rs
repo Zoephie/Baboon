@@ -5,8 +5,8 @@ use blam_tags::TagStruct;
 use super::super::common::fields::elements;
 use super::super::common::view::ViewFrame;
 use super::shaders::{CeMapAnimation, read_effect_map_animation};
-use super::super::common::image::H2Image;
-use super::super::materials::decode_h2_image;
+use super::super::common::image::Image;
+use super::super::materials::decode_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 
@@ -24,7 +24,7 @@ pub(super) struct CeSpriteFrame {
 #[derive(Debug, Clone)]
 pub(crate) struct CeSecondaryMap {
     anchor: Anchor,
-    pub(crate) image: Arc<H2Image>,
+    pub(crate) image: Arc<Image>,
     animation: CeMapAnimation,
     /// `zsprite radius scale`, where nothing means one.
     zsprite_scale: f32,
@@ -63,7 +63,7 @@ pub(crate) struct CeSecondaryDraw {
 /// An effect shader's `bitmap` and how it is laid, by the field's name.
 pub(in crate::app::model_preview) fn read_secondary_map(reader: &TagReader, holder: TagStruct<'_>, bitmap_field: &str) -> Option<Arc<CeSecondaryMap>> {
     let path = holder.read_tag_ref_path(bitmap_field).filter(|path| !path.is_empty())?;
-    let image = decode_h2_image(reader, &path, SamplerKind::Texture2D, 0)?;
+    let image = decode_image(reader, &path, SamplerKind::Texture2D, 0)?;
     Some(Arc::new(CeSecondaryMap {
         anchor: Anchor::read(holder),
         image: Arc::new(image),
@@ -97,7 +97,7 @@ impl CeSecondaryMap {
 pub(crate) struct CeSpriteSheet {
     pub(super) sizes: Vec<[f32; 2]>,
     pub(super) sequences: Vec<Vec<CeSpriteFrame>>,
-    pub(crate) images: Vec<Option<Arc<H2Image>>>,
+    pub(crate) images: Vec<Option<Arc<Image>>>,
 }
 
 pub(in crate::app::model_preview) fn read_sprite_sheet(reader: &TagReader, bitmap_path: &str) -> Option<CeSpriteSheet> {
@@ -130,7 +130,7 @@ pub(in crate::app::model_preview) fn read_sprite_sheet(reader: &TagReader, bitma
     let images = (0..sizes.len())
         .map(|index| {
             used.contains(&index)
-                .then(|| decode_h2_image(reader, bitmap_path, SamplerKind::Texture2D, index))
+                .then(|| decode_image(reader, bitmap_path, SamplerKind::Texture2D, index))
                 .flatten()
                 .map(Arc::new)
         })

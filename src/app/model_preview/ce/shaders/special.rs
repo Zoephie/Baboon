@@ -8,7 +8,7 @@ pub(super) fn meter_pass(
     directory: &std::path::Path,
     root: TagStruct<'_>,
     flags: &ShaderFlags<'_>,
-    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
 ) -> Result<H2DrawPass, String> {
     let rgb = |name: &str| {
         let color = root.read_rgb(name);
@@ -61,7 +61,7 @@ pub(super) fn water_passes(
     directory: &std::path::Path,
     root: TagStruct<'_>,
     flags: &ShaderFlags<'_>,
-    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
 ) -> Result<Vec<H2DrawPass>, String> {
     let read = |name: &str| read_shader_source(directory, name);
     let has = |flag: &str| flags.has(flag);
@@ -136,7 +136,7 @@ pub(super) fn water_passes(
 pub(super) fn plasma_pass(
     directory: &std::path::Path,
     root: TagStruct<'_>,
-    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
 ) -> Result<H2DrawPass, String> {
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let tinted = |brightness: &str, tint: &str| {

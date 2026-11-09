@@ -32,7 +32,7 @@ pub(in crate::app::model_preview) struct H4Game {
     /// The colour grading lookup and the image it was uploaded from. Holding
     /// the image keeps its address from going to a later preview's, so a new
     /// load always uploads its own.
-    pub(super) grading: Option<(std::sync::Arc<super::super::common::image::H2Image>, glow::NativeTexture)>,
+    pub(super) grading: Option<(std::sync::Arc<super::super::common::image::Image>, glow::NativeTexture)>,
     /// The final composite's program.
     pub(super) composite_program: Option<glow::NativeProgram>,
     /// The corners the flare reflections draw from.

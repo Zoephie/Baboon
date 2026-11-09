@@ -13,15 +13,15 @@ pub(crate) enum H3Value {
 #[derive(Debug)]
 pub(crate) struct H3Texture {
     pub(crate) uniform: String,
-    pub(crate) image: Arc<H2Image>,
-    pub(crate) texels: H3Texels,
+    pub(crate) image: Arc<Image>,
+    pub(crate) texels: ImageTexels,
     /// The levels past `image`, as the bitmap stores them.
-    pub(crate) mips: Arc<Vec<H2Image>>,
+    pub(crate) mips: Arc<Vec<Image>>,
     /// What the tag asks of the sampler; none for the engine's own textures.
-    pub(crate) sampler: Option<H3Sampler>,
+    pub(crate) sampler: Option<Sampler>,
     /// The bitmap's other images, in order with `image` standing at its index,
     /// for a `FrameIndex` animation to choose among. Empty without one.
-    pub(crate) frames: Vec<Arc<H2Image>>,
+    pub(crate) frames: Vec<Arc<Image>>,
 }
 
 /// A shader's passes and everything they read.
@@ -194,36 +194,36 @@ mod texel_tests {
     #[test]
     fn the_dxgi_tables_signed_formats_read_signed_whatever_the_curve() {
         for format in [BitmapFormat::DxnSnorm, BitmapFormat::V8u8, BitmapFormat::Q8w8v8u8, BitmapFormat::V16u16] {
-            assert_eq!(H3Texels::of(format, false), H3Texels::Signed);
-            assert_eq!(H3Texels::of(format, true), H3Texels::Signed);
+            assert_eq!(ImageTexels::of(format, false), ImageTexels::Signed);
+            assert_eq!(ImageTexels::of(format, true), ImageTexels::Signed);
         }
     }
 
     #[test]
     fn unsigned_formats_follow_the_curve() {
-        assert_eq!(H3Texels::of(BitmapFormat::A8r8g8b8, true), H3Texels::Srgb);
-        assert_eq!(H3Texels::of(BitmapFormat::A8r8g8b8, false), H3Texels::Linear);
-        assert_eq!(H3Texels::of(BitmapFormat::Dxn, false), H3Texels::Linear);
+        assert_eq!(ImageTexels::of(BitmapFormat::A8r8g8b8, true), ImageTexels::Srgb);
+        assert_eq!(ImageTexels::of(BitmapFormat::A8r8g8b8, false), ImageTexels::Linear);
+        assert_eq!(ImageTexels::of(BitmapFormat::Dxn, false), ImageTexels::Linear);
     }
 
     #[test]
     fn halo4_reads_srgb_only_through_formats_with_an_srgb_twin() {
-        assert_eq!(H3Texels::of_halo4(BitmapFormat::Dxt1, 5), H3Texels::Srgb);
-        assert_eq!(H3Texels::of_halo4(BitmapFormat::A8r8g8b8, 0), H3Texels::Srgb, "unknown curve, colour format");
+        assert_eq!(ImageTexels::of_halo4(BitmapFormat::Dxt1, 5), ImageTexels::Srgb);
+        assert_eq!(ImageTexels::of_halo4(BitmapFormat::A8r8g8b8, 0), ImageTexels::Srgb, "unknown curve, colour format");
         // Halo 3's rule would read these sRGB; Halo 4 has no sRGB view for them.
-        assert_eq!(H3Texels::of_halo4(BitmapFormat::Dxt5a, 5), H3Texels::Linear);
-        assert_eq!(H3Texels::of_halo4(BitmapFormat::A4r4g4b4, 1), H3Texels::Linear);
-        assert_eq!(H3Texels::of_halo4(BitmapFormat::Dxt5, 2), H3Texels::Linear, "gamma 2.0 is never sRGB");
-        assert_eq!(H3Texels::of_halo4(BitmapFormat::Dxt5, 3), H3Texels::Linear, "nor linear");
-        assert_eq!(H3Texels::of_halo4(BitmapFormat::Dxn, 0), H3Texels::Signed, "dxn is BC5_SNORM");
-        assert_eq!(H3Texels::of(BitmapFormat::Dxn, false), H3Texels::Linear, "Halo 3 reads its `dxn` differently");
+        assert_eq!(ImageTexels::of_halo4(BitmapFormat::Dxt5a, 5), ImageTexels::Linear);
+        assert_eq!(ImageTexels::of_halo4(BitmapFormat::A4r4g4b4, 1), ImageTexels::Linear);
+        assert_eq!(ImageTexels::of_halo4(BitmapFormat::Dxt5, 2), ImageTexels::Linear, "gamma 2.0 is never sRGB");
+        assert_eq!(ImageTexels::of_halo4(BitmapFormat::Dxt5, 3), ImageTexels::Linear, "nor linear");
+        assert_eq!(ImageTexels::of_halo4(BitmapFormat::Dxn, 0), ImageTexels::Signed, "dxn is BC5_SNORM");
+        assert_eq!(ImageTexels::of(BitmapFormat::Dxn, false), ImageTexels::Linear, "Halo 3 reads its `dxn` differently");
     }
 
     #[test]
     fn an_unknown_curve_falls_back_on_the_format() {
-        assert!(H3Texels::default_srgb(BitmapFormat::Dxt1));
-        assert!(H3Texels::default_srgb(BitmapFormat::A8r8g8b8));
-        assert!(!H3Texels::default_srgb(BitmapFormat::DxnSnorm));
-        assert!(!H3Texels::default_srgb(BitmapFormat::Abgrfp16));
+        assert!(ImageTexels::default_srgb(BitmapFormat::Dxt1));
+        assert!(ImageTexels::default_srgb(BitmapFormat::A8r8g8b8));
+        assert!(!ImageTexels::default_srgb(BitmapFormat::DxnSnorm));
+        assert!(!ImageTexels::default_srgb(BitmapFormat::Abgrfp16));
     }
 }

@@ -13,10 +13,10 @@ use crate::app::model_preview::common::fields::argb;
 use super::common::fields::{elements, object_block};
 use super::common::math::{cross, dot};
 use super::common::view::{ViewFrame, posed_on};
-use super::common::image::H2Image;
+use super::common::image::Image;
 use super::gen3::materials::{H3Bitmap, read_h3_bitmap};
 use crate::app::model_preview::common::math::UNSET;
-use super::materials::decode_h2_image;
+use super::materials::decode_image;
 use super::*;
 use crate::app::model_preview::common::attached::{Attached, attached};
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -147,7 +147,7 @@ pub(crate) struct Antenna {
     only_under: Option<(String, String)>,
     /// Halo 3 and Reach read their bitmap as the card would.
     pub(crate) h3_bitmap: Option<H3Bitmap>,
-    pub(crate) image: Arc<H2Image>,
+    pub(crate) image: Arc<Image>,
 }
 
 /// `sub_421A90`: `vector` turned about the unit `axis`.
@@ -340,7 +340,7 @@ fn read_antenna(
             width: None,
         });
     }
-    let image = decode_h2_image(reader, &bitmap_path, SamplerKind::Texture2D, 0)?;
+    let image = decode_image(reader, &bitmap_path, SamplerKind::Texture2D, 0)?;
     let h3_bitmap = curve.and_then(|_| read_h3_bitmap(reader, &bitmap_path, 0, SamplerKind::Texture2D));
     Some(Antenna {
         node: marker.node_index.max(0) as usize,
@@ -449,7 +449,7 @@ fn read_reach_antenna<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
         physics,
     };
     let image_index = image_index.unwrap_or(0);
-    let image = decode_h2_image(reader, &bitmap_path, SamplerKind::Texture2D, image_index)?;
+    let image = decode_image(reader, &bitmap_path, SamplerKind::Texture2D, image_index)?;
     let h3_bitmap = read_h3_bitmap(reader, &bitmap_path, image_index as i16, SamplerKind::Texture2D);
     let (place, node) = frame(marker);
     Some(Antenna {
@@ -554,7 +554,7 @@ mod tests {
             reach: Some(ReachAntennaSpring { strength: 0.1, length: 0.4, physics: None }),
             only_under: None,
             h3_bitmap: None,
-            image: Arc::new(H2Image::Flat(super::super::super::materials::TextureImage {
+            image: Arc::new(Image::Flat(super::super::super::materials::TextureImage {
                 rgba: Vec::new(),
                 width: 0,
                 height: 0,

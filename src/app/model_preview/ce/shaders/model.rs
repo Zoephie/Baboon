@@ -33,10 +33,10 @@ struct ModelPass<'a> {
     alpha_test: bool,
     decal: bool,
     two_sided: bool,
-    base: Option<Arc<H2Image>>,
-    detail: Option<Arc<H2Image>>,
-    multipurpose: Option<Arc<H2Image>>,
-    reflection: Option<Arc<H2Image>>,
+    base: Option<Arc<Image>>,
+    detail: Option<Arc<Image>>,
+    multipurpose: Option<Arc<Image>>,
+    reflection: Option<Arc<Image>>,
     base_scale: [f32; 2],
     detail_scale: [f32; 2],
     self_illumination: [f32; 4],
@@ -152,7 +152,7 @@ pub(in crate::app::model_preview) fn ce_model_passes(
     group: &[u8; 4],
     flags: &ShaderFlags<'_>,
     common: &mut Option<Option<CeModelCommon>>,
-    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
 ) -> Vec<H2DrawPass> {
     if !matches!(group, b"soso" | b"senv") {
         return Vec::new();

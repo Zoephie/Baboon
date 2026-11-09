@@ -13,7 +13,7 @@ use super::super::super::h4::materials::H4EffectMaterial;
 use super::super::super::gl::buffer::slice_bytes;
 use super::super::super::*;
 use super::super::super::gl::program::Linked;
-use super::super::super::common::image::H2Image;
+use super::super::super::common::image::Image;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
 
@@ -120,14 +120,14 @@ impl H4EffectGl {
             .find(|texture| texture.uniform == uniform);
         let uploaded = texture.and_then(|texture| unsafe {
             if *kind == TextureKind::FlatArray {
-                let layers: Vec<&H2Image> = if texture.frames.is_empty() {
+                let layers: Vec<&Image> = if texture.frames.is_empty() {
                     vec![&*texture.image]
                 } else {
                     texture.frames.iter().map(|image| &**image).collect()
                 };
                 upload_array(gl, &layers, texture.texels, texture.sampler)
             } else {
-                crate::app::model_preview::gl::texture::upload_h2_image_linear(
+                crate::app::model_preview::gl::texture::upload_image_linear(
                     gl,
                     &texture.image,
                     texture.texels,
@@ -354,14 +354,14 @@ fn shared_value(
 /// Every image as a layer of one texture array, all of the first's size.
 unsafe fn upload_array(
     gl: &glow::Context,
-    layers: &[&H2Image],
-    texels: crate::app::model_preview::common::image::H3Texels,
-    sampler: Option<crate::app::model_preview::common::image::H3Sampler>,
+    layers: &[&Image],
+    texels: crate::app::model_preview::common::image::ImageTexels,
+    sampler: Option<crate::app::model_preview::common::image::Sampler>,
 ) -> Option<glow::NativeTexture> {
     let flats: Vec<&TextureImage> = layers
         .iter()
         .filter_map(|image| match image {
-            H2Image::Flat(image) => Some(image),
+            Image::Flat(image) => Some(image),
             _ => None,
         })
         .collect();
@@ -378,7 +378,7 @@ unsafe fn upload_array(
         return None;
     }
     let format = match texels {
-        crate::app::model_preview::common::image::H3Texels::Srgb => glow::SRGB8_ALPHA8,
+        crate::app::model_preview::common::image::ImageTexels::Srgb => glow::SRGB8_ALPHA8,
         _ => glow::RGBA8,
     };
     let mut rgba = Vec::with_capacity(flats.len() * (width * height * 4));

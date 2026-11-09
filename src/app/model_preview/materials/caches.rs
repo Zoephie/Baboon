@@ -36,7 +36,7 @@ pub(in crate::app::model_preview) struct ResolveCaches {
     pub(in crate::app::model_preview) h2_camo_shader: Option<Option<Arc<TagFile>>>,
     /// Pass maps by path and shape; a shader samples each in only one shape.
     /// By path, shape and image.
-    pub(in crate::app::model_preview) h2_images: HashMap<(String, SamplerKind, usize), Option<Arc<H2Image>>>,
+    pub(in crate::app::model_preview) h2_images: HashMap<(String, SamplerKind, usize), Option<Arc<Image>>>,
     /// Halo CE's camouflage, read once.
     pub(in crate::app::model_preview) ce_camo: Option<Option<CeCamoSettings>>,
     /// How many images a Halo CE bitmap holds.

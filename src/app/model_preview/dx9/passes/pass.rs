@@ -128,7 +128,7 @@ impl H2Pass {
 pub(crate) struct H2DrawTexture {
     pub(crate) slot: u32,
     pub(crate) kind: SamplerKind,
-    pub(crate) image: Option<std::sync::Arc<H2Image>>,
+    pub(crate) image: Option<std::sync::Arc<Image>>,
     /// Bound to the generated normalization cube instead of an image.
     pub(crate) normalization: bool,
     /// Bound to the preview's texaccum target instead of an image.

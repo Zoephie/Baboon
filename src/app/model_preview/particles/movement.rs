@@ -287,8 +287,8 @@ pub(super) fn read_turbulence(
     let path = named(movement)
         .or_else(|| template.as_ref().and_then(|tag| named(tag.root())))
         .unwrap_or_else(|| DEFAULT_TURBULENCE.to_owned());
-    let image = match decode_h2_image(reader, &path, SamplerKind::Texture2D, 0)? {
-        H2Image::Flat(image) if image.whole() && image.width > 0 && image.height > 0 => image,
+    let image = match decode_image(reader, &path, SamplerKind::Texture2D, 0)? {
+        Image::Flat(image) if image.whole() && image.width > 0 && image.height > 0 => image,
         _ => return None,
     };
     Some(H3ParticleTurbulence { strength, xform: [u_scale?, v_scale?, u_offset?, v_offset?], image })

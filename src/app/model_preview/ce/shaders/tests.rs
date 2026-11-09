@@ -122,7 +122,7 @@ fn every_transparent_shader_links_with_its_stage() {
             shaders += 1;
             let passes = ce_transparent_passes(&crate::app::model_preview::load::TagReader::new(&source), tag.root(), group, &mut |_, kind| {
                 match kind {
-                    SamplerKind::Cube => Some(Arc::new(H2Image::Cube {
+                    SamplerKind::Cube => Some(Arc::new(Image::Cube {
                         size: 1,
                         faces: std::array::from_fn(|_| vec![0; 4]),
                     })),

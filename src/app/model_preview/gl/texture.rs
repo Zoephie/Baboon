@@ -9,7 +9,7 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use eframe::glow::{self, HasContext as _};
 
 use super::super::*;
-use super::super::common::image::{H2Image, H3Sampler, H3Texels};
+use super::super::common::image::{Image, Sampler, ImageTexels};
 
 /// The texture bound to a slot whose material has none: one opaque white
 /// texel, never sampled for its value (the slot's `have` flag is zero), only
@@ -38,7 +38,7 @@ pub(in crate::app::model_preview) unsafe fn upload_placeholder_texture(gl: &glow
     }
 }
 
-pub(in crate::app::model_preview) unsafe fn upload_h2_image(gl: &glow::Context, image: &H2Image) -> Option<glow::NativeTexture> {
+pub(in crate::app::model_preview) unsafe fn upload_image(gl: &glow::Context, image: &Image) -> Option<glow::NativeTexture> {
     if !image.whole() {
         return None;
     }
@@ -49,8 +49,8 @@ pub(in crate::app::model_preview) unsafe fn upload_h2_image(gl: &glow::Context, 
     };
     unsafe {
         match image {
-            H2Image::Flat(image) => upload_texture(gl, image),
-            H2Image::Cube { size, faces } => {
+            Image::Flat(image) => upload_texture(gl, image),
+            Image::Cube { size, faces } => {
                 let texture = gl.create_texture().ok()?;
                 gl.bind_texture(glow::TEXTURE_CUBE_MAP, Some(texture));
                 for (face, rgba) in faces.iter().enumerate() {
@@ -73,7 +73,7 @@ pub(in crate::app::model_preview) unsafe fn upload_h2_image(gl: &glow::Context, 
                 gl.bind_texture(glow::TEXTURE_CUBE_MAP, None);
                 Some(texture)
             }
-            H2Image::Volume { width, height, depth, rgba } => {
+            Image::Volume { width, height, depth, rgba } => {
                 let texture = gl.create_texture().ok()?;
                 gl.bind_texture(glow::TEXTURE_3D, Some(texture));
                 gl.tex_image_3d(
@@ -220,7 +220,7 @@ pub(in crate::app::model_preview) unsafe fn upload_texture(gl: &glow::Context, i
 
 /// `d3d11_sampler_state_cache::get`: the border is transparent black, and
 /// anisotropic filters are trilinear with a limit.
-pub(in crate::app::model_preview) unsafe fn h3_apply_sampler(gl: &glow::Context, target: u32, sampler: H3Sampler) {
+pub(in crate::app::model_preview) unsafe fn h3_apply_sampler(gl: &glow::Context, target: u32, sampler: Sampler) {
     const TEXTURE_MAX_ANISOTROPY: u32 = 0x84FE;
     let address = |mode| match mode {
         BitmapAddressMode::Clamp => glow::CLAMP_TO_EDGE,
@@ -252,30 +252,30 @@ pub(in crate::app::model_preview) unsafe fn h3_apply_sampler(gl: &glow::Context,
 }
 
 /// The engine decodes signed texels biased by 128; the card wants them back.
-pub(in crate::app::model_preview) fn signed_bytes(rgba: &[u8], texels: H3Texels) -> Cow<'_, [u8]> {
+pub(in crate::app::model_preview) fn signed_bytes(rgba: &[u8], texels: ImageTexels) -> Cow<'_, [u8]> {
     match texels {
-        H3Texels::Signed => rgba.iter().map(|byte| byte.wrapping_sub(128)).collect(),
+        ImageTexels::Signed => rgba.iter().map(|byte| byte.wrapping_sub(128)).collect(),
         _ => Cow::Borrowed(rgba),
     }
 }
 
-/// `upload_h2_image` with an sRGB format, for the curve the card decodes.
-pub(in crate::app::model_preview) unsafe fn upload_h2_image_linear(
+/// `upload_image` with an sRGB format, for the curve the card decodes.
+pub(in crate::app::model_preview) unsafe fn upload_image_linear(
     gl: &glow::Context,
-    image: &H2Image,
-    texels: H3Texels,
-    mips: &[H2Image],
-    sampler: Option<H3Sampler>,
+    image: &Image,
+    texels: ImageTexels,
+    mips: &[Image],
+    sampler: Option<Sampler>,
 ) -> Option<glow::NativeTexture> {
     // GL reads as much as the size says, whatever the slice holds.
     if !image.whole() {
         return None;
     }
-    let mips = if mips.iter().all(H2Image::whole) { mips } else { &[] };
+    let mips = if mips.iter().all(Image::whole) { mips } else { &[] };
     let (format, kind) = match texels {
-        H3Texels::Linear => (glow::RGBA8, glow::UNSIGNED_BYTE),
-        H3Texels::Srgb => (glow::SRGB8_ALPHA8, glow::UNSIGNED_BYTE),
-        H3Texels::Signed => (glow::RGBA8_SNORM, glow::BYTE),
+        ImageTexels::Linear => (glow::RGBA8, glow::UNSIGNED_BYTE),
+        ImageTexels::Srgb => (glow::SRGB8_ALPHA8, glow::UNSIGNED_BYTE),
+        ImageTexels::Signed => (glow::RGBA8_SNORM, glow::BYTE),
     };
     let format = format as i32;
     let finish = |target| unsafe {
@@ -286,7 +286,7 @@ pub(in crate::app::model_preview) unsafe fn upload_h2_image_linear(
     unsafe {
         let texture = gl.create_texture().ok()?;
         match image {
-            H2Image::Flat(image) => {
+            Image::Flat(image) => {
                 if image.width == 0 || image.height == 0 {
                     gl.delete_texture(texture);
                     return None;
@@ -305,7 +305,7 @@ pub(in crate::app::model_preview) unsafe fn upload_h2_image_linear(
                 );
                 finish(glow::TEXTURE_2D);
                 for (level, mip) in mips.iter().enumerate() {
-                    if let H2Image::Flat(mip) = mip {
+                    if let Image::Flat(mip) = mip {
                         let rgba = signed_bytes(&mip.rgba, texels);
                         let (width, height) = (mip.width as i32, mip.height as i32);
                         let pixels = glow::PixelUnpackData::Slice(Some(&rgba));
@@ -322,7 +322,7 @@ pub(in crate::app::model_preview) unsafe fn upload_h2_image_linear(
                     h3_apply_sampler(gl, glow::TEXTURE_2D, sampler);
                 }
             }
-            H2Image::Cube { size, faces } => {
+            Image::Cube { size, faces } => {
                 gl.bind_texture(glow::TEXTURE_CUBE_MAP, Some(texture));
                 for (face, rgba) in faces.iter().enumerate() {
                     gl.tex_image_2d(
@@ -339,7 +339,7 @@ pub(in crate::app::model_preview) unsafe fn upload_h2_image_linear(
                 }
                 finish(glow::TEXTURE_CUBE_MAP);
                 for (level, mip) in mips.iter().enumerate() {
-                    if let H2Image::Cube { size, faces } = mip {
+                    if let Image::Cube { size, faces } = mip {
                         for (face, rgba) in faces.iter().enumerate() {
                             let rgba = signed_bytes(rgba, texels);
                             let target = glow::TEXTURE_CUBE_MAP_POSITIVE_X + face as u32;
@@ -356,7 +356,7 @@ pub(in crate::app::model_preview) unsafe fn upload_h2_image_linear(
                     h3_apply_sampler(gl, glow::TEXTURE_CUBE_MAP, sampler);
                 }
             }
-            H2Image::Volume { width, height, depth, rgba } => {
+            Image::Volume { width, height, depth, rgba } => {
                 gl.bind_texture(glow::TEXTURE_3D, Some(texture));
                 gl.tex_image_3d(
                     glow::TEXTURE_3D,

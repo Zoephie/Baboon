@@ -72,7 +72,7 @@ pub(crate) struct H3SpriteShader {
     /// `base_map2`, which only `palettized_plasma` reads.
     pub(crate) second_map: Option<H3Bitmap>,
     /// `base_map`'s, `alpha_map`'s, `palette`'s and `base_map2`'s, as baked.
-    pub(crate) samplers: [Option<H3Sampler>; 4],
+    pub(crate) samplers: [Option<Sampler>; 4],
     pub(crate) constants: H3AlbedoConstants,
     /// Reach's `per_pixel_smooth`: `contrast_scale` and `contrast_offset`.
     pub(in crate::app::model_preview) contrast: [f32; 2],
@@ -130,7 +130,7 @@ impl H3SpriteShader {
 
     pub(crate) fn alpha_tested(blend: H3Blend, base_map: H3Bitmap) -> Self {
         // `leaf_system_render_opaque` binds its plate clamped and bilinear.
-        let plate = H3Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Bilinear };
+        let plate = Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Bilinear };
         Self { alpha_test: true, base_map: Some(base_map), samplers: [Some(plate), None, None, None], ..Self::plain(blend) }
     }
 
@@ -273,7 +273,7 @@ fn read_map(reader: &TagReader, shader: TagStruct<'_>, name: &str) -> Option<H3B
 
 /// A sprite shader's maps, and the sampler each is baked with. Failing to
 /// resolve leaves what it authored, on the preview's default sampler.
-fn read_maps(reader: &TagReader, shader: TagStruct<'_>) -> ([Option<H3Bitmap>; 4], [Option<H3Sampler>; 4]) {
+fn read_maps(reader: &TagReader, shader: TagStruct<'_>) -> ([Option<H3Bitmap>; 4], [Option<Sampler>; 4]) {
     const MAPS: [&str; 4] = ["base_map", "alpha_map", "palette", "base_map2"];
     let Some(resolved) = resolve_embedded_method(reader, shader) else {
         return (MAPS.map(|name| read_map(reader, shader, name)), [None; 4]);

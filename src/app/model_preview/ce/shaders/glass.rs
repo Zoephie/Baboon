@@ -26,7 +26,7 @@ pub(super) fn glass_passes(
     directory: &std::path::Path,
     root: TagStruct<'_>,
     flags: &ShaderFlags<'_>,
-    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
 ) -> Result<Vec<H2DrawPass>, String> {
     let read = |name: &str| read_shader_source(directory, name);
     let has = |flag: &str| flags.has(flag);

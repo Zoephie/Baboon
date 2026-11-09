@@ -12,8 +12,8 @@ use blam_tags::{TagFile, TagStruct};
 use super::super::common::fields::{elements, has_flag};
 use super::super::functions::FunctionValues;
 use super::super::gen3::shaders::H3Texture;
-use crate::app::model_preview::common::image::H3Texels;
-use super::super::materials::decode_h2_image;
+use crate::app::model_preview::common::image::ImageTexels;
+use super::super::materials::decode_image;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::named_function::NamedFunction;
 use crate::app::model_preview::gl::blit::blit_depth;
@@ -176,13 +176,13 @@ impl ReachShieldSettings {
             let Some(bitmap) = root.read_tag_ref_path(field).filter(|bitmap| !bitmap.is_empty()) else {
                 continue;
             };
-            let Some(image) = decode_h2_image(reader, &bitmap, SamplerKind::Texture2D, 0) else {
+            let Some(image) = decode_image(reader, &bitmap, SamplerKind::Texture2D, 0) else {
                 continue;
             };
             textures.push(H3Texture {
                 uniform: uniform.to_owned(),
                 image: Arc::new(image),
-                texels: H3Texels::Linear,
+                texels: ImageTexels::Linear,
                 mips: Arc::default(),
                 sampler: None,
                 frames: Vec::new(),

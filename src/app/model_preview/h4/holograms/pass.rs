@@ -218,7 +218,7 @@ impl H4Game {
                 let mut map = HashMap::new();
                 for screen in [&post.combine, &post.composite] {
                     for texture in &screen.textures {
-                        if let Some(uploaded) = upload_h2_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
+                        if let Some(uploaded) = upload_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
                             map.insert(texture.uniform.clone(), uploaded);
                         }
                     }

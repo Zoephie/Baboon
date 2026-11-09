@@ -12,7 +12,7 @@ use blam_tags::render_method::{
 };
 use super::super::common::fields::elements;
 use super::super::gen3::shaders::{H3Blend, H3Material, H3Pass, H3MaterialDialect, H3Texture};
-use crate::app::model_preview::common::image::H3Sampler;
+use crate::app::model_preview::common::image::Sampler;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::hlsl::parse::TextureKind;
 use std::sync::Arc;

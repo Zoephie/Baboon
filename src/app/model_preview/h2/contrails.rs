@@ -12,10 +12,10 @@ use crate::app::model_preview::common::sprites::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::lights::attachment_value;
-use super::super::common::image::H2Image;
+use super::super::common::image::Image;
 use super::super::effects::marker_name;
 use super::super::gen3::shaders::H3Blend;
-use super::super::materials::decode_h2_image;
+use super::super::materials::decode_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{checked_unit, cross};
@@ -106,7 +106,7 @@ pub(crate) struct H2ContrailAt {
     fade_last: bool,
     blend: H3Blend,
     states: Arc<Vec<PointState>>,
-    bitmap: Option<Arc<H2Image>>,
+    bitmap: Option<Arc<Image>>,
 }
 
 fn read_state(reader: &TagReader, state: TagStruct<'_>) -> Option<PointState> {
@@ -174,7 +174,7 @@ pub(in crate::app::model_preview) fn read_h2_contrails(
         let flagged = |wanted: &str| has_flag(root, "flags", wanted);
         let speed = root.read_real_bounds("point velocity");
         let bitmap = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty());
-        let bitmap = bitmap.and_then(|path| decode_h2_image(reader, &path, SamplerKind::Texture2D, 0)).map(Arc::new);
+        let bitmap = bitmap.and_then(|path| decode_image(reader, &path, SamplerKind::Texture2D, 0)).map(Arc::new);
         let states = Arc::new(states);
         let name = marker_name(attachment, "marker");
         for marker in markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name)) {
@@ -301,7 +301,7 @@ impl H2ContrailAt {
 
 
 
-    pub(crate) fn bitmap(&self) -> Option<&Arc<H2Image>> {
+    pub(crate) fn bitmap(&self) -> Option<&Arc<Image>> {
         self.bitmap.as_ref()
     }
 

@@ -2,10 +2,10 @@
 
 use super::*;
 use super::super::gl::buffer::slice_bytes;
-use super::super::gl::texture::{upload_h2_image, upload_texture};
+use super::super::gl::texture::{upload_image, upload_texture};
 use super::super::particles::{sprite_maps, upload_cheap_render_texture};
 use super::super::dx9::passes::{H2DrawPass, H2_LAYER_COUNT};
-use crate::app::model_preview::common::image::H3Sampler;
+use crate::app::model_preview::common::image::Sampler;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use eframe::glow;
 
@@ -327,7 +327,7 @@ impl ModelGpuSlot {
                 .iter()
                 .map(|at| {
                     let (image, texels, mips) = at.bitmap();
-                    vec![crate::app::model_preview::gl::texture::upload_h2_image_linear(gl, image, *texels, mips, None)]
+                    vec![crate::app::model_preview::gl::texture::upload_image_linear(gl, image, *texels, mips, None)]
                 })
                 .chain(super::game::game_flare_images(gl, frame))
                 .collect();
@@ -345,10 +345,10 @@ impl ModelGpuSlot {
                     Some((image, texels, mips)) => {
                         let filter =
                             if antenna.is_reach() { BitmapFilterMode::Trilinear } else { BitmapFilterMode::Bilinear };
-                        let sampler = H3Sampler { address: [BitmapAddressMode::Clamp; 2], filter };
-                        crate::app::model_preview::gl::texture::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
+                        let sampler = Sampler { address: [BitmapAddressMode::Clamp; 2], filter };
+                        crate::app::model_preview::gl::texture::upload_image_linear(gl, image, *texels, mips, Some(sampler))
                     }
-                    None => upload_h2_image(gl, &antenna.image),
+                    None => upload_image(gl, &antenna.image),
                 })
                 .collect();
             for texture in self.volume_textures.drain(..).flatten() {
@@ -360,7 +360,7 @@ impl ModelGpuSlot {
                 .iter()
                 .map(|at| {
                     let (image, texels, mips) = at.bitmap()?;
-                    crate::app::model_preview::gl::texture::upload_h2_image_linear(gl, image, *texels, mips, at.sampler())
+                    crate::app::model_preview::gl::texture::upload_image_linear(gl, image, *texels, mips, at.sampler())
                 })
                 .collect();
             self.flare_geometry = Some(frame.geometry_id);
@@ -440,7 +440,7 @@ impl ModelGpuSlot {
                                 .iter()
                                 .map(|texture| {
                                     let image = texture.image.as_ref()?;
-                                    unsafe { upload_h2_image(gl, image) }
+                                    unsafe { upload_image(gl, image) }
                                 })
                                 .collect()
                         })

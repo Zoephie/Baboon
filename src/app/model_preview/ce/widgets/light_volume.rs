@@ -33,7 +33,7 @@ pub(crate) struct CeLightVolume {
     /// `light_volume_interpolate_frames` lerps the first frame with itself,
     /// so the first is the one that draws.
     frame: LightVolumeFrame,
-    pub(crate) image: Arc<H2Image>,
+    pub(crate) image: Arc<Image>,
 }
 
 fn one_if_unset(value: f32) -> f32 {
@@ -72,7 +72,7 @@ fn read_light_volume(reader: &TagReader, path: &str, owner: u8, markers: &[Rende
             let index = elements(bitmap.root(), "sequences")
                 .get(sequence)
                 .map_or(0, |sequence| sequence.read_int_any("first bitmap index").unwrap_or(0).max(0) as usize);
-            Arc::new(decode_h2_image(reader, &map, SamplerKind::Texture2D, index)?)
+            Arc::new(decode_image(reader, &map, SamplerKind::Texture2D, index)?)
         }
         None => super::super::super::h2::light_volumes::read_glow(reader)?,
     };

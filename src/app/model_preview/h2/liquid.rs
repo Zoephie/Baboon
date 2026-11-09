@@ -14,7 +14,7 @@ use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::light_volumes::{read_glow, read_h2_bitmap};
 use super::lights::attachment_value;
-use super::super::common::image::H2Image;
+use super::super::common::image::Image;
 use super::super::common::named_function::tag_function_at;
 use super::super::effects::marker_name;
 use super::super::*;
@@ -55,7 +55,7 @@ pub(crate) struct LiquidArc {
     range_scale: TagFunction,
     brightness_scale: TagFunction,
     cores: Vec<LiquidCore>,
-    bitmap: Option<Arc<H2Image>>,
+    bitmap: Option<Arc<Image>>,
 }
 
 /// A `liquid` at a marker of the object.
@@ -77,7 +77,7 @@ fn function_of(holder: TagStruct<'_>, name: &str) -> Option<TagFunction> {
     tag_function_at(&holder.descend(name)?, "function")
 }
 
-fn read_arc(reader: &TagReader, arc: TagStruct<'_>, glow: Option<&Arc<H2Image>>) -> Option<LiquidArc> {
+fn read_arc(reader: &TagReader, arc: TagStruct<'_>, glow: Option<&Arc<Image>>) -> Option<LiquidArc> {
     let sprites = arc.read_enum_option("sprite count")?.split(' ').next()?.parse().ok()?;
     let cores = elements(arc, "cores").into_iter().filter_map(|core| {
         Some(LiquidCore {
@@ -259,7 +259,7 @@ impl LiquidArc {
             .collect()
     }
 
-    pub(crate) fn bitmap(&self) -> Option<&Arc<H2Image>> {
+    pub(crate) fn bitmap(&self) -> Option<&Arc<Image>> {
         self.bitmap.as_ref()
     }
 }

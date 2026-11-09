@@ -7,9 +7,9 @@ use std::sync::Arc;
 use eframe::glow::{self, HasContext as _};
 
 use super::super::common::slots::GameSlot;
-use super::super::common::image::H2Image;
+use super::super::common::image::Image;
 use super::super::frame::ModelGpuFrame;
-use crate::app::model_preview::gl::texture::upload_h2_image;
+use crate::app::model_preview::gl::texture::upload_image;
 
 /// The maps Halo 2's sprites draw with, uploaded once per geometry.
 #[derive(Default)]
@@ -36,7 +36,7 @@ impl H2Textures {
     /// The maps of what `frame`'s geometry draws.
     unsafe fn upload(gl: &glow::Context, frame: &ModelGpuFrame) -> Self {
         let preview = &frame.preview;
-        let image = |image: &Arc<H2Image>| unsafe { upload_h2_image(gl, image) };
+        let image = |image: &Arc<Image>| unsafe { upload_image(gl, image) };
         Self {
             flares: preview.h2.flares.iter().map(|at| at.flare.images.iter().map(image).collect()).collect(),
             light_volumes: preview
@@ -96,7 +96,7 @@ impl H2Slot {
                 unsafe { gl.delete_texture(texture) };
             }
             let gels = frame.preview.h2.gel_lights.iter().map(|light| light.gel());
-            self.gels = gels.map(|gel| gel.and_then(|gel| unsafe { upload_h2_image(gl, gel) })).collect();
+            self.gels = gels.map(|gel| gel.and_then(|gel| unsafe { upload_image(gl, gel) })).collect();
             self.gels_for = Some(frame.geometry_id);
         }
         &self.gels

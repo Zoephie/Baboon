@@ -13,11 +13,11 @@ use super::prt::{H3PrtKind, second_order_rotation};
 
 use super::shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Shield, H3Value};
 
-use crate::app::model_preview::common::image::H3Texels;
+use crate::app::model_preview::common::image::ImageTexels;
 use eframe::glow::{self, HasContext as _};
 use super::state::Gen3State;
 use super::super::gl::buffer::model_draw_range;
-use super::super::gl::texture::upload_h2_image_linear;
+use super::super::gl::texture::upload_image_linear;
 #[cfg(test)]
 use super::super::gl::texture::signed_bytes;
 use super::super::common::view::ce_flare_view;

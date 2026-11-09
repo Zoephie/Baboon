@@ -16,7 +16,7 @@ pub(crate) struct CeFlare {
     pub(crate) occlusion_radius: f32,
     pub(super) occlusion_offset: OcclusionOffset,
     pub(super) reflections: Vec<CeReflection>,
-    pub(crate) images: Vec<Arc<H2Image>>,
+    pub(crate) images: Vec<Arc<Image>>,
 }
 
 pub(super) fn read_flare(reader: &TagReader, path: &str) -> Option<CeFlare> {
@@ -29,7 +29,7 @@ pub(super) fn read_flare(reader: &TagReader, path: &str) -> Option<CeFlare> {
     for reflection in elements(root, "reflections") {
         let index = reflection.read_int_any("bitmap index").unwrap_or(0).max(0) as usize;
         let image = indices.iter().position(|known| *known == index).or_else(|| {
-            let image = decode_h2_image(reader, &bitmap, SamplerKind::Texture2D, index)?;
+            let image = decode_image(reader, &bitmap, SamplerKind::Texture2D, index)?;
             images.push(Arc::new(image));
             indices.push(index);
             Some(images.len() - 1)

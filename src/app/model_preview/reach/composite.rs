@@ -5,11 +5,11 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use eframe::glow::{self, HasContext};
 
 use super::super::gen3::effects::screen::H3ScreenSettings;
-use crate::app::model_preview::common::image::H3Sampler;
+use crate::app::model_preview::common::image::Sampler;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::HALF_LENS;
 use crate::app::model_preview::gl::screen::screen_program;
-use crate::app::model_preview::gl::texture::upload_h2_image_linear;
+use crate::app::model_preview::gl::texture::upload_image_linear;
 use super::render::ReachGame;
 
 impl ReachGame {
@@ -30,8 +30,8 @@ impl ReachGame {
                 && let Some((image, texels, mips)) = noise
             {
                 // Sampler 7: wrapped, point.
-                let sampler = H3Sampler { address: [BitmapAddressMode::Wrap; 2], filter: BitmapFilterMode::Point };
-                self.noise = upload_h2_image_linear(gl, image, *texels, mips, Some(sampler));
+                let sampler = Sampler { address: [BitmapAddressMode::Wrap; 2], filter: BitmapFilterMode::Point };
+                self.noise = upload_image_linear(gl, image, *texels, mips, Some(sampler));
             }
             if self.composite_program.is_none() {
                 self.composite_program = screen_program(gl, REACH_COMPOSITE_FRAGMENT);

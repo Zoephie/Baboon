@@ -288,7 +288,7 @@ fn bind_pass_textures(
             Some(ParameterSource::Inline(ResolvedValue::Bitmap(binding))) => (
                 binding.bitmap_path.clone(),
                 binding.bitmap_index,
-                Some(H3Sampler {
+                Some(Sampler {
                     address: [binding.address_mode_x, binding.address_mode_y],
                     filter: binding.filter_mode,
                 }),

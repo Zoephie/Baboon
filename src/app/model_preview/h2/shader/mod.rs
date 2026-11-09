@@ -19,7 +19,7 @@ use crate::core::h2_pixel_shader::{ConstantBinding, SamplerBinding,
     AlphaCompare, AlphaTest, PixelShaderOptions, SamplerKind, translate,
 };
 use super::super::dx9::passes::*;
-use super::super::common::image::H2Image;
+use super::super::common::image::Image;
 
 pub(in crate::app::model_preview) mod resolve;
 mod passes;

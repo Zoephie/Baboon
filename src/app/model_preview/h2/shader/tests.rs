@@ -324,7 +324,7 @@ fn brute_hair_resolves_from_the_kit() {
         1.0,
         |path, _| {
             read(path, "bitmap", b"bitm")?;
-            Some(std::sync::Arc::new(H2Image::Flat(TextureImage {
+            Some(std::sync::Arc::new(Image::Flat(TextureImage {
                 rgba: vec![0; 4],
                 width: 1,
                 height: 1,

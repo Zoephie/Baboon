@@ -210,11 +210,11 @@ fn resolve_one_material(
 }
 
 /// Decode a map in the shape its sampler asks for.
-pub(in crate::app::model_preview) fn decode_h2_image(reader: &TagReader, path: &str, kind: SamplerKind, index: usize) -> Option<H2Image> {
+pub(in crate::app::model_preview) fn decode_image(reader: &TagReader, path: &str, kind: SamplerKind, index: usize) -> Option<Image> {
     let tag = reader.load(path, "bitmap", b"bitm").ok()?;
     if kind == SamplerKind::Texture2D {
         let image = decode_thumbnail(&tag, index, MAX_TEXTURE_EDGE).ok()?;
-        return Some(H2Image::Flat(TextureImage {
+        return Some(Image::Flat(TextureImage {
             rgba: image.rgba,
             width: image.width,
             height: image.height,
@@ -237,7 +237,7 @@ pub(in crate::app::model_preview) fn decode_h2_image(reader: &TagReader, path: &
         }
         let face = |index: usize| decode(image.cube_face_bytes(index as u32).ok()?);
         let faces = [face(0)?, face(1)?, face(2)?, face(3)?, face(4)?, face(5)?];
-        return Some(H2Image::Cube { size: width as usize, faces });
+        return Some(Image::Cube { size: width as usize, faces });
     }
     let depth = image.depth() as usize;
     let mut rgba = Vec::new();
@@ -249,7 +249,7 @@ pub(in crate::app::model_preview) fn decode_h2_image(reader: &TagReader, path: &
         };
         rgba.extend(decode(slice)?);
     }
-    Some(H2Image::Volume { width: width as usize, height: height as usize, depth, rgba })
+    Some(Image::Volume { width: width as usize, height: height as usize, depth, rgba })
 }
 
 /// One layer of a texture array at mip `level`. Each layer keeps its whole

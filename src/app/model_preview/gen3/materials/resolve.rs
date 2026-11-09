@@ -58,12 +58,12 @@ pub(in crate::app::model_preview) fn read_resolved_map(
     reader: &TagReader,
     resolved: &ResolvedRenderMethod,
     name: &str,
-) -> Option<(H3Bitmap, H3Sampler)> {
+) -> Option<(H3Bitmap, Sampler)> {
     let ParameterSource::Inline(ResolvedValue::Bitmap(binding)) = &resolved.find(name)?.source else {
         return None;
     };
     let bitmap = read_h3_bitmap(reader, &binding.bitmap_path, binding.bitmap_index, SamplerKind::Texture2D)?;
-    let sampler = H3Sampler {
+    let sampler = Sampler {
         address: [binding.address_mode_x, binding.address_mode_y],
         filter: binding.filter_mode,
     };
@@ -86,7 +86,7 @@ pub(super) fn reach_environment_maps(reader: &TagReader, pass: &H3Pass, material
         let Some((image, texels, mips)) = h3_image(reader, DEFAULT_CUBE, 0, SamplerKind::Cube, caches) else {
             continue;
         };
-        let sampler = H3Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Trilinear };
+        let sampler = Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Trilinear };
         material.textures.push(H3Texture {
             uniform: uniform.clone(),
             image,

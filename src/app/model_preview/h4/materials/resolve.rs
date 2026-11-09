@@ -49,7 +49,7 @@ fn screen_material(reader: &TagReader, path: &str, caches: &mut ResolveCaches) -
             continue;
         }
         let Some((image, texels, mips)) = h3_image(reader, &texture.bitmap, 0, SamplerKind::Texture2D, caches) else { continue };
-        let sampler = H3Sampler { address: [h4_address(texture.address_u), h4_address(texture.address_v)], filter: h4_filter(texture.filter) };
+        let sampler = Sampler { address: [h4_address(texture.address_u), h4_address(texture.address_v)], filter: h4_filter(texture.filter) };
         textures.push(H3Texture { uniform: uniform.to_owned(), image, texels, mips, sampler: Some(sampler), frames: Vec::new() });
     }
     // `set_explicit_shaders` (X360 0x82AA4FC8) submits for every phase.
@@ -210,7 +210,7 @@ pub(in crate::app::model_preview) fn resolve_h4_material(reader: &TagReader, tag
                     image,
                     texels,
                     mips,
-                    sampler: Some(H3Sampler {
+                    sampler: Some(Sampler {
                         address: [h4_address(texture.address_u), h4_address(texture.address_v)],
                         filter: h4_filter(texture.filter),
                     }),
@@ -229,7 +229,7 @@ pub(in crate::app::model_preview) fn resolve_h4_material(reader: &TagReader, tag
                 && let Some((image, texels, mips)) = h3_image(reader, &path, 0, SamplerKind::Texture2D, caches)
             {
                 // Address 0 (wrap), filter 2 (bilinear).
-                let sampler = H3Sampler { address: [BitmapAddressMode::Wrap; 2], filter: BitmapFilterMode::Bilinear };
+                let sampler = Sampler { address: [BitmapAddressMode::Wrap; 2], filter: BitmapFilterMode::Bilinear };
                 h3.textures.push(H3Texture { uniform, image, texels, mips, sampler: Some(sampler), frames: Vec::new() });
             }
             // Still this material's alone, so the submit takes them in place.

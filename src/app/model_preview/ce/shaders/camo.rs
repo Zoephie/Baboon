@@ -46,7 +46,7 @@ pub(in crate::app::model_preview) fn read_ce_camo_settings(reader: &TagReader) -
 pub(in crate::app::model_preview) fn ce_camo_pass(
     settings: &CeCamoSettings,
     two_sided: bool,
-    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
 ) -> H2DrawPass {
     /// `refraction amount` is in pixels of the half-width the game draws at.
     const HALF_WIDTH: f32 = 320.0;

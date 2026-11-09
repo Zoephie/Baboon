@@ -12,10 +12,10 @@ use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::effect_part::H2EffectPart;
 use super::super::effects::{for_each_attached_part, part_markers};
-use super::super::common::image::H2Image;
+use super::super::common::image::Image;
 use super::super::common::named_function::tag_function_at;
 use super::super::effects::marker_name;
-use super::super::materials::decode_h2_image;
+use super::super::materials::decode_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::dot;
@@ -65,7 +65,7 @@ pub(crate) struct H2Volume {
     color: TagFunction,
     facing: TagFunction,
     aspect: Option<VolumeAspect>,
-    bitmap: Option<Arc<H2Image>>,
+    bitmap: Option<Arc<Image>>,
 }
 
 /// A `light_volume` at a marker of the object.
@@ -93,7 +93,7 @@ fn function_of(holder: TagStruct<'_>, name: &str) -> Option<TagFunction> {
     tag_function_at(&holder.descend(name)?, "function")
 }
 
-fn read_volume(reader: &TagReader, volume: TagStruct<'_>, glow: Option<&Arc<H2Image>>) -> Option<H2Volume> {
+fn read_volume(reader: &TagReader, volume: TagStruct<'_>, glow: Option<&Arc<Image>>) -> Option<H2Volume> {
     let flagged = |wanted: &str| has_flag(volume, "flags", wanted);
     let aspect = elements(volume, "aspect").first().and_then(|aspect| {
         Some(VolumeAspect {
@@ -106,7 +106,7 @@ fn read_volume(reader: &TagReader, volume: TagStruct<'_>, glow: Option<&Arc<H2Im
     });
     let own = volume.read_tag_ref_path("bitmap").filter(|path| !path.is_empty());
     let bitmap = match own {
-        Some(path) => decode_h2_image(reader, &path, SamplerKind::Texture2D, 0).map(Arc::new),
+        Some(path) => decode_image(reader, &path, SamplerKind::Texture2D, 0).map(Arc::new),
         None => glow.cloned(),
     };
     let count = volume.read_int_any("sprite count")?.clamp(4, MOST_SPRITES as i128) as usize;
@@ -151,15 +151,15 @@ fn read_volume(reader: &TagReader, volume: TagStruct<'_>, glow: Option<&Arc<H2Im
 }
 
 /// `globals`' `rasterizer data`, whose `glow` stands in for a volume's bitmap.
-pub(in crate::app::model_preview) fn read_glow(reader: &TagReader) -> Option<Arc<H2Image>> {
+pub(in crate::app::model_preview) fn read_glow(reader: &TagReader) -> Option<Arc<Image>> {
     let globals = reader.load("globals\\globals", "globals", b"matg").ok()?;
     let data = elements(globals.root(), "rasterizer data");
     let path = data.first()?.read_tag_ref_path("glow").filter(|path| !path.is_empty())?;
-    decode_h2_image(reader, &path, SamplerKind::Texture2D, 0).map(Arc::new)
+    decode_image(reader, &path, SamplerKind::Texture2D, 0).map(Arc::new)
 }
 
-pub(in crate::app::model_preview) fn read_h2_bitmap(reader: &TagReader, path: &str) -> Option<Arc<H2Image>> {
-    decode_h2_image(reader, path, SamplerKind::Texture2D, 0).map(Arc::new)
+pub(in crate::app::model_preview) fn read_h2_bitmap(reader: &TagReader, path: &str) -> Option<Arc<Image>> {
+    decode_image(reader, path, SamplerKind::Texture2D, 0).map(Arc::new)
 }
 
 /// `render_submit_object_attachments`: one at every marker of the name. Then
@@ -423,7 +423,7 @@ impl H2Volume {
         self.fuzzy
     }
 
-    pub(crate) fn bitmap(&self) -> Option<&Arc<H2Image>> {
+    pub(crate) fn bitmap(&self) -> Option<&Arc<Image>> {
         self.bitmap.as_ref()
     }
 }

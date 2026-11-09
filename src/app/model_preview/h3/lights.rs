@@ -14,7 +14,7 @@ use super::super::effects::{
 };
 use super::super::functions::FunctionValues;
 
-use super::super::common::image::H2Image;
+use super::super::common::image::Image;
 use super::super::common::named_function::NamedFunction;
 use super::super::gen3::effects::flares::{H3EffectScale, H3Flare, read_h3_flare};
 use super::super::*;
@@ -88,7 +88,7 @@ pub(crate) struct H3Light {
     spherical: f32,
     color: H3Channel,
     intensity: H3Channel,
-    pub(crate) gel: Option<Arc<H2Image>>,
+    pub(crate) gel: Option<Arc<Image>>,
     /// Its `Lens Flare`, which `light_submit_lens_flares` draws at it.
     pub(in crate::app::model_preview) flare: Option<Arc<H3Flare>>,
 }
@@ -245,7 +245,7 @@ fn read_h3_light(reader: &TagReader, path: &str) -> Option<H3LightTag> {
     let gel = root.read_tag_ref_path("gel bitmap").filter(|gel| !gel.is_empty());
     let gel = gel
         .filter(|_| has_flag_labelled(root, "flags", &SHADOWS_AND_GELS))
-        .and_then(|gel| decode_h2_image(reader, &gel, SamplerKind::Texture2D, 0))
+        .and_then(|gel| decode_image(reader, &gel, SamplerKind::Texture2D, 0))
         .map(Arc::new);
     Some(H3LightTag {
         frustum: root.field("type").is_some_and(|field| field.enum_is("frustum")),
@@ -281,7 +281,7 @@ struct H3LightTag {
     spherical: f32,
     color: H3Channel,
     intensity: H3Channel,
-    gel: Option<Arc<H2Image>>,
+    gel: Option<Arc<Image>>,
     flare: Option<Arc<H3Flare>>,
 }
 

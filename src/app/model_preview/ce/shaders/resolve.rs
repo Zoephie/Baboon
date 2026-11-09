@@ -114,7 +114,7 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
         if let Some(cached) = caches.h2_images.get(&key) {
             return cached.clone();
         }
-        let decoded = decode_h2_image(reader, path, kind, image).map(Arc::new);
+        let decoded = decode_image(reader, path, kind, image).map(Arc::new);
         caches.h2_images.insert(key, decoded.clone());
         decoded
     };
@@ -172,7 +172,7 @@ fn expand_ce_digits(
                 .h2_images
                 .entry(key)
                 .or_insert_with(|| {
-                    decode_h2_image(reader, &numeric.map, SamplerKind::Texture2D, digit).map(Arc::new)
+                    decode_image(reader, &numeric.map, SamplerKind::Texture2D, digit).map(Arc::new)
                 })
                 .clone();
             let mut pass = pass.clone();

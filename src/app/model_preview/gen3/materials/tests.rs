@@ -10,7 +10,7 @@ fn kit_an_a8_bitmap_samples_black_with_its_alpha() {
     let Some(source) = kit_source(GameId::HaloReach) else { return };
     let first_texel = |path: &str| {
         let (image, _, _) = read_h3_bitmap(&crate::app::model_preview::load::TagReader::new(&source), path, 0, SamplerKind::Texture2D).expect(path);
-        let H2Image::Flat(flat) = &*image else {
+        let Image::Flat(flat) = &*image else {
             panic!("{path} should be flat");
         };
         [flat.rgba[0], flat.rgba[1], flat.rgba[2], flat.rgba[3]]

@@ -11,7 +11,7 @@ use super::super::gen3::pipeline::{PictureCopies, view_projection};
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::state::Gen3State;
 use super::super::gl::screen::screen_program;
-use super::super::gl::texture::upload_h2_image_linear;
+use super::super::gl::texture::upload_image_linear;
 use super::render::H3Game;
 use super::vision::{GAME_FAR, GAME_NEAR, H3MotionBlur, H3Vision, inverted};
 
@@ -209,7 +209,7 @@ impl H3Game {
                 let Some((image, texels, mips)) = vision.mask() else {
                     return;
                 };
-                self.vision_mask = upload_h2_image_linear(gl, image, *texels, mips, None);
+                self.vision_mask = upload_image_linear(gl, image, *texels, mips, None);
             }
             let (Some(program), Some(mask)) = (self.vision_program, self.vision_mask) else {
                 return;
