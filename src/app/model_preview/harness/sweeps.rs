@@ -7,6 +7,7 @@ use super::shot::*;
 use crate::core::game::GameId;
 use crate::core::source::TagSource;
 use eframe::glow::{self, HasContext as _};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// What one pass reads: `H3_PASS=<family>|<template>|<entry>` and

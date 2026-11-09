@@ -1,7 +1,8 @@
 //! preview application state.
 //! It owns state types only; drawing them and acting on them belong to the feature's other modules.
 
-use super::*;
+use super::{ModelPreviewData, PreviewAnimationPlayback};
+use std::collections::HashMap;
 
 pub(in crate::app) const DEFAULT_MODEL_PREVIEW_SIZE: f32 = 1.0;
 pub(in crate::app) const MIN_MODEL_PREVIEW_SIZE: f32 = 0.8;

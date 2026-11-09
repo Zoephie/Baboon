@@ -1,7 +1,10 @@
 //! Model loading, variant selection, and depth-tested preview presentation.
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
-use super::*;
+use super::{
+    GameId, TagEntry, TagEntryLocation, TagNameIndex, TagSource, file_entry_key, read_entry,
+    tag_path,
+};
 use crate::app::browser::decode_thumbnail;
 use crate::app::editor::{
     BlockConfirm, FieldEditContext, cached_render_method_definition, cached_render_method_option,
@@ -15,8 +18,11 @@ use crate::app::export::{
 };
 use crate::app::kits::KitStamp;
 use crate::app::shell::{WorkerMessage, spawn_background, spawn_worker};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use blam_tags::paths::{group_tag_to_extension, resolve_tag_path, tag_ref_path};
+use blam_tags::{RenderModel, TagField, TagFieldData, TagFile, TagStruct};
+use eframe::egui;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 pub(in crate::app) mod animation;
 mod antennas;

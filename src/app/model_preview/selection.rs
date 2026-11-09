@@ -1,7 +1,12 @@
 //! The variant, region and permutation selection: which variant and
 //! permutations a preview starts in, and which regions it draws.
 
-use super::*;
+use super::super::ModelVariantRegionChoice;
+use super::{
+    ModelPreviewData, ModelPreviewLayer, ModelPreviewState, ModelRegionSelection, PHYSICS_REGION,
+    RenderModelPreviewRegion,
+};
+use std::collections::HashMap;
 
 /// The variant to select on load: the one an object names, else one literally
 /// named `default`, else the first (the canonical entry — `chief`, `minor`,
@@ -177,7 +182,11 @@ pub(super) fn normalized_new_variant_name(
 
 #[cfg(test)]
 mod tests {
+    use super::super::{
+        ModelVariantPreview, RenderModelPreview, RenderModelPreviewRegion, model_preview_data,
+    };
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn an_object_s_default_variant_comes_first() {

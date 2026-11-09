@@ -20,6 +20,7 @@ use super::gl_state::gl_state;
 use crate::core::format::TagNameIndex;
 use crate::core::game::GameId;
 use crate::core::source::{TagEntry, TagEntryLocation, TagSource};
+use eframe::egui;
 use eframe::glow::{self, HasContext as _};
 use std::sync::Arc;
 

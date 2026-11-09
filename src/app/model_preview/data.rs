@@ -1,7 +1,14 @@
 //! The preview data a load produces: the renderer-facing geometry, its
 //! materials, markers and nodes, and the resolved variants beside it.
 
-use super::*;
+use super::super::GameId;
+use super::{
+    ChangeColors, MaterialTextures, PreviewAnimationEntry, antennas, ce, cloth, dx9, gen3, h2, h3,
+    h4, particles, reach,
+};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Renderer-facing preview geometry derived from a [`RenderModel`]. Lives in
 /// Baboon (not blam-tags) since it is purely a GUI concern.
