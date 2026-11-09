@@ -168,39 +168,39 @@ fn load_snapshot(data: &ModelPreviewData) -> String {
         regions.sort();
         let mut hidden: Vec<_> = variant.hidden_regions.iter().collect();
         hidden.sort();
-        let text = format!("{regions:?} {hidden:?} {:?}", variant.muted_nodes);
+        let text = format!("{} {} {}", debug_text(&regions), debug_text(&hidden), debug_text(&variant.muted_nodes));
         line(&mut out, &format!("variant {}", variant.name), &text);
     }
     line(
         &mut out,
         "default_variant",
-        &format!("{:?}", data.default_variant),
+        &debug_text(&data.default_variant),
     );
     line(
         &mut out,
         "change_colors",
-        &format!("{:?}", data.change_colors),
+        &debug_text(&data.change_colors),
     );
     line(
         &mut out,
         "ce_object_functions",
-        &format!("{:?}", data.ce_object_functions),
+        &debug_text(&data.ce_object_functions),
     );
-    line(&mut out, "ce_attached", &format!("{:?}", data.ce_attached));
-    line(&mut out, "ce_weapons", &format!("{:?}", data.ce_weapons));
+    line(&mut out, "ce_attached", &debug_text(&data.ce_attached));
+    line(&mut out, "ce_weapons", &debug_text(&data.ce_weapons));
     line(
         &mut out,
         "object_functions",
-        &format!("{:?}", data.object_functions),
+        &debug_text(&data.object_functions),
     );
-    line(&mut out, "weapons", &format!("{:?}", data.weapons));
-    line(&mut out, "attached", &format!("{:?}", data.attached));
+    line(&mut out, "weapons", &debug_text(&data.weapons));
+    line(&mut out, "attached", &debug_text(&data.attached));
     line(
         &mut out,
         "scenario_bsps",
-        &format!("{:?}", data.scenario_bsps),
+        &debug_text(&data.scenario_bsps),
     );
-    line(&mut out, "notes", &format!("{:?}", data.notes));
+    line(&mut out, "notes", &debug_text(&data.notes));
     out
 }
 

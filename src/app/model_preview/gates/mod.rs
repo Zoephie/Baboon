@@ -23,7 +23,7 @@ mod options;
 #[cfg(target_os = "macos")]
 mod pixels;
 
-use field_lines::{inline_field_lines, line};
+use field_lines::{debug_text, inline_field_lines, line};
 pub(super) use field_lines::field_lines;
 pub(super) use load::LOAD_SET;
 
