@@ -34,9 +34,7 @@ pub(in crate::app::model_preview) fn read_h3_object_features(
     preview
         .gen3
         .flares
-        .extend(super::super::gen3::effects::flares::light_flares(
-            &preview.h3.lights,
-        ));
+        .extend(super::lights::light_flares(&preview.h3.lights));
     preview.gen3.light_volumes = super::super::gen3::effects::light_volumes::read_h3_light_volumes(
         reader,
         model_tag,

@@ -18,11 +18,13 @@ use crate::app::model_preview::common::marker::MarkerFrame;
 
 use super::super::common::image::Image;
 use super::super::common::named_function::NamedFunction;
-use super::super::gen3::effects::flares::{Gen3EffectScale, Gen3Flare, read_h3_flare};
+use super::super::gen3::effects::flares::{
+    FlareLight, FlareLightAt, Gen3EffectScale, Gen3Flare, Gen3FlareAt, light_flare, read_h3_flare,
+};
 use super::super::gen3::lights::SHADOWS_AND_GELS;
 use super::super::{RenderModelPreviewMarker, TagReader, decode_image};
 use crate::app::model_preview::common::attached::attached;
-use crate::app::model_preview::common::math::{cross, dot};
+use crate::app::model_preview::common::math::{SMALLEST, cross, dot};
 use crate::core::h2_pixel_shader::SamplerKind;
 
 /// What `add_simple_light_to_draw_list` falls back on.
@@ -30,7 +32,6 @@ const FALLBACK_DISTANCE: f32 = 5.0;
 const FALLBACK_CONE: f32 = 0.5;
 /// `light_update`'s range until something names one.
 const DEFAULT_RANGE: f32 = 0.5;
-pub(in crate::app::model_preview) const SMALLEST: f32 = 1e-6;
 
 #[derive(Debug, Clone)]
 struct H3Channel(NamedFunction);
@@ -181,7 +182,7 @@ impl H3Light {
 
     /// `light_update`'s `state.color` and `state.current_scale` this frame,
     /// or none while the light is out.
-    pub(crate) fn state(
+    pub(crate) fn light_state(
         &self,
         values: Option<&FunctionValues>,
         change_colors: &[[f32; 3]; 4],
@@ -229,7 +230,7 @@ impl H3Light {
         time: f32,
         onset: f32,
     ) -> Option<H3LitLight> {
-        let (color, _) = self.state(values, change_colors, time, onset)?;
+        let (color, _) = self.light_state(values, change_colors, time, onset)?;
         let (position, mut forward) = posed_on(self.node, self.position, self.forward, bones);
         let (_, mut up) = posed_on(self.node, self.position, self.up, bones);
         if self.world_oriented {
@@ -463,6 +464,37 @@ pub(in crate::app::model_preview) fn read_h3_lights(
 }
 
 attached!(H3Light);
+
+impl FlareLight for H3Light {
+    fn state(
+        &self,
+        values: Option<&FunctionValues>,
+        change_colors: &[[f32; 3]; 4],
+        time: f32,
+        onset: f32,
+    ) -> Option<([f32; 3], f32)> {
+        self.light_state(values, change_colors, time, onset)
+    }
+}
+
+/// `light_submit_lens_flares`: each light with a `Lens Flare` draws it where
+/// the light is, by the light's color and scale. Take `lights` once they are
+/// final, renamed for what they hang on.
+pub(in crate::app::model_preview) fn light_flares(lights: &[H3Light]) -> Vec<Gen3FlareAt> {
+    let flare_of = |light: &H3Light| {
+        let at = FlareLightAt {
+            object: light.object,
+            node: light.node,
+            position: light.position,
+            forward: light.forward,
+            only_under: light.only_under.clone(),
+            scale_by: light.scale_by.clone(),
+        };
+        let flare = Arc::clone(light.flare.as_ref()?);
+        Some(light_flare(at, flare, Arc::new(light.clone())))
+    };
+    lights.iter().filter_map(flare_of).collect()
+}
 
 #[cfg(test)]
 mod tests {

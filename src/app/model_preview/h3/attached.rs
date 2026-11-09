@@ -53,6 +53,6 @@ pub(in crate::app::model_preview) fn read_h3_attached_features<
     preview
         .gen3
         .flares
-        .extend(super::super::gen3::effects::flares::light_flares(&lights));
+        .extend(super::lights::light_flares(&lights));
     preview.h3.lights.extend(lights);
 }

@@ -23,10 +23,8 @@ use super::super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
 use super::super::super::{RenderModelPreviewMarker, TagReader};
 use super::super::pipeline::EXPOSURE;
 use crate::app::model_preview::common::attached::attached;
-use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
+use crate::app::model_preview::common::math::{SMALLEST, cross, dot, unit_by_reciprocal};
 use crate::core::h2_pixel_shader::SamplerKind;
-
-use super::super::super::h3::lights::{H3Light, SMALLEST};
 
 /// A `lens_flare`'s first reflection, the only one H3 draws.
 #[derive(Debug, Clone)]
@@ -177,7 +175,32 @@ pub(crate) struct Gen3FlareAt {
     event: Option<(Arc<EffectTimes>, usize)>,
     flare: Arc<Gen3Flare>,
     /// A light's own flare: the light, whose state colors and scales it.
-    light: Option<Arc<H3Light>>,
+    light: Option<Arc<dyn FlareLight>>,
+}
+
+/// A light with a flare of its own (`light_submit_lens_flares`), which its
+/// state colors and scales and puts out with it.
+pub(crate) trait FlareLight: std::fmt::Debug + Send + Sync {
+    /// `light_update`'s `state.color` and `state.current_scale` this frame,
+    /// or none while the light is out.
+    fn state(
+        &self,
+        values: Option<&FunctionValues>,
+        change_colors: &[[f32; 3]; 4],
+        time: f32,
+        onset: f32,
+    ) -> Option<([f32; 3], f32)>;
+}
+
+/// Where a light with a flare hangs: its object, node and place on it, the
+/// region and permutation it shows under, and its function.
+pub(in crate::app::model_preview) struct FlareLightAt {
+    pub(in crate::app::model_preview) object: u8,
+    pub(in crate::app::model_preview) node: usize,
+    pub(in crate::app::model_preview) position: [f32; 3],
+    pub(in crate::app::model_preview) forward: [f32; 3],
+    pub(in crate::app::model_preview) only_under: Option<(String, String)>,
+    pub(in crate::app::model_preview) scale_by: String,
 }
 
 /// `effect_generate_lens_flares`' use of the attachment's scale.
@@ -422,26 +445,26 @@ pub(in crate::app::model_preview) fn read_h3_flares(
     flares
 }
 
-/// `light_submit_lens_flares`: each light with a `Lens Flare` draws it where
-/// the light is, by the light's color and scale. Take `lights` once they are
-/// final, renamed for what they hang on.
-pub(in crate::app::model_preview) fn light_flares(lights: &[H3Light]) -> Vec<Gen3FlareAt> {
-    let flare_of = |light: &H3Light| {
-        Some(Gen3FlareAt {
-            object: light.object,
-            node: light.node,
-            position: light.position,
-            forward: light.forward,
-            only_under: light.only_under.clone(),
-            scale_by: light.scale_by.clone(),
-            secondary_by: String::new(),
-            by_effect: None,
-            event: None,
-            flare: Arc::clone(light.flare.as_ref()?),
-            light: Some(Arc::new(light.clone())),
-        })
-    };
-    lights.iter().filter_map(flare_of).collect()
+/// `light_submit_lens_flares`: a light's `Lens Flare`, drawn where the
+/// light is, by the light's color and scale.
+pub(in crate::app::model_preview) fn light_flare(
+    at: FlareLightAt,
+    flare: Arc<Gen3Flare>,
+    light: Arc<dyn FlareLight>,
+) -> Gen3FlareAt {
+    Gen3FlareAt {
+        object: at.object,
+        node: at.node,
+        position: at.position,
+        forward: at.forward,
+        only_under: at.only_under,
+        scale_by: at.scale_by,
+        secondary_by: String::new(),
+        by_effect: None,
+        event: None,
+        flare,
+        light: Some(light),
+    }
 }
 
 /// `k_minimum_visible_lens_flare`.
@@ -473,7 +496,7 @@ impl Gen3FlareAt {
     }
 
     /// For a light's own flare, the light.
-    pub(crate) fn light(&self) -> Option<&H3Light> {
+    pub(crate) fn light(&self) -> Option<&dyn FlareLight> {
         self.light.as_deref()
     }
 

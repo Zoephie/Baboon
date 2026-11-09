@@ -153,6 +153,9 @@ pub(in crate::app::model_preview) fn rigid_inverse(matrix: &Matrix4) -> Matrix4 
     inverse
 }
 
+/// The least a length, cone or power is taken to be (`_real_epsilon`).
+pub(in crate::app::model_preview) const SMALLEST: f32 = 1e-6;
+
 /// Tool's postprocess takes bounds all under this as unset.
 pub(in crate::app::model_preview) const UNSET: f32 = 0.0001;
 
