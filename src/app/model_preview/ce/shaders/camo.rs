@@ -4,7 +4,7 @@ use super::base::{
     CAMO_FILE, SimplePass, plain_blend, read_shader_source, shader_directory, texture,
 };
 use super::{
-    Dx9BlendFactor, Dx9DrawPass, Dx9VertexStage, PASS_GLSL_VERSION, DX9_TEXTURE_ROWS, Image,
+    DX9_TEXTURE_ROWS, Dx9BlendFactor, Dx9DrawPass, Dx9VertexStage, Image, PASS_GLSL_VERSION,
     SamplerKind, TagReader, has_flag, translate_fx,
 };
 use std::sync::Arc;

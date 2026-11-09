@@ -2,7 +2,7 @@
 
 use super::super::super::gl::glsl::fill;
 use super::ce::{CE_POINT_LIGHT_ROWS, CE_TRANSPARENT_CUBE};
-use super::kind::{Dx9VertexStage, DX9_TEXTURE_ROWS};
+use super::kind::{DX9_TEXTURE_ROWS, Dx9VertexStage};
 use super::{H2_PRT_REGISTERS, model_vertex_prelude};
 
 impl Dx9VertexStage {

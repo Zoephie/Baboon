@@ -13,7 +13,7 @@ use super::model::LAYER_GROUPS;
 use super::special::{meter_pass, plasma_pass, water_passes};
 use super::{
     CeNumeric, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass, Dx9DrawTexture, Dx9VertexStage,
-    FADE_MODES, FramebufferBlend, PASS_GLSL_VERSION, Image, SamplerKind, TagReader, argb, has_flag,
+    FADE_MODES, FramebufferBlend, Image, PASS_GLSL_VERSION, SamplerKind, TagReader, argb, has_flag,
     translate_fx,
 };
 use blam_tags::{TagBlock, TagFieldData, TagStruct};

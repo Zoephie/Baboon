@@ -9,8 +9,8 @@ use super::base::{
 };
 use super::glass::bumped_rows;
 use super::{
-    Dx9BlendFactor, Dx9Compare, Dx9Depth, Dx9DrawPass, Dx9VertexStage, PASS_GLSL_VERSION,
-    DX9_TEXTURE_ROWS, Image, SamplerKind, translate_fx,
+    DX9_TEXTURE_ROWS, Dx9BlendFactor, Dx9Compare, Dx9Depth, Dx9DrawPass, Dx9VertexStage, Image,
+    PASS_GLSL_VERSION, SamplerKind, translate_fx,
 };
 use blam_tags::TagStruct;
 use std::sync::Arc;

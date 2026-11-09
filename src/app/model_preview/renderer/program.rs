@@ -197,7 +197,10 @@ mod tests {
     /// dialect egui can hand the renderer; without it, skip by name.
     #[test]
     fn pass_support_reads_the_context_version() {
-        assert!(pass_context_supported(4, 1, false), "the macOS core profile");
+        assert!(
+            pass_context_supported(4, 1, false),
+            "the macOS core profile"
+        );
         assert!(pass_context_supported(3, 3, false));
         assert!(!pass_context_supported(3, 2, false));
         assert!(!pass_context_supported(3, 3, true), "OpenGL ES");

@@ -192,7 +192,8 @@ pub(in crate::app::model_preview) fn function_values_for(
         .iter()
         .flat_map(|textures| textures.iter())
         .any(|texture| texture.h3.is_some());
-    (data.object_functions.is_some() || flares || h3).then(|| object_function_values(data, set, time))
+    (data.object_functions.is_some() || flares || h3)
+        .then(|| object_function_values(data, set, time))
 }
 
 /// Whether anything on the object changes with time alone.
@@ -247,8 +248,7 @@ fn object_functions_move(
         .zip(&held)
         .any(|(attached, (_, values))| attached.functions.move_at_rest(values));
     held_move
-        || data
-            .object_functions
-            .as_ref()
-            .is_some_and(|functions| functions.move_at_rest(&object_function_values(data, set, time)))
+        || data.object_functions.as_ref().is_some_and(|functions| {
+            functions.move_at_rest(&object_function_values(data, set, time))
+        })
 }

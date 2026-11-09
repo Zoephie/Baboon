@@ -1,7 +1,7 @@
 //! The GPU slots a preview's buffers and textures live in, least recently drawn first out.
 
 use super::super::dx9::draw::sort_points;
-use super::super::dx9::passes::{Dx9DrawPass, DX9_LAYER_COUNT};
+use super::super::dx9::passes::{DX9_LAYER_COUNT, Dx9DrawPass};
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::texture::{upload_image, upload_texture};
 use super::super::particles::{sprite_maps, upload_cheap_render_texture};
@@ -358,8 +358,7 @@ impl ModelGpuSlot {
                 .cheap_emitters
                 .first()
                 .and_then(|at| at.library().render_texture());
-            self.cheap_texture =
-                render.and_then(|render| upload_cheap_render_texture(gl, render));
+            self.cheap_texture = render.and_then(|render| upload_cheap_render_texture(gl, render));
             for texture in self.flare_textures.drain(..).flatten().flatten() {
                 gl.delete_texture(texture);
             }

@@ -1,7 +1,7 @@
 //! A material's decoded textures and detail composition.
 
 use super::super::{SLOT_COUNT, TextureSlot};
-use super::{Dx9DrawPass, Gen3Material, DX9_LAYER_COUNT};
+use super::{DX9_LAYER_COUNT, Dx9DrawPass, Gen3Material};
 use std::sync::Arc;
 
 /// One decoded texture, ready to become a GL texture.

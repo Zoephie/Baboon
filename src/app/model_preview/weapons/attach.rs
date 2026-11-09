@@ -5,7 +5,7 @@ use super::super::{RenderModelPreview, TagReader};
 use super::graph::{descendants, string_id_in};
 use super::unit::UnitWeapons;
 use super::{
-    AttachedObject, WeaponIk, MarkerFrame, attach_point, attach_vector, build_render_preview,
+    AttachedObject, MarkerFrame, WeaponIk, attach_point, attach_vector, build_render_preview,
     elements, fold_attached, holder_of, object_variant, weapon_ik,
 };
 use blam_tags::TagFile;

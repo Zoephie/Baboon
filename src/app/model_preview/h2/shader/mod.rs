@@ -9,7 +9,7 @@
 //! chooses them for something with no lightmap of its own.
 
 use super::super::common::image::Image;
-use super::super::dx9::stage::{Dx9VertexStage, DX9_TEXTURE_ROWS};
+use super::super::dx9::stage::{DX9_TEXTURE_ROWS, Dx9VertexStage};
 use super::super::functions::object_input;
 use super::super::materials::TextureImage;
 use crate::app::model_preview::common::fields::has_flag;

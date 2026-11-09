@@ -12,7 +12,7 @@ use super::super::gen3::pipeline::gen3_set_blend;
 use super::super::gen3::shaders::Gen3Blend;
 use super::super::renderer::FrameCx;
 use super::slot::H2Slot;
-use crate::app::model_preview::common::sprite_gl::{sprite_occlusion, draw_flare_sprites};
+use crate::app::model_preview::common::sprite_gl::{draw_flare_sprites, sprite_occlusion};
 
 /// Halo 2's own part of the dx9 shading: its cloth, its gel lights' maps,
 /// its light volumes, liquids and contrails, and its flares.
@@ -195,8 +195,7 @@ impl Dx9Game for H2Game {
                 let occlusion = match at.occlusion_patches(bones, view) {
                     None => [1.0; 2],
                     Some((outer, inner)) => {
-                        let Some(outer) = sprite_occlusion(gl, flares, camera, view, &outer)
-                        else {
+                        let Some(outer) = sprite_occlusion(gl, flares, camera, view, &outer) else {
                             continue;
                         };
                         let inner = inner.map_or(Some(1.0), |inner| {

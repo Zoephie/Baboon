@@ -41,8 +41,7 @@ pub(in crate::app::model_preview) fn read_h4_attached_features<
     preview.h4.lights.extend(named(lights, name));
     preview.h4.cheap_lights.extend(named(cheap, name));
     super::super::h4::light_pass::read_h4_light_passes(reader, preview);
-    let particles =
-        super::super::particles::read_particles(reader, object, owner, markers, frame);
+    let particles = super::super::particles::read_particles(reader, object, owner, markers, frame);
     preview
         .particles
         .extend(named(particles, name).map(Arc::new));

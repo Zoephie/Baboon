@@ -7,7 +7,7 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use super::super::common::image::Image;
 use super::super::frame::ModelGpuFrame;
-use super::super::gen3::pipeline::{SHIELD_DAMAGE, HALF_LENS};
+use super::super::gen3::pipeline::{HALF_LENS, SHIELD_DAMAGE};
 use super::super::renderer::RenderCore;
 use super::render::H4Game;
 use crate::app::model_preview::common::image::{ImageTexels, Sampler};

@@ -10,7 +10,7 @@ use super::base::{
 use super::special::unseen_pass;
 use super::transparent::TRANSPARENT_DECAL_DEPTH_BIAS;
 use super::{
-    Dx9BlendFactor, Dx9DrawPass, Dx9VertexStage, PASS_GLSL_VERSION, DX9_TEXTURE_ROWS, Image,
+    DX9_TEXTURE_ROWS, Dx9BlendFactor, Dx9DrawPass, Dx9VertexStage, Image, PASS_GLSL_VERSION,
     SamplerKind, translate_fx,
 };
 use blam_tags::TagStruct;

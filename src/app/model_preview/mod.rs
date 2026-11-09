@@ -70,8 +70,8 @@ pub(in crate::app) use load::build_render_preview;
 pub(in crate::app) use campaign_evolved::prewarm_ce_mesh_sync_index;
 use common::camera::{
     DEPTH_UNITS, MAX_PREVIEW_SCALE, ModelGpuCamera, PreviewCamera, camera_light, clip_position,
-    sprite_pixels, eye_position, min_preview_scale, preview_center_radius, rotate_view_vector,
-    scene_depth_terms, unrotate_view_vector,
+    eye_position, min_preview_scale, preview_center_radius, rotate_view_vector, scene_depth_terms,
+    sprite_pixels, unrotate_view_vector,
 };
 use common::clock::{frame_steps, resume_point};
 pub(in crate::app) use common::palette::material_color;

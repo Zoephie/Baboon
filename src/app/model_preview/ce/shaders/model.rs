@@ -8,8 +8,8 @@ use super::base::{
 };
 use super::transparent::MODEL_DECAL_DEPTH_BIAS;
 use super::{
-    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass,
-    Dx9VertexStage, PASS_GLSL_VERSION, DX9_TEXTURE_ROWS, Image, PassAnimation, SamplerKind, TagReader,
+    DX9_TEXTURE_ROWS, Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth,
+    Dx9DrawPass, Dx9VertexStage, Image, PASS_GLSL_VERSION, PassAnimation, SamplerKind, TagReader,
     TranslatedFxShader, translate_fx,
 };
 use blam_tags::TagStruct;

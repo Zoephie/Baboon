@@ -15,7 +15,7 @@ use super::super::dx9::passes::{
     Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass,
     Dx9DrawTexture, PASS_GLSL_VERSION,
 };
-use super::super::dx9::stage::{Dx9VertexStage, DX9_TEXTURE_ROWS};
+use super::super::dx9::stage::{DX9_TEXTURE_ROWS, Dx9VertexStage};
 use crate::app::model_preview::ce::blend::{FADE_MODES, FramebufferBlend};
 use crate::app::model_preview::common::random::{high16_times_inverse_65535, lcg_step};
 use crate::core::ce_pixel_shader::{TranslatedFxShader, translate_fx};

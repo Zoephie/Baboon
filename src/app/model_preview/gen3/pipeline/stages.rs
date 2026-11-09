@@ -281,12 +281,8 @@ impl Gen3State {
                                 .unwrap_or(0.0)
                         };
                         // `render_object_context`: the overshield in fifths of a byte.
-                        let quantities = [
-                            frame.time,
-                            reading(SHIELD_DAMAGE),
-                            reading(OVERSHIELD),
-                            0.0,
-                        ];
+                        let quantities =
+                            [frame.time, reading(SHIELD_DAMAGE), reading(OVERSHIELD), 0.0];
                         gl.uniform_4_f32_slice(location.as_ref(), &quantities);
                     }
                     if name == "bound_sphere" {

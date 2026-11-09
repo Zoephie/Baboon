@@ -4,7 +4,7 @@ use super::animation::{H2AnimatedRow, H2Animation, H2Clock, PassAnimation, anima
 use super::change_colors::H2AnimatedTint;
 use super::globals::fill_components;
 use super::numeric::CeNumeric;
-use super::{AlphaTest, Dx9VertexStage, DX9_TEXTURE_ROWS, Image, SamplerKind};
+use super::{AlphaTest, DX9_TEXTURE_ROWS, Dx9VertexStage, Image, SamplerKind};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(in crate::app) enum Dx9ParameterValue {

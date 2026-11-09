@@ -12,7 +12,7 @@ use super::draw::{
     ce_sorts_transparents, draw_ce_group, draw_ce_transparents,
 };
 use super::slot::CeSlot;
-use crate::app::model_preview::common::sprite_gl::{sprite_occlusion, draw_flare_sprites};
+use crate::app::model_preview::common::sprite_gl::{draw_flare_sprites, sprite_occlusion};
 use eframe::glow::{self, HasContext as _};
 
 /// Halo CE's own part of the dx9 shading: its flags and effects, its

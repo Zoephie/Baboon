@@ -15,7 +15,7 @@ use super::super::{
     ALL_SLOTS, DetailFunction, ModelGpuFrame, ModelGpuSlot, SLOT_COUNT, effects, material_color,
 };
 use super::grid::{background_is_dark, grid_line_color};
-use super::program::{SAMPLER_UNIFORMS, pass_context_supported, model_shader_sources};
+use super::program::{SAMPLER_UNIFORMS, model_shader_sources, pass_context_supported};
 use super::slot::{MODEL_GPU_SLOTS, MaterialGlTextures, ModelSlotLru};
 use eframe::egui::Color32;
 use eframe::glow;

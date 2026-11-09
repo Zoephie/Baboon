@@ -3,8 +3,8 @@
 
 use super::super::dx9::passes::H2Clock;
 use super::super::dx9::passes::{
-    Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9DrawPass, Dx9Layer, PASS_GLSL_VERSION,
-    DX9_REFLECTION_SCALE, H2DefaultLight, normalization_face,
+    DX9_REFLECTION_SCALE, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9DrawPass,
+    Dx9Layer, H2DefaultLight, PASS_GLSL_VERSION, normalization_face,
 };
 use super::super::dx9::stage::Dx9VertexStage;
 use super::super::gl::buffer::model_draw_range;

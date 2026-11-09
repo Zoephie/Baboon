@@ -696,12 +696,7 @@ mod tests {
             summary,
             [
                 (2, "b_l_hand", "left_hand_spartan", IkHolder::Weapon(1)),
-                (
-                    3,
-                    "b_r_hand",
-                    "right_hand_spartan",
-                    IkHolder::Weapon(1)
-                ),
+                (3, "b_r_hand", "right_hand_spartan", IkHolder::Weapon(1)),
             ]
         );
         assert!(tracks.iter().all(|track| {

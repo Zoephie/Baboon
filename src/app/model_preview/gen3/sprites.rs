@@ -7,7 +7,7 @@ use super::state::Gen3State;
 use eframe::glow::{self, HasContext as _};
 
 use super::super::super::effects::EffectOnsets;
-use super::super::common::sprite_gl::{SpriteGl, sprite_occlusion, draw_flare_sprites};
+use super::super::common::sprite_gl::{SpriteGl, draw_flare_sprites, sprite_occlusion};
 use super::super::common::sprites::{
     ParticleTargets, advance_sprite_simulations, begin_flares, draw_antennas, draw_particle_system,
     draw_sprite_quad,
@@ -16,11 +16,11 @@ use super::super::common::view::ViewFrame;
 use super::super::common::view::camera_view_frame;
 use super::super::gl::pass_state::PassState;
 use super::super::particles::ParticleField;
-use super::super::particles::{CHEAP_FLOATS, CheapGl, ParticleGl, particle_floats, link_cheap_gl};
+use super::super::particles::{CHEAP_FLOATS, CheapGl, ParticleGl, link_cheap_gl, particle_floats};
 use super::super::reach::lighting::reach_exposure;
 use super::super::{
-    ModelGpuCamera, ModelGpuFrame, ModelGpuSlot, RenderCore, clip_position, sprite_pixels, h4,
-    scene_depth_terms,
+    ModelGpuCamera, ModelGpuFrame, ModelGpuSlot, RenderCore, clip_position, h4, scene_depth_terms,
+    sprite_pixels,
 };
 use super::pipeline::{gen3_lighting_constants, gen3_set_blend};
 use super::render::Gen3Game;

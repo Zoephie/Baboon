@@ -8,7 +8,8 @@ use super::screen::{
 };
 use super::{
     DrawnObject, Gen3Material, Gen3Pass, Gen3State, Gen3Value, H4BloomSettings, H4Draw, H4Game,
-    H4HologramPost, H4ScreenMaterial, camera_view_frame, gen3_set_cull, set_value, upload_image_linear,
+    H4HologramPost, H4ScreenMaterial, camera_view_frame, gen3_set_cull, set_value,
+    upload_image_linear,
 };
 use crate::app::model_preview::gl::blit::blit_depth;
 use eframe::glow;

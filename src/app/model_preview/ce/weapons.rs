@@ -375,7 +375,7 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
 #[cfg(test)]
 mod tests {
     use super::super::super::animation::ik::weapon::{
-        WeaponIk, LONGEST_REACH, clip_runs_weapon_ik, reach_with_arm,
+        LONGEST_REACH, WeaponIk, clip_runs_weapon_ik, reach_with_arm,
     };
     use super::super::super::common::marker::{attach_point, attach_vector};
     use super::super::super::common::math::{IDENTITY, axis_of, minus, place_of};

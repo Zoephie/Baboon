@@ -1,6 +1,6 @@
 //! A pass's animated values: their kinds, clocks and rows, and the readers they share.
 
-use super::{FunctionValues, DX9_TEXTURE_ROWS, tag_function_at};
+use super::{DX9_TEXTURE_ROWS, FunctionValues, tag_function_at};
 use blam_tags::tag_function::FunctionType;
 use blam_tags::{TagFunction, TagStruct};
 use std::sync::Arc;
