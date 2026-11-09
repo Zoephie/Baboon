@@ -39,12 +39,13 @@ pub(crate) struct RenderModelPreview {
     pub errors: Vec<ModelErrorPrimitive>,
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
-    /// Halo CE: where a held weapon pulls the unit's hands.
+    /// Where a held weapon pulls the unit's hands, in every game that holds
+    /// weapons.
     pub weapon_ik: Vec<crate::app::model_preview::animation::ik::weapon::WeaponIk>,
     pub particles: Vec<Arc<particles::ParticleSystem>>,
     pub cloth: Vec<cloth::ClothAt>,
     pub instances: RenderModelInstances,
-    /// Halo 2 antennas, on the markers of the opened object.
+    /// Antennas, on the markers of the opened object.
     pub antennas: Vec<antennas::Antenna>,
     /// Halo 2's own features.
     pub h2: h2::H2Features,
@@ -285,7 +286,7 @@ pub(in crate::app) struct ModelPreviewData {
     pub(in crate::app) variants: Vec<ModelVariantPreview>,
     /// The variant an object tag starts in, when it names one.
     pub(in crate::app) default_variant: Option<String>,
-    /// The Halo 2 object beside this model's change colors; empty otherwise.
+    /// The object beside this model's change colors; empty otherwise.
     pub(in crate::app) change_colors: ChangeColors,
     /// An opened Halo CE object's functions.
     pub(in crate::app) ce_object_functions: Option<super::ce::functions::CeObjectFunctions>,
@@ -293,11 +294,11 @@ pub(in crate::app) struct ModelPreviewData {
     pub(in crate::app) ce_attached: Vec<super::ce::weapons::CeAttachedObject>,
     /// Halo CE bipeds: what the unit can hold.
     pub(in crate::app) ce_weapons: Option<super::ce::weapons::CeBipedWeapons>,
-    /// Halo 2: the functions of an opened object.
+    /// Halo 2 and later: the functions of an opened object.
     pub(in crate::app) object_functions: Option<super::functions::ObjectFunctions>,
-    /// Halo 2 units: what they can hold.
+    /// Halo 2 and later units: what they can hold.
     pub(in crate::app) weapons: Option<super::weapons::UnitWeapons>,
-    /// Halo 2 units: what they hold.
+    /// Halo 2 and later units: what they hold.
     pub(in crate::app) attached: Vec<super::weapons::attached::AttachedObject>,
     /// Scenario tags only: the `structure bsps` block's references (one per
     /// element, `None` where the reference is empty), driving the per-BSP

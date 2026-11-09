@@ -70,7 +70,7 @@ impl ModelSlotLru {
 pub(in crate::app::model_preview) struct SlotSimulations {
     /// Halo 2's and the gen3 games' particle systems.
     pub(in crate::app::model_preview) particles: particles::ParticleField,
-    /// Reach's cheap particles.
+    /// Reach's and Halo 4's cheap particles.
     pub(in crate::app::model_preview) cheap: particles::cheap::CheapField,
     pub(in crate::app::model_preview) strips: gen3::effects::strips::Gen3StripField,
     /// When each effect began, for Halo 2's and the gen3 games' effect parts.
@@ -109,7 +109,7 @@ pub(in crate::app::model_preview) struct ModelGpuSlot {
     pub(in crate::app::model_preview) simulations: SlotSimulations,
     pub(in crate::app::model_preview) vertex_array: glow::NativeVertexArray,
     pub(super) vertex_buffer: glow::NativeBuffer,
-    /// Halo 2 per-vertex PRT, unused by every other model.
+    /// Per-vertex PRT, for Halo 2's and the gen3 games' PRT models.
     pub(super) prt_buffer: glow::NativeBuffer,
     pub(super) index_buffer: glow::NativeBuffer,
     /// The ground grid's own vertex array and buffer, built per geometry

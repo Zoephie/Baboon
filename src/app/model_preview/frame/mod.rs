@@ -132,14 +132,14 @@ pub(in crate::app::model_preview) struct ModelGpuFrame {
     /// Skinning matrices for this frame — three vec4 rows per bone, in
     /// `RenderModelPreview::nodes` order. `None` draws the bind pose.
     pub(in crate::app::model_preview) bones: Option<Arc<Vec<[f32; 4]>>>,
-    /// The selected variant's change colors for Halo 2 passes.
+    /// The selected variant's change colors, for the game's passes.
     pub(in crate::app::model_preview) change_colors: [[f32; 3]; 4],
     /// Halo CE: each object's `A out` to `D out` and change colors this frame,
     /// the opened one first. Empty with none.
     pub(in crate::app::model_preview) object_states: Vec<CeObjectState>,
     /// Whether those change by themselves.
     pub(in crate::app::model_preview) object_moves: bool,
-    /// Halo 2: what its shaders can read of the object's functions.
+    /// What the game's shaders can read of the object's functions.
     pub(in crate::app::model_preview) function_values: Option<super::functions::FunctionValues>,
     /// What a held weapon's own functions read, by owner.
     pub(in crate::app::model_preview) attached_values: Vec<(u8, super::functions::FunctionValues)>,
@@ -151,7 +151,7 @@ pub(in crate::app::model_preview) struct ModelGpuFrame {
     pub(in crate::app::model_preview) ce_points: Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>,
     /// The panel's plays of Halo CE's event effects.
     pub(in crate::app::model_preview) ce_plays: ce::effects::CeEventPlays,
-    /// Draw opaque Halo 2 materials through their passes.
+    /// Draw materials through the game's own passes.
     pub(in crate::app::model_preview) game_shaders: bool,
     pub(in crate::app::model_preview) default_lights: bool,
     pub(in crate::app::model_preview) active_camo: bool,
@@ -159,7 +159,7 @@ pub(in crate::app::model_preview) struct ModelGpuFrame {
     pub(in crate::app::model_preview) self_shadow: bool,
     pub(in crate::app::model_preview) prt: bool,
     pub(in crate::app::model_preview) light_follows_camera: bool,
-    /// Seconds, for what Halo 2 shaders animate.
+    /// Seconds, for what the game's shaders animate.
     pub(in crate::app::model_preview) time: f32,
     /// A PRT model's constants on the object path: lit, then in shadow.
     pub(in crate::app::model_preview) h2_prt_clusters: Option<[Vec<[f32; 4]>; 2]>,

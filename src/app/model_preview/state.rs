@@ -43,7 +43,7 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) weapon: Option<String>,
     /// The `weapon` the cached `data` was built with.
     pub(in crate::app) loaded_weapon: Option<String>,
-    /// Halo 2 bipeds: what the left hand holds.
+    /// Halo 2 and later bipeds: what the left hand holds.
     pub(in crate::app) secondary_weapon: Option<String>,
     pub(in crate::app) loaded_secondary_weapon: Option<String>,
     /// What outlives the reload a weapon change makes: the old geometry's id,
@@ -73,7 +73,7 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) loaded_scenario_selection: std::collections::BTreeSet<usize>,
     pub(in crate::app) render_mode: ModelRenderMode,
     pub(in crate::app) show_backfaces: bool,
-    /// Draw Halo 2 opaque materials through the game's own passes.
+    /// Draw materials through the game's own passes.
     pub(in crate::app) game_shaders: bool,
     /// Take the game's no-lightmap path, with its two default lights, instead
     /// of its path for an object in a level.
@@ -93,7 +93,7 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) ce_event_scales: [f32; 2],
     /// The shots the panel has fired from Halo CE weapons' triggers.
     pub(in crate::app) ce_shots: super::ce::firing::CeShots,
-    /// What the panel has set of a Halo 2 object's functions.
+    /// What the panel has set of a Halo 2 or later object's functions.
     pub(in crate::app) function_inputs: super::functions::FunctionInputs,
     /// A texture-resolve job is running for the loaded model.
     pub(in crate::app) textures_pending: bool,

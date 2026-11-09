@@ -381,7 +381,7 @@ impl RenderCore {
     ) {
         unsafe {
             if frame.render_mode.draws_wireframe() {
-                // Halo 3's passes end on their own programs; the camera and
+                // The gen3 passes end on their own programs; the camera and
                 // material uniforms below are the preview's.
                 gl.use_program(Some(self.program));
                 gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
