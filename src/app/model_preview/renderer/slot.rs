@@ -329,7 +329,7 @@ impl ModelGpuSlot {
                     let (image, texels, mips) = at.bitmap();
                     vec![crate::app::model_preview::gl::texture::upload_h2_image_linear(gl, image, *texels, mips, None)]
                 })
-                .chain(h4::flares::pass::h4_flare_images(gl, frame))
+                .chain(super::game::game_flare_images(gl, frame))
                 .collect();
             for texture in self.antenna_textures.drain(..).flatten() {
                 gl.delete_texture(texture);

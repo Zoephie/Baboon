@@ -64,6 +64,15 @@ impl GameRenders {
     }
 }
 
+/// The flare images a game uploads after Halo 3's and Reach's in the slot's,
+/// by the drawing its preview goes to.
+pub(super) unsafe fn game_flare_images(gl: &glow::Context, frame: &ModelGpuFrame) -> Vec<Vec<Option<glow::NativeTexture>>> {
+    match Route::of(&frame.preview) {
+        Route::Halo4 => unsafe { h4::flares::pass::h4_flare_images(gl, frame) },
+        _ => Vec::new(),
+    }
+}
+
 /// Which drawing a preview goes to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Route {
