@@ -363,6 +363,7 @@ mod tests {
         fn new(options: Vec<String>, height: f32) -> Self {
             let ctx = egui::Context::default();
             ctx.set_global_style(foundation_style());
+            install_focus_outlines(&ctx);
             Self {
                 ctx,
                 options,
@@ -581,7 +582,10 @@ mod tests {
             let mut demo = Demo::new((0..20).map(|i| format!("Choice {i}")).collect(), 180.0);
             demo.nested = nested;
             demo.open();
-            demo.search("Choice 19");
+            // Typing immediately after opening must filter without a click
+            // inside the search field, for direct and nested option lists.
+            demo.frame(vec![egui::Event::Text("Choice 19".to_owned())]);
+            demo.settle();
             assert_eq!(demo.rows.iter().map(|(i, _)| *i).collect::<Vec<_>>(), [19]);
             demo.click(demo.rows[0].1.center());
             assert_eq!(demo.selected, 19);

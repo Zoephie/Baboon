@@ -955,6 +955,7 @@ pub(in crate::app) fn picker_search_field(
         crate::app::ui_kit::singleline_text_edit(filter)
             .hint_text(placeholder_text(hint))
             .desired_width(ui.available_width())
+            .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
             .margin(egui::Margin {
                 left: 4,
                 right: 28,

@@ -148,7 +148,7 @@ pub(in crate::app) fn browser_favorites_divider(ui: &mut Ui, favorites_visible: 
 }
 
 /// A tab connected to the surface below it: round above, open along the bottom.
-pub(in crate::app) fn paint_connected_tab(ui: &Ui, rect: egui::Rect, fill: Color32, active: bool) {
+pub(in crate::app) fn paint_connected_tab(ui: &Ui, rect: egui::Rect, fill: Color32, active: bool, focused: bool) {
     let corners = egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 };
     // Cover the bar's baseline with an opaque area, rather than an
     // antialiased stroke laid over another stroke at a fractional pixel.
@@ -169,15 +169,16 @@ pub(in crate::app) fn paint_connected_tab(ui: &Ui, rect: egui::Rect, fill: Color
             }
         }
         points.push(r.right_bottom());
-        ui.painter().add(egui::Shape::line(points, Stroke::new(1.0, grid_line())));
+        let border = if focused { focused_tab_border(ui.visuals().dark_mode) } else { grid_line() };
+        ui.painter().add(egui::Shape::line(points, Stroke::new(1.0, border)));
     }
 }
 
 /// Leave the active tab's opening out of the page outline entirely.
 pub(in crate::app) fn paint_page_outline(
-    ui: &Ui, rect: egui::Rect, corners: egui::CornerRadius, tab: Option<&egui::Rect>,
+    ui: &Ui, rect: egui::Rect, corners: egui::CornerRadius, tab: Option<&egui::Rect>, focused: bool,
 ) {
-    let stroke = Stroke::new(1.0, grid_line());
+    let stroke = Stroke::new(1.0, if focused { focused_tab_border(ui.visuals().dark_mode) } else { grid_line() });
     let Some(tab) = tab else {
         ui.painter().rect_stroke(rect, corners, stroke, egui::StrokeKind::Inside);
         return;
@@ -6283,6 +6284,72 @@ mod tests {
         settle(&mut h, 4);
         let tag = &h.app.model.kits[h.app.model.active].parsed_tags[&key].tag;
         assert_eq!(tag.root().descend("materials[0]").unwrap().read_int_any("material type"), Some(6));
+    }
+
+    #[test]
+    fn block_entry_dropdown_focuses_search_in_full_editor() {
+        let kit = LooseKit::new("block-search-focus", "haloce_mcc");
+        let path = kit.write_classic_ce("objects/collision", "model_collision_geometry");
+        let source = kit.source();
+        let mut tag = read_entry(&source.source, &source.entries[0]).unwrap();
+        for name in ["Alpha", "Bravo"] {
+            crate::core::document::apply::add_block_element(&mut tag, "materials").unwrap();
+            let index = if name == "Alpha" { 0 } else { 1 };
+            crate::core::document::apply::apply_field_edit(&mut tag,
+                &format!("materials[{index}]/name"), name).unwrap();
+        }
+        tag.write(&path).unwrap();
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        let key = kit.open(&mut h.app, "objects/collision.model_collision_geometry");
+        settle(&mut h, 12);
+        let jump = h.ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new((
+            "block_index_jump_test", key.as_str(), "indirect damage material",
+        )))).unwrap();
+        click_point(&mut h, jump.center());
+        settle(&mut h, 30);
+        let selector = h.painted_rects.iter().find(|(text, _)| text.contains("0.") && text.contains("Alpha"))
+            .expect("the materials selector is visible").1.center();
+        click_point(&mut h, selector);
+        settle(&mut h, 8);
+        assert!(h.painted.iter().any(|text| text == "Search Entries"));
+        h.frame(vec![egui::Event::Text("Bravo".to_owned())]);
+        settle(&mut h, 3);
+        assert!(h.painted.iter().any(|text| text == "Bravo"),
+            "the popup filters immediately: {:?}", h.painted);
+    }
+
+    #[test]
+    fn block_index_jump_scrolls_to_already_selected_and_other_entries() {
+        for index in [0, 1] {
+            let kit = LooseKit::new("block-index-jump", "haloce_mcc");
+            let path = kit.write_classic_ce("objects/collision", "model_collision_geometry");
+            let source = kit.source();
+            let mut tag = read_entry(&source.source, &source.entries[0]).unwrap();
+            for _ in 0..2 {
+                crate::core::document::apply::add_block_element(&mut tag, "materials").unwrap();
+            }
+            for (path, value) in [
+                ("materials[0]/name", "Alpha"), ("materials[1]/name", "Bravo"),
+                ("indirect damage material", if index == 0 { "0" } else { "1" }),
+            ] {
+                crate::core::document::apply::apply_field_edit(&mut tag, path, value).unwrap();
+            }
+            tag.write(&path).unwrap();
+            let mut h = Harness::new();
+            kit.install(&mut h.app);
+            let key = kit.open(&mut h.app, "objects/collision.model_collision_geometry");
+            settle(&mut h, 12);
+            let jump = h.ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new((
+                "block_index_jump_test", key.as_str(), "indirect damage material",
+            )))).expect("the index reference's Jump To button is visible");
+            click_point(&mut h, jump.center());
+            settle(&mut h, 30);
+            let expected = if index == 0 { "Alpha" } else { "Bravo" };
+            assert!(h.painted_rects.iter().any(|(text, rect)| text == expected
+                && rect.top() > 150.0 && rect.bottom() < SCREEN.y - 40.0),
+                "Jump To must show material {index} without opening its dropdown: {:?}", h.painted);
+        }
     }
 
     /// Rows out of view are not built, and what shows is what drawing every

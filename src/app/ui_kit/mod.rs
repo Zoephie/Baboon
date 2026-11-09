@@ -2,6 +2,8 @@
 //! artwork. It knows nothing about tags or features.
 
 use super::*;
+mod focus;
+pub(in crate::app) use focus::{install_focus_outlines, workspace_has_focus};
 pub(in crate::app) mod scroll;
 
 pub(in crate::app) mod style;

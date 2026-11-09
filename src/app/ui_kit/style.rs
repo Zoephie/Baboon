@@ -566,6 +566,11 @@ pub(in crate::app) fn grid_line() -> Color32 {
     }
 }
 
+/// Neutral emphasis for the tab owning the currently focused pane.
+pub(in crate::app) fn focused_tab_border(dark_mode: bool) -> Color32 {
+    Color32::from_gray(if dark_mode { 160 } else { 90 })
+}
+
 pub(in crate::app) fn foundation_group_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(43, 43, 43)

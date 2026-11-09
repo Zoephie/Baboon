@@ -1871,7 +1871,7 @@ pub(in crate::app) fn jump_target_id() -> egui::Id {
     egui::Id::new("foundation_jump_to_block")
 }
 
-/// A parent jump belongs to the exact tag pane that initiated it. Matching
+/// A parent or index-reference jump belongs to the exact tag pane that initiated it. Matching
 /// block paths in another pane or editing kit must never consume this request.
 pub(in crate::app) fn parent_block_jump_id(view_scope: &str, tag_key: &str) -> egui::Id {
     egui::Id::new(("foundation_parent_block_jump", view_scope, tag_key))
@@ -2047,8 +2047,7 @@ pub(in crate::app) fn draw_foundation_block_control(
     ));
     let now = ui.input(|input| input.time);
 
-    // 3.4 jump-to-parent: if a child's "↑" targeted this block last frame, bring
-    // its header into view (and clear the pending target).
+    // Bring a navigation target's header into view and clear the pending request.
     if pending_jump
         .as_deref()
         .is_some_and(|target| block_paths_match(target, path_salt))
@@ -2689,7 +2688,7 @@ fn searchable_block_selector_with_none(
                 .data(|data| data.get_temp::<String>(filter_id))
                 .unwrap_or_default();
             let filter_changed =
-                picker_search_field(ui, &mut filter, "search entries…", just_opened);
+                picker_search_field(ui, &mut filter, "Search Entries", just_opened);
             ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
             ui.separator();
             let query = filter.trim().to_lowercase();
@@ -3286,8 +3285,15 @@ pub(in crate::app) fn draw_foundation_block_index_row(
         } else {
             go_to.on_disabled_hover_text("No referenced element (index is <none>)")
         };
+        #[cfg(test)]
+        ui.data_mut(|data| data.insert_temp(egui::Id::new((
+            "block_index_jump_test", edit.tag_key, strip_field_ordinals(path),
+        )), go_to.rect));
         if go_to.clicked() {
-            ui.data_mut(|d| d.insert_temp(jump_target_id(), target_block_path.to_owned()));
+            // The pane treats its scoped navigation request as a reason to
+            // render offscreen destinations, even when selection is unchanged.
+            let jump_id = parent_block_jump_id(edit.view_scope, edit.tag_key);
+            ui.data_mut(|d| d.insert_temp(jump_id, target_block_path.to_owned()));
             set_block_selected_index(ui, edit, target_block_path, current as usize);
             ui.ctx().request_repaint();
         }
@@ -3887,6 +3893,7 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.set_fonts(foundation_fonts());
         ctx.set_global_style(foundation_style());
+        install_focus_outlines(&ctx);
         let popup_id = egui::Id::new("test_block_search_resize");
         let frame = |events| {
             let mut response = None;
@@ -3929,6 +3936,9 @@ mod tests {
         }
         let height = || ctx.memory(|memory| memory.area_rect(popup_id).unwrap().height());
         let full_height = height();
+        let focused_search = ctx.memory(|memory| memory.focused()).expect("opening the dropdown focuses search");
+        assert_eq!(ctx.read_response(focused_search).unwrap().rect.height(), BUTTON_HEIGHT,
+            "the entry search uses the standard input height");
         frame(vec![egui::Event::Text("entry 39".to_owned())]);
         for _ in 0..5 {
             frame(Vec::new());

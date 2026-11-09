@@ -12,7 +12,7 @@ fn draw_home_tab(ui: &mut Ui, group: egui_tiles::TileId, active: bool) -> egui::
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, "Home"));
     let fill = if active { left_panel() } else if response.hovered() { context_menu_hover() }
         else { Color32::TRANSPARENT };
-    crate::app::shell::frame::paint_connected_tab(ui, rect, fill, active);
+    crate::app::shell::frame::paint_connected_tab(ui, rect, fill, active, active && workspace_has_focus(ui.ctx()));
     paint_button_icon_at(ui, ButtonIcon::Home,
         egui::Rect::from_center_size(rect.center(), Vec2::splat(18.0)), text_dark());
     response
@@ -91,7 +91,16 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         // Tile traversal visits the top/left child first, including nested
         // splits, so the first tab bar is the primary workspace's bar.
         if *self.primary_group.get_or_insert(tile_id) == tile_id {
-            if draw_home_tab(ui, tile_id, empty || self.parts.shell.home_groups.contains(&tile_id)).clicked() {
+            let home_active = empty || self.parts.shell.home_groups.contains(&tile_id);
+            let home_tab = draw_home_tab(ui, tile_id, home_active);
+            if !home_active && tabs.children.iter().find(|id| tiles.is_visible(**id))
+                .is_some_and(|id| !tabs.is_active(*id))
+            {
+                ui.painter().vline(home_tab.rect.right() - 0.5,
+                    (home_tab.rect.top() + 5.0)..=(home_tab.rect.bottom() - 5.0),
+                    Stroke::new(1.0, grid_line()));
+            }
+            if home_tab.clicked() {
                 self.cx.send(AppAction::ShowHome { group: tile_id });
             }
         } else {
@@ -260,7 +269,9 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         if ui.is_rect_visible(rect) && !state.is_being_dragged {
             let fill = if !state.active && response.hovered() { context_menu_hover() }
                 else { self.tab_bg_color(ui.visuals(), tiles, tile_id, state) };
-            crate::app::shell::frame::paint_connected_tab(ui, rect, fill, state.active);
+            let focused = workspace_has_focus(ui.ctx()) && matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(kit))
+                if *kit == self.cx.model.kits[self.cx.model.active].id);
+            crate::app::shell::frame::paint_connected_tab(ui, rect, fill, state.active, focused);
             if !state.active && self.inactive_dividers.contains(&tile_id) {
                 ui.painter().vline(rect.right() - 0.5, (rect.top() + 5.0)..=(rect.bottom() - 5.0),
                     Stroke::new(1.0, grid_line()));
@@ -360,7 +371,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
                 .with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config));
         let fill = if response.hovered() || popup.is_open() { context_menu_hover() }
             else { Color32::TRANSPARENT };
-        crate::app::shell::frame::paint_connected_tab(ui, rect, fill, false);
+        crate::app::shell::frame::paint_connected_tab(ui, rect, fill, false, false);
         paint_button_icon_at(ui, ButtonIcon::AddWorkspace,
             egui::Rect::from_center_size(rect.center(), Vec2::splat(18.0)), text_dark());
         let home = self.parts.shell.home_groups.contains(&group);
