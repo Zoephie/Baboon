@@ -391,7 +391,7 @@ pub(in crate::app::model_preview) fn resolve_h4_material(
         textures.slots[TextureSlot::Base as usize] = cached_bitmap(reader, &binding, caches);
     }
     match result {
-        Ok(h3) => textures.h3 = Some(Arc::new(h3)),
+        Ok(h3) => textures.gen3 = Some(Arc::new(h3)),
         Err(error) => textures.error = Some(format!("Halo 4 material not drawn: {error}")),
     }
     caches.h4.shaders.insert(material.shader, Ok(shader));

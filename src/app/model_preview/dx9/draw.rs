@@ -1,7 +1,7 @@
 //! The DX9 pass machinery on the shared core: preparing the programs, binding a pass's
 //! uniforms, drawing each material's passes in order, the texaccum fill and the frame copy.
 
-use super::super::dx9::passes::H2Clock;
+use super::super::dx9::passes::Dx9Clock;
 use super::super::dx9::passes::{
     DX9_REFLECTION_SCALE, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9DrawPass,
     Dx9Layer, Dx9Light, PASS_GLSL_VERSION, normalization_face,
@@ -17,7 +17,7 @@ use super::super::{
     link_pass_program, rotate_view_vector, unrotate_view_vector,
 };
 use super::binds::Dx9Binds;
-use super::shadow::{H2_SHADOW_MAP_UNIT, ShadowStyle, h2_shadow_matrix};
+use super::shadow::{SHADOW_MAP_UNIT, ShadowStyle, shadow_matrix};
 use crate::core::h2_pixel_shader::SamplerKind;
 use eframe::glow::{self, HasContext as _};
 use std::collections::HashMap;
@@ -29,16 +29,16 @@ use std::rc::Rc;
 pub(in crate::app::model_preview) struct Dx9Gl {
     /// Linked pass programs. `None` records a failure, so it is not retried
     /// every frame and the material keeps drawing as it did.
-    pub(in crate::app::model_preview) h2_programs:
+    pub(in crate::app::model_preview) pass_programs:
         HashMap<(Dx9VertexStage, String), Option<Rc<Linked>>>,
-    pub(in crate::app::model_preview) h2_normalization_cube: Option<glow::NativeTexture>,
-    pub(in crate::app::model_preview) h2_target: Option<SceneTarget>,
-    pub(in crate::app::model_preview) h2_frame_copy: Option<SceneTarget>,
+    pub(in crate::app::model_preview) normalization_cube: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) texaccum_target: Option<SceneTarget>,
+    pub(in crate::app::model_preview) frame_copy: Option<SceneTarget>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
-    pub(in crate::app::model_preview) h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
+    pub(in crate::app::model_preview) gel_now: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
     /// Made on first use; `Some(None)` once making it failed, so a driver
     /// that cannot is not asked again (and nothing leaks) every frame.
-    pub(in crate::app::model_preview) h2_shadow_map:
+    pub(in crate::app::model_preview) shadow_map:
         Option<Option<(glow::NativeFramebuffer, glow::NativeTexture)>>,
     /// The style of the self shadow drawn last, which its passes and a later
     /// apply bind the light from.
@@ -48,18 +48,18 @@ pub(in crate::app::model_preview) struct Dx9Gl {
 impl Dx9Gl {
     pub(in crate::app::model_preview) unsafe fn new(gl: &glow::Context) -> Self {
         Self {
-            h2_programs: HashMap::new(),
-            h2_normalization_cube: unsafe { upload_normalization_cube(gl) },
-            h2_target: None,
-            h2_frame_copy: None,
-            h2_gel: None,
-            h2_shadow_map: None,
+            pass_programs: HashMap::new(),
+            normalization_cube: unsafe { upload_normalization_cube(gl) },
+            texaccum_target: None,
+            frame_copy: None,
+            gel_now: None,
+            shadow_map: None,
             shadow: None,
         }
     }
 }
 
-pub(in crate::app::model_preview) const H2_GEL_MASK_UNIT: u32 = 10;
+pub(in crate::app::model_preview) const GEL_UNIT: u32 = 10;
 
 pub(in crate::app::model_preview) fn gl_blend_factor(factor: Dx9BlendFactor) -> u32 {
     match factor {
@@ -265,13 +265,13 @@ pub(in crate::app::model_preview) unsafe fn upload_normalization_cube(
 }
 
 impl RenderCore {
-    fn h2_passes(frame: &ModelGpuFrame, material: usize, layer: Dx9Layer) -> &[Dx9DrawPass] {
+    fn dx9_passes_of(frame: &ModelGpuFrame, material: usize, layer: Dx9Layer) -> &[Dx9DrawPass] {
         frame
             .textures
             .as_ref()
             .and_then(|textures| textures.get(material))
             .map_or(&[], |material| {
-                material.h2_layers[layer as usize].as_slice()
+                material.dx9_layers[layer as usize].as_slice()
             })
     }
 
@@ -279,7 +279,7 @@ impl RenderCore {
     pub(in crate::app::model_preview) fn dx9_camo_on(&self, frame: &ModelGpuFrame) -> bool {
         frame.active_camo
             && (0..frame.preview.materials.len())
-                .any(|material| self.h2_material_ready(frame, material, Dx9Layer::ActiveCamo))
+                .any(|material| self.dx9_material_ready(frame, material, Dx9Layer::ActiveCamo))
     }
 
     /// Whether a material's passes stand in for the slots. Transparent ones
@@ -290,38 +290,38 @@ impl RenderCore {
         frame: &ModelGpuFrame,
         material: usize,
     ) -> bool {
-        if self.h2_material_ready(frame, material, Dx9Layer::Transparent) {
+        if self.dx9_material_ready(frame, material, Dx9Layer::Transparent) {
             return true;
         }
         if self.dx9_camo_on(frame) {
-            return self.h2_material_ready(frame, material, Dx9Layer::ActiveCamo);
+            return self.dx9_material_ready(frame, material, Dx9Layer::ActiveCamo);
         }
         if !frame.game_shaders {
             return false;
         }
         let lightmap = frame.dx9_lightmap_layer();
-        self.h2_material_ready(frame, material, lightmap)
-            || self.h2_material_ready(frame, material, Dx9Layer::Prt)
-            || (Self::h2_passes(frame, material, lightmap).is_empty()
-                && (self.h2_material_ready(frame, material, Dx9Layer::Overlay)
+        self.dx9_material_ready(frame, material, lightmap)
+            || self.dx9_material_ready(frame, material, Dx9Layer::Prt)
+            || (Self::dx9_passes_of(frame, material, lightmap).is_empty()
+                && (self.dx9_material_ready(frame, material, Dx9Layer::Overlay)
                     || (frame
                         .textures
                         .as_ref()
                         .and_then(|textures| textures.get(material))
                         .is_none_or(|material| material.get(TextureSlot::Base).is_none())
-                        && self.h2_material_ready(frame, material, Dx9Layer::SelfIllumination))))
+                        && self.dx9_material_ready(frame, material, Dx9Layer::SelfIllumination))))
     }
 
     /// Whether a material draws through its passes rather than the slots: it
     /// has some, and every one linked.
-    fn h2_material_ready(&self, frame: &ModelGpuFrame, material: usize, layer: Dx9Layer) -> bool {
-        let passes = Self::h2_passes(frame, material, layer);
+    fn dx9_material_ready(&self, frame: &ModelGpuFrame, material: usize, layer: Dx9Layer) -> bool {
+        let passes = Self::dx9_passes_of(frame, material, layer);
         self.shaders_supported
             && !passes.is_empty()
             && (layer != Dx9Layer::Prt || (frame.prt && frame.preview.h2.prt.is_some()))
             && passes.iter().all(|pass| {
                 self.dx9
-                    .h2_programs
+                    .pass_programs
                     .get(&(pass.stage, pass.fragment.clone()))
                     .is_some_and(Option::is_some)
             })
@@ -342,10 +342,10 @@ impl RenderCore {
         };
         let passes = textures
             .iter()
-            .flat_map(|material| material.h2_layers.iter().flatten());
+            .flat_map(|material| material.dx9_layers.iter().flatten());
         for pass in passes {
             let key = (pass.stage, pass.fragment.clone());
-            if self.dx9.h2_programs.contains_key(&key) {
+            if self.dx9.pass_programs.contains_key(&key) {
                 continue;
             }
             let vertex = pass.stage.source(PASS_GLSL_VERSION);
@@ -357,7 +357,7 @@ impl RenderCore {
                     None
                 }
             };
-            self.dx9.h2_programs.insert(key, program);
+            self.dx9.pass_programs.insert(key, program);
         }
     }
 
@@ -374,8 +374,8 @@ impl RenderCore {
         let needed = order.iter().any(|&index| {
             frame.preview.batches.get(index).is_some_and(|batch| {
                 let material = batch.material_index as usize;
-                self.h2_material_ready(frame, material, Dx9Layer::Texaccum)
-                    || self.h2_material_ready(frame, material, Dx9Layer::LightAlbedo)
+                self.dx9_material_ready(frame, material, Dx9Layer::Texaccum)
+                    || self.dx9_material_ready(frame, material, Dx9Layer::LightAlbedo)
             })
         });
         if !needed {
@@ -386,16 +386,16 @@ impl RenderCore {
             let size = state.size();
             if self
                 .dx9
-                .h2_target
+                .texaccum_target
                 .as_ref()
                 .is_none_or(|target| target.size != size)
             {
-                if let Some(old) = self.dx9.h2_target.take() {
+                if let Some(old) = self.dx9.texaccum_target.take() {
                     old.delete(gl);
                 }
-                self.dx9.h2_target = SceneTarget::new(gl, size[0], size[1]);
+                self.dx9.texaccum_target = SceneTarget::new(gl, size[0], size[1]);
             }
-            if let Some(target) = &self.dx9.h2_target {
+            if let Some(target) = &self.dx9.texaccum_target {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
                 gl.viewport(0, 0, size[0], size[1]);
                 PassState::new().disable(glow::SCISSOR_TEST).apply(gl);
@@ -435,7 +435,7 @@ impl RenderCore {
             frame.preview.batches.get(index).is_some_and(|batch| {
                 let material = batch.material_index as usize;
                 Dx9Layer::ALL.iter().any(|layer| {
-                    Self::h2_passes(frame, material, *layer)
+                    Self::dx9_passes_of(frame, material, *layer)
                         .iter()
                         .any(|pass| pass.textures.iter().any(|texture| texture.frame_copy))
                 })
@@ -448,17 +448,17 @@ impl RenderCore {
         unsafe {
             if self
                 .dx9
-                .h2_frame_copy
+                .frame_copy
                 .as_ref()
                 .is_none_or(|copy| copy.size != [width, height])
             {
-                if let Some(old) = self.dx9.h2_frame_copy.take() {
+                if let Some(old) = self.dx9.frame_copy.take() {
                     old.delete(gl);
                 }
-                self.dx9.h2_frame_copy = SceneTarget::new(gl, width, height);
+                self.dx9.frame_copy = SceneTarget::new(gl, width, height);
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             }
-            if let Some(copy) = &self.dx9.h2_frame_copy {
+            if let Some(copy) = &self.dx9.frame_copy {
                 gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(framebuffer));
                 gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(copy.framebuffer));
                 gl.blit_framebuffer(
@@ -498,7 +498,7 @@ impl RenderCore {
                 continue;
             };
             let material = batch.material_index as usize;
-            if !self.h2_material_ready(frame, material, layer)
+            if !self.dx9_material_ready(frame, material, layer)
                 || (layer != Dx9Layer::Transparent && !self.passes_replace_slots(frame, material))
             {
                 continue;
@@ -510,7 +510,10 @@ impl RenderCore {
             ) else {
                 continue;
             };
-            for (pass_index, pass) in Self::h2_passes(frame, material, layer).iter().enumerate() {
+            for (pass_index, pass) in Self::dx9_passes_of(frame, material, layer)
+                .iter()
+                .enumerate()
+            {
                 if camouflaged && pass.hidden_by_camo {
                     continue;
                 }
@@ -522,13 +525,13 @@ impl RenderCore {
                     continue;
                 }
                 let key = (pass.stage, pass.fragment.clone());
-                let Some(Some(program)) = self.dx9.h2_programs.get(&key).cloned() else {
+                let Some(Some(program)) = self.dx9.pass_programs.get(&key).cloned() else {
                     continue;
                 };
                 drew = true;
                 unsafe {
                     PassState::new().use_program(program.program).apply(gl);
-                    self.bind_h2_uniforms(gl, frame, material, &program, pass, eye, light, own);
+                    self.bind_dx9_uniforms(gl, frame, material, &program, pass, eye, light, own);
                     let textures = self.slots[slot]
                         .materials
                         .get(material)
@@ -537,14 +540,15 @@ impl RenderCore {
                         let uploaded = textures.and_then(|list| list.get(index)).copied().flatten();
                         let (target, bound) = match texture.kind {
                             SamplerKind::Texture2D => {
-                                let target = self.dx9.h2_target.as_ref().map(|target| target.color);
-                                let gel = self.dx9.h2_gel.and_then(|(texture, _)| texture);
+                                let target =
+                                    self.dx9.texaccum_target.as_ref().map(|target| target.color);
+                                let gel = self.dx9.gel_now.and_then(|(texture, _)| texture);
                                 let bound = if texture.gel {
                                     gel.or(self.placeholder)
                                 } else if texture.texaccum {
                                     target.or(self.placeholder)
                                 } else if texture.frame_copy {
-                                    let copy = self.dx9.h2_frame_copy.as_ref();
+                                    let copy = self.dx9.frame_copy.as_ref();
                                     copy.map(|copy| copy.color).or(self.placeholder)
                                 } else {
                                     uploaded.or(self.placeholder)
@@ -554,7 +558,7 @@ impl RenderCore {
                             SamplerKind::Cube => (
                                 glow::TEXTURE_CUBE_MAP,
                                 if texture.normalization {
-                                    self.dx9.h2_normalization_cube
+                                    self.dx9.normalization_cube
                                 } else {
                                     uploaded.or(self.black_cube)
                                 },
@@ -597,7 +601,7 @@ impl RenderCore {
         }
     }
 
-    unsafe fn bind_h2_uniforms(
+    unsafe fn bind_dx9_uniforms(
         &self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -618,16 +622,16 @@ impl RenderCore {
                 // Set by the shadow pass these stages draw within or after.
                 let style = self.dx9.shadow.unwrap_or_else(|| ShadowStyle::dx9(frame));
                 let (toward, shadow_alpha) = (style.toward, style.alpha);
-                let matrix = h2_shadow_matrix(&frame.preview, toward);
+                let matrix = shadow_matrix(&frame.preview, toward);
                 gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
                 // A caster draws into the map: bound then, it would be read
                 // and written at once.
                 if pass.stage == Dx9VertexStage::ShadowMask
-                    && let Some(Some((_, map))) = self.dx9.h2_shadow_map
+                    && let Some(Some((_, map))) = self.dx9.shadow_map
                 {
                     let location = program.location(gl, "u_shadow_map");
                     PassState::new()
-                        .sampler(H2_SHADOW_MAP_UNIT, glow::TEXTURE_2D, Some(map), location)
+                        .sampler(SHADOW_MAP_UNIT, glow::TEXTURE_2D, Some(map), location)
                         .apply(gl);
                 }
                 if let Some(normal) = style.normal {
@@ -689,7 +693,7 @@ impl RenderCore {
             gl.uniform_3_f32_slice(location.as_ref(), &camera.center);
             let location = program.location(gl, "u_eye");
             gl.uniform_3_f32_slice(location.as_ref(), &eye);
-            if let Some(copy) = &self.dx9.h2_frame_copy {
+            if let Some(copy) = &self.dx9.frame_copy {
                 let location = program.location(gl, "u_view_size");
                 gl.uniform_2_f32(location.as_ref(), copy.size[0] as f32, copy.size[1] as f32);
             }
@@ -706,7 +710,7 @@ impl RenderCore {
             let location = program.location(gl, "u_texture_rows");
             let (outputs, change_colors) =
                 (frame.outputs_of(material), frame.change_colors_of(material));
-            let clock = H2Clock {
+            let clock = Dx9Clock {
                 time: frame.time,
                 values: frame.function_values_of(material),
             };
@@ -759,18 +763,18 @@ impl RenderCore {
                 let location = program.location(gl, "u_light_falloff");
                 gl.uniform_1_f32(location.as_ref(), 0.5 / light.radius);
             }
-            if let Some((_, rows)) = &self.dx9.h2_gel {
+            if let Some((_, rows)) = &self.dx9.gel_now {
                 let location = program.location(gl, "u_gel_rows");
                 gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             }
             if let (Dx9VertexStage::LightGel, Some(location), Some((gel, _))) = (
                 pass.stage,
                 program.location(gl, "u_gel_map"),
-                &self.dx9.h2_gel,
+                &self.dx9.gel_now,
             ) {
                 PassState::new()
                     .sampler(
-                        H2_GEL_MASK_UNIT,
+                        GEL_UNIT,
                         glow::TEXTURE_2D,
                         gel.or(self.placeholder),
                         Some(location),

@@ -56,15 +56,15 @@ pub(in crate::app::model_preview) fn shader_input_names(
         .collect();
     let passes = owned
         .iter()
-        .flat_map(|texture| texture.h2_layers.iter().flatten());
+        .flat_map(|texture| texture.dx9_layers.iter().flatten());
     let h3 = owned
         .iter()
-        .filter_map(|texture| texture.h3.as_ref())
+        .filter_map(|texture| texture.gen3.as_ref())
         .flat_map(|material| &material.animations);
     let h3 = h3.flat_map(|animation| [animation.input.as_str(), animation.range.as_str()]);
     let extensions = owned
         .iter()
-        .filter_map(|texture| texture.h3.as_ref())
+        .filter_map(|texture| texture.gen3.as_ref())
         .filter_map(|material| material.extension());
     // What draws after a material reads its object's functions too, as a
     // hologram's screen materials do.
@@ -91,7 +91,7 @@ pub(in crate::app::model_preview) fn shader_input_names(
     // `sub_6C18F0` gates the shield overlay on this itself.
     let gen3_shield = owned
         .iter()
-        .filter_map(|texture| texture.h3.as_ref())
+        .filter_map(|texture| texture.gen3.as_ref())
         .any(|h3| h3.shield.is_some());
     let shield = data
         .preview
@@ -171,7 +171,7 @@ pub(in crate::app::model_preview) fn function_values_for(
         .textures
         .iter()
         .flat_map(|textures| textures.iter())
-        .any(|texture| texture.h3.is_some());
+        .any(|texture| texture.gen3.is_some());
     (data.object_functions.is_some() || features || h3)
         .then(|| object_function_values(data, set, time))
 }
@@ -191,7 +191,7 @@ pub(in crate::app::model_preview) fn object_moves(
             .iter()
             .flat_map(|textures| textures.iter())
             .any(|texture| {
-                texture.h3.as_ref().is_some_and(|material| {
+                texture.gen3.as_ref().is_some_and(|material| {
                     material
                         .animations
                         .iter()

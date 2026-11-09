@@ -15,17 +15,17 @@ pub(in crate::app::model_preview) fn finish_dx9_layers(
     share_object_layers(materials, textures);
     for texture in textures {
         // A pass with no object implementation still has the fallback's.
-        if texture.h2_layers[Dx9Layer::ObjectLightmap as usize].is_empty() {
-            texture.h2_layers[Dx9Layer::ObjectLightmap as usize] =
-                texture.h2_layers[Dx9Layer::Lightmap as usize].clone();
+        if texture.dx9_layers[Dx9Layer::ObjectLightmap as usize].is_empty() {
+            texture.dx9_layers[Dx9Layer::ObjectLightmap as usize] =
+                texture.dx9_layers[Dx9Layer::Lightmap as usize].clone();
         }
         let lit = [Dx9Layer::Lightmap, Dx9Layer::Prt]
             .iter()
-            .flat_map(|layer| &texture.h2_layers[*layer as usize])
+            .flat_map(|layer| &texture.dx9_layers[*layer as usize])
             .any(|pass| pass.stage != Dx9VertexStage::CeModel);
-        if lit || texture.h3.is_some() {
+        if lit || texture.gen3.is_some() {
             for (layer, pass) in dx9_shadow_passes() {
-                texture.h2_layers[layer as usize] = vec![pass];
+                texture.dx9_layers[layer as usize] = vec![pass];
             }
         }
     }
@@ -42,7 +42,7 @@ pub(in crate::app::model_preview) fn share_object_layers(
     let transparent = Dx9Layer::Transparent as usize;
     let bloom = Dx9Layer::Bloom as usize;
     if let Some(overlay) = materials.iter().position(|material| material.ce.overlay) {
-        let passes = std::mem::take(&mut textures[overlay].h2_layers[transparent]);
+        let passes = std::mem::take(&mut textures[overlay].dx9_layers[transparent]);
         share_with_object(
             materials,
             textures,
@@ -60,7 +60,7 @@ pub(in crate::app::model_preview) fn share_object_layers(
             .iter()
             .position(|material| material.h2.shield == Some(layer))
         {
-            let passes = std::mem::take(&mut textures[owner].h2_layers[from]);
+            let passes = std::mem::take(&mut textures[owner].dx9_layers[from]);
             share_with_object(
                 materials,
                 textures,
@@ -82,7 +82,7 @@ fn share_with_object(
 ) {
     for (material, texture) in materials.iter().zip(textures) {
         if material.object == object {
-            texture.h2_layers[layer] = passes.to_vec();
+            texture.dx9_layers[layer] = passes.to_vec();
         }
     }
 }
@@ -112,11 +112,11 @@ mod tests {
         ];
         let mut textures = vec![MaterialTextures::default(); materials.len()];
         let [(_, pass), ..] = dx9_shadow_passes();
-        textures[1].h2_layers[Dx9Layer::Transparent as usize] = vec![pass.clone()];
-        textures[2].h2_layers[Dx9Layer::Transparent as usize] = vec![pass];
+        textures[1].dx9_layers[Dx9Layer::Transparent as usize] = vec![pass.clone()];
+        textures[2].dx9_layers[Dx9Layer::Transparent as usize] = vec![pass];
         share_object_layers(&materials, &mut textures);
         let has =
-            |index: usize, layer: Dx9Layer| !textures[index].h2_layers[layer as usize].is_empty();
+            |index: usize, layer: Dx9Layer| !textures[index].dx9_layers[layer as usize].is_empty();
         for layer in [Dx9Layer::Hologram, Dx9Layer::ShieldDamaged] {
             assert!(
                 has(0, layer) && has(1, layer) && has(2, layer),

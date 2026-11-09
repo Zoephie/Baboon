@@ -2,7 +2,7 @@
 
 use super::animation::H2AnimatedTint;
 use super::animation::{
-    H2AnimatedRow, H2Animation, H2Clock, PassAnimation, PassVisibility, animated_vector,
+    Dx9Clock, H2AnimatedRow, H2Animation, PassAnimation, PassVisibility, animated_vector,
 };
 use super::globals::fill_components;
 use super::{DX9_TEXTURE_ROWS, Dx9VertexStage, Image, SamplerKind};
@@ -230,7 +230,7 @@ impl Dx9DrawPass {
 
     pub(crate) fn texture_rows_at(
         &self,
-        clock: H2Clock<'_>,
+        clock: Dx9Clock<'_>,
         outputs: &[f32; 4],
     ) -> [[f32; 4]; DX9_TEXTURE_ROWS] {
         let mut rows = self.texture_rows;
@@ -255,7 +255,7 @@ impl Dx9DrawPass {
             .flat_map(|(_, animations)| animations)
     }
 
-    pub(crate) fn tints_at(&self, clock: H2Clock<'_>) -> ([f32; 4], [f32; 4]) {
+    pub(crate) fn tints_at(&self, clock: Dx9Clock<'_>) -> ([f32; 4], [f32; 4]) {
         let at = |mut tint: [f32; 4], animated: &[H2AnimatedTint]| {
             for (mask, animations) in animated {
                 if let Some(vector) = animated_vector(animations, clock) {
@@ -271,7 +271,12 @@ impl Dx9DrawPass {
     }
 
     /// Fill what the shader animates of `value`, the constant at `register`.
-    pub(crate) fn animate_constant(&self, register: u32, value: &mut [f32; 4], clock: H2Clock<'_>) {
+    pub(crate) fn animate_constant(
+        &self,
+        register: u32,
+        value: &mut [f32; 4],
+        clock: Dx9Clock<'_>,
+    ) {
         for (animated, component, animations) in &self.animated_constants {
             if *animated == register
                 && let Some(vector) = animated_vector(animations, clock)

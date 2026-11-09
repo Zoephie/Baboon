@@ -377,13 +377,13 @@ fn halo_ce_shaders_resolve_as_the_engine_composes_them() {
     let shield = resolve_classic(&source, r"characters\cyborg\shaders\light shield", b"schi");
     assert!(shield.error.is_none());
     assert!(shield.slots.iter().all(Option::is_none));
-    assert_eq!(shield.h2_layers[Dx9Layer::Transparent as usize].len(), 1);
+    assert_eq!(shield.dx9_layers[Dx9Layer::Transparent as usize].len(), 1);
     // `smet` is Halo 4's `structure_meta` in the cross-game extension table;
     // the kit's own names make it `shader_transparent_meter`, so the shader
     // loads rather than being reported as a missing file.
     let meter = resolve_classic(&source, r"vehicles\warthog\shaders\meter engine", b"smet");
     assert!(meter.error.is_none(), "{:?}", meter.error);
-    assert_eq!(meter.h2_layers[Dx9Layer::Transparent as usize].len(), 1);
+    assert_eq!(meter.dx9_layers[Dx9Layer::Transparent as usize].len(), 1);
 }
 
 /// With `BLAM_TEST_HCEEK`: a permutation draws its own image of a bitmap,
@@ -418,7 +418,7 @@ fn a_halo_ce_permutation_picks_the_image_and_wraps() {
             .map(|image| image.rgba.clone())
             .unwrap()
     };
-    let pass = |textures: &MaterialTextures| match textures.h2_layers[Dx9Layer::Lightmap as usize]
+    let pass = |textures: &MaterialTextures| match textures.dx9_layers[Dx9Layer::Lightmap as usize]
         [0]
     .textures[0]
         .image
@@ -604,7 +604,7 @@ fn every_h2_shader_takes_the_global_active_camo() {
     };
     let camo = |path: &str| {
         let textures = resolve_model_textures(&source, &[material(path)]);
-        textures[0].h2_layers[Dx9Layer::ActiveCamo as usize].clone()
+        textures[0].dx9_layers[Dx9Layer::ActiveCamo as usize].clone()
     };
     let chief = camo("objects\\characters\\masterchief\\shaders\\masterchief");
     let brute = camo("objects\\characters\\brute\\shaders\\brute");

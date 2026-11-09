@@ -134,7 +134,7 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
         caches.h2_images.insert(key, decoded.clone());
         decoded
     };
-    textures.h2_layers[Dx9Layer::Lightmap as usize] =
+    textures.dx9_layers[Dx9Layer::Lightmap as usize] =
         ce_model_passes(reader, root, &group, &flags, &mut common, &mut bitmap);
     let transparent = ce_transparent_passes(reader, root, &group, &mut bitmap);
     if matches!(&group, b"soso" | b"senv") {
@@ -144,14 +144,14 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
             .get_or_insert_with(|| read_ce_camo_settings(reader));
         if let Some(settings) = settings {
             let two_sided = flags.has("two-sided");
-            textures.h2_layers[Dx9Layer::ActiveCamo as usize] =
+            textures.dx9_layers[Dx9Layer::ActiveCamo as usize] =
                 vec![ce_camo_pass(settings, two_sided, &mut bitmap)];
         }
     }
-    textures.h2_layers[Dx9Layer::Transparent as usize] =
+    textures.dx9_layers[Dx9Layer::Transparent as usize] =
         expand_ce_digits(reader, transparent, permutation, caches);
     caches.ce.model_common = common;
-    if !textures.h2_layers[Dx9Layer::Transparent as usize].is_empty() {
+    if !textures.dx9_layers[Dx9Layer::Transparent as usize].is_empty() {
         return textures;
     }
     if !matches!(&group, b"soso" | b"senv") {

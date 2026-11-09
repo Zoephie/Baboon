@@ -275,7 +275,7 @@ pub(super) fn render(
     let textures = materials::resolve_model_textures(source, &data.preview.materials);
     let with_passes = textures
         .iter()
-        .filter(|t| t.h2_layers.iter().any(|l| !l.is_empty()))
+        .filter(|t| t.dx9_layers.iter().any(|l| !l.is_empty()))
         .count();
     eprintln!(
         "{}: {} materials, {with_passes} with passes",
@@ -286,12 +286,12 @@ pub(super) fn render(
         eprintln!(
             "NOTE MAT {} h3 {} {:?}",
             material.shader_path,
-            texture.h3.is_some(),
+            texture.gen3.is_some(),
             texture.error
         );
         // `H4_TEXTURES=1`: each pass's samplers, and whether one is bound.
         if options.report_textures
-            && let Some(h3) = &texture.h3
+            && let Some(h3) = &texture.gen3
         {
             let passes = h3.albedo.iter().chain(std::iter::once(&h3.lit));
             for (name, kind) in passes.flat_map(|pass| pass.textures.iter()) {

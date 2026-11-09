@@ -249,7 +249,7 @@ impl ModelGpuFrame {
             return false;
         };
         // Halo 3 has no layers to ask: what moves it is all in `object_moves`.
-        if self.object_moves && textures.iter().any(|texture| texture.h3.is_some()) {
+        if self.object_moves && textures.iter().any(|texture| texture.gen3.is_some()) {
             return true;
         }
         self.visible_batches.iter().any(|&index| {
@@ -262,7 +262,7 @@ impl ModelGpuFrame {
                     Dx9Layer::ALL
                         .iter()
                         .filter(|layer| self.dx9_draws(**layer))
-                        .flat_map(|layer| &material.h2_layers[*layer as usize])
+                        .flat_map(|layer| &material.dx9_layers[*layer as usize])
                         .any(|pass| {
                             let outputs = self.outputs_of(batch.material_index as usize);
                             pass.moves()

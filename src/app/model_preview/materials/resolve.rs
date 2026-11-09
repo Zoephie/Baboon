@@ -167,7 +167,7 @@ fn resolve_one_material(
     // `Game::of` calls every tag after Halo 2 `Halo3`, Reach's included.
     if blam_tags::game::Game::of(&shader) == blam_tags::game::Game::Halo3 {
         match prepare_h3_material(reader, &values, caches) {
-            Ok(material) => textures.h3 = Some(Arc::new(material)),
+            Ok(material) => textures.gen3 = Some(Arc::new(material)),
             // The general shader still draws it, so this is only worth saying
             // when there is nothing else to show.
             Err(error) if textures.slots.iter().all(Option::is_none) => {

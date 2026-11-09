@@ -240,7 +240,7 @@ impl Gen3State {
             }
             let shields = frame.textures.iter().flat_map(|textures| textures.iter());
             let global = shields
-                .filter_map(|texture| texture.h3.as_ref()?.shield.as_ref())
+                .filter_map(|texture| texture.gen3.as_ref()?.shield.as_ref())
                 .next();
             let settings = game
                 .shield_settings(frame)
@@ -283,7 +283,7 @@ impl Gen3State {
                 .collect();
             for textures in frame.textures.iter().flat_map(|textures| textures.iter()) {
                 let mut map = HashMap::new();
-                if let Some(material) = &textures.h3 {
+                if let Some(material) = &textures.gen3 {
                     for texture in &material.textures {
                         if let Some(uploaded) = upload_image_linear(
                             gl,

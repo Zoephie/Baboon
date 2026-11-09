@@ -496,7 +496,7 @@ impl ModelGpuSlot {
                         .collect()
                 };
                 uploaded.dx9_textures =
-                    std::array::from_fn(|layer| upload(&material.h2_layers[layer]));
+                    std::array::from_fn(|layer| upload(&material.dx9_layers[layer]));
                 uploaded
             })
             .collect();

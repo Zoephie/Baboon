@@ -93,7 +93,7 @@ fn an_object_input_holds_still_at_what_a_whole_object_exports() {
     // An object's functions take over from the resting value.
     let values = FunctionValues::from([("boost".to_owned(), 0.25)]);
     assert_eq!(
-        held.input(H2Clock {
+        held.input(Dx9Clock {
             time: 3.0,
             values: Some(&values)
         }),

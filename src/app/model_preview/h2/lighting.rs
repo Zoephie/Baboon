@@ -72,7 +72,7 @@ pub(in crate::app::model_preview) unsafe fn draw_h2_gel_lights(
             };
             let specular = super::lights::has_specular(&light);
             let (light, draws) = super::lights::overbrighten(&light);
-            core.dx9.h2_gel = Some((gels.get(index).copied().flatten(), rows.rows));
+            core.dx9.gel_now = Some((gels.get(index).copied().flatten(), rows.rows));
             if specular {
                 core.draw_dx9_layer(
                     gl,
@@ -93,7 +93,7 @@ pub(in crate::app::model_preview) unsafe fn draw_h2_gel_lights(
             for _ in 0..draws {
                 core.draw_dx9_layer(gl, frame, slot, order, layer, Some(&light), &H2Binds);
             }
-            core.dx9.h2_gel = None;
+            core.dx9.gel_now = None;
         }
         if masked {
             gl.color_mask(false, false, false, true);

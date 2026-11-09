@@ -215,7 +215,7 @@ impl Gen3State {
                 let material = found.and_then(|at| {
                     textures?
                         .get(at)?
-                        .h3
+                        .gen3
                         .as_ref()
                         .map(|material| (at, material))
                 });

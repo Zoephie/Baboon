@@ -48,7 +48,7 @@ impl RenderCore {
         if !self.gen3_supported {
             return None;
         }
-        frame.textures.as_ref()?.get(material)?.h3.as_ref()
+        frame.textures.as_ref()?.get(material)?.gen3.as_ref()
     }
 
     pub(in crate::app::model_preview) fn gen3_draws(&self, frame: &ModelGpuFrame) -> bool {
@@ -57,7 +57,7 @@ impl RenderCore {
             && frame
                 .textures
                 .iter()
-                .any(|textures| textures.iter().any(|texture| texture.h3.is_some()))
+                .any(|textures| textures.iter().any(|texture| texture.gen3.is_some()))
     }
 
     /// `cloth_render_opaque` builds its mesh from where the sheet is now.

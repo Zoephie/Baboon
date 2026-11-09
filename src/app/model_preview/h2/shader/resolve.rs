@@ -118,8 +118,8 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
         }
         let has_texaccum = [Dx9Layer::Texaccum, Dx9Layer::LightAlbedo]
             .iter()
-            .any(|layer| !textures.h2_layers[*layer as usize].is_empty());
-        textures.h2_layers[layer as usize] = prepare_h2_passes(
+            .any(|layer| !textures.dx9_layers[*layer as usize].is_empty());
+        textures.dx9_layers[layer as usize] = prepare_h2_passes(
             reader,
             shader,
             &parameters,
@@ -140,18 +140,18 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
                 let defaults = template.as_ref()?.parameters.get(BUMP)?;
                 Some(defaults.default_bitmap.clone()).filter(|path| !path.is_empty())
             });
-        textures.h2_layers[Dx9Layer::ActiveCamo as usize] =
+        textures.dx9_layers[Dx9Layer::ActiveCamo as usize] =
             prepare_h2_camo_passes(reader, bump, caches);
     }
     // Passes draw it with Game Shaders on: an emblem's overlay does, and is only
     // off for want of a player. Without them, and with no slots, it is bare.
     if textures.slots.iter().all(Option::is_none)
-        && textures.h2_layers[Dx9Layer::Transparent as usize].is_empty()
+        && textures.dx9_layers[Dx9Layer::Transparent as usize].is_empty()
     {
         let template = root.read_tag_ref_path("template").unwrap_or_default();
         let leaf = tag_path::name(&template);
         let reason = format!("its template ({leaf}) uses none of the maps this preview draws");
-        if textures.h2_layers.iter().all(Vec::is_empty) {
+        if textures.dx9_layers.iter().all(Vec::is_empty) {
             textures.error = Some(reason);
         } else {
             textures.bare_without_passes = Some(format!("{reason} without Game Shaders"));

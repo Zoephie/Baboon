@@ -81,11 +81,11 @@ pub(crate) struct MaterialTextures {
     /// from an option default — including the detail maps' tiling, which lives
     /// there and defaults to 16.
     pub used_shader_parameters_only: bool,
-    /// Halo 2 passes by `Dx9Layer`, drawn in place of the slots above; empty
+    /// The dx9 passes by `Dx9Layer`, drawn in place of the slots above; empty
     /// for other games and outside a loose kit, whose `.psh` sources they need.
-    pub h2_layers: [Vec<Dx9DrawPass>; DX9_LAYER_COUNT],
-    /// Halo 3's own shader, translated from the kit's source.
-    pub h3: Option<Arc<Gen3Material>>,
+    pub dx9_layers: [Vec<Dx9DrawPass>; DX9_LAYER_COUNT],
+    /// A gen3 game's own shader, translated from the kit's source.
+    pub gen3: Option<Arc<Gen3Material>>,
     /// Reach's `only render for shields`: `render_model_postprocess` (the
     /// 360's) makes its parts a shield's, which no ordinary pass draws.
     pub shield_only: bool,
