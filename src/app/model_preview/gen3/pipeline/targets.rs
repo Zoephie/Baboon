@@ -71,7 +71,7 @@ impl Gen3Targets {
         }
     }
 
-    pub(super) unsafe fn delete(self, gl: &glow::Context) {
+    pub(in crate::app::model_preview) unsafe fn delete(self, gl: &glow::Context) {
         unsafe {
             gl.delete_framebuffer(self.albedo_framebuffer);
             gl.delete_framebuffer(self.accumulation_framebuffer);

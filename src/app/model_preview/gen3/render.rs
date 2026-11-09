@@ -171,7 +171,11 @@ impl<G: Gen3Game> Gen3Pipeline<G> {
 
 impl<G: Gen3Game> GameRender for Gen3Pipeline<G> {
     /// The scene's depth copy is the frame's own, made while its picture draws.
-    unsafe fn prepare(&mut self, _cx: &mut FrameCx<'_>) {
+    unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
+        // The shared targets, for this frame (handed back in `finish`).
+        if self.state.targets.is_none() {
+            self.state.targets = cx.core.gen3_targets.take();
+        }
         self.state.depth_copy = None;
         // A frame that stopped before its last sprites leaves no queue for
         // this one to draw from.
@@ -208,6 +212,12 @@ impl<G: Gen3Game> GameRender for Gen3Pipeline<G> {
                     state.draw_sprites(cx.core, game, cx.gl, cx.frame, cx.slot, SpriteStage::Rest);
                 }
             }
+        }
+        // The targets go back for the next gen3 frame, whichever game's.
+        if let Some(targets) = self.state.targets.take()
+            && let Some(other) = cx.core.gen3_targets.replace(targets)
+        {
+            unsafe { other.delete(cx.gl) };
         }
     }
 

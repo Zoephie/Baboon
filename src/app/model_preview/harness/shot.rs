@@ -539,3 +539,32 @@ fn halo_3s_self_shadow_reads_its_own_normals_after_another_gen3_preview() {
     assert!(reach_drawn.iter().any(|byte| *byte != 0), "the Reach warthog drew");
     assert!(before == after, "Halo 3's shadow read another pipeline's normals");
 }
+
+/// The gen3 pipelines share one set of targets: a Reach frame after a Halo 3
+/// one, at the same size, draws through the set Halo 3 made rather than a
+/// second, and hands it back.
+#[test]
+fn gen3_games_share_one_set_of_targets() {
+    let (Some(halo3), Some(reach)) =
+        (super::kit::kit_source(GameId::Halo3), super::kit::kit_source(GameId::HaloReach))
+    else {
+        return;
+    };
+    let shot = |model: &str, kind: &str| Shot {
+        model: model.to_owned(),
+        shaders: true,
+        lights: true,
+        yaw: 0.6,
+        pitch: 0.25,
+        kind: Some(kind.to_owned()),
+    };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let chief = shot("objects\\characters\\masterchief\\masterchief", "biped");
+    render(&gl, &mut renderer, &halo3, &chief, &ShotOptions::new(GameId::Halo3));
+    let made = renderer.gen3_targets_normal();
+    assert!(made.is_some(), "Halo 3's frame handed its targets back");
+    let warthog = shot("objects\\vehicles\\human\\warthog\\warthog", "vehicle");
+    render(&gl, &mut renderer, &reach, &warthog, &ShotOptions::new(GameId::HaloReach));
+    assert_eq!(renderer.gen3_targets_normal(), made, "Reach drew through Halo 3's set");
+}

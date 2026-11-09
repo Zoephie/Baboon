@@ -16,6 +16,10 @@ use eframe::glow;
 /// targets, and, until each game's drawing moves to its own folder, every
 /// game's own state too.
 pub(in crate::app::model_preview) struct RenderCore {
+    /// The gen3 targets between frames. Every gen3 pipeline draws through
+    /// the one set, taking it for its frame and handing it back, so a session
+    /// that previews several gen3 games keeps one set, not one each.
+    pub(in crate::app::model_preview) gen3_targets: Option<super::super::gen3::pipeline::Gen3Targets>,
     /// What a gen3 array sampler reads with nothing of its own.
     pub(in crate::app::model_preview) black_array: Option<glow::NativeTexture>,
     /// As `Dx9Gl::h2_bloom`.
@@ -116,6 +120,7 @@ impl RenderCore {
             let black_array = upload_solid_volume(gl, glow::TEXTURE_2D_ARRAY, [0, 0, 0, 255]);
             let black_flat = upload_black_flat(gl);
             Ok(Self {
+                gen3_targets: None,
                 gen3_supported: !version.is_embedded && (version.major, version.minor) >= (4, 1),
                 black_flat,
                 black_array,

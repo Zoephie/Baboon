@@ -118,6 +118,12 @@ impl ModelGlRenderer {
         Ok(Self { core: RenderCore::new(gl)?, games: GameRenders::default() })
     }
 
+    /// The shared gen3 targets' normal texture, between frames.
+    #[cfg(test)]
+    pub(in crate::app::model_preview) fn gen3_targets_normal(&self) -> Option<glow::NativeTexture> {
+        self.core.gen3_targets.as_ref().map(|targets| targets.normal)
+    }
+
     /// Draw `frame`: its slot, the game's preparation, the scene target, the
     /// shared program and grid, the game's shading, the wireframe, what the
     /// game draws over it, and the scene put back.
