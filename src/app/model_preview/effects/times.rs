@@ -1,6 +1,7 @@
 //! When an effect's events and parts run: their times and the onsets the preview keeps.
 
-use super::*;
+use super::{FunctionValues, elements, has_flag};
+use blam_tags::TagStruct;
 
 /// `effect_build_locations`: a location of this name takes the attachment's marker.
 pub(super) const REPLACE: &str = "replace";

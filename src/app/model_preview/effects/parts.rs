@@ -1,6 +1,15 @@
 //! An effect's parts: which run, for whom, and what each makes.
 
-use super::*;
+use super::super::TagReader;
+use super::events::{NO_NODE, WORLD_AXES};
+use super::object::{ObjectEffect, object_effects};
+use super::placement::marker_name;
+use super::times::{
+    AIR, ANYWHERE, DISABLED, EffectTimes, ONLY_FIRST_PERSON, ONLY_NONVIOLENT, PART_SCALE,
+};
+use super::{MarkerFrame, elements, has_flag};
+use blam_tags::{TagFieldData, TagFile, TagStruct};
+use std::sync::Arc;
 
 /// An event's part on an attachment's effect.
 pub(in crate::app::model_preview) struct EffectPart<'a> {

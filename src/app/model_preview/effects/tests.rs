@@ -1,4 +1,6 @@
+use super::super::RenderModelPreviewMarker;
 use super::*;
+use blam_tags::{TagFieldData, TagFile};
 
 fn location() -> MarkerFrame {
     // Facing +Y, its left along -X.

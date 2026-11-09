@@ -1,6 +1,9 @@
 //! Event functions and the effects nested inside events.
 
-use super::*;
+use super::super::TagReader;
+use super::elements;
+use super::object::ObjectEffect;
+use blam_tags::TagStruct;
 
 pub(super) const WORLD_AXES: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 

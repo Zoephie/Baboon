@@ -1,6 +1,16 @@
 //! The effects an object carries, with their markers and vectors.
 
-use super::*;
+use super::super::{RenderModelPreviewMarker, TagReader, object_reference};
+use super::events::{
+    WORLD_AXES, WORLD_ORIENTATION, collect_event_effects, event_function_name, with_nested_effects,
+};
+use super::placement::marker_name;
+use super::times::{EffectTimes, MOST_MARKERS, REPLACE};
+use super::{
+    MarkerFrame, cross, dot, elements, function_slot_of, has_flag, object_block, perpendicular,
+    unit_by_reciprocal,
+};
+use blam_tags::{TagFile, TagStruct};
 
 /// An effect an object runs: an attachment, on while its function is, or one
 /// an event plays, which the preview gives a function of its own to start it.

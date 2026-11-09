@@ -1,6 +1,7 @@
 //! Where a part sits: its marker, rotation and frame.
 
-use super::*;
+use super::MarkerFrame;
+use blam_tags::TagStruct;
 
 pub(in crate::app::model_preview) fn marker_name(holder: TagStruct<'_>, field: &str) -> String {
     holder
