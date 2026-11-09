@@ -199,7 +199,7 @@ pub(in crate::app::model_preview) fn draw_ce_function_inputs(
             let passes = owned
                 .filter(|(material, _)| material.object == object)
                 .flat_map(|(_, texture)| texture.dx9_layers.iter().flatten());
-            for animation in passes.filter_map(|pass| pass.ce_animation.as_ref()) {
+            for animation in passes.filter_map(|pass| pass.own_animation.as_ref()) {
                 for (read, output) in read.iter_mut().zip(animation.outputs_read()) {
                     *read |= output;
                 }

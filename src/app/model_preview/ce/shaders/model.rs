@@ -165,7 +165,7 @@ fn build_passes(pass: ModelPass<'_>) -> Vec<Dx9DrawPass> {
     rows[8] = [cutoff, falloff, 0.0, 0.0];
     draw.texture_rows = rows;
     draw.light_direct = FIRST_LIGHT_DIRECTION;
-    draw.ce_animation = animation.map(|animation| Arc::new(animation) as Arc<dyn PassAnimation>);
+    draw.own_animation = animation.map(|animation| Arc::new(animation) as Arc<dyn PassAnimation>);
 
     let perpendicular = tinted(&pass.perpendicular);
     let parallel = tinted(&pass.parallel);

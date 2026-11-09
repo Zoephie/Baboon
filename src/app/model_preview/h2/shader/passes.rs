@@ -2,8 +2,8 @@
 
 use super::super::super::common::fields::{path_elements, rgb};
 use super::super::super::dx9::passes::{
-    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Depth, H2Animation, H2AnimationKind,
-    animation_function,
+    Dx9Animation, Dx9AnimationKind, Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare,
+    Dx9Depth, animation_function,
 };
 use super::constants::read_custom_channels;
 use super::template::{Dx9ParameterValue, Dx9Pass, Dx9PassTexture, Dx9VertexConstant};
@@ -43,7 +43,7 @@ const NO_EXTERN: &str = "none";
 
 /// The animations of a parameter. The game reads these and never the
 /// parameter's constant, so an input a preview has no value for still counts.
-fn read_animations(parameter: TagStruct<'_>) -> Vec<H2Animation> {
+fn read_animations(parameter: TagStruct<'_>) -> Vec<Dx9Animation> {
     path_elements(parameter, "animation properties")
         .filter_map(|property| {
             let held_input = property
@@ -61,19 +61,19 @@ fn read_animations(parameter: TagStruct<'_>) -> Vec<H2Animation> {
                     (name, rest)
                 });
             let kind = match property.read_enum_option("type")?.as_str() {
-                "bitmap scale uniform" => H2AnimationKind::ScaleUniform,
-                "bitmap scale x" => H2AnimationKind::ScaleX,
-                "bitmap scale y" => H2AnimationKind::ScaleY,
-                "bitmap scale z" => H2AnimationKind::ScaleZ,
-                "bitmap translation x" => H2AnimationKind::TranslationX,
-                "bitmap translation y" => H2AnimationKind::TranslationY,
-                "bitmap translation z" => H2AnimationKind::TranslationZ,
-                "bitmap rotation angle" => H2AnimationKind::Rotation,
-                "value" => H2AnimationKind::Value,
-                "color" => H2AnimationKind::Color,
+                "bitmap scale uniform" => Dx9AnimationKind::ScaleUniform,
+                "bitmap scale x" => Dx9AnimationKind::ScaleX,
+                "bitmap scale y" => Dx9AnimationKind::ScaleY,
+                "bitmap scale z" => Dx9AnimationKind::ScaleZ,
+                "bitmap translation x" => Dx9AnimationKind::TranslationX,
+                "bitmap translation y" => Dx9AnimationKind::TranslationY,
+                "bitmap translation z" => Dx9AnimationKind::TranslationZ,
+                "bitmap rotation angle" => Dx9AnimationKind::Rotation,
+                "value" => Dx9AnimationKind::Value,
+                "color" => Dx9AnimationKind::Color,
                 _ => return None,
             };
-            Some(H2Animation {
+            Some(Dx9Animation {
                 kind,
                 period: property.read_real("time period").unwrap_or(0.0),
                 held_input,
@@ -93,7 +93,7 @@ pub(super) struct ParameterLevel {
     pub(super) value: f32,
     pub(super) color: [f32; 3],
     /// A shader's own: `shader_setup_get_shader_parameters` is all the game reads.
-    pub(super) animations: Vec<H2Animation>,
+    pub(super) animations: Vec<Dx9Animation>,
 }
 
 pub(super) type Parameters = HashMap<String, ParameterLevel>;

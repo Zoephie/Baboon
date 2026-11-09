@@ -2,7 +2,7 @@
 //! textures, parameters, vertex constants and animations, before it becomes
 //! a `Dx9DrawPass`.
 
-use super::super::super::dx9::passes::{Dx9Blend, Dx9Depth, H2Animation};
+use super::super::super::dx9::passes::{Dx9Animation, Dx9Blend, Dx9Depth};
 use crate::core::h2_pixel_shader::AlphaTest;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,7 +46,7 @@ pub(in crate::app) struct Dx9Pass {
     pub(in crate::app) parameters: Vec<(String, Dx9ParameterValue)>,
     pub(in crate::app) vertex_constants: Vec<Dx9VertexConstant>,
     /// What the shader animates of `parameters`, by parameter.
-    pub(in crate::app) animations: std::collections::BTreeMap<String, Vec<H2Animation>>,
+    pub(in crate::app) animations: std::collections::BTreeMap<String, Vec<Dx9Animation>>,
 }
 impl Dx9Pass {
     /// The kit's generated source for this pass's implementation.

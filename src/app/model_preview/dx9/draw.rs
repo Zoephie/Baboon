@@ -728,7 +728,7 @@ impl RenderCore {
             for (register, value) in &pass.constants {
                 let mut value = *value;
                 pass.animate_constant(*register, &mut value, clock);
-                if let Some(animation) = &pass.ce_animation {
+                if let Some(animation) = &pass.own_animation {
                     animation.constant(*register, &mut value, frame.time, &change_colors, &outputs);
                     if animation.eye_register() == Some(*register) {
                         let [x, y, z] = unrotate_view_vector(

@@ -149,7 +149,7 @@ pub(super) fn glass_passes(
             },
         }
         .build();
-        draw.ce_animation = Some(Arc::new(CeModelAnimation {
+        draw.own_animation = Some(Arc::new(CeModelAnimation {
             eye_register: shader.register("c_eye_forward"),
             ..Default::default()
         }));

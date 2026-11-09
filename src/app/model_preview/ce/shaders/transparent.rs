@@ -335,7 +335,7 @@ fn transparent_pass(
     pass.constants = constants;
     pass.texture_rows = identity_map_rows();
     let fade_source = function_source(root, "framebuffer fade source");
-    pass.ce_animation = Some(Arc::new(CeModelAnimation {
+    pass.own_animation = Some(Arc::new(CeModelAnimation {
         fade_source,
         ..animation
     }));

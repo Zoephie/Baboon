@@ -1,8 +1,8 @@
 //! A dx9 pass: its blend, depth, cull, textures and constants, and the pass as drawn.
 
-use super::animation::H2AnimatedTint;
+use super::animation::Dx9AnimatedTint;
 use super::animation::{
-    Dx9Clock, H2AnimatedRow, H2Animation, PassAnimation, PassVisibility, animated_vector,
+    Dx9AnimatedRow, Dx9Animation, Dx9Clock, PassAnimation, PassVisibility, animated_vector,
 };
 use super::globals::fill_components;
 use super::{DX9_TEXTURE_ROWS, Dx9VertexStage, Image, SamplerKind};
@@ -128,15 +128,15 @@ pub(crate) struct Dx9DrawPass {
     pub(crate) light_direct: [f32; 3],
     pub(crate) light_indirect: [f32; 3],
     /// Components of `constants` the shader animates: register, component.
-    pub(in crate::app::model_preview) animated_constants: Vec<(u32, usize, Vec<H2Animation>)>,
-    pub(in crate::app::model_preview) animated_rows: Vec<H2AnimatedRow>,
+    pub(in crate::app::model_preview) animated_constants: Vec<(u32, usize, Vec<Dx9Animation>)>,
+    pub(in crate::app::model_preview) animated_rows: Vec<Dx9AnimatedRow>,
     /// One component of a row a stage reads as a value, and the value
     /// animations that replace it (`sub_6DE0F0`): row, component.
-    pub(in crate::app::model_preview) animated_row_values: Vec<(usize, usize, Vec<H2Animation>)>,
-    pub(in crate::app::model_preview) animated_tint_facing: Vec<H2AnimatedTint>,
-    pub(in crate::app::model_preview) animated_tint_glancing: Vec<H2AnimatedTint>,
+    pub(in crate::app::model_preview) animated_row_values: Vec<(usize, usize, Vec<Dx9Animation>)>,
+    pub(in crate::app::model_preview) animated_tint_facing: Vec<Dx9AnimatedTint>,
+    pub(in crate::app::model_preview) animated_tint_glancing: Vec<Dx9AnimatedTint>,
     /// Halo CE reworks its rows and a constant by its own functions.
-    pub(crate) ce_animation: Option<std::sync::Arc<dyn PassAnimation>>,
+    pub(crate) own_animation: Option<std::sync::Arc<dyn PassAnimation>>,
 }
 
 impl Dx9DrawPass {
@@ -171,7 +171,7 @@ impl Dx9DrawPass {
             animated_row_values: Vec::new(),
             animated_tint_facing: Vec::new(),
             animated_tint_glancing: Vec::new(),
-            ce_animation: None,
+            own_animation: None,
         }
     }
 
@@ -187,16 +187,16 @@ impl Dx9DrawPass {
                     .flat_map(|(_, _, animations)| animations),
             )
             .chain(self.animated_tints())
-            .any(H2Animation::moves)
+            .any(Dx9Animation::moves)
             || self
-                .ce_animation
+                .own_animation
                 .as_ref()
                 .is_some_and(|animation| animation.moves())
     }
 
     /// Whether it moves by itself while `outputs` hold.
     pub(crate) fn moves_with(&self, outputs: &[f32; 4]) -> bool {
-        self.ce_animation
+        self.own_animation
             .as_ref()
             .is_some_and(|animation| animation.moves_with(outputs))
     }
@@ -223,7 +223,7 @@ impl Dx9DrawPass {
     pub(crate) fn reads_outputs(&self) -> bool {
         self.numeric.is_some()
             || self
-                .ce_animation
+                .own_animation
                 .as_ref()
                 .is_some_and(|animation| animation.reads_outputs())
     }
@@ -242,13 +242,13 @@ impl Dx9DrawPass {
                 rows[*row][*channel] = vector[*channel];
             }
         }
-        if let Some(animation) = &self.ce_animation {
+        if let Some(animation) = &self.own_animation {
             animation.apply_rows(&mut rows, clock.time, outputs);
         }
         rows
     }
 
-    fn animated_tints(&self) -> impl Iterator<Item = &H2Animation> {
+    fn animated_tints(&self) -> impl Iterator<Item = &Dx9Animation> {
         self.animated_tint_facing
             .iter()
             .chain(&self.animated_tint_glancing)
@@ -256,7 +256,7 @@ impl Dx9DrawPass {
     }
 
     pub(crate) fn tints_at(&self, clock: Dx9Clock<'_>) -> ([f32; 4], [f32; 4]) {
-        let at = |mut tint: [f32; 4], animated: &[H2AnimatedTint]| {
+        let at = |mut tint: [f32; 4], animated: &[Dx9AnimatedTint]| {
             for (mask, animations) in animated {
                 if let Some(vector) = animated_vector(animations, clock) {
                     fill_components(&mut tint, vector, *mask);

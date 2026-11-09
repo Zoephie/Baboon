@@ -2,8 +2,8 @@
 
 use super::super::super::dx9::passes::{
     DEFAULT_AMBIENT, DEFAULT_DIRECT_COLOR, DEFAULT_DIRECT_VECTOR, DEFAULT_INDIRECT_COLOR,
-    DEFAULT_INDIRECT_VECTOR, Dx9Cull, Dx9DrawPass, Dx9DrawTexture, H2AnimatedRow, H2Animation,
-    H2RowForm, PASS_GLSL_VERSION, fill_components, identity_rows,
+    DEFAULT_INDIRECT_VECTOR, Dx9AnimatedRow, Dx9Animation, Dx9Cull, Dx9DrawPass, Dx9DrawTexture,
+    Dx9RowForm, PASS_GLSL_VERSION, fill_components, identity_rows,
 };
 use super::passes::{
     ACTIVE_CAMO_AMOUNT, ACTIVE_CAMO_BUMP, CAMERA_FEEDS, FRAME_COPY, LIGHT_FALLOFF, LIGHT_GEL,
@@ -143,7 +143,7 @@ pub(in crate::app) fn prepare_draw_pass(
         animated_row_values: vertex.animated_row_values,
         animated_tint_facing: vertex.animated_tint_facing,
         animated_tint_glancing: vertex.animated_tint_glancing,
-        ce_animation: None,
+        own_animation: None,
     })
 }
 
@@ -156,7 +156,7 @@ fn parameter_of<'a>(pass: &'a Dx9Pass, name: &str) -> Option<&'a Dx9ParameterVal
 }
 
 /// The animations `pass` runs on the parameter `name`.
-fn animations_of(pass: &Dx9Pass, name: &str) -> Vec<H2Animation> {
+fn animations_of(pass: &Dx9Pass, name: &str) -> Vec<Dx9Animation> {
     pass.animations.get(name).cloned().unwrap_or_default()
 }
 
@@ -164,7 +164,7 @@ fn animations_of(pass: &Dx9Pass, name: &str) -> Vec<H2Animation> {
 /// a change color, a light's color or the active camo amount.
 struct PixelConstants {
     constants: Vec<(u32, [f32; 4])>,
-    animated_constants: Vec<(u32, usize, Vec<H2Animation>)>,
+    animated_constants: Vec<(u32, usize, Vec<Dx9Animation>)>,
     change_colors: Vec<(u32, usize, usize)>,
     light_colors: Vec<(u32, usize)>,
     camo_amounts: Vec<(u32, usize)>,
@@ -316,10 +316,10 @@ struct VertexConstants {
     texture_rows: [[f32; 4]; DX9_TEXTURE_ROWS],
     tint_facing: [f32; 4],
     tint_glancing: [f32; 4],
-    animated_tint_facing: Vec<([bool; 4], Vec<H2Animation>)>,
-    animated_tint_glancing: Vec<([bool; 4], Vec<H2Animation>)>,
-    animated_rows: Vec<H2AnimatedRow>,
-    animated_row_values: Vec<(usize, usize, Vec<H2Animation>)>,
+    animated_tint_facing: Vec<([bool; 4], Vec<Dx9Animation>)>,
+    animated_tint_glancing: Vec<([bool; 4], Vec<Dx9Animation>)>,
+    animated_rows: Vec<Dx9AnimatedRow>,
+    animated_row_values: Vec<(usize, usize, Vec<Dx9Animation>)>,
     light_direct: [f32; 3],
     light_indirect: [f32; 3],
 }
@@ -424,10 +424,10 @@ fn vertex_constants(
         };
         let animations: Vec<_> = animations_of(pass, &constant.parameter)
             .into_iter()
-            .filter(H2Animation::is_transform)
+            .filter(Dx9Animation::is_transform)
             .collect();
         if !animations.is_empty() {
-            animated_rows.push(H2AnimatedRow {
+            animated_rows.push(Dx9AnimatedRow {
                 register: constant.register.max(0) as usize,
                 form,
                 scale: [x, y, x],
@@ -450,27 +450,27 @@ fn vertex_constants(
 
 /// A texture row filled from a parameter's tiling, in the form its
 /// `components` name; `None` when they name none.
-fn scale_row(row: &mut [f32; 4], components: &str, [x, y]: [f32; 2]) -> Option<H2RowForm> {
+fn scale_row(row: &mut [f32; 4], components: &str, [x, y]: [f32; 2]) -> Option<Dx9RowForm> {
     let form = if components.contains("row1") {
         *row = [x, 0.0, 0.0, 0.0];
-        H2RowForm::Row1
+        Dx9RowForm::Row1
     } else if components.contains("row2") {
         *row = [0.0, y, 0.0, 0.0];
-        H2RowForm::Row2
+        Dx9RowForm::Row2
     } else if components.contains("row3") {
         *row = [0.0, 0.0, x, 0.0];
-        H2RowForm::Row3
+        Dx9RowForm::Row3
     } else if components.contains("simple xform") {
         *row = [x, y, 0.0, 0.0];
-        H2RowForm::SimpleXform
+        Dx9RowForm::SimpleXform
     } else if components.starts_with("xy (2D scale") {
         row[0] = x;
         row[1] = y;
-        H2RowForm::ScaleXy
+        Dx9RowForm::ScaleXy
     } else if components.starts_with("zw (2D scale") {
         row[2] = x;
         row[3] = y;
-        H2RowForm::ScaleZw
+        Dx9RowForm::ScaleZw
     } else {
         return None;
     };

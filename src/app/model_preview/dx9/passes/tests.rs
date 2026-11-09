@@ -3,9 +3,9 @@ use super::*;
 use blam_tags::TagFunction;
 use std::sync::Arc;
 
-fn animation(kind: H2AnimationKind, period: f32, value: f32) -> H2Animation {
+fn animation(kind: Dx9AnimationKind, period: f32, value: f32) -> Dx9Animation {
     let function = blam_tags::tag_function::H2Function::new_constant(value);
-    H2Animation {
+    Dx9Animation {
         kind,
         period,
         held_input: None,
@@ -22,11 +22,11 @@ fn animation(kind: H2AnimationKind, period: f32, value: f32) -> H2Animation {
 
 #[test]
 fn a_period_wraps_time_and_no_period_reads_it_raw() {
-    let cycling = animation(H2AnimationKind::Value, 4.0, 0.0);
+    let cycling = animation(Dx9AnimationKind::Value, 4.0, 0.0);
     assert_eq!(cycling.input(1.0.into()), 0.25);
     assert_eq!(cycling.input(5.0.into()), 0.25);
     assert_eq!(
-        animation(H2AnimationKind::Value, 0.0, 0.0).input(5.0.into()),
+        animation(Dx9AnimationKind::Value, 0.0, 0.0).input(5.0.into()),
         5.0
     );
 }
@@ -35,7 +35,7 @@ fn a_period_wraps_time_and_no_period_reads_it_raw() {
 fn a_texture_transform_moves_scales_and_turns_as_the_game_builds_it() {
     let row = |form, animations| {
         let mut rows = [[0.0; 4]; DX9_TEXTURE_ROWS];
-        H2AnimatedRow {
+        Dx9AnimatedRow {
             register: 1,
             form,
             scale: [2.0, 4.0, 8.0],
@@ -45,30 +45,30 @@ fn a_texture_transform_moves_scales_and_turns_as_the_game_builds_it() {
         rows[1]
     };
     let moved = vec![
-        animation(H2AnimationKind::TranslationX, 0.0, 0.25),
-        animation(H2AnimationKind::TranslationY, 0.0, 0.5),
+        animation(Dx9AnimationKind::TranslationX, 0.0, 0.25),
+        animation(Dx9AnimationKind::TranslationY, 0.0, 0.5),
     ];
     // `sub_6D8B60` leaves a translation unscaled.
     assert_eq!(
-        row(H2RowForm::SimpleXform, moved.clone()),
+        row(Dx9RowForm::SimpleXform, moved.clone()),
         [2.0, 4.0, 0.25, 0.5]
     );
-    assert_eq!(row(H2RowForm::Row1, moved.clone()), [2.0, 0.0, 0.0, 0.25]);
-    assert_eq!(row(H2RowForm::Row2, moved), [0.0, 4.0, 0.0, 0.5]);
+    assert_eq!(row(Dx9RowForm::Row1, moved.clone()), [2.0, 0.0, 0.0, 0.25]);
+    assert_eq!(row(Dx9RowForm::Row2, moved), [0.0, 4.0, 0.0, 0.5]);
 
-    let deep = vec![animation(H2AnimationKind::TranslationZ, 0.0, 0.5)];
-    assert_eq!(row(H2RowForm::Row3, deep), [0.0, 0.0, 8.0, 0.5]);
-    let even = vec![animation(H2AnimationKind::ScaleUniform, 0.0, 3.0)];
+    let deep = vec![animation(Dx9AnimationKind::TranslationZ, 0.0, 0.5)];
+    assert_eq!(row(Dx9RowForm::Row3, deep), [0.0, 0.0, 8.0, 0.5]);
+    let even = vec![animation(Dx9AnimationKind::ScaleUniform, 0.0, 3.0)];
     assert_eq!(
-        row(H2RowForm::Row3, even),
+        row(Dx9RowForm::Row3, even),
         [0.0, 0.0, 3.0, 0.0],
         "uniform scale reaches z"
     );
 
     let turned = row(
-        H2RowForm::Row1,
+        Dx9RowForm::Row1,
         vec![animation(
-            H2AnimationKind::Rotation,
+            Dx9AnimationKind::Rotation,
             0.0,
             std::f32::consts::FRAC_PI_2,
         )],
@@ -84,9 +84,9 @@ fn an_object_input_holds_still_at_what_a_whole_object_exports() {
     assert_eq!(object_input("shield_vitality"), 1.0);
     assert_eq!(object_input("object_overshield_amount"), 0.0);
     assert_eq!(object_input("boost"), 0.0);
-    let held = H2Animation {
+    let held = Dx9Animation {
         held_input: Some(("boost".to_owned(), 1.0)),
-        ..animation(H2AnimationKind::Value, 4.0, 0.0)
+        ..animation(Dx9AnimationKind::Value, 4.0, 0.0)
     };
     assert_eq!(held.input(3.0.into()), 1.0);
     assert!(!held.moves());
@@ -103,7 +103,7 @@ fn an_object_input_holds_still_at_what_a_whole_object_exports() {
 
 #[test]
 fn only_a_non_constant_function_moves() {
-    assert!(!animation(H2AnimationKind::Value, 1.0, 0.5).moves());
+    assert!(!animation(Dx9AnimationKind::Value, 1.0, 0.5).moves());
 }
 
 #[test]

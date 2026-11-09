@@ -41,7 +41,7 @@ pub(crate) trait PassAnimation: std::fmt::Debug + Send + Sync {
 
 /// What one of a shader parameter's `animation properties` drives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum H2AnimationKind {
+pub(crate) enum Dx9AnimationKind {
     ScaleUniform,
     ScaleX,
     ScaleY,
@@ -57,8 +57,8 @@ pub(crate) enum H2AnimationKind {
 /// A parameter function the game reads by time, as in
 /// `shader_setup_evaluate_overlay_animation`.
 #[derive(Debug, Clone)]
-pub(crate) struct H2Animation {
-    pub(in crate::app::model_preview) kind: H2AnimationKind,
+pub(crate) struct Dx9Animation {
+    pub(in crate::app::model_preview) kind: Dx9AnimationKind,
     /// Seconds to a cycle. At zero the function reads the time itself.
     pub(in crate::app::model_preview) period: f32,
     /// The object function this reads instead of time, and what it reads
@@ -70,7 +70,7 @@ pub(crate) struct H2Animation {
     pub(in crate::app::model_preview) function: Arc<TagFunction>,
 }
 
-impl PartialEq for H2Animation {
+impl PartialEq for Dx9Animation {
     fn eq(&self, other: &Self) -> bool {
         self.kind == other.kind
             && self.period == other.period
@@ -93,7 +93,7 @@ impl From<f32> for Dx9Clock<'_> {
     }
 }
 
-impl H2Animation {
+impl Dx9Animation {
     /// `sub_915520`: the named function's value, or with no name the time
     /// over the period, wrapped unless the function is periodic. The game
     /// divides by a period of 0 as well, which leaves it NaN; the preview
@@ -136,7 +136,7 @@ impl H2Animation {
     fn vector<'a>(&self, clock: impl Into<Dx9Clock<'a>>) -> [f32; 4] {
         let clock = clock.into();
         match self.kind {
-            H2AnimationKind::Color => {
+            Dx9AnimationKind::Color => {
                 let color = self
                     .function
                     .evaluate_color(self.input(clock), self.range(clock));
@@ -169,14 +169,14 @@ impl H2Animation {
     }
 
     pub(in crate::app::model_preview) fn is_transform(&self) -> bool {
-        !matches!(self.kind, H2AnimationKind::Value | H2AnimationKind::Color)
+        !matches!(self.kind, Dx9AnimationKind::Value | Dx9AnimationKind::Color)
     }
 }
 
 /// The last value or color of a parameter's animations, as they overwrite
 /// one another in the game.
 pub(in crate::app::model_preview) fn animated_vector(
-    animations: &[H2Animation],
+    animations: &[Dx9Animation],
     clock: Dx9Clock<'_>,
 ) -> Option<[f32; 4]> {
     animations
@@ -195,7 +195,7 @@ pub(in crate::app::model_preview) fn animation_function(
 
 /// How a pass holds a texture transform in one register.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum H2RowForm {
+pub(crate) enum Dx9RowForm {
     Row1,
     Row2,
     /// The last of a 3D map's three: `xyzw row3 (3D affine xform)`.
@@ -207,14 +207,14 @@ pub(crate) enum H2RowForm {
 
 /// A texture transform to rebuild each frame.
 #[derive(Debug, Clone)]
-pub(crate) struct H2AnimatedRow {
+pub(crate) struct Dx9AnimatedRow {
     pub(in crate::app::model_preview) register: usize,
-    pub(in crate::app::model_preview) form: H2RowForm,
+    pub(in crate::app::model_preview) form: Dx9RowForm,
     pub(in crate::app::model_preview) scale: [f32; 3],
-    pub(in crate::app::model_preview) animations: Vec<H2Animation>,
+    pub(in crate::app::model_preview) animations: Vec<Dx9Animation>,
 }
 
-impl H2AnimatedRow {
+impl Dx9AnimatedRow {
     /// `sub_6D8B60`, which turns about the middle of the map. Scale reaches
     /// the turn and not the translation, which `sub_9185D0` writes straight
     /// into its register each frame.
@@ -224,17 +224,17 @@ impl H2AnimatedRow {
         for animation in &self.animations {
             let value = animation.scalar(clock);
             match animation.kind {
-                H2AnimationKind::ScaleUniform => {
+                Dx9AnimationKind::ScaleUniform => {
                     (scale_x, scale_y, scale_z) = (value, value, value)
                 }
-                H2AnimationKind::ScaleX => scale_x = value,
-                H2AnimationKind::ScaleY => scale_y = value,
-                H2AnimationKind::ScaleZ => scale_z = value,
-                H2AnimationKind::TranslationX => move_x = value,
-                H2AnimationKind::TranslationY => move_y = value,
-                H2AnimationKind::TranslationZ => move_z = value,
-                H2AnimationKind::Rotation => angle = value,
-                H2AnimationKind::Value | H2AnimationKind::Color => {}
+                Dx9AnimationKind::ScaleX => scale_x = value,
+                Dx9AnimationKind::ScaleY => scale_y = value,
+                Dx9AnimationKind::ScaleZ => scale_z = value,
+                Dx9AnimationKind::TranslationX => move_x = value,
+                Dx9AnimationKind::TranslationY => move_y = value,
+                Dx9AnimationKind::TranslationZ => move_z = value,
+                Dx9AnimationKind::Rotation => angle = value,
+                Dx9AnimationKind::Value | Dx9AnimationKind::Color => {}
             }
         }
         let (sin, cos): (f32, f32) = f32::sin_cos(angle);
@@ -244,15 +244,15 @@ impl H2AnimatedRow {
             return;
         };
         match self.form {
-            H2RowForm::Row1 => *row = [cos * scale_x, -sin * scale_x, 0.0, offset_x],
-            H2RowForm::Row2 => *row = [sin * scale_y, cos * scale_y, 0.0, offset_y],
-            H2RowForm::Row3 => *row = [0.0, 0.0, scale_z, move_z],
-            H2RowForm::SimpleXform => *row = [cos * scale_x, cos * scale_y, offset_x, offset_y],
-            H2RowForm::ScaleXy => (row[0], row[1]) = (cos * scale_x, cos * scale_y),
-            H2RowForm::ScaleZw => (row[2], row[3]) = (cos * scale_x, cos * scale_y),
+            Dx9RowForm::Row1 => *row = [cos * scale_x, -sin * scale_x, 0.0, offset_x],
+            Dx9RowForm::Row2 => *row = [sin * scale_y, cos * scale_y, 0.0, offset_y],
+            Dx9RowForm::Row3 => *row = [0.0, 0.0, scale_z, move_z],
+            Dx9RowForm::SimpleXform => *row = [cos * scale_x, cos * scale_y, offset_x, offset_y],
+            Dx9RowForm::ScaleXy => (row[0], row[1]) = (cos * scale_x, cos * scale_y),
+            Dx9RowForm::ScaleZw => (row[2], row[3]) = (cos * scale_x, cos * scale_y),
         }
     }
 }
 
 /// Animations of a tint, with the components they write.
-pub(in crate::app::model_preview) type H2AnimatedTint = ([bool; 4], Vec<H2Animation>);
+pub(in crate::app::model_preview) type Dx9AnimatedTint = ([bool; 4], Vec<Dx9Animation>);

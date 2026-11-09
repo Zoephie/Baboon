@@ -67,7 +67,7 @@ pub(super) fn meter_pass(
         rows: [[0.0; 4]; DX9_TEXTURE_ROWS],
     }
     .build();
-    pass.ce_animation = Some(Arc::new(CeModelAnimation {
+    pass.own_animation = Some(Arc::new(CeModelAnimation {
         meter: Some(meter),
         ..Default::default()
     }));
@@ -215,7 +215,7 @@ pub(super) fn plasma_pass(
         rows: [[0.0; 4]; DX9_TEXTURE_ROWS],
     }
     .build();
-    pass.ce_animation = Some(Arc::new(CeModelAnimation {
+    pass.own_animation = Some(Arc::new(CeModelAnimation {
         plasma: Some(plasma),
         ..Default::default()
     }));

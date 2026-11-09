@@ -43,7 +43,7 @@ pub(in crate::app::model_preview) fn shadow_pass(
         animated_row_values: Vec::new(),
         animated_tint_facing: Vec::new(),
         animated_tint_glancing: Vec::new(),
-        ce_animation: None,
+        own_animation: None,
     }
 }
 
