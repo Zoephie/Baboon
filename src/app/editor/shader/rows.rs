@@ -119,6 +119,7 @@ pub(in crate::app) fn push_shader_parameter_rows(
                 instance,
                 edit_prefix,
                 param_index,
+                tag,
             ));
             rows.extend(shader_bitmap_expansion_rows(
                 option,
@@ -126,6 +127,7 @@ pub(in crate::app) fn push_shader_parameter_rows(
                 instance,
                 edit_prefix,
                 param_index,
+                tag,
             ));
         }
         RenderMethodParameterType::Color | RenderMethodParameterType::ArgbColor => {
@@ -387,6 +389,7 @@ pub(in crate::app) fn shader_bitmap_row(
     instance: Option<&RenderMethodParameter>,
     edit_prefix: &str,
     param_index: Option<usize>,
+    tag: &TagFile,
 ) -> ShaderGridRow {
     let value = instance
         .map(|param| param.bitmap_path.as_str())
@@ -466,15 +469,12 @@ pub(in crate::app) fn shader_bitmap_row(
         for sampler in BITMAP_SAMPLER_OVERRIDES {
             // The field is a plain short: it takes the mode's index. Its name
             // ("trilinear") does not parse as one.
-            let initial_value = instance.map(|instance| match sampler.flag_bit {
-                BITMAP_FLAG_FILTER => instance.bitmap_filter_mode as i16,
-                BITMAP_FLAG_ADDRESS => instance.bitmap_address_mode as i16,
-                BITMAP_FLAG_ADDRESS_X => instance.bitmap_address_mode_x as i16,
-                _ => instance.bitmap_address_mode_y as i16,
-            }).unwrap_or_else(|| if sampler.flag_bit == BITMAP_FLAG_FILTER {
+            // An inactive short may be untouched zero backing, not an authored
+            // mode. Start an enabled override from the template's own index.
+            let initial_index = if sampler.flag_bit == BITMAP_FLAG_FILTER {
                 parameter.default_filter_mode_index
-            } else { parameter.default_address_mode_index })
-            .to_string();
+            } else { parameter.default_address_mode_index };
+            let initial_value = initial_index.to_string();
             if let Some(pidx) = param_index {
                 let flag_path =
                     append_field_path(edit_prefix, &format!("parameters[{pidx}]/bitmap flags"));
@@ -484,15 +484,17 @@ pub(in crate::app) fn shader_bitmap_row(
                 );
                 items.push(ShaderContextItem {
                     label: sampler.menu_label.to_owned(),
-                    // The enable bit is independent of the stored mode. Keep
-                    // that mode intact so re-enabling restores the same value.
                     disable: (current_flags & sampler.flag_bit != 0).then(||
-                        ShaderContextAction::FieldEdits(vec![PendingFieldEdit {
-                            path: flag_path.clone(),
-                            input: (current_flags & !sampler.flag_bit).to_string(),
-                        }])
+                        ShaderContextAction::FieldEdits(vec![
+                            PendingFieldEdit {
+                                path: flag_path.clone(),
+                                input: (current_flags & !sampler.flag_bit).to_string(),
+                            },
+                            PendingFieldEdit { path: field_path.clone(), input: initial_value.clone() },
+                        ])
                     ),
-                    confirm_disable: false,
+                    confirm_disable: shader_sampler_raw_index(tag, edit_prefix, param_index, sampler.field)
+                        .is_some_and(|current| current != initial_index),
                     action: ShaderContextAction::FieldEdits(vec![
                         PendingFieldEdit {
                             path: flag_path,
@@ -636,6 +638,7 @@ pub(in crate::app) fn shader_bitmap_expansion_rows(
     instance: Option<&RenderMethodParameter>,
     edit_prefix: &str,
     param_index: Option<usize>,
+    tag: &TagFile,
 ) -> Vec<ShaderGridRow> {
     let mut rows = Vec::new();
     let name = &parameter.parameter_name;
@@ -657,7 +660,8 @@ pub(in crate::app) fn shader_bitmap_expansion_rows(
             rows.push(shader_sampler_enum_row(
                 format!("{name}_filter_mode"),
                 parameter.default_filter_mode_index,
-                instance.bitmap_filter_mode as i16,
+                shader_sampler_raw_index(tag, edit_prefix, param_index, "bitmap filter mode")
+                    .unwrap_or(instance.bitmap_filter_mode as i16),
                 filter_opts,
                 edit_prefix,
                 param_index,
@@ -668,7 +672,8 @@ pub(in crate::app) fn shader_bitmap_expansion_rows(
             rows.push(shader_sampler_enum_row(
                 format!("{name}_wrap_mode"),
                 parameter.default_address_mode_index,
-                instance.bitmap_address_mode as i16,
+                shader_sampler_raw_index(tag, edit_prefix, param_index, "bitmap address mode")
+                    .unwrap_or(instance.bitmap_address_mode as i16),
                 addr_opts.clone(),
                 edit_prefix,
                 param_index,
@@ -679,7 +684,8 @@ pub(in crate::app) fn shader_bitmap_expansion_rows(
             rows.push(shader_sampler_enum_row(
                 format!("{name}_wrap_mode_x"),
                 parameter.default_address_mode_index,
-                instance.bitmap_address_mode_x as i16,
+                shader_sampler_raw_index(tag, edit_prefix, param_index, "bitmap address mode x")
+                    .unwrap_or(instance.bitmap_address_mode_x as i16),
                 addr_opts.clone(),
                 edit_prefix,
                 param_index,
@@ -690,7 +696,8 @@ pub(in crate::app) fn shader_bitmap_expansion_rows(
             rows.push(shader_sampler_enum_row(
                 format!("{name}_wrap_mode_y"),
                 parameter.default_address_mode_index,
-                instance.bitmap_address_mode_y as i16,
+                shader_sampler_raw_index(tag, edit_prefix, param_index, "bitmap address mode y")
+                    .unwrap_or(instance.bitmap_address_mode_y as i16),
                 addr_opts.clone(),
                 edit_prefix,
                 param_index,
@@ -1495,6 +1502,13 @@ pub(in crate::app) fn bitmap_extern_option_labels() -> Vec<String> {
     .collect()
 }
 
+fn shader_sampler_raw_index(tag: &TagFile, edit_prefix: &str, param_index: Option<usize>, field: &str) -> Option<i16> {
+    let path = append_field_path(edit_prefix, &format!("parameters[{}]", param_index?));
+    // RenderMethod's strong enums are renderer-facing and map unknown/later-
+    // engine values to zero. Editors must retain the authored short instead.
+    tag.root().descend(&path)?.read_int_any(field)?.try_into().ok()
+}
+
 /// A bitmap sampler sub-row backed by an enum dropdown (filter / wrap modes).
 /// The underlying tag field is a plain short integer, so the dropdown writes
 /// the selected option index.
@@ -1508,11 +1522,11 @@ pub(in crate::app) fn shader_sampler_enum_row(
     field: &str,
 ) -> ShaderGridRow {
     let default_label = options
-        .get(default_index.max(0) as usize)
+        .get(usize::try_from(default_index).unwrap_or(usize::MAX))
         .cloned()
         .unwrap_or_else(|| default_index.to_string());
     let current_label = options
-        .get(current_index.max(0) as usize)
+        .get(usize::try_from(current_index).unwrap_or(usize::MAX))
         .cloned()
         .unwrap_or_else(|| current_index.to_string());
     let mut row = shader_option_value_row(label, default_label, current_label);
@@ -1800,7 +1814,7 @@ mod tests {
             ("bitmap flags", "3"),
             ("bitmap filter mode", "9"),
             ("bitmap address mode", "4"),
-            ("bitmap address mode x", "3"),
+            ("bitmap address mode x", "0"),
         ] {
             set(&mut shader, &format!("{parameters}[0]/{field}"), value);
         }
@@ -1821,6 +1835,15 @@ mod tests {
         let wrap = row("base_map_wrap_mode");
         assert_eq!(wrap.value_cell.text, "mirroronce");
 
+        for value in ["99", "-1"] {
+            set(&mut shader, &format!("{parameters}[0]/bitmap filter mode"), value);
+            let method = RenderMethod::from_tag(&shader).unwrap();
+            let raw_rows = shader_rows_from_option(&shader, &method, &option, &prefix);
+            let row = raw_rows.iter().find(|row| row.label == "base_map_filter_mode").unwrap();
+            assert_eq!(row.value_cell.text, value, "unknown modes must remain visible as their stored index");
+            assert_eq!(row.edit.as_ref().unwrap().current, value);
+        }
+
         let inputs: Vec<&str> = rows
             .iter()
             .filter_map(|row| row.context_menu.as_ref())
@@ -1835,8 +1858,8 @@ mod tests {
             .collect();
         assert_eq!(
             inputs,
-            ["3"],
-            "enabling the x override preserves its stored index"
+            ["4"],
+            "first enabling an inactive override starts at the template default"
         );
     }
 

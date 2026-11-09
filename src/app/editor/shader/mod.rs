@@ -1438,7 +1438,7 @@ mod tests {
     }
 
     #[test]
-    fn bitmap_sampler_checkbox_disables_without_losing_the_saved_mode() {
+    fn removing_a_custom_sampler_warns_and_reenabling_starts_at_the_default() {
         let mut grid = Grid::new(1);
         grid.idle(2);
         grid.click("Override Default", 0);
@@ -1453,19 +1453,47 @@ mod tests {
         grid.apply();
         grid.right_click_at(grid.find("p0_0", 0).center());
         grid.click("filter mode", 0);
-        assert_eq!(grid.count("Disable Optional Argument?"), 0);
+        assert_eq!(grid.count("Disable Optional Argument?"), 1);
+        assert!(grid.ops.is_empty());
+        grid.click("Cancel", 0);
+        assert_eq!(RenderMethod::from_tag(&grid.doc.tag).unwrap().parameters[0].bitmap_filter_mode as i16, 2);
+        grid.right_click_at(grid.find("p0_0", 0).center());
+        grid.click("filter mode", 0);
+        grid.click("Disable Argument", 0);
         grid.apply();
         let render_method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
         assert_eq!(render_method.parameters[0].bitmap_flags & 1, 0);
-        assert_eq!(render_method.parameters[0].bitmap_filter_mode as i16, 2);
+        assert_eq!(render_method.parameters[0].bitmap_filter_mode as i16, 0);
         assert_eq!(grid.count("p0_0_filter_mode"), 0);
         grid.right_click_at(grid.find("p0_0", 0).center());
         grid.click("filter mode", 0);
         grid.apply();
         let render_method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
         assert_eq!(render_method.parameters[0].bitmap_flags & 1, 1);
-        assert_eq!(render_method.parameters[0].bitmap_filter_mode as i16, 2);
+        assert_eq!(render_method.parameters[0].bitmap_filter_mode as i16, 0);
         assert_eq!(grid.count("p0_0_filter_mode"), 1);
+    }
+
+    #[test]
+    fn undoing_clear_restores_an_explicit_default_valued_override() {
+        let mut grid = Grid::new(1);
+        grid.idle(2);
+        grid.click_at(rightmost_on_row(&grid, "p0_2", "Override Default").center());
+        grid.apply();
+        assert_eq!(grid.parameters().len(), 1);
+        grid.click_at(rightmost_on_row(&grid, "p0_2", "×").center());
+        grid.apply();
+        assert!(grid.parameters().is_empty());
+        let (snapshot, _) = grid.doc.journal.undo(&grid.doc.tag).unwrap();
+        grid.doc.tag = TagFile::read_from_bytes(&snapshot).unwrap();
+        grid.doc.note_layout_change();
+        grid.revision += 1;
+        grid.idle(2);
+        assert_eq!(grid.parameters().len(), 1);
+        let row_y = grid.find("p0_2", 0).center().y;
+        assert!(!grid.painted.iter().any(|(text, rect)| text == "Override Default"
+            && (rect.center().y - row_y).abs() < 10.0),
+            "Undo restored explicit backing; it must display the editable value again");
     }
 
     #[test]

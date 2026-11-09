@@ -846,53 +846,55 @@ pub(in crate::app) fn draw_foundation_flags_row(
             else { FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x }, label_height),
         Vec2::new(panel_width, panel_height),
     );
-    paint_flag_panel(ui, flags_rect);
+    crate::app::ui_kit::read_only_input_scope(ui, !edit.can_edit(meta), |ui| {
+        paint_flag_panel(ui, flags_rect);
 
-    if display_flags.is_empty() {
-        paint_findable_text(
-            ui,
-            flags_rect.left_center() + Vec2::new(8.0, 0.0),
-            Align2::LEFT_CENTER,
-            &if edit.expert_mode { format!("0x{raw:04X} (none set)") } else { "No visible flags".to_owned() },
-            FontId::proportional(12.5),
-            text_dark(),
-            FindTargetKind::Value,
-        );
-    } else {
-        let mut next_mask = raw;
-        for (index, (bit, option, is_set)) in display_flags.iter().enumerate() {
-            let id = ui.make_persistent_id((edit.view_scope, edit.tag_key, path, "flag", *bit));
-            let response = draw_flag_option(ui, flags_rect, index, id,
-                &option.label, option.help.as_deref(), *is_set, edit.can_edit(meta));
+        if display_flags.is_empty() {
+            paint_findable_text(
+                ui,
+                flags_rect.left_center() + Vec2::new(8.0, 0.0),
+                Align2::LEFT_CENTER,
+                &if edit.expert_mode { format!("0x{raw:04X} (none set)") } else { "No visible flags".to_owned() },
+                FontId::proportional(12.5),
+                text_dark(),
+                FindTargetKind::Value,
+            );
+        } else {
+            let mut next_mask = raw;
+            for (index, (bit, option, is_set)) in display_flags.iter().enumerate() {
+                let id = ui.make_persistent_id((edit.view_scope, edit.tag_key, path, "flag", *bit));
+                let response = draw_flag_option(ui, flags_rect, index, id,
+                    &option.label, option.help.as_deref(), *is_set, edit.can_edit(meta));
 
-            if response.clicked() {
-                if let Some(bit_mask) = 1u64.checked_shl(*bit) {
-                    if *is_set {
-                        next_mask &= !bit_mask;
-                    } else {
-                        next_mask |= bit_mask;
+                if response.clicked() {
+                    if let Some(bit_mask) = 1u64.checked_shl(*bit) {
+                        if *is_set {
+                            next_mask &= !bit_mask;
+                        } else {
+                            next_mask |= bit_mask;
+                        }
+                        edit.pending.push(PendingFieldEdit {
+                            path: path.to_owned(),
+                            input: next_mask.to_string(),
+                        });
                     }
-                    edit.pending.push(PendingFieldEdit {
-                        path: path.to_owned(),
-                        input: next_mask.to_string(),
-                    });
                 }
+            }
+
+            if edit.expert_mode {
+                paint_findable_text(
+                    ui,
+                    flags_rect.left_bottom() + Vec2::new(8.0, -5.0),
+                    Align2::LEFT_BOTTOM,
+                    &format!("0x{raw:04X}"),
+                    FontId::proportional(11.5),
+                    subtle_dark(),
+                    FindTargetKind::Value,
+                );
             }
         }
 
-        if edit.expert_mode {
-            paint_findable_text(
-                ui,
-                flags_rect.left_bottom() + Vec2::new(8.0, -5.0),
-                Align2::LEFT_BOTTOM,
-                &format!("0x{raw:04X}"),
-                FontId::proportional(11.5),
-                subtle_dark(),
-                FindTargetKind::Value,
-            );
-        }
-    }
-
+    });
 }
 
 #[cfg(test)]
@@ -1140,7 +1142,7 @@ mod tests {
                 egui::Shape::Text(text) => {
                     text_x.insert(text.galley.text().to_owned(), text.pos.x);
                 }
-                egui::Shape::Rect(rect) if rect.rect.height() > 40.0 && rect.fill == foundation_input() => panels.push(rect.rect.left()),
+                egui::Shape::Rect(rect) if rect.rect.height() > 40.0 && rect.fill == foundation_input().gamma_multiply(0.5) => panels.push(rect.rect.left()),
                 _ => {}
             }
         }

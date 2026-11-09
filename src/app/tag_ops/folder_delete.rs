@@ -215,7 +215,7 @@ fn delete_folder(confirm: DeleteFolderConfirm, game: Option<GameId>, names: TagN
     }
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
     let destination = super::delete::loose_trash_destination(game.map(GameId::as_str),
-        &tag_path::relative_tag_path(&confirm.relative), now.as_micros() as u64)?;
+        &tag_path::relative_tag_path(&confirm.relative), now.as_secs())?;
     move_folder_to_trash(&confirm.root, &confirm.relative, &destination, tx)?;
     // A failed cache write must not hide the completed deletion from the UI.
     let warning = game.and_then(|game| (|| -> anyhow::Result<()> {
@@ -245,7 +245,11 @@ fn move_folder_to_trash(root: &Path, relative: &Path, destination: &Path,
     if parent.canonicalize().map_err(|error| error.to_string())?.starts_with(&canonical) {
         return Err("The recovery folder cannot be inside the folder being deleted".into());
     }
-    if fs::rename(&folder, destination).is_ok() { return Ok(()); }
+    match fs::rename(&folder, destination) {
+        Ok(()) => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::CrossesDevices => {},
+        Err(error) => return Err(format!("Could not move {} to recovery; no files were removed: {error}", folder.display())),
+    }
     // Reserve the destination, then copy everything before removing any source
     // bytes. A failed copy leaves the original intact and the recovery copy.
     fs::create_dir(destination).map_err(|error| error.to_string())?;
@@ -342,6 +346,24 @@ mod tests {
         assert!(move_folder_to_trash(&kit.root, Path::new("doomed"), &occupied, &tx).is_err());
         assert_eq!(fs::read(occupied.join("important.txt")).unwrap(), b"existing recovery");
         assert!(kit.root.join("doomed").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locked_folder_delete_leaves_every_original_file_intact() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let kit = fixture();
+        let free = kit.root.join("doomed/aaa_free.txt");
+        let locked = kit.root.join("doomed/zzz_locked.txt");
+        fs::write(&free, b"unlocked").unwrap();
+        fs::write(&locked, b"locked").unwrap();
+        let _lock = fs::OpenOptions::new().read(true).share_mode(3).open(&locked).unwrap();
+        let destination = kit.root.parent().unwrap().join("locked-recovery/doomed");
+        let (tx, _rx) = mpsc::channel();
+        assert!(move_folder_to_trash(&kit.root, Path::new("doomed"), &destination, &tx).is_err());
+        assert_eq!(fs::read(&free).unwrap(), b"unlocked", "failed deletion must leave unlocked siblings intact too");
+        assert!(kit.path("doomed/render.render_model").exists());
+        assert!(!destination.exists(), "a sharing violation must not start a fallback copy");
     }
 
     #[test]

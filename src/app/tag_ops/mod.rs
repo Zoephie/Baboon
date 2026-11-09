@@ -11,7 +11,7 @@ use crate::app::kits::{Kit, KitId, KitMut, KitStamp, KitView, is_windows_reserve
 use crate::app::mods::{ContainerWriteMode, ContainerWriteOutcome};
 use blam_tags::convert::{CONVERSION_PROFILES, apply_editing_kit_mcc_header};
 use crate::app::references::{
-    build_reverse_dependency_index, collect_tag_dependency_refs, collect_tag_references,
+    collect_tag_dependency_refs, collect_tag_references,
     dependency_entry_reference_path, read_entry_dependencies, reference_path_from_abs_file,
 };
 use crate::app::editor::{

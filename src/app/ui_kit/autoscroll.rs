@@ -22,6 +22,16 @@ struct Session {
 fn targets_id() -> egui::Id { egui::Id::new("autoscroll_targets") }
 fn session_id() -> egui::Id { egui::Id::new("autoscroll_session") }
 fn cancelled_id() -> egui::Id { session_id().with("cancelled_pass") }
+fn middle_drag_id() -> egui::Id { session_id().with("middle_drag_reserved") }
+
+/// A canvas which already uses the middle button owns that press, including
+/// clicks which never cross the drag threshold. Do not also scroll its page.
+pub(in crate::app) fn reserve_middle_drag(ui: &Ui, response: &egui::Response) {
+    if response.enabled() && ui.rect_contains_pointer(response.rect) {
+        let pass = ui.ctx().cumulative_pass_nr();
+        ui.data_mut(|data| data.insert_temp(middle_drag_id(), pass));
+    }
+}
 
 pub(in crate::app) fn register<R>(ui: &Ui, output: &egui::scroll_area::ScrollAreaOutput<R>, axes: egui::Vec2b) {
     if !ui.is_enabled() || !ui.is_visible() { return; }
@@ -76,6 +86,7 @@ fn update(ctx: &egui::Context) {
         input.pointer.button_released(egui::PointerButton::Middle), input.focused,
     ));
     if session.is_none() && pressed && focused
+        && ctx.data(|data| data.get_temp::<u64>(middle_drag_id())) != Some(ctx.cumulative_pass_nr())
         && let Some(origin) = position
         && let Some(target) = targets.iter().filter(|target| target.hovered)
             .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))

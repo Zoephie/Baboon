@@ -44,9 +44,15 @@ pub(super) fn loose_trash_destination(
     }
     let mut destination = crate::core::storage::data_path(DELETED_TAGS_DIR);
     destination.push(game.unwrap_or("unknown-game"));
-    destination.push(now_unix_secs.to_string());
-    destination.push(relative);
-    Ok(destination)
+    // Both tag and folder deletion use seconds. Repeated deletion of the same
+    // path within a second gets a suffix rather than a different time unit.
+    let mut suffix = 0u64;
+    loop {
+        let run = if suffix == 0 { now_unix_secs.to_string() } else { format!("{now_unix_secs}-{suffix}") };
+        let candidate = destination.join(run).join(&relative);
+        if !candidate.try_exists().map_err(|error| error.to_string())? { return Ok(candidate); }
+        suffix += 1;
+    }
 }
 
 /// Drop every per-kit trace of a tag that no longer exists.

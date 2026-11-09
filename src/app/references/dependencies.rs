@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::app::kits::terminal::trim_terminal_lines;
+#[cfg(test)]
 use crate::app::tag_ops::refactor::send_folder_refactor_progress;
 
 #[cfg(test)]
@@ -528,6 +529,7 @@ pub(in crate::app) fn build_dependency_candidate_index(
     index
 }
 
+#[cfg(test)]
 pub(in crate::app) fn build_reverse_dependency_index(
     root: &Path,
     source: &TagSource,

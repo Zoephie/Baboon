@@ -2,6 +2,16 @@
 //! nothing borrows the tag: field values, function bytes, block structure,
 //! shader parameters and model variants.
 
+/// A missing or zero schema limit means the block has no count limit.
+pub(crate) fn block_capacity(max_count: Option<u32>) -> Option<usize> {
+    max_count.filter(|&limit| limit != 0).map(|limit| limit as usize)
+}
+
+/// Existing oversized tags can still be repaired or replaced in place.
+pub(crate) fn block_count_fits(max_count: Option<u32>, current: usize, next: usize) -> bool {
+    next <= current || block_capacity(max_count).is_none_or(|limit| next <= limit)
+}
+
 #[derive(Clone)]
 pub(crate) struct PendingFieldEdit {
     pub(crate) path: String,

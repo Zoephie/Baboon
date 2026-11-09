@@ -906,40 +906,21 @@ pub(in crate::app) fn run_folder_refactor_job(
     }
     let rewrites =
         build_folder_reference_rewrites(&root, &source, &destination, &old_entries, &names);
-    let all_entries_before = if move_folder && existing_all_entries.is_empty() {
-        send_folder_refactor_progress(tx, &label, "Building tag database", None);
-        scan_folder_subtree_entries(&root, Path::new(""), &names).map_err(|e| e.to_string())?
-    } else {
-        existing_all_entries.clone()
-    };
-    let mut reverse_dependencies = existing_reverse_dependencies.or_else(|| {
-        game.and_then(|game| crate::core::source::load_reverse_dependency_index(game.as_str(), &root))
-    });
-    if move_folder
-        && let Some(index) = reverse_dependencies.as_ref()
-        && index.len() != all_entries_before.len()
-    {
-        let _ = tx.send(WorkerMessage::TerminalLine(format!(
-            "Dependency index is stale ({} indexed tag(s), {} current tag(s)); rebuilding",
-            index.len(),
-            all_entries_before.len()
-        )));
-        reverse_dependencies = None;
-    }
-    if move_folder && reverse_dependencies.is_none() {
+    let (all_entries_before, mut reverse_dependencies, mut index_changes) = if move_folder {
         let dependency_source = TagSource::LooseFolder {
-            root: root.clone(),
-            game: game.clone(),
-            definitions_root: locate_definitions_root(),
+            root: root.clone(), game, definitions_root: locate_definitions_root(),
         };
-        reverse_dependencies = Some(build_reverse_dependency_index(
-            &root,
-            &dependency_source,
-            &all_entries_before,
-            &label,
-            tx,
-        ));
-    }
+        let (entries, index, changes) = prepare_tag_refactor_index(
+            &root, &dependency_source, game, &names, &existing_all_entries,
+            existing_reverse_dependencies, &label, tx,
+        )?;
+        (entries, Some(index), changes)
+    } else {
+        let index = existing_reverse_dependencies.or_else(|| {
+            game.and_then(|game| crate::core::source::load_reverse_dependency_index(game.as_str(), &root))
+        });
+        (existing_all_entries.clone(), index, RefactorIndexChanges::default())
+    };
     let dependency_schema_path = game
         .map(|game| {
             locate_definitions_root()
@@ -1044,11 +1025,12 @@ pub(in crate::app) fn run_folder_refactor_job(
         );
     }
 
-    let changes = RefactorIndexChanges {
-        removed: if move_folder { old_entries.iter().map(|entry| entry.key.clone()).collect() } else { Vec::new() },
-        touched: new_entries.iter().map(|entry| entry.key.clone()).chain(rewrite_result.changed_keys.iter().cloned()).collect(),
-    };
-    persist_refactor_indexes(&root, game, &all_entries, reverse_dependencies.as_ref(), &changes, tx);
+    if move_folder {
+        index_changes.removed.extend(old_entries.iter().map(|entry| entry.key.clone()));
+    }
+    index_changes.touched.extend(new_entries.iter().map(|entry| entry.key.clone()));
+    index_changes.touched.extend(rewrite_result.changed_keys.iter().cloned());
+    persist_refactor_indexes(&root, game, &all_entries, reverse_dependencies.as_ref(), &index_changes, tx);
 
     let action = match (move_folder, new_name.is_some()) {
         (true, true) => "Renamed",
@@ -2135,6 +2117,27 @@ mod tests {
             None,
             "a referrer outside the folder keeps its key"
         );
+    }
+
+    #[test]
+    fn folder_move_refreshes_only_missing_dependency_records() {
+        let kit = kit("folder-refactor-index-gap");
+        let entries = kit.entries();
+        let mut index = kit.index();
+        // A failed earlier dependency read leaves a gap, not a stale index.
+        index.clear_tag(&kit.key(USER));
+        crate::core::source::save_entry_index(kit.game, &kit.root, &entries).unwrap();
+        crate::core::source::save_reverse_dependency_index(kit.game, &kit.root, &index).unwrap();
+        crate::app::references::DEPENDENCY_READS.with(|reads| *reads.borrow_mut() = Some(Vec::new()));
+        let (tx, _rx) = mpsc::channel();
+        let done = run_folder_refactor_job(kit.root.clone(), PathBuf::from("objects/props"),
+            kit.path("levels"), None, true, "Moving props".into(), kit.names(),
+            Some(GameId::Halo3), entries, Some(index), &tx).unwrap();
+        let reads = crate::app::references::DEPENDENCY_READS.with(|reads| reads.borrow_mut().take().unwrap());
+        assert_eq!(reads.len(), 5, "one missing dependency read plus four moved/rewritten tags: {reads:?}");
+        assert!(!done.status.contains("NOT"), "{}", done.status);
+        assert_eq!(render_reference(&kit, USER).as_deref(), Some("levels\\props\\crate"));
+        crate::core::source::remove_test_index_source(kit.game, &kit.root);
     }
 
     /// A copy leaves the original and its referrers alone; the copied tags

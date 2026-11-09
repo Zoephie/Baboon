@@ -757,9 +757,8 @@ pub(super) fn draw_shader_grid_cell_with_icon(
     game: Option<GameId>,
 ) {
     let mut cell_ui = ui.new_child(egui::UiBuilder::new().id_salt(id_source).max_rect(rect));
-    if id_source.starts_with("default:") || id_source.starts_with("category_default:") {
-        cell_ui.multiply_opacity(0.5);
-    }
+    // Painted cells are read-only even when they are not in the defaults column.
+    cell_ui.set_opacity(cell_ui.opacity().min(0.5));
     let ui = &mut cell_ui;
     let fill = foundation_input();
     let text_color = material_text();

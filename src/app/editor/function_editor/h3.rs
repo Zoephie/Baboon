@@ -914,6 +914,10 @@ fn labeled_function_bound(ui: &mut Ui, label: &str, value: &mut f32, editable: b
         );
         let id = ui.make_persistent_id(("function_output_bound", label));
         let draft_id = id.with("draft");
+        // Escape clears egui's focus before widgets draw. Remember the prior
+        // focus so that this focus loss discards the draft instead of committing.
+        let cancelled = ui.memory(|memory| memory.has_focus(id) || memory.had_focus_last_frame(id))
+            && ui.input(|input| input.key_pressed(egui::Key::Escape));
         let mut text = ui.data(|data| data.get_temp::<String>(draft_id))
             .unwrap_or_else(|| value.to_string());
         let invalid = text.trim().parse::<f32>().ok().filter(|v| v.is_finite()).is_none();
@@ -923,7 +927,6 @@ fn labeled_function_bound(ui: &mut Ui, label: &str, value: &mut f32, editable: b
             ui, &mut text, field_width, id, editable, invalid,
             egui::CornerRadius { nw: 2, sw: 2, ne: 0, se: 0 },
         );
-        let cancelled = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape));
         if cancelled {
             response.surrender_focus();
         } else if editable && crate::app::editor::fields::lost_focus_once(&response)
@@ -1344,14 +1347,23 @@ mod tests {
 
     #[test]
     fn inline_graph_output_bounds_accept_typed_values() {
-        check_inline_graph_output_bounds(GameId::Halo2, *b"bipd", "functions[0]/default function/data", h2_editor(FunctionType::Spline));
-        check_inline_graph_output_bounds(GameId::Halo2, *b"nhdt", "bitmap widgets[0]/effect[0]/function/data", h2_editor(FunctionType::Spline));
-        let mut editor = constant_editor();
-        editor.set_master_type(EngineMasterType::Curve).unwrap();
-        check_inline_graph_output_bounds(GameId::Halo3, *b"bipd", "functions[0]/default function/data", editor);
+        check_graph_bounds(false);
     }
 
-    fn check_inline_graph_output_bounds(game: GameId, group: [u8; 4], path: &str, editor: TagFunctionEditor) {
+    #[test]
+    fn inline_graph_output_bounds_escape_discards_typed_values() {
+        check_graph_bounds(true);
+    }
+
+    fn check_graph_bounds(cancel: bool) {
+        check_inline_graph_output_bounds(GameId::Halo2, *b"bipd", "functions[0]/default function/data", h2_editor(FunctionType::Spline), cancel);
+        check_inline_graph_output_bounds(GameId::Halo2, *b"nhdt", "bitmap widgets[0]/effect[0]/function/data", h2_editor(FunctionType::Spline), cancel);
+        let mut editor = constant_editor();
+        editor.set_master_type(EngineMasterType::Curve).unwrap();
+        check_inline_graph_output_bounds(GameId::Halo3, *b"bipd", "functions[0]/default function/data", editor, cancel);
+    }
+
+    fn check_inline_graph_output_bounds(game: GameId, group: [u8; 4], path: &str, editor: TagFunctionEditor, cancel: bool) {
         let ctx = egui::Context::default();
         let view = std::cell::RefCell::new(FunctionView::from_function(editor.into_function()));
         let frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput {
@@ -1402,7 +1414,12 @@ mod tests {
             frame(vec![]);
             frame(vec![egui::Event::Text(value[1..].into())]);
             assert_eq!(view.borrow().function.to_bytes(), before, "typing should remain a draft until committed");
-            frame(vec![egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }]);
+            frame(vec![egui::Event::Key { key: if cancel { egui::Key::Escape } else { egui::Key::Enter }, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }]);
+            if cancel {
+                frame(vec![]);
+                assert_eq!(view.borrow().function.to_bytes(), before, "Escape must discard {label} for {game:?}");
+                continue;
+            }
             let range = TagFunctionEditor::from_function(view.borrow().function.clone()).clamp_range().unwrap();
             frame(vec![]);
             assert_eq!(if label == "Max:" { range.1 } else { range.0 }, expected, "typing {value} into {label} for {game:?}");

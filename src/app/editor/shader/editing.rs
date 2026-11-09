@@ -942,7 +942,7 @@ fn draw_shader_grid_row_inner(
                 .id_salt(("shader_default_flags", &row.label))
                 .max_rect(default_rect),
         );
-        defaults.multiply_opacity(0.5);
+        defaults.set_opacity(defaults.opacity().min(0.5));
         defaults.visuals_mut().disabled_alpha = 1.0;
         paint_flag_panel(&defaults, default_rect);
         for (bit, option) in options.iter().enumerate() {
@@ -1245,7 +1245,10 @@ fn draw_shader_grid_row_inner(
         })
         .clicked()
         {
-            ui.data_mut(|data| data.insert_temp(restored_default_id, true));
+            // Only an in-place function reset needs a UI marker. Deleted
+            // backing already renders inherited, and a marker would survive
+            // Undo and conceal a restored default-valued override.
+            ui.data_mut(|data| data.insert_temp(restored_default_id, function_reset.is_some()));
             if let Some(reset) = function_reset {
                 match reset {
                     ShaderFunctionReset::Field(value) => edit.pending.push(value),
@@ -1889,7 +1892,7 @@ fn draw_shader_editable_value_with_color_preview(
     let buffer_key = format!("{}|{}", edit.tag_key, row_edit.path);
     match &row_edit.kind {
         ShaderRowEditKind::Enum(options) => {
-            let current_idx = row_edit.current.parse::<usize>().unwrap_or(0);
+            let current_idx = row_edit.current.parse::<usize>().unwrap_or(usize::MAX);
             let selected_text = options
                 .get(current_idx)
                 .cloned()
@@ -3647,12 +3650,12 @@ mod tests {
             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                 egui::Shape::Rect(frame) if frame.rect == rect && frame.stroke.width > 0.0)),
                 "{id} must retain a visible input border");
-            let expected_fill = if id.starts_with("default:") || id.starts_with("category_default:") {
-                foundation_input().gamma_multiply(0.5)
-            } else { foundation_input() };
+            // This renderer paints read-only cells, including values in the
+            // override column; editable overrides use the input renderer.
+            let expected_fill = foundation_input().gamma_multiply(0.5);
             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                 egui::Shape::Rect(frame) if frame.rect == rect && frame.fill == expected_fill)),
-                "{id} must use the standard fill, with defaults faded to 50%");
+                "{id} must use the standard fill faded to 50% for read-only values");
         }
     }
 

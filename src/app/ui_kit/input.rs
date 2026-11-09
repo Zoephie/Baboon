@@ -4,6 +4,23 @@ use std::sync::Arc;
 
 pub(in crate::app) const INPUT_CORNER_RADIUS: egui::CornerRadius = egui::CornerRadius::same(2);
 
+/// Fade the complete input without disabling selection, copying or inspection.
+/// Nested read-only renderers (including shader defaults) share one 50% fade.
+pub(in crate::app) fn read_only_input_scope<R>(ui: &mut Ui, read_only: bool, draw: impl FnOnce(&mut Ui) -> R) -> R {
+    let opacity = ui.opacity();
+    let disabled_alpha = ui.visuals().disabled_alpha;
+    if read_only {
+        ui.set_opacity(opacity.min(0.5));
+        ui.visuals_mut().disabled_alpha = 1.0;
+    }
+    let result = draw(ui);
+    if read_only {
+        ui.set_opacity(opacity);
+        ui.visuals_mut().disabled_alpha = disabled_alpha;
+    }
+    result
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) enum InputState {
     #[default]
@@ -150,7 +167,11 @@ impl<'a> SinglelineTextEdit<'a> {
         self
     }
 
-    pub(in crate::app) fn show(mut self, ui: &mut Ui) -> egui::text_edit::TextEditOutput {
+    pub(in crate::app) fn show(self, ui: &mut Ui) -> egui::text_edit::TextEditOutput {
+        read_only_input_scope(ui, self.read_only || !ui.is_enabled(), |ui| self.show_inner(ui))
+    }
+
+    fn show_inner(mut self, ui: &mut Ui) -> egui::text_edit::TextEditOutput {
         if self.custom_frame {
             let mut output = self.edit.show(ui);
             super::text_focus::singleline_tab_focus(ui, &mut output);

@@ -388,56 +388,56 @@ fn foundation_value_text_filled_with_placeholder(
     string_id_placeholder: bool,
     corners: egui::CornerRadius,
 ) -> egui::Response {
-    // Read-only boxes use the same neutral fill with dimmer text (a missing
-    // reference keeps its red). They still take focus so text can be copied.
-    let read_only = !text.is_mutable();
-    let invalid = fill == Some(invalid_value_fill());
-    let unapplied = fill == Some(unapplied_value_fill());
-    let status_color = if unapplied { unapplied_value_text() } else { invalid_value_text() };
-    let state = if invalid { InputState::Invalid } else if unapplied { InputState::Warning } else { InputState::Normal };
-    let appearance = input_appearance(ui, state, read_only, false);
-    let fill = fill.unwrap_or(appearance.fill);
-    let color = if read_only && color == text_dark() { subtle_dark() } else { color };
-    ui.painter().rect_filled(rect, corners, fill);
-    let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
-    let status = status.map(|status| ui.painter().layout_no_wrap(status.to_owned(), FontId::proportional(11.0), status_color));
-    let right_padding = 4.0 + status.as_ref().map_or(0.0, |galley| galley.size().x + 8.0);
-    let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
-        findable_galley(ui, text.as_str(), font_id.clone(), color, FindTargetKind::Value)
-    };
-    // A frame of our own, so egui doesn't draw a different one for a buffer
-    // it can't change; egui ignores `.margin()` once a frame is given.
-    let showing_placeholder = string_id_placeholder && text.as_str().is_empty();
-    let mut edit = crate::app::ui_kit::singleline_text_edit(text)
-        .frame(egui::Frame::NONE.inner_margin(egui::Margin {
-            left: left_padding as i8,
-            right: right_padding.ceil() as i8,
-            top: 2,
-            bottom: 2,
-        }))
-        .font(font_id.clone())
-        .text_color(color)
-        .vertical_align(egui::Align::Center)
-        .clip_text(true)
-        .layouter(&mut layouter);
-    if string_id_placeholder { edit = edit.hint_text(placeholder_text("NONE")); }
-    if let Some(id) = id {
-        edit = edit.id(id);
-    }
-    // egui forces hint text to the UI's weak-text colour, so scope that colour
-    // to this input to keep NONE at exactly half the normal text opacity.
-    let previous_weak = ui.visuals().weak_text_color;
-    if showing_placeholder { ui.visuals_mut().weak_text_color = Some(text_dark().gamma_multiply(0.5)); }
-    let response = ui.put(rect, edit);
-    if showing_placeholder { ui.visuals_mut().weak_text_color = previous_weak; }
-    let appearance = input_appearance(ui, state, read_only, response.has_focus());
-    ui.painter().rect_stroke(rect, corners, appearance.stroke, egui::StrokeKind::Inside);
-    if let Some(status) = status {
-        ui.painter().with_clip_rect(rect.shrink(1.0)).galley(
-            egui::pos2(rect.right() - 4.0 - status.size().x, rect.center().y - status.size().y * 0.5),
-            status, status_color);
-    }
-    response
+    crate::app::ui_kit::read_only_input_scope(ui, !text.is_mutable(), |ui| {
+        // Fade the whole box, preserving validation hues and selectable text.
+        let read_only = !text.is_mutable();
+        let invalid = fill == Some(invalid_value_fill());
+        let unapplied = fill == Some(unapplied_value_fill());
+        let status_color = if unapplied { unapplied_value_text() } else { invalid_value_text() };
+        let state = if invalid { InputState::Invalid } else if unapplied { InputState::Warning } else { InputState::Normal };
+        let appearance = input_appearance(ui, state, read_only, false);
+        let fill = fill.unwrap_or(appearance.fill);
+        ui.painter().rect_filled(rect, corners, fill);
+        let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
+        let status = status.map(|status| ui.painter().layout_no_wrap(status.to_owned(), FontId::proportional(11.0), status_color));
+        let right_padding = 4.0 + status.as_ref().map_or(0.0, |galley| galley.size().x + 8.0);
+        let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
+            findable_galley(ui, text.as_str(), font_id.clone(), color, FindTargetKind::Value)
+        };
+        // A frame of our own, so egui doesn't draw a different one for a buffer
+        // it can't change; egui ignores `.margin()` once a frame is given.
+        let showing_placeholder = string_id_placeholder && text.as_str().is_empty();
+        let mut edit = crate::app::ui_kit::singleline_text_edit(text)
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin {
+                left: left_padding as i8,
+                right: right_padding.ceil() as i8,
+                top: 2,
+                bottom: 2,
+            }))
+            .font(font_id.clone())
+            .text_color(color)
+            .vertical_align(egui::Align::Center)
+            .clip_text(true)
+            .layouter(&mut layouter);
+        if string_id_placeholder { edit = edit.hint_text(placeholder_text("NONE")); }
+        if let Some(id) = id {
+            edit = edit.id(id);
+        }
+        // egui forces hint text to the UI's weak-text colour, so scope that colour
+        // to this input to keep NONE at exactly half the normal text opacity.
+        let previous_weak = ui.visuals().weak_text_color;
+        if showing_placeholder { ui.visuals_mut().weak_text_color = Some(text_dark().gamma_multiply(0.5)); }
+        let response = ui.put(rect, edit);
+        if showing_placeholder { ui.visuals_mut().weak_text_color = previous_weak; }
+        let appearance = input_appearance(ui, state, read_only, response.has_focus());
+        ui.painter().rect_stroke(rect, corners, appearance.stroke, egui::StrokeKind::Inside);
+        if let Some(status) = status {
+            ui.painter().with_clip_rect(rect.shrink(1.0)).galley(
+                egui::pos2(rect.right() - 4.0 - status.size().x, rect.center().y - status.size().y * 0.5),
+                status, status_color);
+        }
+        response
+    })
 }
 
 fn tag_reference_value_width(available: f32) -> f32 {
@@ -474,22 +474,24 @@ pub(super) fn foundation_tag_reference_input_cell_colored(
     missing: bool,
     show_hover_text: bool,
 ) -> egui::Response {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
-    let response = foundation_value_text_filled(
-        ui,
-        rect,
-        &mut text,
-        None,
-        if missing { invalid_value_text() } else { color },
-        tag_reference_icon_footprint(),
-        missing.then(invalid_value_fill),
-        missing.then_some("missing"),
-    );
-    paint_tag_reference_icon(ui, rect, icon);
-    if response.hovered() && show_hover_text {
-        return response.on_hover_text(hover.unwrap_or(text));
-    }
-    response
+    crate::app::ui_kit::read_only_input_scope(ui, true, |ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
+        let response = foundation_value_text_filled(
+            ui,
+            rect,
+            &mut text,
+            None,
+            if missing { invalid_value_text() } else { color },
+            tag_reference_icon_footprint(),
+            missing.then(invalid_value_fill),
+            missing.then_some("missing"),
+        );
+        paint_tag_reference_icon(ui, rect, icon);
+        if response.hovered() && show_hover_text {
+            return response.on_hover_text(hover.unwrap_or(text));
+        }
+        response
+    })
 }
 
 pub(super) fn foundation_tag_reference_text_edit_cell(
@@ -1182,10 +1184,12 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.set_global_style(foundation_style());
         let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
-            for (value, editable) in [("readonlyvalue", false), ("editablevalue", true)] {
+            for (value, editable, opacity) in [("readonlyvalue", false, 1.0), ("editablevalue", true, 1.0), ("nestedreadonly", false, 0.5)] {
+                ui.set_opacity(opacity);
                 let mut text = value.to_owned();
                 foundation_value_cell(ui, &mut text, 120.0, egui::Id::new(value), editable);
             }
+            ui.set_opacity(1.0);
             foundation_input_cell(ui, "displayedvalue", 120.0);
         });
         let mut texts = std::collections::HashMap::new();
@@ -1193,10 +1197,13 @@ mod tests {
             if let egui::Shape::Text(text) = &clipped.shape {
                 let font = text.galley.job.sections[0].format.font_id.clone();
                 texts.insert(text.galley.text().to_owned(), (text.pos.x + text.galley.rect.left(), font));
+                let expected = if text.galley.text() == "editablevalue" { text_dark() } else { text_dark().gamma_multiply(0.5) };
+                assert!(text.galley.rows.iter().flat_map(|row| &row.visuals.mesh.vertices).any(|vertex| vertex.color == expected),
+                    "{}: read-only inputs fade once, including inside an already faded parent", text.galley.text());
             }
         }
         let editable = &texts["editablevalue"];
-        for read_only in ["readonlyvalue", "displayedvalue"] {
+        for read_only in ["readonlyvalue", "displayedvalue", "nestedreadonly"] {
             assert_eq!(&texts[read_only], editable, "{read_only} is laid out unlike an editable value");
         }
     }

@@ -2394,8 +2394,8 @@ fn draw_block_header_menu(
     paste_gate: PasteGate,
     actions: &mut BlockHeaderActions,
 ) {
-    let capacity = max_count.filter(|&limit| limit != 0).map(|limit| limit as usize);
-    let fits = |new_count: usize| capacity.is_none_or(|limit| new_count <= limit);
+    let capacity = crate::core::document::ops::block_capacity(max_count);
+    let fits = |new_count: usize| crate::core::document::ops::block_count_fits(max_count, count, new_count);
     let copied_count = match paste_gate {
         PasteGate::Ready { count, .. } => Some(count),
         _ => None,
@@ -2446,7 +2446,9 @@ fn draw_block_header_menu(
                          versions isn't supported yet.",
                     );
                 }
-                PasteGate::Empty => {}
+                PasteGate::Empty => {
+                    response.on_disabled_hover_text("Copy a compatible entry or block first.");
+                }
             }
         }
         let replacement = match paste_gate {
@@ -2456,6 +2458,8 @@ fn draw_block_header_menu(
             _ => None,
         };
         let hint = match paste_gate {
+            PasteGate::Empty => "Copy a compatible entry or block first.",
+            PasteGate::VersionMismatch => "Clipboard entries use a different struct version and cannot be pasted here.",
             PasteGate::Ready { count: n, .. } if !fits(n) =>
                 "The copied entries exceed this block's maximum entry count",
             PasteGate::Ready { whole_block: false, .. } if count == 0 && capacity == Some(1) =>
@@ -2516,7 +2520,7 @@ fn prepare_block_control_availability(
     let can_edit = editable && allow_structural;
     let has_sel = count > 0;
     // `max_count` of 0 in the schema means "unbounded".
-    let capacity = max_count.filter(|&m| m != 0).map(|m| m as usize);
+    let capacity = crate::core::document::ops::block_capacity(max_count);
     let at_capacity = capacity.is_some_and(|m| count >= m);
     let capacity_hint = capacity
         .filter(|_| at_capacity)
@@ -3496,6 +3500,8 @@ mod tests {
             ("Paste", Some(1), 1, 1, false, "none"),
             ("Paste to Replace Entry", Some(1), 0, 1, false, "paste"),
             ("Paste to Replace Entry", Some(1), 1, 1, false, "entry"),
+            ("Paste to Replace Entry", Some(1), 3, 1, false, "entry"),
+            ("Paste to Replace Block", Some(1), 3, 2, true, "block"),
             ("Paste to Replace Block", Some(1), 1, 1, true, "block"),
             ("Paste to Replace Block", Some(1), 1, 2, true, "none"),
             ("Paste to Replace Entry", Some(1), 1, 2, false, "none"),
@@ -5543,13 +5549,14 @@ mod tests {
                             );
                         });
                     });
-                    // Read-only values share the input fill but dim their text.
+                    // Read-only values fade as a whole, including their text.
                     texts = output
                         .shapes
                         .iter()
                         .filter_map(|clipped| match &clipped.shape {
                             egui::Shape::Text(text) if text.galley.text() == "0"
-                                && text.galley.job.sections.iter().any(|section| section.format.color == subtle_dark()) =>
+                                && text.galley.rows.iter().flat_map(|row| &row.visuals.mesh.vertices)
+                                    .any(|vertex| vertex.color == text_dark().gamma_multiply(0.5)) =>
                                 Some("<dimmed value>".to_owned()),
                             egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
                             _ => None,

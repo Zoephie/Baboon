@@ -400,7 +400,8 @@ pub(in crate::app) fn draw_foundation_color_row(
         let width = foundation_component_width(ui, &parts, 76.0, SWATCH_WIDTH + ui.spacing().item_spacing.x);
         draw_foundation_component_cells(ui, &parts, width, path, editable, false, edit);
 
-        let response = color_preview_button(ui, Vec2::new(SWATCH_WIDTH, BUTTON_HEIGHT), swatch);
+        let response = crate::app::ui_kit::read_only_input_scope(ui, !editable, |ui|
+            color_preview_button(ui, Vec2::new(SWATCH_WIDTH, BUTTON_HEIGHT), swatch));
         let response = response
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text(if editable {
@@ -815,80 +816,82 @@ fn draw_foundation_data_row(
             .min_size([DATA_TEXT_MIN_WIDTH.min(largest.x), DATA_TEXT_MIN_HEIGHT])
             .max_size(largest)
             .show(ui, |ui| {
-                // The box is the whole resizable area, so its grip is the
-                // box's own corner. Its fill and border are painted under the
-                // text, the border once focus is known.
-                let frame_rect = ui.max_rect();
-                let background = ui.painter().add(egui::Shape::Noop);
-                // Greyed when it can't be edited, as the value boxes are.
-                let text_color = if stored_bytes(&draft.text).is_err() {
-                    invalid_value_text()
-                } else if editable { text_dark() } else { subtle_dark() };
-                let scroll = crate::app::ScrollArea::both()
-                    .id_salt(id.with("scroll"))
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
-                            findable_galley(ui, text.as_str(), font.clone(), text_color, FindTargetKind::Value)
-                        };
-                        let mut read_only = draft.text.as_str();
-                        let buffer: &mut dyn egui::TextBuffer =
-                            if editable { &mut draft.text } else { &mut read_only };
-                        // As big as the box, so a press anywhere in it puts the
-                        // caret in the text.
-                        let response = ui.add(
-                            egui::TextEdit::multiline(buffer)
-                                .id(id)
-                                .font(font.clone())
-                                .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(
-                                    DATA_TEXT_PADDING.x as i8,
-                                    DATA_TEXT_PADDING.y as i8,
-                                )))
-                                .min_size(frame_rect.size())
-                                .desired_width(frame_rect.width() - 2.0 * DATA_TEXT_PADDING.x)
-                                .layouter(&mut layouter),
-                        );
-                        if !editable {
-                            return;
-                        }
-                        draft.note_response(&response);
-                        if draft.changed
-                            && lost_focus_once(&response)
-                            && let Ok(bytes) = stored_bytes(&draft.text)
-                        {
-                            edit.pending.extend(data_edit(path, bytes).pending);
-                            draft.mark_committed();
-                        }
-                    });
-                let invalid = stored_bytes(&draft.text).is_err();
-                let appearance = input_appearance(ui,
-                    if invalid { InputState::Invalid } else { InputState::Normal },
-                    !editable, ui.memory(|memory| memory.has_focus(id)));
-                ui.painter().set(
-                    background,
-                    egui::Shape::Vec(vec![
-                        egui::Shape::rect_filled(
-                            frame_rect,
-                            appearance.corners,
-                            appearance.fill,
-                        ),
-                        egui::Shape::rect_stroke(frame_rect, appearance.corners, appearance.stroke, egui::StrokeKind::Inside),
-                    ]),
-                );
-                // While its text can still scroll, the box keeps the wheel:
-                // otherwise what it doesn't use scrolls the pane as well, and
-                // the two move at once.
-                let can_scroll = scroll.content_size - scroll.inner_rect.size();
-                if ui.rect_contains_pointer(frame_rect) {
-                    ui.input_mut(|input| {
-                        if can_scroll.x > 0.5 {
-                            input.smooth_scroll_delta.x = 0.0;
-                        }
-                        if can_scroll.y > 0.5 {
-                            input.smooth_scroll_delta.y = 0.0;
-                        }
-                    });
-                }
+                crate::app::ui_kit::read_only_input_scope(ui, !editable, |ui| {
+                    // The box is the whole resizable area, so its grip is the
+                    // box's own corner. Its fill and border are painted under the
+                    // text, the border once focus is known.
+                    let frame_rect = ui.max_rect();
+                    let background = ui.painter().add(egui::Shape::Noop);
+                    // Greyed when it can't be edited, as the value boxes are.
+                    let text_color = if stored_bytes(&draft.text).is_err() {
+                        invalid_value_text()
+                    } else { text_dark() };
+                    let scroll = crate::app::ScrollArea::both()
+                        .id_salt(id.with("scroll"))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
+                                findable_galley(ui, text.as_str(), font.clone(), text_color, FindTargetKind::Value)
+                            };
+                            let mut read_only = draft.text.as_str();
+                            let buffer: &mut dyn egui::TextBuffer =
+                                if editable { &mut draft.text } else { &mut read_only };
+                            // As big as the box, so a press anywhere in it puts the
+                            // caret in the text.
+                            let response = ui.add(
+                                egui::TextEdit::multiline(buffer)
+                                    .id(id)
+                                    .font(font.clone())
+                                    .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(
+                                        DATA_TEXT_PADDING.x as i8,
+                                        DATA_TEXT_PADDING.y as i8,
+                                    )))
+                                    .min_size(frame_rect.size())
+                                    .desired_width(frame_rect.width() - 2.0 * DATA_TEXT_PADDING.x)
+                                    .layouter(&mut layouter),
+                            );
+                            if !editable {
+                                return;
+                            }
+                            draft.note_response(&response);
+                            if draft.changed
+                                && lost_focus_once(&response)
+                                && let Ok(bytes) = stored_bytes(&draft.text)
+                            {
+                                edit.pending.extend(data_edit(path, bytes).pending);
+                                draft.mark_committed();
+                            }
+                        });
+                    let invalid = stored_bytes(&draft.text).is_err();
+                    let appearance = input_appearance(ui,
+                        if invalid { InputState::Invalid } else { InputState::Normal },
+                        !editable, ui.memory(|memory| memory.has_focus(id)));
+                    ui.painter().set(
+                        background,
+                        egui::Shape::Vec(vec![
+                            egui::Shape::rect_filled(
+                                frame_rect,
+                                appearance.corners,
+                                appearance.fill,
+                            ),
+                            egui::Shape::rect_stroke(frame_rect, appearance.corners, appearance.stroke, egui::StrokeKind::Inside),
+                        ]),
+                    );
+                    // While its text can still scroll, the box keeps the wheel:
+                    // otherwise what it doesn't use scrolls the pane as well, and
+                    // the two move at once.
+                    let can_scroll = scroll.content_size - scroll.inner_rect.size();
+                    if ui.rect_contains_pointer(frame_rect) {
+                        ui.input_mut(|input| {
+                            if can_scroll.x > 0.5 {
+                                input.smooth_scroll_delta.x = 0.0;
+                            }
+                            if can_scroll.y > 0.5 {
+                                input.smooth_scroll_delta.y = 0.0;
+                            }
+                        });
+                    }
+                });
             });
     });
     if !draft.changed {

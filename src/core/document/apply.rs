@@ -874,18 +874,18 @@ fn block_element_remap(tag: &TagFile, op: &BlockOp) -> Result<Option<BlockElemen
         return Ok(None);
     };
     let len = block.len();
-    // Refuse oversized clipboard operations before deleting/replacing anything.
-    // UI gating is not sufficient: every document mutation must honor the schema.
-    let pasted_len = match &op.kind {
+    // Validate clipboard commands before deleting/replacing anything. Preserve
+    // the ability to repair existing over-limit blocks without growing them.
+    let next_len = match &op.kind {
         BlockOpKind::Paste { elements, .. } => Some(len.saturating_add(elements.len())),
         BlockOpKind::ReplaceElement { elements, .. } =>
             Some(len.saturating_sub(1).saturating_add(elements.len())),
         BlockOpKind::ReplaceBlock { elements } => Some(elements.len()),
         _ => None,
     };
-    let max_count = block.definition().max_count() as usize;
-    if max_count != 0 && pasted_len.is_some_and(|new_len| new_len > max_count) {
-        return Err(format!("Paste would exceed the maximum of {max_count} entries in {}", op.path));
+    let max_count = block.definition().max_count();
+    if next_len.is_some_and(|new_len| !crate::core::document::ops::block_count_fits(Some(max_count), len, new_len)) {
+        return Err(format!("Edit would exceed the maximum of {max_count} entries in {}", op.path));
     }
 
     let remap = match &op.kind {
@@ -1543,6 +1543,25 @@ mod tests {
             apply_one_block_op(&mut tag, &BlockOp { path: "basic block".to_owned(), kind }).unwrap();
             assert_eq!(test_indices(&tag), if whole_block { [-1, -1, -1] } else { [0, 1, 2] });
         }
+    }
+
+    #[test]
+    fn over_limit_blocks_allow_same_size_replacement_and_shrinking() {
+        let mut tag = TagFile::new(crate::core::test_kits::definitions().join("halo2_mcc/new_hud_definition.json")).unwrap();
+        add_block_element(&mut tag, "bitmap widgets").unwrap();
+        let path = "bitmap widgets[0]/effect";
+        // Simulate a pre-existing malformed tag, bypassing command validation.
+        for _ in 0..3 { add_block_element(&mut tag, path).unwrap(); }
+        let copied = tag.root().field_path(path).unwrap().as_block().unwrap().element_snapshot(0).unwrap();
+        for kind in [
+            BlockOpKind::ReplaceElement { at: 1, elements: vec![copied.clone()] },
+            BlockOpKind::ReplaceBlock { elements: vec![copied.clone(), copied.clone()] },
+        ] {
+            apply_one_block_op(&mut tag, &BlockOp { path: path.into(), kind }).unwrap();
+        }
+        assert_eq!(tag.root().field_path(path).unwrap().as_block().unwrap().len(), 2);
+        assert!(apply_one_block_op(&mut tag, &BlockOp { path: path.into(),
+            kind: BlockOpKind::Paste { at: 0, elements: vec![copied] } }).is_err());
     }
 
     #[test]

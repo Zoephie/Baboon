@@ -637,7 +637,7 @@ pub(in crate::app) fn foundation_input() -> Color32 {
     input_fill_for(is_dark_mode())
 }
 
-/// Read-only inputs share the standard fill; their text/interaction conveys state.
+/// Read-only inputs share the palette and fade as a whole in read_only_input_scope.
 pub(in crate::app) fn foundation_input_read_only() -> Color32 {
     foundation_input()
 }

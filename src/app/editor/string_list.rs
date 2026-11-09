@@ -1837,7 +1837,7 @@ fn id_cell(ui: &mut Ui, list: &StringList, index: usize, editable: bool, interac
     let rect = ui.available_rect_before_wrap();
     remember_text_menu_selection(ui, id, rect);
     let background = ui.painter().add(egui::Shape::Noop);
-    let response = cell_box(ui, rect, |ui| {
+    let response = cell_box(ui, rect, !editable || !interactive, |ui| {
         let mut read_only;
         let buffer: &mut dyn egui::TextBuffer = if editable {
             &mut draft.text
@@ -1858,7 +1858,7 @@ fn id_cell(ui: &mut Ui, list: &StringList, index: usize, editable: bool, interac
             .response
     });
     let problem = id_problem(list, index, &draft.text);
-    paint_cell_fill(ui, background, rect, problem.is_some().then(invalid_value_fill));
+    paint_cell_fill(ui, background, rect, problem.is_some().then(invalid_value_fill), !editable || !interactive);
     let response = match &problem {
         Some(problem) => response.on_hover_text(problem.as_str()),
         None => response,
@@ -2033,7 +2033,7 @@ fn text_cell(
         ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
     let background = ui.painter().add(egui::Shape::Noop);
-    let output = cell_box_output(ui, rect, |ui| {
+    let output = cell_box_output(ui, rect, !editable || !interactive, |ui| {
         let mut read_only;
         let buffer: &mut dyn egui::TextBuffer = if editable {
             &mut draft.text
@@ -2057,7 +2057,7 @@ fn text_cell(
     let text = analysis.text.clone();
     let units = text.encode_utf16().count();
     let too_long = units > max_units;
-    paint_cell_fill(ui, background, rect, (errors || too_long).then(invalid_value_fill));
+    paint_cell_fill(ui, background, rect, (errors || too_long).then(invalid_value_fill), !editable || !interactive);
     let response = output.response.response.clone();
     let response = if errors {
         response.on_hover_text(if list.storage == Storage::HudMessages { "Unknown HUD token or invalid escape. Use % followed by a button, action or custom substitution; %% represents a literal percent." } else { "The tool would refuse this text: a literal & is &&, and a glyph is &name or &U+XXXX." })
@@ -2586,20 +2586,22 @@ fn unsupported_keywords(shown: &str, analysis: &strings::Analysis) -> Vec<Range<
 /// A cell's box: its edge, and what `contents` draws in it. Its fill is
 /// painted after, by [`paint_cell_fill`], once the cell knows whether what
 /// was typed this frame is valid.
-fn cell_box(ui: &mut Ui, rect: egui::Rect, contents: impl FnOnce(&mut Ui) -> egui::Response) -> egui::Response {
-    cell_box_output(ui, rect, contents)
+fn cell_box(ui: &mut Ui, rect: egui::Rect, read_only: bool, contents: impl FnOnce(&mut Ui) -> egui::Response) -> egui::Response {
+    cell_box_output(ui, rect, read_only, contents)
 }
 
-fn cell_box_output<R: CellOutput>(ui: &mut Ui, rect: egui::Rect, contents: impl FnOnce(&mut Ui) -> R) -> R {
-    let rect = cell_rect(rect);
-    let output = ui.scope_builder(egui::UiBuilder::new().max_rect(rect), contents).inner;
-    let stroke = if output.focused() {
-        ui.visuals().selection.stroke
-    } else {
-        Stroke::new(1.0, foundation_input_edge())
-    };
-    ui.painter().rect_stroke(rect, ui.visuals().widgets.inactive.corner_radius, stroke, egui::StrokeKind::Inside);
-    output
+fn cell_box_output<R: CellOutput>(ui: &mut Ui, rect: egui::Rect, read_only: bool, contents: impl FnOnce(&mut Ui) -> R) -> R {
+    crate::app::ui_kit::read_only_input_scope(ui, read_only, |ui| {
+        let rect = cell_rect(rect);
+        let output = ui.scope_builder(egui::UiBuilder::new().max_rect(rect), contents).inner;
+        let stroke = if output.focused() {
+            ui.visuals().selection.stroke
+        } else {
+            Stroke::new(1.0, foundation_input_edge())
+        };
+        ui.painter().rect_stroke(rect, ui.visuals().widgets.inactive.corner_radius, stroke, egui::StrokeKind::Inside);
+        output
+    })
 }
 
 fn cell_rect(rect: egui::Rect) -> egui::Rect {
@@ -2607,12 +2609,14 @@ fn cell_rect(rect: egui::Rect) -> egui::Rect {
 }
 
 /// Fill the shape reserved under a cell's box.
-fn paint_cell_fill(ui: &Ui, background: egui::layers::ShapeIdx, rect: egui::Rect, fill: Option<Color32>) {
-    let shape = egui::Shape::rect_filled(cell_rect(rect), ui.visuals().widgets.inactive.corner_radius, fill.unwrap_or(ui.visuals().text_edit_bg_color()));
-    ui.painter().set(background, shape);
-    if fill == Some(invalid_value_fill()) {
-        ui.painter().rect_stroke(cell_rect(rect), ui.visuals().widgets.inactive.corner_radius, invalid_value_stroke(), egui::StrokeKind::Inside);
-    }
+fn paint_cell_fill(ui: &mut Ui, background: egui::layers::ShapeIdx, rect: egui::Rect, fill: Option<Color32>, read_only: bool) {
+    crate::app::ui_kit::read_only_input_scope(ui, read_only, |ui| {
+        let shape = egui::Shape::rect_filled(cell_rect(rect), ui.visuals().widgets.inactive.corner_radius, fill.unwrap_or(ui.visuals().text_edit_bg_color()));
+        ui.painter().set(background, shape);
+        if fill == Some(invalid_value_fill()) {
+            ui.painter().rect_stroke(cell_rect(rect), ui.visuals().widgets.inactive.corner_radius, invalid_value_stroke(), egui::StrokeKind::Inside);
+        }
+    });
 }
 
 /// What a cell's contents return, for its box to draw focus around.
