@@ -227,6 +227,30 @@ pub(in crate::app::model_preview) fn read_pose_solvers(
         .collect()
 }
 
+/// Whether what a game keeps of its own on the opened object moves with
+/// time alone: a Halo CE object's functions (and those of what is attached
+/// to it) that move at rest, or Reach's shield while it shows at the frame's
+/// `function_values`.
+pub(in crate::app::model_preview) fn own_state_moves(
+    data: &ModelPreviewData,
+    function_values: Option<&super::super::functions::FunctionValues>,
+) -> bool {
+    super::super::ce::frame::object_functions(data).any(|functions| functions.move_at_rest())
+        || data.preview.reach.shield.as_ref().is_some_and(|shield| {
+            let damage = function_values
+                .and_then(|values| values.get(super::super::gen3::pipeline::SHIELD_DAMAGE))
+                .copied()
+                .unwrap_or(0.0);
+            shield.settings.showing(damage)
+        })
+}
+
+/// Whether the opened object's own shield (Reach's or Halo 4's) offers the
+/// shield's damage among the sliders.
+pub(in crate::app::model_preview) fn own_shield_gates(data: &ModelPreviewData) -> bool {
+    data.preview.reach.shield.is_some() || data.preview.h4.shield.is_some()
+}
+
 /// Once the clips are listed after a weapon change, the clip to play where
 /// the game picks it its own way: a Halo CE unit's, taking the `waiting`
 /// one. `None` for any other model, or with no clip waiting.

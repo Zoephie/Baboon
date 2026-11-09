@@ -1,7 +1,7 @@
 //! The function inputs and values a frame reads: the sliders, the attached objects' values and whether anything moves.
 
-use super::super::ce::frame::object_functions;
 use super::super::dx9::passes::Dx9Layer;
+use super::super::load::{own_shield_gates, own_state_moves};
 use super::super::{MaterialTextures, ModelPreviewData, RenderModelPreview, gen3};
 
 /// Where the names the panel's sliders offer come from, after the Halo 2
@@ -98,9 +98,8 @@ pub(in crate::app::model_preview) fn shader_input_names(
         .materials
         .iter()
         .any(|m| m.object == object && m.h2.shield == Some(Dx9Layer::ShieldDamaged));
-    let reach_shield =
-        object == 0 && (data.preview.reach.shield.is_some() || data.preview.h4.shield.is_some());
-    let gate = (shield || gen3_shield || reach_shield).then_some("current_shield_damage");
+    let own_shield = object == 0 && own_shield_gates(data);
+    let gate = (shield || gen3_shield || own_shield).then_some("current_shield_damage");
     let gate = gate
         .into_iter()
         .chain(gen3_shield.then_some(gen3::pipeline::OVERSHIELD));
@@ -184,16 +183,9 @@ pub(in crate::app::model_preview) fn object_moves(
     time: f32,
     function_values: Option<&super::super::functions::FunctionValues>,
 ) -> bool {
-    object_functions(data).any(|functions| functions.move_at_rest())
+    own_state_moves(data, function_values)
         || object_functions_move(data, set, time)
         || data.preview.any_feature(|list| list.moves())
-        || data.preview.reach.shield.as_ref().is_some_and(|shield| {
-            let damage = function_values
-                .and_then(|values| values.get(gen3::pipeline::SHIELD_DAMAGE))
-                .copied()
-                .unwrap_or(0.0);
-            shield.settings.showing(damage)
-        })
         || data
             .textures
             .iter()
