@@ -34,7 +34,7 @@ fn a_period_wraps_time_and_no_period_reads_it_raw() {
 #[test]
 fn a_texture_transform_moves_scales_and_turns_as_the_game_builds_it() {
     let row = |form, animations| {
-        let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+        let mut rows = [[0.0; 4]; DX9_TEXTURE_ROWS];
         H2AnimatedRow {
             register: 1,
             form,

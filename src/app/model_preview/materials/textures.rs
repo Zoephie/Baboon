@@ -1,7 +1,7 @@
 //! A material's decoded textures and detail composition.
 
 use super::super::{SLOT_COUNT, TextureSlot};
-use super::{Dx9DrawPass, Gen3Material, H2_LAYER_COUNT};
+use super::{Dx9DrawPass, Gen3Material, DX9_LAYER_COUNT};
 use std::sync::Arc;
 
 /// One decoded texture, ready to become a GL texture.
@@ -83,7 +83,7 @@ pub(crate) struct MaterialTextures {
     pub used_shader_parameters_only: bool,
     /// Halo 2 passes by `Dx9Layer`, drawn in place of the slots above; empty
     /// for other games and outside a loose kit, whose `.psh` sources they need.
-    pub h2_layers: [Vec<Dx9DrawPass>; H2_LAYER_COUNT],
+    pub h2_layers: [Vec<Dx9DrawPass>; DX9_LAYER_COUNT],
     /// Halo 3's own shader, translated from the kit's source.
     pub h3: Option<Arc<Gen3Material>>,
     /// Reach's `only render for shields`: `render_model_postprocess` (the

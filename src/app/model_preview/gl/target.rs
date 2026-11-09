@@ -313,14 +313,14 @@ pub(in crate::app::model_preview) struct DepthTarget {
 /// game shaders are on, because the environment layer blends by destination
 /// alpha, which the window's framebuffer need not keep. The other is texaccum,
 /// for lightmap passes to read back at each pixel's screen position.
-pub(in crate::app::model_preview) struct H2Target {
+pub(in crate::app::model_preview) struct SceneTarget {
     pub(in crate::app::model_preview) framebuffer: glow::NativeFramebuffer,
     pub(in crate::app::model_preview) color: glow::NativeTexture,
     pub(in crate::app::model_preview) depth: glow::NativeRenderbuffer,
     pub(in crate::app::model_preview) size: [i32; 2],
 }
 
-impl H2Target {
+impl SceneTarget {
     pub(in crate::app::model_preview) unsafe fn new(
         gl: &glow::Context,
         width: i32,

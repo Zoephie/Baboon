@@ -16,7 +16,7 @@ use super::super::common::view::ViewFrame;
 use super::super::common::view::ce_flare_view;
 use super::super::gl::pass_state::PassState;
 use super::super::particles::ParticleField;
-use super::super::particles::{CHEAP_FLOATS, CheapGl, ParticleGl, particle_floats, reach_cheap_gl};
+use super::super::particles::{CHEAP_FLOATS, CheapGl, ParticleGl, particle_floats, link_cheap_gl};
 use super::super::reach::lighting::reach_exposure;
 use super::super::{
     ModelGpuCamera, ModelGpuFrame, ModelGpuSlot, RenderCore, ce_flare_clip, ce_flare_pixels, h4,
@@ -114,16 +114,16 @@ impl Gen3State {
                 let mut distorted = 0;
                 for &(_, sprite) in &queue.distortions {
                     distorted += 1;
-                    pass.draw_sorted(game, uploaded, &mut core.h2_distortion_copy, sprite);
+                    pass.draw_sorted(game, uploaded, &mut core.distortion_copy, sprite);
                 }
                 self.distorted = distorted > 0;
             } else {
                 while let Some(sprite) = queue.next_farther_than(stage_limit(stage)) {
-                    pass.draw_sorted(game, uploaded, &mut core.h2_distortion_copy, sprite);
+                    pass.draw_sorted(game, uploaded, &mut core.distortion_copy, sprite);
                 }
             }
             if matches!(stage, SpriteStage::Rest) {
-                pass.draw_cheap_particles(uploaded, &mut core.reach_cheap_gl, core.program);
+                pass.draw_cheap_particles(uploaded, &mut core.cheap_gl, core.program);
             }
             if matches!(
                 stage,
@@ -529,7 +529,7 @@ impl SpritePass<'_> {
         let (gl, frame, camera) = (self.gl, self.frame, self.camera);
         let (Some(first), Some(texture)) = (
             frame.preview.gen3.cheap_emitters.first(),
-            uploaded.reach_cheap_texture,
+            uploaded.cheap_texture,
         ) else {
             return;
         };
@@ -540,7 +540,7 @@ impl SpritePass<'_> {
         unsafe {
             if !drawn.is_empty()
                 && let Some(cheap) = cheap_gl
-                    .get_or_insert_with(|| reach_cheap_gl(gl, program))
+                    .get_or_insert_with(|| link_cheap_gl(gl, program))
                     .as_ref()
             {
                 let vertices: Vec<[f32; CHEAP_FLOATS]> = drawn

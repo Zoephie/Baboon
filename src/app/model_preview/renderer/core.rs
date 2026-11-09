@@ -6,7 +6,7 @@ use super::super::gl::buffer::model_draw_range;
 use super::super::gl::link::link;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::ColorTarget;
-use super::super::gl::target::H2Target;
+use super::super::gl::target::SceneTarget;
 use super::super::gl::texture::{
     upload_black_cube, upload_black_flat, upload_placeholder_texture, upload_solid_volume,
 };
@@ -15,7 +15,7 @@ use super::super::{
     ALL_SLOTS, DetailFunction, ModelGpuFrame, ModelGpuSlot, SLOT_COUNT, effects, material_color,
 };
 use super::grid::{background_is_dark, grid_line_color};
-use super::program::{SAMPLER_UNIFORMS, h2_context_supported, model_shader_sources};
+use super::program::{SAMPLER_UNIFORMS, pass_context_supported, model_shader_sources};
 use super::slot::{MODEL_GPU_SLOTS, MaterialGlTextures, ModelSlotLru};
 use eframe::egui::Color32;
 use eframe::glow;
@@ -37,13 +37,13 @@ pub(in crate::app::model_preview) struct RenderCore {
     /// As `Dx9Gl::h2_bloom`.
     pub(in crate::app::model_preview) particle_gl: Option<Option<ParticleGl>>,
     /// As `Dx9Gl::h2_bloom`.
-    pub(in crate::app::model_preview) reach_cheap_gl: Option<Option<CheapGl>>,
+    pub(in crate::app::model_preview) cheap_gl: Option<Option<CheapGl>>,
     /// Particles step once a frame, however many calls draw them.
     pub(in crate::app::model_preview) sprites_advanced: bool,
     /// Halo 2's `target_particle_distortion`, copied from the frame.
-    pub(in crate::app::model_preview) h2_distortion_copy: Option<ColorTarget>,
+    pub(in crate::app::model_preview) distortion_copy: Option<ColorTarget>,
     /// Whether this context's GLSL can draw the games' shaders, which every
-    /// pipeline's scene needs; see `H2_GLSL_VERSION`.
+    /// pipeline's scene needs; see `PASS_GLSL_VERSION`.
     pub(in crate::app::model_preview) shaders_supported: bool,
     /// The DX9 pipeline's programs, targets and maps, which Halo 2 and
     /// Halo CE draw with and Halo 3's shadow draws through.
@@ -57,7 +57,7 @@ pub(in crate::app::model_preview) struct RenderCore {
     pub(in crate::app::model_preview) black_cube: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) black_volume: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) white_volume: Option<glow::NativeTexture>,
-    pub(in crate::app::model_preview) scene: Option<H2Target>,
+    pub(in crate::app::model_preview) scene: Option<SceneTarget>,
     pub(in crate::app::model_preview) program: glow::NativeProgram,
     pub(in crate::app::model_preview) slots: Vec<ModelGpuSlot>,
     pub(super) lru: ModelSlotLru,
@@ -151,16 +151,16 @@ impl RenderCore {
                 black_flat,
                 black_array,
                 sprite_gl: None,
-                shaders_supported: h2_context_supported(
+                shaders_supported: pass_context_supported(
                     version.major,
                     version.minor,
                     version.is_embedded,
                 ),
                 black_cube: upload_black_cube(gl),
                 particle_gl: None,
-                reach_cheap_gl: None,
+                cheap_gl: None,
                 sprites_advanced: false,
-                h2_distortion_copy: None,
+                distortion_copy: None,
                 black_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [0, 0, 0, 255]),
                 white_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [255; 4]),
                 dx9: Dx9Gl::new(gl),
@@ -476,7 +476,7 @@ impl RenderCore {
                 if let Some(old) = self.scene.take() {
                     old.delete(gl);
                 }
-                self.scene = H2Target::new(gl, size[0], size[1]);
+                self.scene = SceneTarget::new(gl, size[0], size[1]);
             }
             let Some(scene) = &self.scene else {
                 state.restore(gl);

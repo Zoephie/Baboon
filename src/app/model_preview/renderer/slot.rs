@@ -1,7 +1,7 @@
 //! The GPU slots a preview's buffers and textures live in, least recently drawn first out.
 
 use super::super::dx9::draw::sort_points;
-use super::super::dx9::passes::{Dx9DrawPass, H2_LAYER_COUNT};
+use super::super::dx9::passes::{Dx9DrawPass, DX9_LAYER_COUNT};
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::texture::{upload_image, upload_texture};
 use super::super::particles::{sprite_maps, upload_cheap_render_texture};
@@ -136,12 +136,12 @@ pub(in crate::app::model_preview) struct ModelGpuSlot {
     /// Halo 3's and Halo 4's lens flares: per flare, then per image, of
     /// `flare_geometry`.
     pub(in crate::app::model_preview) flare_textures: Vec<Vec<Option<glow::NativeTexture>>>,
-    pub(in crate::app::model_preview) h3_textures: gen3::pipeline::Gen3SlotTextures,
+    pub(in crate::app::model_preview) gen3_textures: gen3::pipeline::Gen3SlotTextures,
     pub(in crate::app::model_preview) flare_geometry: Option<u64>,
     pub(in crate::app::model_preview) antenna_textures: Vec<Option<glow::NativeTexture>>,
     pub(in crate::app::model_preview) volume_textures: Vec<Option<glow::NativeTexture>>,
     /// The cheap particles' library's render texture array.
-    pub(in crate::app::model_preview) reach_cheap_texture: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) cheap_texture: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) strip_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     pub(in crate::app::model_preview) particle_textures: Vec<[Option<glow::NativeTexture>; 4]>,
 }
@@ -189,12 +189,12 @@ impl ModelGpuSlot {
                 materials: Vec::new(),
                 uploaded_textures: None,
                 flare_textures: Vec::new(),
-                h3_textures: Default::default(),
+                gen3_textures: Default::default(),
                 flare_geometry: None,
                 simulations: SlotSimulations::default(),
                 antenna_textures: Vec::new(),
                 volume_textures: Vec::new(),
-                reach_cheap_texture: None,
+                cheap_texture: None,
                 strip_textures: Vec::new(),
                 particle_textures: Vec::new(),
             })
@@ -349,7 +349,7 @@ impl ModelGpuSlot {
                 .iter()
                 .map(|strip| maps(strip.shader()))
                 .collect();
-            if let Some(texture) = self.reach_cheap_texture.take() {
+            if let Some(texture) = self.cheap_texture.take() {
                 gl.delete_texture(texture);
             }
             let render = frame
@@ -358,7 +358,7 @@ impl ModelGpuSlot {
                 .cheap_emitters
                 .first()
                 .and_then(|at| at.library().render_texture());
-            self.reach_cheap_texture =
+            self.cheap_texture =
                 render.and_then(|render| upload_cheap_render_texture(gl, render));
             for texture in self.flare_textures.drain(..).flatten().flatten() {
                 gl.delete_texture(texture);
@@ -510,7 +510,7 @@ impl ModelGpuSlot {
                         })
                         .collect()
                 };
-                uploaded.h2_textures =
+                uploaded.dx9_textures =
                     std::array::from_fn(|layer| upload(&material.h2_layers[layer]));
                 uploaded
             })
@@ -520,7 +520,7 @@ impl ModelGpuSlot {
     pub(super) unsafe fn release_textures(&mut self, gl: &glow::Context) {
         for material in self.materials.drain(..) {
             let passes = material
-                .h2_textures
+                .dx9_textures
                 .into_iter()
                 .flatten()
                 .flatten()
@@ -536,8 +536,8 @@ impl ModelGpuSlot {
 pub(in crate::app::model_preview) struct MaterialGlTextures {
     pub(in crate::app::model_preview) textures: [Option<glow::NativeTexture>; SLOT_COUNT],
     /// By `Dx9Layer` and pass, one texture per entry of its `textures`.
-    pub(in crate::app::model_preview) h2_textures:
-        [Vec<Vec<Option<glow::NativeTexture>>>; H2_LAYER_COUNT],
+    pub(in crate::app::model_preview) dx9_textures:
+        [Vec<Vec<Option<glow::NativeTexture>>>; DX9_LAYER_COUNT],
     pub(super) uv_scales: [[f32; 2]; SLOT_COUNT],
     pub(in crate::app::model_preview) detail: DetailComposition,
 }
@@ -546,7 +546,7 @@ impl Default for MaterialGlTextures {
     fn default() -> Self {
         Self {
             textures: Default::default(),
-            h2_textures: Default::default(),
+            dx9_textures: Default::default(),
             uv_scales: [[1.0; 2]; SLOT_COUNT],
             detail: DetailComposition::default(),
         }

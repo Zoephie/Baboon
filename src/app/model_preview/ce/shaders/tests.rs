@@ -36,7 +36,7 @@ fn every_model_shader_links_with_its_stage() {
         .expect("the kit's model shader translates");
     let dir = crate::core::test_kits::unique_temp_dir("ce_model_shaders");
     let (vertex, pixel) = (dir.join("pass.vert"), dir.join("pass.frag"));
-    std::fs::write(&vertex, Dx9VertexStage::CeModel.source(H2_GLSL_VERSION)).unwrap();
+    std::fs::write(&vertex, Dx9VertexStage::CeModel.source(PASS_GLSL_VERSION)).unwrap();
     for (environment, mask, function, before) in (0..2).flat_map(|environment| {
         (0..9).flat_map(move |mask| {
             (0..3).flat_map(move |function| {
@@ -86,7 +86,7 @@ fn active_camo_links_with_its_stage() {
     let pass = ce_camo_pass(&settings, false, &mut |_, _| None);
     let dir = crate::core::test_kits::unique_temp_dir("ce_active_camo");
     let (vertex, pixel) = (dir.join("pass.vert"), dir.join("pass.frag"));
-    std::fs::write(&vertex, pass.stage.source(H2_GLSL_VERSION)).unwrap();
+    std::fs::write(&vertex, pass.stage.source(PASS_GLSL_VERSION)).unwrap();
     std::fs::write(&pixel, &pass.fragment).unwrap();
     let output = std::process::Command::new("glslangValidator")
         .arg("-l")
@@ -168,7 +168,7 @@ fn every_transparent_shader_links_with_its_stage() {
                 if !drawn.insert((pass.stage, pass.fragment.clone())) {
                     continue;
                 }
-                std::fs::write(&vertex, pass.stage.source(H2_GLSL_VERSION)).unwrap();
+                std::fs::write(&vertex, pass.stage.source(PASS_GLSL_VERSION)).unwrap();
                 std::fs::write(&pixel, &pass.fragment).unwrap();
                 let output = std::process::Command::new("glslangValidator")
                     .arg("-l")
@@ -231,7 +231,7 @@ fn a_full_turn_of_rotation_leaves_the_rows_square() {
         scale: 1.0,
     };
     let animation = map([idle.clone(), idle, still], [None; 3]);
-    let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+    let mut rows = [[0.0; 4]; DX9_TEXTURE_ROWS];
     animation.apply(&mut rows, 1.0, &[0.0; 4]);
     assert_eq!(rows[0], [2.0, 0.0, 0.0, 0.0]);
     assert_eq!(rows[1], [0.0, 3.0, 0.0, 0.0]);
@@ -275,7 +275,7 @@ fn an_eye_shader_reads_its_blink_from_an_object_function() {
     .unwrap();
     let animation = read_map_animation(tag.root(), 0, [1.0; 2], [0.0; 2], 0.0);
     assert_eq!(animation.sources, [None, Some(0), None]);
-    let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+    let mut rows = [[0.0; 4]; DX9_TEXTURE_ROWS];
     animation.apply(&mut rows, 0.0, &[0.0; 4]);
     assert_eq!(rows[1][3], 0.0);
     animation.apply(&mut rows, 0.0, &[1.0, 0.0, 0.0, 0.0]);
@@ -324,7 +324,7 @@ fn plasma_rests_unseen_and_its_output_brings_it_up() {
         plasma: Some(plasma),
         ..Default::default()
     };
-    let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+    let mut rows = [[0.0; 4]; DX9_TEXTURE_ROWS];
     animation.apply_rows(&mut rows, 4.0, &[0.0; 4]);
     assert_eq!(rows[7][3], 0.0);
     assert_eq!(rows[0], [3.0, 0.0, 0.0, 2.0]);

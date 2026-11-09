@@ -1,6 +1,6 @@
 //! The program Halo CE's effect sprites draw with.
 
-use super::super::super::renderer::link_h2_program;
+use super::super::super::renderer::link_pass_program;
 use eframe::glow::{self, HasContext as _};
 
 /// `fx/eff_common.h`: what Halo CE's particles, contrails and light volumes
@@ -34,7 +34,7 @@ pub(in crate::app::model_preview) unsafe fn ce_effect_gl(
     main: glow::NativeProgram,
 ) -> Option<CeEffectGl> {
     unsafe {
-        let program = link_h2_program(gl, main, CE_EFFECT_VERTEX, CE_EFFECT_FRAGMENT)
+        let program = link_pass_program(gl, main, CE_EFFECT_VERTEX, CE_EFFECT_FRAGMENT)
             .map_err(|error| eprintln!("model preview: {error}"))
             .ok()?;
         let vertex_array = gl.create_vertex_array().ok()?;

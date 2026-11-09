@@ -2,7 +2,7 @@
 
 use super::{
     Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass,
-    Dx9DrawTexture, Dx9VertexStage, H2_TEXTURE_ROWS, Image, SamplerKind, TagReader, TagSource,
+    Dx9DrawTexture, Dx9VertexStage, DX9_TEXTURE_ROWS, Image, SamplerKind, TagReader, TagSource,
     has_flag_in_any,
 };
 use blam_tags::TagStruct;
@@ -134,7 +134,7 @@ pub(super) struct SimplePass {
     pub(super) channels: [bool; 4],
     pub(super) textures: Vec<Dx9DrawTexture>,
     pub(super) constants: Vec<(u32, [f32; 4])>,
-    pub(super) rows: [[f32; 4]; H2_TEXTURE_ROWS],
+    pub(super) rows: [[f32; 4]; DX9_TEXTURE_ROWS],
 }
 
 impl SimplePass {

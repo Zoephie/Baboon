@@ -13,7 +13,7 @@ use super::model::LAYER_GROUPS;
 use super::special::{meter_pass, plasma_pass, water_passes};
 use super::{
     CeNumeric, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass, Dx9DrawTexture, Dx9VertexStage,
-    FADE_MODES, FramebufferBlend, H2_GLSL_VERSION, Image, SamplerKind, TagReader, argb, has_flag,
+    FADE_MODES, FramebufferBlend, PASS_GLSL_VERSION, Image, SamplerKind, TagReader, argb, has_flag,
     translate_fx,
 };
 use blam_tags::{TagBlock, TagFieldData, TagStruct};
@@ -427,7 +427,7 @@ fn generic_pass(
         defines.push(("FIRST_MAP_IS_CUBE", "1"));
     }
     let read = |name: &str| read_shader_source(directory, name);
-    let shader = translate_fx(GENERIC_FILE, H2_GLSL_VERSION, &defines, read)?;
+    let shader = translate_fx(GENERIC_FILE, PASS_GLSL_VERSION, &defines, read)?;
     let reference = flags.has("alpha-tested").then_some(ALPHA_REFERENCE);
     let fragment = shader.entry_tested("pixel_main(i)", reference);
     let animation = CeModelAnimation {
@@ -512,7 +512,7 @@ fn chicago_pass(
 
     let cube = if first_map != 0 { "1" } else { "0" };
     let read = |name: &str| read_shader_source(directory, name);
-    let shader = translate_fx(CHICAGO_FILE, H2_GLSL_VERSION, &[("USE_CUBE", cube)], read)?;
+    let shader = translate_fx(CHICAGO_FILE, PASS_GLSL_VERSION, &[("USE_CUBE", cube)], read)?;
     let reference = flags.has("alpha-tested").then_some(ALPHA_REFERENCE);
     let fragment = shader.entry_tested("pixel_main(i)", reference);
     let animation = CeModelAnimation {

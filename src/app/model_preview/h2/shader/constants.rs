@@ -3,14 +3,14 @@
 use super::super::super::dx9::passes::{
     DEFAULT_AMBIENT, DEFAULT_DIRECT_COLOR, DEFAULT_DIRECT_VECTOR, DEFAULT_INDIRECT_COLOR,
     DEFAULT_INDIRECT_VECTOR, Dx9Cull, Dx9DrawPass, Dx9DrawTexture, Dx9ParameterValue, Dx9Pass,
-    H2_GLSL_VERSION, H2AnimatedRow, H2Animation, H2RowForm, fill_components, identity_rows,
+    PASS_GLSL_VERSION, H2AnimatedRow, H2Animation, H2RowForm, fill_components, identity_rows,
 };
 use super::passes::{
     ACTIVE_CAMO_AMOUNT, ACTIVE_CAMO_BUMP, CAMERA_FEEDS, FRAME_COPY, LIGHT_FALLOFF, LIGHT_GEL,
     TEXACCUM_TARGET, VECTOR_NORMALIZATION, WATER_REFRACTION, change_color_channel,
 };
 use super::{
-    ConstantBinding, Dx9VertexStage, H2_TEXTURE_ROWS, Image, PixelShaderOptions, SamplerBinding,
+    ConstantBinding, Dx9VertexStage, DX9_TEXTURE_ROWS, Image, PixelShaderOptions, SamplerBinding,
     SamplerKind, TextureImage, has_flag, translate,
 };
 use blam_tags::TagStruct;
@@ -111,7 +111,7 @@ pub(in crate::app) fn prepare_draw_pass(
         cases,
         alpha_test: pass.alpha_test,
     };
-    let translated = translate(psh, H2_GLSL_VERSION, &options)?;
+    let translated = translate(psh, PASS_GLSL_VERSION, &options)?;
     let pixel = pixel_constants(pass, &translated.constants, specular_brightness);
     let textures = draw_textures(pass, &translated.samplers, &mut bitmap);
     let vertex = vertex_constants(pass, stage, specular_brightness, &scale);
@@ -312,7 +312,7 @@ fn draw_textures(
 /// the facing and glancing tints, the lightmap's two light vectors, and
 /// which of them animate.
 struct VertexConstants {
-    texture_rows: [[f32; 4]; H2_TEXTURE_ROWS],
+    texture_rows: [[f32; 4]; DX9_TEXTURE_ROWS],
     tint_facing: [f32; 4],
     tint_glancing: [f32; 4],
     animated_tint_facing: Vec<([bool; 4], Vec<H2Animation>)>,
@@ -324,7 +324,7 @@ struct VertexConstants {
 }
 
 /// The texture rows a `stage` starts from before its constants fill them.
-fn default_texture_rows(stage: Dx9VertexStage) -> [[f32; 4]; H2_TEXTURE_ROWS] {
+fn default_texture_rows(stage: Dx9VertexStage) -> [[f32; 4]; DX9_TEXTURE_ROWS] {
     if stage.uses_scale_rows() {
         std::array::from_fn(|row| {
             if (row == 3 && stage.is_lightmap()) || (row == 2 && stage == Dx9VertexStage::Texaccum)

@@ -6,7 +6,7 @@
 
 use super::ce::shaders::{CeCamoSettings, CeModelCommon};
 use super::common::image::Image;
-use super::dx9::passes::{Dx9DrawPass, Dx9Layer, H2_LAYER_COUNT, h2_shadow_passes};
+use super::dx9::passes::{Dx9DrawPass, Dx9Layer, DX9_LAYER_COUNT, h2_shadow_passes};
 use super::dx9::stage::Dx9VertexStage;
 use super::gen3::shaders::{Gen3Material, Gen3Shield, Gen3Sources};
 use crate::core::h2_pixel_shader::SamplerKind;

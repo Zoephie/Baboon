@@ -147,7 +147,7 @@ pub(super) const PRT_WEIGHTS_ATTRIBUTE: u32 = 15;
 
 /// Link a pass with the main program's attribute locations, because the
 /// model's vertex array is bound to those.
-pub(in crate::app::model_preview) unsafe fn link_h2_program(
+pub(in crate::app::model_preview) unsafe fn link_pass_program(
     gl: &glow::Context,
     main: glow::NativeProgram,
     vertex_source: &str,
@@ -178,10 +178,10 @@ pub(in crate::app::model_preview) unsafe fn link_h2_program(
     }
 }
 
-/// Whether a context can compile `H2_GLSL_VERSION`. This asks the context, not
+/// Whether a context can compile `PASS_GLSL_VERSION`. This asks the context, not
 /// egui's `ShaderVersion`: that only sorts contexts into the dialects egui
 /// itself uses, and calls everything from GL 3.1 up `#version 140`.
-pub(super) fn h2_context_supported(major: u32, minor: u32, embedded: bool) -> bool {
+pub(super) fn pass_context_supported(major: u32, minor: u32, embedded: bool) -> bool {
     !embedded && (major, minor) >= (3, 3)
 }
 
@@ -197,10 +197,10 @@ mod tests {
     /// dialect egui can hand the renderer; without it, skip by name.
     #[test]
     fn pass_support_reads_the_context_version() {
-        assert!(h2_context_supported(4, 1, false), "the macOS core profile");
-        assert!(h2_context_supported(3, 3, false));
-        assert!(!h2_context_supported(3, 2, false));
-        assert!(!h2_context_supported(3, 3, true), "OpenGL ES");
+        assert!(pass_context_supported(4, 1, false), "the macOS core profile");
+        assert!(pass_context_supported(3, 3, false));
+        assert!(!pass_context_supported(3, 2, false));
+        assert!(!pass_context_supported(3, 3, true), "OpenGL ES");
     }
 
     #[test]

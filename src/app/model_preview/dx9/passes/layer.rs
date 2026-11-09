@@ -52,10 +52,10 @@ pub(crate) enum Dx9Layer {
     ShadowApply,
 }
 
-pub(crate) const H2_LAYER_COUNT: usize = 26;
+pub(crate) const DX9_LAYER_COUNT: usize = 26;
 
 impl Dx9Layer {
-    pub(crate) const ALL: [Self; H2_LAYER_COUNT] = [
+    pub(crate) const ALL: [Self; DX9_LAYER_COUNT] = [
         Self::Texaccum,
         Self::LightAlbedo,
         Self::Lightmap,

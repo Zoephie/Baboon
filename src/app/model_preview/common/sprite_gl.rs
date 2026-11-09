@@ -7,7 +7,7 @@ use super::super::gl::buffer::slice_bytes;
 use super::super::gl::glsl::{VIEW_DEPTH, fill};
 #[cfg(test)]
 use super::super::reach;
-use super::super::{ModelGpuCamera, ce_flare_clip, link_h2_program};
+use super::super::{ModelGpuCamera, ce_flare_clip, link_pass_program};
 use crate::app::model_preview::common;
 
 /// The vertex stream of Halo CE's lens flares: clip position, then texcoord.
@@ -160,7 +160,7 @@ pub(in crate::app::model_preview) unsafe fn link_sprite_gl(
     main: glow::NativeProgram,
 ) -> Option<SpriteGl> {
     unsafe {
-        let program = link_h2_program(gl, main, CE_FLARE_VERTEX, &ce_flare_fragment())
+        let program = link_pass_program(gl, main, CE_FLARE_VERTEX, &ce_flare_fragment())
             .map_err(|error| eprintln!("model preview: {error}"))
             .ok()?;
         let vertex_array = gl.create_vertex_array().ok()?;

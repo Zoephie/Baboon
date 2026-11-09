@@ -2,7 +2,7 @@
 
 use super::base::option_index;
 use super::periodic::{PERIODIC_ONE, PERIODIC_ZERO, periodic_evaluate};
-use super::{H2_TEXTURE_ROWS, PassAnimation};
+use super::{DX9_TEXTURE_ROWS, PassAnimation};
 use blam_tags::TagStruct;
 
 /// One axis of a `shader_texture_animation`. The tag's zeros mean a default.
@@ -65,7 +65,7 @@ impl CeMapAnimation {
 
     pub(super) fn apply(
         &self,
-        rows: &mut [[f32; 4]; H2_TEXTURE_ROWS],
+        rows: &mut [[f32; 4]; DX9_TEXTURE_ROWS],
         time: f32,
         outputs: &[f32; 4],
     ) {
@@ -183,7 +183,7 @@ impl CePlasma {
             .map_or(1.0, |source| outputs[source].powf(self.intensity_exponent))
     }
 
-    fn apply(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32, outputs: &[f32; 4]) {
+    fn apply(&self, rows: &mut [[f32; 4]; DX9_TEXTURE_ROWS], time: f32, outputs: &[f32; 4]) {
         const LEAST_OFFSET: f32 = 0.0005;
         let offset = self.offset_source.map_or(0.0, |source| {
             outputs[source].powf(self.offset_exponent) * self.offset_amount
@@ -311,7 +311,7 @@ impl PassAnimation for CeModelAnimation {
             || self.colors.iter().any(|color| color.follows_output)
     }
 
-    fn apply_rows(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32, outputs: &[f32; 4]) {
+    fn apply_rows(&self, rows: &mut [[f32; 4]; DX9_TEXTURE_ROWS], time: f32, outputs: &[f32; 4]) {
         self.maps
             .iter()
             .for_each(|map| map.apply(rows, time, outputs));
@@ -420,7 +420,7 @@ impl CeMapAnimation {
         time: f32,
         outputs: &[f32; 4],
     ) -> [[f32; 4]; 2] {
-        let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+        let mut rows = [[0.0; 4]; DX9_TEXTURE_ROWS];
         let at = Self {
             row: 0,
             ..self.clone()
@@ -487,7 +487,7 @@ pub(super) fn read_model_animation(
     }
 }
 
-pub(super) fn identity_map_rows() -> [[f32; 4]; H2_TEXTURE_ROWS] {
+pub(super) fn identity_map_rows() -> [[f32; 4]; DX9_TEXTURE_ROWS] {
     std::array::from_fn(|row| match row {
         0 | 2 | 4 | 6 => [1.0, 0.0, 0.0, 0.0],
         1 | 3 | 5 | 7 => [0.0, 1.0, 0.0, 0.0],

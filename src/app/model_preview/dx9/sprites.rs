@@ -122,7 +122,7 @@ impl RenderCore {
                 let targets = ParticleTargets {
                     no_map: self.black_flat,
                     depth_copy: None,
-                    distortion_copy: &mut self.h2_distortion_copy,
+                    distortion_copy: &mut self.distortion_copy,
                     stops: 0.0,
                 };
                 draw_particle_system(gl, particles, uploaded, frame, index, &view, targets);

@@ -4,7 +4,7 @@ use super::animation::{H2AnimatedRow, H2Animation, H2Clock, PassAnimation, anima
 use super::change_colors::H2AnimatedTint;
 use super::globals::fill_components;
 use super::numeric::CeNumeric;
-use super::{AlphaTest, Dx9VertexStage, H2_TEXTURE_ROWS, Image, SamplerKind};
+use super::{AlphaTest, Dx9VertexStage, DX9_TEXTURE_ROWS, Image, SamplerKind};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(in crate::app) enum Dx9ParameterValue {
@@ -169,7 +169,7 @@ pub(crate) struct Dx9DrawPass {
     pub(crate) textures: Vec<Dx9DrawTexture>,
     /// Pixel constant registers, by register index.
     pub(crate) constants: Vec<(u32, [f32; 4])>,
-    pub(crate) texture_rows: [[f32; 4]; H2_TEXTURE_ROWS],
+    pub(crate) texture_rows: [[f32; 4]; DX9_TEXTURE_ROWS],
     pub(crate) tint_facing: [f32; 4],
     pub(crate) tint_glancing: [f32; 4],
     /// Constant components filled from the object's change colors at draw
@@ -215,7 +215,7 @@ impl Dx9DrawPass {
             channels: [true; 4],
             textures: Vec::new(),
             constants: Vec::new(),
-            texture_rows: [[0.0; 4]; H2_TEXTURE_ROWS],
+            texture_rows: [[0.0; 4]; DX9_TEXTURE_ROWS],
             tint_facing: [1.0; 4],
             tint_glancing: [1.0; 4],
             change_colors: Vec::new(),
@@ -289,7 +289,7 @@ impl Dx9DrawPass {
         &self,
         clock: H2Clock<'_>,
         outputs: &[f32; 4],
-    ) -> [[f32; 4]; H2_TEXTURE_ROWS] {
+    ) -> [[f32; 4]; DX9_TEXTURE_ROWS] {
         let mut rows = self.texture_rows;
         self.animated_rows
             .iter()
@@ -370,13 +370,13 @@ pub(crate) fn normalization_face(face: usize, size: usize) -> Vec<u8> {
 }
 
 /// The GL version every translated shader and vertex stage declares.
-pub(crate) const H2_GLSL_VERSION: &str = "#version 330\n";
+pub(crate) const PASS_GLSL_VERSION: &str = "#version 330\n";
 
 /// Reflection vectors in the game carry a scale of about 2.
-pub(crate) const H2_REFLECTION_SCALE: f32 = 2.0;
+pub(crate) const DX9_REFLECTION_SCALE: f32 = 2.0;
 
 /// Rows of an identity 2D transform: `x` in even registers, `y` in odd ones.
-pub(in crate::app::model_preview) fn identity_rows() -> [[f32; 4]; H2_TEXTURE_ROWS] {
+pub(in crate::app::model_preview) fn identity_rows() -> [[f32; 4]; DX9_TEXTURE_ROWS] {
     std::array::from_fn(|row| {
         if row % 2 == 0 {
             [1.0, 0.0, 0.0, 0.0]

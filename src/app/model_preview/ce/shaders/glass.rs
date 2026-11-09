@@ -10,15 +10,15 @@ use super::base::{
 use super::special::unseen_pass;
 use super::transparent::TRANSPARENT_DECAL_DEPTH_BIAS;
 use super::{
-    Dx9BlendFactor, Dx9DrawPass, Dx9VertexStage, H2_GLSL_VERSION, H2_TEXTURE_ROWS, Image,
+    Dx9BlendFactor, Dx9DrawPass, Dx9VertexStage, PASS_GLSL_VERSION, DX9_TEXTURE_ROWS, Image,
     SamplerKind, translate_fx,
 };
 use blam_tags::TagStruct;
 use std::sync::Arc;
 
-fn lit_rows(scale: [f32; 4]) -> [[f32; 4]; H2_TEXTURE_ROWS] {
+fn lit_rows(scale: [f32; 4]) -> [[f32; 4]; DX9_TEXTURE_ROWS] {
     let vector = |[x, y, z]: [f32; 3]| [x, y, z, 0.0];
-    let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+    let mut rows = [[0.0; 4]; DX9_TEXTURE_ROWS];
     rows[2] = scale;
     rows[4] = vector(AMBIENT);
     rows[5] = vector(FIRST_LIGHT_COLOR);
@@ -28,8 +28,8 @@ fn lit_rows(scale: [f32; 4]) -> [[f32; 4]; H2_TEXTURE_ROWS] {
 }
 
 /// `Dx9VertexStage::Bumped`'s rows for one map at `scale`.
-pub(super) fn bumped_rows(scale: f32) -> [[f32; 4]; H2_TEXTURE_ROWS] {
-    let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+pub(super) fn bumped_rows(scale: f32) -> [[f32; 4]; DX9_TEXTURE_ROWS] {
+    let mut rows = [[0.0; 4]; DX9_TEXTURE_ROWS];
     rows[0] = [1.0, 1.0, 0.0, 0.0];
     rows[2] = [scale, scale, 0.0, 0.0];
     rows
@@ -58,7 +58,7 @@ pub(super) fn glass_passes(
     let tint = rgb("background tint color");
     let tint_map = map("background tint map", SamplerKind::Texture2D);
     if tint_map.is_some() || tint != [0.0; 3] {
-        let shader = translate_fx(GLASS_TINT_FILE, H2_GLSL_VERSION, &[], read)?;
+        let shader = translate_fx(GLASS_TINT_FILE, PASS_GLSL_VERSION, &[], read)?;
         let register = shader.register("c_tint_and_intensity").unwrap_or(0);
         let size = scale("background tint map scale");
         passes.push(
@@ -98,7 +98,7 @@ pub(super) fn glass_passes(
         } else {
             GLASS_BUMPED_FILE
         };
-        let shader = translate_fx(file, H2_GLSL_VERSION, &[], read)?;
+        let shader = translate_fx(file, PASS_GLSL_VERSION, &[], read)?;
         let mut constants = Vec::new();
         let mut constant = |name: &str, value: [f32; 4]| {
             if let Some(register) = shader.register(name) {
@@ -159,7 +159,7 @@ pub(super) fn glass_passes(
     let diffuse = map("diffuse map", SamplerKind::Texture2D);
     let detail = map("diffuse detail map", SamplerKind::Texture2D);
     if diffuse.is_some() || detail.is_some() {
-        let shader = translate_fx(GLASS_DIFFUSE_FILE, H2_GLSL_VERSION, &[], read)?;
+        let shader = translate_fx(GLASS_DIFFUSE_FILE, PASS_GLSL_VERSION, &[], read)?;
         let (base, fine) = (
             scale("diffuse map scale"),
             scale("diffuse detail map scale"),

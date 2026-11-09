@@ -4,7 +4,7 @@ use super::super::gen3::shaders::Gen3Blend;
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::glsl::{VIEW_DEPTH, fill};
 use super::super::reach::lighting::reach_particle_light;
-use super::super::{ModelGpuCamera, ce_flare_clip, gen3, link_h2_program, scene_depth_terms};
+use super::super::{ModelGpuCamera, ce_flare_clip, gen3, link_pass_program, scene_depth_terms};
 use crate::app::model_preview::particles;
 use eframe::glow::{self, HasContext as _};
 
@@ -248,7 +248,7 @@ pub(in crate::app::model_preview) unsafe fn gen3_particle_gl(
     main: glow::NativeProgram,
 ) -> Option<ParticleGl> {
     unsafe {
-        let program = link_h2_program(gl, main, PARTICLE_VERTEX, &particle_fragment())
+        let program = link_pass_program(gl, main, PARTICLE_VERTEX, &particle_fragment())
             .map_err(|error| eprintln!("model preview: {error}"))
             .ok()?;
         let vertex_array = gl.create_vertex_array().ok()?;

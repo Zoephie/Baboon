@@ -27,7 +27,7 @@ pub(super) unsafe fn draw_dynamic_lights(cx: &mut Gen3Cx<'_>, batches: &[Gen3Bat
                 continue;
             };
             let gel = cx.core.slots[slot]
-                .h3_textures
+                .gen3_textures
                 .gels
                 .get(index)
                 .copied()

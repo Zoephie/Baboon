@@ -1,6 +1,6 @@
 //! A pass's animated values: their kinds, clocks and rows, and the readers they share.
 
-use super::{FunctionValues, H2_TEXTURE_ROWS, tag_function_at};
+use super::{FunctionValues, DX9_TEXTURE_ROWS, tag_function_at};
 use blam_tags::tag_function::FunctionType;
 use blam_tags::{TagFunction, TagStruct};
 use std::sync::Arc;
@@ -17,7 +17,7 @@ pub(crate) trait PassAnimation: std::fmt::Debug + Send + Sync {
     /// Whether anything here follows an object output.
     fn reads_outputs(&self) -> bool;
     /// The texture rows, reworked for `time` and `outputs`.
-    fn apply_rows(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32, outputs: &[f32; 4]);
+    fn apply_rows(&self, rows: &mut [[f32; 4]; DX9_TEXTURE_ROWS], time: f32, outputs: &[f32; 4]);
     /// The value constant `register` holds, if it animates it.
     fn constant(
         &self,
@@ -210,7 +210,7 @@ impl H2AnimatedRow {
     /// `sub_6D8B60`, which turns about the middle of the map. Scale reaches
     /// the turn and not the translation, which `sub_9185D0` writes straight
     /// into its register each frame.
-    pub(super) fn apply(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], clock: H2Clock<'_>) {
+    pub(super) fn apply(&self, rows: &mut [[f32; 4]; DX9_TEXTURE_ROWS], clock: H2Clock<'_>) {
         let [mut scale_x, mut scale_y, mut scale_z] = self.scale;
         let (mut move_x, mut move_y, mut move_z, mut angle) = (0.0, 0.0, 0.0, 0.0);
         for animation in &self.animations {

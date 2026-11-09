@@ -115,7 +115,7 @@ use panel::texture_resolve_note;
 #[cfg(test)]
 use renderer::ModelGlRenderer;
 use renderer::{
-    FrameCx, MAX_PREVIEW_BONES, ModelGpuSlot, RenderCore, link_h2_program, model_gl_failure,
+    FrameCx, MAX_PREVIEW_BONES, ModelGpuSlot, RenderCore, link_pass_program, model_gl_failure,
     paint_model_gl, preview_background,
 };
 use selection::{

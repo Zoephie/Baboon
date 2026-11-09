@@ -9,7 +9,7 @@ use super::base::{
 use super::transparent::MODEL_DECAL_DEPTH_BIAS;
 use super::{
     Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass,
-    Dx9VertexStage, H2_GLSL_VERSION, H2_TEXTURE_ROWS, Image, PassAnimation, SamplerKind, TagReader,
+    Dx9VertexStage, PASS_GLSL_VERSION, DX9_TEXTURE_ROWS, Image, PassAnimation, SamplerKind, TagReader,
     TranslatedFxShader, translate_fx,
 };
 use blam_tags::TagStruct;
@@ -22,7 +22,7 @@ pub(in crate::app::model_preview) type CeModelCommon = Arc<TranslatedFxShader>;
 pub(super) fn read_common(reader: &TagReader) -> Option<CeModelCommon> {
     let directory = shader_directory(reader)?;
     let read = |name: &str| read_shader_source(&directory, name);
-    match translate_fx(COMMON_FILE, H2_GLSL_VERSION, &[], read) {
+    match translate_fx(COMMON_FILE, PASS_GLSL_VERSION, &[], read) {
         Ok(shader) => Some(Arc::new(shader)),
         Err(error) => {
             eprintln!("model preview: {COMMON_FILE}: {error}");
@@ -152,7 +152,7 @@ fn build_passes(pass: ModelPass<'_>) -> Vec<Dx9DrawPass> {
     constant("c_fog_color", [0.0; 4]);
 
     let vector = |[x, y, z]: [f32; 3]| [x, y, z, 0.0];
-    let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+    let mut rows = [[0.0; 4]; DX9_TEXTURE_ROWS];
     rows[0] = [pass.base_scale[0], 0.0, 0.0, 0.0];
     rows[1] = [0.0, pass.base_scale[1], 0.0, 0.0];
     rows[2] = [pass.detail_scale[0], pass.detail_scale[1], 0.0, 0.0];

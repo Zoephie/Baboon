@@ -6,7 +6,7 @@ use super::layer::Dx9Layer;
 use super::lights::H2_SHADOW_BIAS;
 use super::pass::{
     Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass,
-    H2_GLSL_VERSION, identity_rows,
+    PASS_GLSL_VERSION, identity_rows,
 };
 use crate::app::model_preview::gen3::shadow::{H3_SHADOW_APPLY, H3_SHADOW_APPLY_BIAS};
 
@@ -49,7 +49,7 @@ pub(crate) fn h2_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
             Dx9Layer::ShadowCaster,
             pass(
                 Dx9VertexStage::ShadowCaster,
-                format!("{H2_GLSL_VERSION}void main() {{}}\n"),
+                format!("{PASS_GLSL_VERSION}void main() {{}}\n"),
                 Dx9Compare::LessOrEqual,
                 true,
             ),
@@ -61,7 +61,7 @@ pub(crate) fn h2_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
                 fill(
                     include_str!("shaders/shadow_mask.frag"),
                     &[
-                        ("version", &H2_GLSL_VERSION),
+                        ("version", &PASS_GLSL_VERSION),
                         ("bias", &format!("{H2_SHADOW_BIAS:.4}")),
                     ],
                 ),
@@ -77,7 +77,7 @@ pub(crate) fn h2_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
                     Dx9VertexStage::LightGel,
                     fill(
                         include_str!("shaders/gel_mask.frag"),
-                        &[("version", &H2_GLSL_VERSION)],
+                        &[("version", &PASS_GLSL_VERSION)],
                     ),
                     Dx9Compare::Equal,
                     false,
@@ -98,7 +98,7 @@ pub(crate) fn h2_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
                 }),
                 ..pass(
                     Dx9VertexStage::ShadowMask,
-                    format!("{H2_GLSL_VERSION}{H3_SHADOW_APPLY}"),
+                    format!("{PASS_GLSL_VERSION}{H3_SHADOW_APPLY}"),
                     // The lit pass's depth is another program's: near, not equal.
                     Dx9Compare::LessOrEqual,
                     false,

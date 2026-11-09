@@ -218,7 +218,7 @@ impl Gen3State {
         frame: &ModelGpuFrame,
         slot: usize,
     ) {
-        let uploaded = &mut core.slots[slot].h3_textures;
+        let uploaded = &mut core.slots[slot].gen3_textures;
         if uploaded.id == Some(frame.textures_id) {
             return;
         }

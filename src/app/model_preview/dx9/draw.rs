@@ -3,19 +3,19 @@
 
 use super::super::dx9::passes::H2Clock;
 use super::super::dx9::passes::{
-    Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9DrawPass, Dx9Layer, H2_GLSL_VERSION,
-    H2_REFLECTION_SCALE, H2DefaultLight, normalization_face,
+    Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9DrawPass, Dx9Layer, PASS_GLSL_VERSION,
+    DX9_REFLECTION_SCALE, H2DefaultLight, normalization_face,
 };
 use super::super::dx9::stage::Dx9VertexStage;
 use super::super::gl::buffer::model_draw_range;
 use super::super::gl::pass_state::PassState;
 use super::super::gl::program::Linked;
 use super::super::gl::scope::PostScope;
-use super::super::gl::target::H2Target;
+use super::super::gl::target::SceneTarget;
 use super::super::h2::bloom::H2Bloom;
 use super::super::{
     DEPTH_UNITS, ModelGpuFrame, RenderCore, RenderModelPreview, TextureSlot, eye_position,
-    link_h2_program, rotate_view_vector, unrotate_view_vector,
+    link_pass_program, rotate_view_vector, unrotate_view_vector,
 };
 use super::shadow::{H2_SHADOW_MAP_UNIT, ShadowStyle, h2_shadow_matrix};
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -32,8 +32,8 @@ pub(in crate::app::model_preview) struct Dx9Gl {
     pub(in crate::app::model_preview) h2_programs:
         HashMap<(Dx9VertexStage, String), Option<Rc<Linked>>>,
     pub(in crate::app::model_preview) h2_normalization_cube: Option<glow::NativeTexture>,
-    pub(in crate::app::model_preview) h2_target: Option<H2Target>,
-    pub(in crate::app::model_preview) h2_frame_copy: Option<H2Target>,
+    pub(in crate::app::model_preview) h2_target: Option<SceneTarget>,
+    pub(in crate::app::model_preview) h2_frame_copy: Option<SceneTarget>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
     pub(in crate::app::model_preview) h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
     /// Made on first use; `Some(None)` once making it failed, so a driver
@@ -380,8 +380,8 @@ impl RenderCore {
             if self.dx9.h2_programs.contains_key(&key) {
                 continue;
             }
-            let vertex = pass.stage.source(H2_GLSL_VERSION);
-            let linked = unsafe { link_h2_program(gl, self.program, &vertex, &pass.fragment) };
+            let vertex = pass.stage.source(PASS_GLSL_VERSION);
+            let linked = unsafe { link_pass_program(gl, self.program, &vertex, &pass.fragment) };
             let program = match linked {
                 Ok(program) => Some(Rc::new(Linked::new(program))),
                 Err(error) => {
@@ -424,7 +424,7 @@ impl RenderCore {
                 if let Some(old) = self.dx9.h2_target.take() {
                     old.delete(gl);
                 }
-                self.dx9.h2_target = H2Target::new(gl, size[0], size[1]);
+                self.dx9.h2_target = SceneTarget::new(gl, size[0], size[1]);
             }
             if let Some(target) = &self.dx9.h2_target {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
@@ -496,7 +496,7 @@ impl RenderCore {
             if let Some(bloom) = self
                 .dx9
                 .h2_bloom
-                .get_or_insert_with(|| H2Bloom::new(gl, H2_GLSL_VERSION))
+                .get_or_insert_with(|| H2Bloom::new(gl, PASS_GLSL_VERSION))
             {
                 bloom.apply(gl, framebuffer, color, size, frame.show_backfaces);
             }
@@ -535,7 +535,7 @@ impl RenderCore {
                 if let Some(old) = self.dx9.h2_frame_copy.take() {
                     old.delete(gl);
                 }
-                self.dx9.h2_frame_copy = H2Target::new(gl, width, height);
+                self.dx9.h2_frame_copy = SceneTarget::new(gl, width, height);
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             }
             if let Some(copy) = &self.dx9.h2_frame_copy {
@@ -611,7 +611,7 @@ impl RenderCore {
                     let textures = self.slots[slot]
                         .materials
                         .get(material)
-                        .and_then(|material| material.h2_textures[layer as usize].get(pass_index));
+                        .and_then(|material| material.dx9_textures[layer as usize].get(pass_index));
                     for (index, texture) in pass.textures.iter().enumerate() {
                         let uploaded = textures.and_then(|list| list.get(index)).copied().flatten();
                         let (target, bound) = match texture.kind {
@@ -781,7 +781,7 @@ impl RenderCore {
             set_1(gl, program, "u_scale", camera.scale);
             set_1(gl, program, "u_depth_scale", camera.depth_scale);
             set_1(gl, program, "u_perspective", camera.perspective);
-            set_1(gl, program, "u_reflection_scale", H2_REFLECTION_SCALE);
+            set_1(gl, program, "u_reflection_scale", DX9_REFLECTION_SCALE);
             set_1(
                 gl,
                 program,

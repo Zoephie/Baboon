@@ -1,7 +1,7 @@
 //! Every dx9 vertex stage, Halo 2's and Halo CE's, and the texture rows they share.
 
 /// Passes keep values up to register 9 of the vertex shader's bank.
-pub(in crate::app) const H2_TEXTURE_ROWS: usize = 10;
+pub(in crate::app) const DX9_TEXTURE_ROWS: usize = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(in crate::app) enum Dx9VertexStage {

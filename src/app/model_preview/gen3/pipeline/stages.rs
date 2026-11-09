@@ -308,7 +308,7 @@ impl Gen3State {
                 }
                 let targets = state.targets.as_ref();
                 let uploaded = this.slots[slot]
-                    .h3_textures
+                    .gen3_textures
                     .materials
                     .get(batch.material_index as usize);
                 for (unit, (name, kind)) in pass.textures.iter().enumerate() {
@@ -349,7 +349,7 @@ impl Gen3State {
                             .copied()
                             .or_else(|| {
                                 let noise = other.strip_prefix("LocalTexture_").unwrap_or(other);
-                                this.slots[slot].h3_textures.shield.get(noise).copied()
+                                this.slots[slot].gen3_textures.shield.get(noise).copied()
                             }),
                     };
                     match kind {

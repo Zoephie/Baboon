@@ -9,8 +9,8 @@ use super::base::{
 };
 use super::glass::bumped_rows;
 use super::{
-    Dx9BlendFactor, Dx9Compare, Dx9Depth, Dx9DrawPass, Dx9VertexStage, H2_GLSL_VERSION,
-    H2_TEXTURE_ROWS, Image, SamplerKind, translate_fx,
+    Dx9BlendFactor, Dx9Compare, Dx9Depth, Dx9DrawPass, Dx9VertexStage, PASS_GLSL_VERSION,
+    DX9_TEXTURE_ROWS, Image, SamplerKind, translate_fx,
 };
 use blam_tags::TagStruct;
 use std::sync::Arc;
@@ -50,7 +50,7 @@ pub(super) fn meter_pass(
         .filter(|path| !path.is_empty())
         .and_then(|path| bitmap(&path, SamplerKind::Texture2D));
     let read = |name: &str| read_shader_source(directory, name);
-    let shader = translate_fx(METER_FILE, H2_GLSL_VERSION, &[], read)?;
+    let shader = translate_fx(METER_FILE, PASS_GLSL_VERSION, &[], read)?;
     let mut pass = SimplePass {
         stage: Dx9VertexStage::CeMeter,
         fragment: shader.entry("pixel_main(i)"),
@@ -64,7 +64,7 @@ pub(super) fn meter_pass(
             image.or_else(|| Some(flat(WHITE))),
         )],
         constants: (0..6).map(|register| (register, [0.0; 4])).collect(),
-        rows: [[0.0; 4]; H2_TEXTURE_ROWS],
+        rows: [[0.0; 4]; DX9_TEXTURE_ROWS],
     }
     .build();
     pass.ce_animation = Some(Arc::new(CeModelAnimation {
@@ -94,7 +94,7 @@ pub(super) fn water_passes(
         .unwrap_or(0.0);
     let parallel = nonzero(root.read_real("view parallel brightness"), 1.0);
     let modulates_reflection = has("base map alpha modulates reflection");
-    let opacity = translate_fx(WATER_OPACITY_FILE, H2_GLSL_VERSION, &[], read)?;
+    let opacity = translate_fx(WATER_OPACITY_FILE, PASS_GLSL_VERSION, &[], read)?;
     let constants = vec![(0, [perpendicular; 4]), (1, [parallel; 4]), (2, [0.0; 4])];
     let mut passes = Vec::new();
     let surface = |call: &str, blend, channels, textures, constants| {
@@ -107,7 +107,7 @@ pub(super) fn water_passes(
             channels,
             textures,
             constants,
-            rows: [[0.0; 4]; H2_TEXTURE_ROWS],
+            rows: [[0.0; 4]; DX9_TEXTURE_ROWS],
         }
         .build()
     };
@@ -132,7 +132,7 @@ pub(super) fn water_passes(
             constants,
         ));
     }
-    let shader = translate_fx(WATER_REFLECTION_FILE, H2_GLSL_VERSION, &[], read)?;
+    let shader = translate_fx(WATER_REFLECTION_FILE, PASS_GLSL_VERSION, &[], read)?;
     let source = if modulates_reflection {
         Dx9BlendFactor::DstAlpha
     } else {
@@ -202,7 +202,7 @@ pub(super) fn plasma_pass(
         volume(1, "secondary noise map"),
     ];
     let read = |name: &str| read_shader_source(directory, name);
-    let shader = translate_fx(PLASMA_FILE, H2_GLSL_VERSION, &[], read)?;
+    let shader = translate_fx(PLASMA_FILE, PASS_GLSL_VERSION, &[], read)?;
     let mut pass = SimplePass {
         stage: Dx9VertexStage::CePlasma,
         fragment: shader.entry("pixel_main(i)"),
@@ -212,7 +212,7 @@ pub(super) fn plasma_pass(
         channels: [true, true, true, false],
         textures,
         constants: Vec::new(),
-        rows: [[0.0; 4]; H2_TEXTURE_ROWS],
+        rows: [[0.0; 4]; DX9_TEXTURE_ROWS],
     }
     .build();
     pass.ce_animation = Some(Arc::new(CeModelAnimation {
@@ -225,7 +225,7 @@ pub(super) fn plasma_pass(
 /// A pass that draws nothing, for a surface with nothing to show a lone model.
 pub(super) fn unseen_pass() -> Dx9DrawPass {
     let fragment = format!(
-        "{H2_GLSL_VERSION}in vec4 v_color0;\nout vec4 out_color;\nvoid main() {{ discard; }}\n"
+        "{PASS_GLSL_VERSION}in vec4 v_color0;\nout vec4 out_color;\nvoid main() {{ discard; }}\n"
     );
     let depth = Dx9Depth {
         compare: Some(Dx9Compare::LessOrEqual),

@@ -10,7 +10,7 @@ use super::super::functions::FunctionValues;
 
 use super::super::common::image::Image;
 use super::super::h2::prt::H2PrtLight;
-use super::stage::{Dx9VertexStage, H2_TEXTURE_ROWS};
+use super::stage::{Dx9VertexStage, DX9_TEXTURE_ROWS};
 use crate::core::h2_pixel_shader::{AlphaTest, SamplerKind};
 
 mod layer;

@@ -2,7 +2,7 @@
 
 use super::super::super::gen3::shaders::Gen3Blend;
 use super::super::super::gl::buffer::slice_bytes;
-use super::super::super::{gen3, link_h2_program};
+use super::super::super::{gen3, link_pass_program};
 use crate::app::model_preview::particles;
 use eframe::glow::{self, HasContext as _};
 
@@ -66,13 +66,13 @@ impl CheapGl {
     }
 }
 
-pub(in crate::app::model_preview) unsafe fn reach_cheap_gl(
+pub(in crate::app::model_preview) unsafe fn link_cheap_gl(
     gl: &glow::Context,
     main: glow::NativeProgram,
 ) -> Option<CheapGl> {
     use particles::cheap::{CHEAP_PARTICLE_FRAGMENT, CHEAP_PARTICLE_VERTEX};
     unsafe {
-        let program = link_h2_program(gl, main, CHEAP_PARTICLE_VERTEX, CHEAP_PARTICLE_FRAGMENT)
+        let program = link_pass_program(gl, main, CHEAP_PARTICLE_VERTEX, CHEAP_PARTICLE_FRAGMENT)
             .map_err(|error| eprintln!("model preview: {error}"))
             .ok()?;
         let vertex_array = gl.create_vertex_array().ok()?;

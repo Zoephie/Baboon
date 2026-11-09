@@ -4,7 +4,7 @@ use super::base::{
     CAMO_FILE, SimplePass, plain_blend, read_shader_source, shader_directory, texture,
 };
 use super::{
-    Dx9BlendFactor, Dx9DrawPass, Dx9VertexStage, H2_GLSL_VERSION, H2_TEXTURE_ROWS, Image,
+    Dx9BlendFactor, Dx9DrawPass, Dx9VertexStage, PASS_GLSL_VERSION, DX9_TEXTURE_ROWS, Image,
     SamplerKind, TagReader, has_flag, translate_fx,
 };
 use std::sync::Arc;
@@ -31,7 +31,7 @@ pub(in crate::app::model_preview) fn read_ce_camo_settings(
     let data = root.descend("rasterizer data[0]")?;
     let tint = data.read_rgb("tint color");
     let read = |name: &str| read_shader_source(&directory, name);
-    let shader = translate_fx(CAMO_FILE, H2_GLSL_VERSION, &[], read).ok()?;
+    let shader = translate_fx(CAMO_FILE, PASS_GLSL_VERSION, &[], read).ok()?;
     let entry = if has_flag(data, "flags", "tint edge density") {
         "main_T0_P1(i)"
     } else {
@@ -65,7 +65,7 @@ pub(in crate::app::model_preview) fn ce_camo_pass(
         .and_then(|path| bitmap(path, SamplerKind::Cube));
     let mut frame = texture(2, SamplerKind::Texture2D, None);
     frame.frame_copy = true;
-    let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+    let mut rows = [[0.0; 4]; DX9_TEXTURE_ROWS];
     rows[0] = [settings.refraction / HALF_WIDTH, settings.falloff, 0.0, 0.0];
     let [red, green, blue] = settings.tint;
     rows[1] = [red, green, blue, 0.0];
