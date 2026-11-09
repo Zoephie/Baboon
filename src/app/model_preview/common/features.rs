@@ -377,7 +377,6 @@ impl Feature for super::super::cloth::ClothAt {
     }
 }
 
-impl Feature for super::super::antennas::ce::CeAntenna {}
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;

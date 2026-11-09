@@ -18,6 +18,8 @@ features!(super::CeFeatures {
 
 // Halo CE's read no Halo 2 function names; an effect runs at rest only when
 // no event plays it.
+impl Feature for super::antennas::CeAntenna {}
+
 impl Feature for super::lights::CeLight {}
 
 impl Feature for super::widgets::CeLightVolume {}

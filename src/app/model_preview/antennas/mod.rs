@@ -22,7 +22,6 @@ use crate::app::model_preview::common::sprites::AntennaQuad;
 use crate::core::h2_pixel_shader::SamplerKind;
 use spring::{ReachAntennaSpring, posed_marker};
 
-pub(in crate::app::model_preview) mod ce;
 pub(super) mod spring;
 
 /// The first sprite of an antenna vertex's sequence, as `antenna_new` and

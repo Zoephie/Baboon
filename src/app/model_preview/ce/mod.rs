@@ -1,6 +1,7 @@
 //! Halo CE: what an object brings with it, its functions, and the effects,
 //! lights and shader passes the preview draws for it.
 
+pub(in crate::app::model_preview) mod antennas;
 pub(super) mod blend;
 pub(super) mod contrails;
 pub(in crate::app::model_preview) mod draw;
@@ -30,7 +31,7 @@ pub(crate) struct CeFeatures {
     /// Halo CE: the lens flares of the object and what it holds.
     pub lights: Vec<super::ce::lights::CeLight>,
     /// Halo CE: the antennas among the object's widgets.
-    pub antennas: Vec<super::antennas::ce::CeAntenna>,
+    pub antennas: Vec<antennas::CeAntenna>,
     /// Halo CE effects the object's attachments hang on it, then those it
     /// names for its events.
     pub effects: Vec<super::ce::effects::CeEffectAt>,

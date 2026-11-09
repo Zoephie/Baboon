@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use blam_tags::TagFile;
 
-use super::super::ce::lights::marker_or_origin;
+use super::super::antennas::{ANTENNA_TRIM, AntennaSprite, antenna_sprite};
 use super::super::common::fields::{elements, object_block};
 use super::super::common::image::Image;
 use super::super::common::math::dot;
@@ -13,7 +13,7 @@ use super::super::common::sprites::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::materials::decode_image;
 use super::super::{RenderModelPreviewMarker, TagReader};
-use super::{ANTENNA_TRIM, AntennaSprite, antenna_sprite};
+use super::lights::marker_or_origin;
 use crate::app::model_preview::common::fields::argb;
 use crate::core::h2_pixel_shader::SamplerKind;
 

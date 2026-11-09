@@ -89,10 +89,9 @@ fn read_ce_features(
     markers: &[RenderModelPreviewMarker],
     ce: &mut super::super::ce::CeFeatures,
 ) {
-    ce.antennas
-        .extend(super::super::antennas::ce::read_ce_antennas(
-            reader, object, owner, markers,
-        ));
+    ce.antennas.extend(super::antennas::read_ce_antennas(
+        reader, object, owner, markers,
+    ));
     ce.effects
         .extend(super::super::ce::effects::read_ce_effects(
             reader, object, owner, markers,
