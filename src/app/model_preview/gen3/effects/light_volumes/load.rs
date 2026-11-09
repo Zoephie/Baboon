@@ -17,11 +17,11 @@ pub(crate) struct H3VolumeDefinition {
     pub(super) offset: H3VolumeProperty,
     pub(super) density: H3VolumeProperty,
     pub(super) profile_length: H3VolumeProperty,
-    pub(super) thickness: H3VolumeProperty,
-    pub(super) color: H3VolumeProperty,
-    pub(super) alpha: H3VolumeProperty,
-    pub(super) intensity: H3VolumeProperty,
-    pub(super) brightness_ratio: f32,
+    pub(in crate::app::model_preview) thickness: H3VolumeProperty,
+    pub(in crate::app::model_preview) color: H3VolumeProperty,
+    pub(in crate::app::model_preview) alpha: H3VolumeProperty,
+    pub(in crate::app::model_preview) intensity: H3VolumeProperty,
+    pub(in crate::app::model_preview) brightness_ratio: f32,
     pub(super) blend: H3Blend,
     /// None for Reach's `circular`, which samples no map.
     pub(super) bitmap: Option<H3Bitmap>,
@@ -40,7 +40,7 @@ pub(crate) struct H3VolumeDefinition {
     pub(super) precompiled: Option<Vec<([f32; 3], f32)>>,
     /// Halo 4's: the `actual material` it draws through, and its
     /// `appearance flags`.
-    pub(super) h4: Option<(H4EffectMaterial, u32)>,
+    pub(in crate::app::model_preview) h4: Option<(H4EffectMaterial, u32)>,
 }
 
 impl H3VolumeDefinition {

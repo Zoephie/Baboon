@@ -3,17 +3,17 @@
 use super::*;
 
 /// What a volume's frame lays out before its profiles.
-struct VolumeLayout {
-    state: H3VolumeState,
-    origin: [f32; 3],
-    direction: [f32; 3],
-    count: i32,
+pub(in crate::app::model_preview) struct VolumeLayout {
+    pub(in crate::app::model_preview) state: H3VolumeState,
+    pub(in crate::app::model_preview) origin: [f32; 3],
+    pub(in crate::app::model_preview) direction: [f32; 3],
+    pub(in crate::app::model_preview) count: i32,
     /// `length × density`, whole or not.
-    profiles: f32,
+    pub(in crate::app::model_preview) profiles: f32,
     /// `1 / density`.
-    distance: f32,
-    offset: f32,
-    side_length: f32,
+    pub(in crate::app::model_preview) distance: f32,
+    pub(in crate::app::model_preview) offset: f32,
+    pub(in crate::app::model_preview) side_length: f32,
 }
 
 /// `c_light_volume_gpu::render`'s count, and the two sizes the shaders get.
@@ -26,7 +26,7 @@ pub(super) fn profile_layout(length: f32, density: f32) -> (i32, f32, f32) {
 }
 
 /// `light_volume_update`'s place along the row. A row of one sits at its start.
-pub(super) fn percentile(index: i32, profiles: f32) -> f32 {
+pub(in crate::app::model_preview) fn percentile(index: i32, profiles: f32) -> f32 {
     if profiles > 1.0 { index as f32 / (profiles - 1.0) } else { 0.0 }
 }
 
@@ -114,7 +114,7 @@ impl H3LightVolumeAt {
 
     /// What `c_light_volume_gpu::render` works out once a frame, or none
     /// while it draws nothing.
-    fn layout(
+    pub(in crate::app::model_preview) fn layout(
         &self,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
@@ -150,71 +150,6 @@ impl H3LightVolumeAt {
             distance,
             offset: volume.offset.scalar(&state),
             side_length: volume.profile_length.scalar(&state),
-        })
-    }
-
-    /// Halo 4's draw this frame: `SetMaterialState`'s overall state and,
-    /// for each profile, the state `light_volume_update.fx` writes, packed.
-    pub(crate) fn h4_draw(
-        &self,
-        values: Option<&FunctionValues>,
-        bones: Option<&[[f32; 4]]>,
-        view: &ViewFrame,
-        time: f32,
-        onset: f32,
-    ) -> Option<H4VolumeDraw> {
-        let (_, appearance) = self.definition.h4.as_ref()?;
-        self.h4_frame(*appearance, values, bones, view, time, onset)
-    }
-
-    /// [`Self::h4_draw`] with `appearance flags` of `appearance`.
-    pub(super) fn h4_frame(
-        &self,
-        appearance: u32,
-        values: Option<&FunctionValues>,
-        bones: Option<&[[f32; 4]]>,
-        view: &ViewFrame,
-        time: f32,
-        onset: f32,
-    ) -> Option<H4VolumeDraw> {
-        let volume = &*self.definition;
-        let VolumeLayout { mut state, origin, direction, count, profiles, distance, offset, side_length } =
-            self.layout(values, bones, view, time, onset)?;
-        if count <= 0 {
-            return None;
-        }
-        // `inputs[]`: every state but the profile's own place, which the
-        // update reads from the profile.
-        let inputs = H4_STATE_ORDER.map(|input| match input {
-            H3VolumeInput::Percentile => 0.0,
-            other => other.of(&state),
-        });
-        let states = (0..count)
-            .map(|index| {
-                state.percentile = percentile(index, profiles);
-                let along = offset + distance * index as f32;
-                let position: [f32; 3] = std::array::from_fn(|axis| origin[axis] + direction[axis] * along);
-                let [red, green, blue] = volume.color.color(&state);
-                pack_profile_state(&H4ProfileState {
-                    position,
-                    percentile: state.percentile,
-                    color: [red, green, blue, volume.alpha.scalar(&state)],
-                    thickness: volume.thickness.scalar(&state),
-                    intensity: volume.intensity.scalar(&state),
-                })
-            })
-            .collect();
-        Some(H4VolumeDraw {
-            appearance: appearance as f32,
-            brightness_ratio: volume.brightness_ratio,
-            offset,
-            profiles,
-            distance,
-            side_length,
-            origin,
-            direction,
-            inputs,
-            states,
         })
     }
 

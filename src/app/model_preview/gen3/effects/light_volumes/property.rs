@@ -7,7 +7,7 @@ pub(super) const SEEDS: usize = 2;
 
 /// `light_volume_state_input_enum`, by option name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum H3VolumeInput {
+pub(in crate::app::model_preview) enum H3VolumeInput {
     Percentile,
     GameTime,
     Age,
@@ -46,7 +46,7 @@ impl H3VolumeInput {
         }
     }
 
-    pub(super) fn of(self, state: &H3VolumeState) -> f32 {
+    pub(in crate::app::model_preview) fn of(self, state: &H3VolumeState) -> f32 {
         match self {
             Self::Percentile => state.percentile,
             Self::GameTime => state.game_time,
@@ -62,8 +62,8 @@ impl H3VolumeInput {
 
 /// `c_light_volume_states`.
 #[derive(Debug, Clone, Copy, Default)]
-pub(super) struct H3VolumeState {
-    pub(super) percentile: f32,
+pub(in crate::app::model_preview) struct H3VolumeState {
+    pub(in crate::app::model_preview) percentile: f32,
     pub(super) game_time: f32,
     pub(super) age: f32,
     pub(super) seeds: [f32; SEEDS],
@@ -76,7 +76,7 @@ pub(super) struct H3VolumeState {
 
 /// `c_editable_property_base`.
 #[derive(Debug, Clone)]
-pub(super) struct H3VolumeProperty {
+pub(in crate::app::model_preview) struct H3VolumeProperty {
     pub(super) input: H3VolumeInput,
     pub(super) range: H3VolumeInput,
     /// `output_mod_enum`: added, or else multiplied, by `modifier_input`.
@@ -154,7 +154,7 @@ impl H3VolumeProperty {
         }
     }
 
-    pub(super) fn scalar(&self, state: &H3VolumeState) -> f32 {
+    pub(in crate::app::model_preview) fn scalar(&self, state: &H3VolumeState) -> f32 {
         let value = self.function.evaluate(self.input.of(state), self.range.of(state));
         let modifier = self.modifier_input.of(state);
         match self.adds {
@@ -178,7 +178,7 @@ impl H3VolumeProperty {
         most / ((least + most) * 0.5)
     }
 
-    pub(super) fn color(&self, state: &H3VolumeState) -> [f32; 3] {
+    pub(in crate::app::model_preview) fn color(&self, state: &H3VolumeState) -> [f32; 3] {
         let color = self.function.evaluate_color(self.input.of(state), self.range.of(state));
         [color.red, color.green, color.blue]
     }

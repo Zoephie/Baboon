@@ -5,3 +5,4 @@ pub(in crate::app::model_preview) mod particles;
 pub(in crate::app::model_preview) mod particle_pass;
 pub(in crate::app::model_preview) mod tracer_pass;
 pub(in crate::app::model_preview) mod light_volume_pass;
+pub(in crate::app::model_preview) mod light_volumes;

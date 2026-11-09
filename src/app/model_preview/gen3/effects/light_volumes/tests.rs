@@ -1,5 +1,4 @@
 use super::*;
-use super::eval::*;
 use crate::app::model_preview::harness::kit::{kit_root, kit_source};
 use crate::core::game::GameId;
 
@@ -316,30 +315,6 @@ fn kit_halo_3_volumes_keep_their_map() {
     assert!(!volume.reach && volume.bitmap.is_some());
     assert!(volume.circular.is_none() && volume.depth_fade.is_none() && volume.lod.is_none());
     assert!(volume.precompiled.is_none());
-}
-
-/// `WriteProfileMemexportedState`: the position and percentile as they
-/// are, thickness and intensity as halves, the colour saturated into
-/// ARGB8 (`PackARGB8`), which an intensity over 1 survives.
-#[test]
-fn a_profile_packs_as_the_update_writes_it() {
-    let state = H4ProfileState {
-        position: [1.0, -2.0, 3.5],
-        percentile: 0.25,
-        color: [2.0, 0.5, -1.0, 1.0],
-        thickness: 0.5,
-        intensity: 3.0,
-    };
-    let words = pack_profile_state(&state);
-    assert_eq!(words[..4], [1.0f32, -2.0, 3.5, 0.25].map(f32::to_bits));
-    // Half 0.5 is 0x3800, half 3 is 0x4200.
-    assert_eq!(words[4], 0x3800 | (0x4200 << 16));
-    // Red saturates to 255, blue to 0; green truncates 127.5 to 127.
-    assert_eq!(words[5], (255 << 24) | (255 << 16) | (127 << 8));
-    assert_eq!(words[6..], [0, 0]);
-    let dimmer = pack_profile_state(&H4ProfileState { intensity: 1.0, ..state });
-    assert_ne!(dimmer[4], words[4], "intensity rides in the halves, not the colour");
-    assert_eq!(dimmer[5], words[5]);
 }
 
 /// Halo 4's frame: profiles placed along the direction from the offset a
