@@ -23,11 +23,11 @@ use super::gen3::materials::{
     Gen3Bitmap, read_h3_bitmap, read_resolved_map, resolve_embedded_method,
 };
 use super::gen3::pipeline::EXPOSURE as H3_EXPOSURE;
-use super::gen3::shaders::{Gen3Blend, read_h3_definition};
-use super::materials::{TextureImage, decode_image};
-use super::reach::lighting::{
+use super::gen3::pipeline::{
     reach_alt_exposure, reach_exposure, reach_lightmap_tint, reach_particle_light,
 };
+use super::gen3::shaders::{Gen3Blend, read_h3_definition};
+use super::materials::{TextureImage, decode_image};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::image::Sampler;
 use crate::app::model_preview::common::marker::MarkerFrame;

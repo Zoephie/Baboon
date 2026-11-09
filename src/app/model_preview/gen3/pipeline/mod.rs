@@ -30,6 +30,8 @@ mod programs;
 pub(in crate::app::model_preview) use programs::*;
 mod uniforms;
 pub(in crate::app::model_preview) use uniforms::*;
+mod exposure;
+pub(in crate::app::model_preview) use exposure::*;
 mod lighting;
 pub(in crate::app::model_preview) use lighting::*;
 mod blend;

@@ -1,4 +1,4 @@
-use super::super::super::super::reach::lighting::{reach_alt_exposure, reach_exposure};
+use super::super::super::super::gen3::pipeline::{reach_alt_exposure, reach_exposure};
 use super::super::super::super::{TagSource, load_referenced_tag_from_source};
 use super::super::super::pipeline::EXPOSURE as H3_EXPOSURE;
 use super::super::super::shaders::Gen3Blend;

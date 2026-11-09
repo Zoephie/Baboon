@@ -5,11 +5,12 @@
 
 use eframe::glow::{self, HasContext};
 
+use super::super::gen3::pipeline::{REACH_EXPOSURE, REACH_HDR_DIVISOR};
 use super::super::gen3::pipeline::{set_value, view_projection};
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::screen_lights::screen_to_relative_world;
 use super::super::gen3::state::Gen3State;
-use super::lighting::{REACH_EXPOSURE, REACH_HDR_DIVISOR, reach_frame_value};
+use super::lighting::reach_frame_value;
 use super::lights::{CHEAP_ALBEDO_BLEND, ReachLightMethod, ReachLitLight};
 use super::render::ReachGame;
 use crate::app::model_preview::common::camera::eye_position;

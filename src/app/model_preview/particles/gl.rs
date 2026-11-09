@@ -1,9 +1,9 @@
 //! The particle program H2 and the gen3 games draw their particles with: its GLSL, vertex floats and sprite maps.
 
+use super::super::gen3::pipeline::reach_particle_light;
 use super::super::gen3::shaders::Gen3Blend;
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::glsl::{VIEW_DEPTH, fill};
-use super::super::reach::lighting::reach_particle_light;
 use super::super::{ModelGpuCamera, clip_position, gen3, link_pass_program, scene_depth_terms};
 use crate::app::model_preview::particles;
 use eframe::glow::{self, HasContext as _};

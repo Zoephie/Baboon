@@ -17,11 +17,11 @@ use super::super::common::view::camera_view_frame;
 use super::super::gl::pass_state::PassState;
 use super::super::particles::ParticleField;
 use super::super::particles::{CHEAP_FLOATS, CheapGl, ParticleGl, link_cheap_gl, particle_floats};
-use super::super::reach::lighting::reach_exposure;
 use super::super::{
     ModelGpuCamera, ModelGpuFrame, ModelGpuSlot, RenderCore, clip_position, h4, scene_depth_terms,
     sprite_pixels,
 };
+use super::pipeline::reach_exposure;
 use super::pipeline::{gen3_lighting_constants, gen3_set_blend};
 use super::render::Gen3Game;
 use crate::app::model_preview::common::sprites::layered_distance;
