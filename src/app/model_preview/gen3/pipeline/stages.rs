@@ -961,39 +961,4 @@ impl Gen3State {
             targets.depth_copy
         })
     }
-
-    /// `c_render_shield::render_object_internal`: every part that takes the
-    /// shield, through 61 or 119, added over what lies behind with no depth
-    /// written and no face culled.
-    pub(in crate::app::model_preview) unsafe fn draw_reach_shield(
-        &mut self,
-        core: &mut RenderCore,
-        gl: &glow::Context,
-        frame: &ModelGpuFrame,
-        slot: usize,
-    ) {
-        let Some(shield) = frame.preview.reach.shield.clone() else {
-            return;
-        };
-        let damage = frame
-            .function_values
-            .as_ref()
-            .and_then(|values| values.get(SHIELD_DAMAGE))
-            .copied()
-            .unwrap_or(0.0);
-        if !shield.settings.showing(damage) {
-            return;
-        }
-        let parts = super::super::shield::shield_parts(core, frame);
-        if parts.is_empty() {
-            return;
-        }
-        let (low, high) = (frame.preview.bounds_min, frame.preview.bounds_max);
-        let center = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
-        let state = shield
-            .settings
-            .state(damage, frame.time, frame.function_values.as_ref());
-        let values = shield.settings.values(&state, center);
-        unsafe { self.draw_shield_parts(core, gl, frame, slot, &parts, shield.pass(), values) }
-    }
 }

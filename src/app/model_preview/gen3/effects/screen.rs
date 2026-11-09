@@ -11,12 +11,10 @@ use super::super::super::common::named_function::tag_function_at;
 use super::super::super::common::view::{ViewFrame, posed_on};
 use super::super::super::effects::{EffectOnsets, EffectTimes, for_each_attached_part};
 use super::super::super::functions::FunctionValues;
-use super::super::super::reach::composite::REACH_SCREEN_NOISE_BITMAP;
 use super::super::super::{
     GameId, RenderModelPreview, RenderModelPreviewMarker, RenderModelPreviewMaterial, TagReader,
 };
 use crate::app::model_preview::common::marker::MarkerFrame;
-use crate::core::h2_pixel_shader::SamplerKind;
 
 /// `build_saturation_matrix`'s weights.
 const LUMINANCE: [f32; 3] = [0.212_656, 0.715_158, 0.072_185_6];
@@ -687,22 +685,6 @@ pub(in crate::app::model_preview) fn read_h3_screen_effects(
     effects
 }
 
-/// `rasterizer_globals`' default bitmap that Reach's final composite reads
-/// its bright and dark noise from (sampler 7 of MCC `sub_140841DE0`).
-pub(in crate::app::model_preview) fn read_reach_screen_noise(
-    reader: &TagReader,
-) -> Option<super::super::super::gen3::materials::Gen3Bitmap> {
-    let globals = reader
-        .load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg")
-        .ok()?;
-    let defaults = elements(globals.root(), "default bitmaps");
-    let noise = defaults.get(REACH_SCREEN_NOISE_BITMAP)?;
-    let path = noise
-        .read_tag_ref_path("default bitmaps")
-        .filter(|path| !path.is_empty())?;
-    super::super::super::gen3::materials::read_h3_bitmap(reader, &path, 0, SamplerKind::Texture2D)
-}
-
 /// Every `shader_screen` these can draw, as materials of no batch, which gives
 /// them the textures and passes of any other.
 pub(in crate::app::model_preview) fn add_screen_shader_materials(preview: &mut RenderModelPreview) {
@@ -1100,9 +1082,10 @@ mod tests {
             )
             .is_empty()
         );
-        let (image, ..) =
-            read_reach_screen_noise(&crate::app::model_preview::load::TagReader::new(&source))
-                .expect("monochrome_random");
+        let (image, ..) = super::super::super::super::reach::composite::read_reach_screen_noise(
+            &crate::app::model_preview::load::TagReader::new(&source),
+        )
+        .expect("monochrome_random");
         assert!(image.whole());
     }
 

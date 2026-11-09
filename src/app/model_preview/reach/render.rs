@@ -106,10 +106,7 @@ impl Gen3Game for ReachGame {
     }
 
     unsafe fn shield(&mut self, cx: &mut Gen3Cx<'_>) {
-        unsafe {
-            cx.state
-                .draw_reach_shield(cx.core, cx.gl, cx.frame, cx.slot)
-        }
+        unsafe { super::shield::draw_reach_shield(cx.state, cx.core, cx.gl, cx.frame, cx.slot) }
     }
 
     unsafe fn bloom(

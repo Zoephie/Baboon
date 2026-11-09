@@ -49,7 +49,6 @@ pub(in crate::app::model_preview) fn read_reach_object_features(
         .iter()
         .any(|effect| effect.adds_noise())
     {
-        preview.reach.screen_noise =
-            super::super::gen3::effects::screen::read_reach_screen_noise(reader);
+        preview.reach.screen_noise = super::composite::read_reach_screen_noise(reader);
     }
 }

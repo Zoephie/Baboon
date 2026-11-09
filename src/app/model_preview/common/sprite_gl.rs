@@ -5,8 +5,6 @@ use eframe::glow::{self, HasContext as _};
 
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::glsl::{VIEW_DEPTH, fill};
-#[cfg(test)]
-use super::super::reach;
 use super::super::{ModelGpuCamera, clip_position, link_pass_program};
 use crate::app::model_preview::common;
 
@@ -194,17 +192,12 @@ mod tests {
     use crate::app::model_preview::gl::glslang::assert_compiles_under_glslang;
 
     /// The flare program, which Reach's light volumes' disc and depth fade
-    /// share, and Reach's composite with its gamma and noise, as the
-    /// particle program is checked.
+    /// share, as the particle program is checked.
     #[test]
-    fn the_flare_and_reach_composite_programs_compile_under_glslang() {
+    fn the_flare_program_compiles_under_glslang() {
         assert_compiles_under_glslang(
             "flare",
             &[("vert", SPRITE_VERTEX), ("frag", &sprite_fragment())],
-        );
-        assert_compiles_under_glslang(
-            "reach_composite",
-            &[("frag", super::reach::composite::REACH_COMPOSITE_FRAGMENT)],
         );
     }
 }

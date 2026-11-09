@@ -8,10 +8,13 @@ use super::super::gen3::effects::screen::Gen3ScreenSettings;
 use super::super::gen3::pipeline::HALF_LENS;
 use super::super::gen3::render::Gen3Cx;
 use super::render::ReachGame;
+use crate::app::model_preview::common::fields::elements;
 use crate::app::model_preview::common::image::Sampler;
 use crate::app::model_preview::gl::pass_state::PassState;
 use crate::app::model_preview::gl::screen::{premultiplied_over, screen_program};
 use crate::app::model_preview::gl::texture::upload_image_linear;
+use crate::app::model_preview::load::TagReader;
+use crate::core::h2_pixel_shader::SamplerKind;
 
 impl ReachGame {
     /// Reach's `final_composite`: see [`REACH_COMPOSITE_FRAGMENT`].
@@ -142,6 +145,22 @@ pub(in crate::app::model_preview) fn reach_noise_offset(frame: u32, random: [f32
 pub(in crate::app::model_preview) const REACH_COMPOSITE_FRAGMENT: &str =
     include_str!("shaders/composite.frag");
 
+/// `rasterizer_globals`' default bitmap that Reach's final composite reads
+/// its bright and dark noise from (sampler 7 of MCC `sub_140841DE0`).
+pub(in crate::app::model_preview) fn read_reach_screen_noise(
+    reader: &TagReader,
+) -> Option<super::super::gen3::materials::Gen3Bitmap> {
+    let globals = reader
+        .load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg")
+        .ok()?;
+    let defaults = elements(globals.root(), "default bitmaps");
+    let noise = defaults.get(REACH_SCREEN_NOISE_BITMAP)?;
+    let path = noise
+        .read_tag_ref_path("default bitmaps")
+        .filter(|path| !path.is_empty())?;
+    super::super::gen3::materials::read_h3_bitmap(reader, &path, 0, SamplerKind::Texture2D)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +192,15 @@ mod tests {
         assert_eq!(reach_noise_offset(2, [0.0, 0.0]), [0.5, 0.5]);
         assert_eq!(reach_noise_offset(3, [0.0, 0.0]), [0.5, 0.0]);
         assert_eq!(reach_noise_offset(0, [0.5, 0.25]), [0.25, 0.125]);
+    }
+
+    /// Reach's composite with its gamma and noise, as the particle program
+    /// is checked.
+    #[test]
+    fn reachs_composite_compiles_under_glslang() {
+        crate::app::model_preview::gl::glslang::assert_compiles_under_glslang(
+            "reach_composite",
+            &[("frag", REACH_COMPOSITE_FRAGMENT)],
+        );
     }
 }
