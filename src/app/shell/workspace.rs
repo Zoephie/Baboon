@@ -52,6 +52,7 @@ impl Baboon {
                 self.draw_workspace_tiles(ui, ctx);
             });
         self.draw_auxiliary_windows(ctx);
+        crate::app::ui_kit::autoscroll::draw_blocker(ui);
         // The draws' commands land first: some of them queue the very requests
         // processed next (the tag pane sends its sound player's plays this way),
         // and the next frame's draws have to see those requests settled, or

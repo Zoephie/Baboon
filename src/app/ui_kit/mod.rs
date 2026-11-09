@@ -3,6 +3,7 @@
 
 use super::*;
 mod focus;
+pub(in crate::app) mod autoscroll;
 pub(in crate::app) use focus::{install_focus_outlines, workspace_has_focus};
 pub(in crate::app) mod scroll;
 

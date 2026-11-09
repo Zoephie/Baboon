@@ -1281,6 +1281,7 @@ fn draw_table_contents(
                 ctx.request_repaint();
             }
         });
+    crate::app::ui_kit::autoscroll::register(ui, &scroll, egui::Vec2b::new(false, true));
     let header_rect = egui::Rect::from_min_max(top, egui::pos2(scroll.inner_rect.right(), header_bottom));
     painter.set(header_background, table_header_background(header_rect));
     if let Some(rect) = id_header_rect {
