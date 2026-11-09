@@ -1632,7 +1632,7 @@ fn draw_group_rename(ui: &mut Ui, count: usize, edit: &FieldEditContext<'_>, ren
         .stroke(if rename.error.is_some() {invalid_value_stroke()}else{Stroke::new(1.0, foundation_input_edge())})
         .inner_margin(egui::Margin {left:4,right:(count_width+12.0).ceil() as i8,top:2,bottom:2});
     let response=ui.add_sized(Vec2::new(ui.available_width(),BUTTON_HEIGHT),
-        egui::TextEdit::singleline(&mut rename.text).id(id).font(TextStyle::Monospace)
+        crate::app::ui_kit::singleline_text_edit(&mut rename.text).id(id).font(TextStyle::Monospace)
             .vertical_align(egui::Align::Center).frame(frame).interactive(rename.pending_merge.is_none()));
     ui.painter().text(egui::pos2(response.rect.right()-8.0,response.rect.center().y),egui::Align2::RIGHT_CENTER,
         count,font,text_dark().gamma_multiply(0.5));
@@ -1845,7 +1845,7 @@ fn id_cell(ui: &mut Ui, list: &StringList, index: usize, editable: bool, interac
             read_only = draft.text.as_str();
             &mut read_only
         };
-        egui::TextEdit::singleline(buffer)
+        crate::app::ui_kit::singleline_text_edit(buffer)
             .id(id)
             .interactive(interactive)
             .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)))
@@ -2041,7 +2041,7 @@ fn text_cell(
             read_only = draft.text.as_str();
             &mut read_only
         };
-        egui::TextEdit::singleline(buffer)
+        crate::app::ui_kit::singleline_text_edit(buffer)
             .id(id)
             .interactive(interactive)
             .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)))

@@ -152,11 +152,13 @@ impl<'a> SinglelineTextEdit<'a> {
 
     pub(in crate::app) fn show(mut self, ui: &mut Ui) -> egui::text_edit::TextEditOutput {
         if self.custom_frame {
-            return self.edit.show(ui);
+            let mut output = self.edit.show(ui);
+            super::text_focus::singleline_tab_focus(ui, &mut output);
+            return output;
         }
         let background = ui.painter().add(egui::Shape::Noop);
         self.edit = self.edit.frame(egui::Frame::NONE.inner_margin(self.margin));
-        let output = self.edit.show(ui);
+        let mut output = self.edit.show(ui);
         let style = input_appearance(ui, self.state, self.read_only, output.response.has_focus());
         let fill = if self.state == InputState::Normal {
             self.background.unwrap_or(style.fill)
@@ -173,6 +175,7 @@ impl<'a> SinglelineTextEdit<'a> {
             style.stroke,
             egui::StrokeKind::Inside,
         );
+        super::text_focus::singleline_tab_focus(ui, &mut output);
         output
     }
 }

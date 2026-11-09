@@ -437,7 +437,6 @@ fn foundation_value_text_filled_with_placeholder(
             egui::pos2(rect.right() - 4.0 - status.size().x, rect.center().y - status.size().y * 0.5),
             status, status_color);
     }
-    text_edit_cursor_to_start_on_tab_focus(ui, &response);
     response
 }
 
@@ -520,19 +519,6 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
         response.on_hover_text("Referenced tag not found on disk")
     } else {
         response
-    }
-}
-
-pub(in crate::app) fn text_edit_cursor_to_start_on_tab_focus(ui: &Ui, response: &egui::Response) {
-    if response.gained_focus() && ui.input(|input| input.key_pressed(egui::Key::Tab)) {
-        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id) {
-            state
-                .cursor
-                .set_char_range(Some(egui::text::CCursorRange::one(
-                    egui::text::CCursor::new(0),
-                )));
-            state.store(ui.ctx(), response.id);
-        }
     }
 }
 

@@ -11,6 +11,8 @@ pub(in crate::app) mod style;
 pub(in crate::app) use style::*;
 mod input;
 pub(in crate::app) use input::*;
+mod text_focus;
+pub(in crate::app) use text_focus::install_text_focus;
 mod table_header;
 pub(in crate::app) use table_header::*;
 mod dropdown;

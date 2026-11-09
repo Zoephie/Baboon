@@ -1964,7 +1964,6 @@ fn draw_shader_editable_value_with_color_preview(
                         .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
                         .vertical_align(egui::Align::Center),
                 );
-                text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
@@ -2240,7 +2239,6 @@ fn draw_shader_editable_value_with_color_preview(
                         .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
                         .vertical_align(egui::Align::Center),
                 );
-                text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
@@ -2351,7 +2349,6 @@ fn draw_shader_editable_value_with_color_preview(
             shader_cell_scope(ui, rect, |ui| {
                 ui.visuals_mut().extreme_bg_color = foundation_input();
                 let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
-                text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
@@ -2382,7 +2379,6 @@ fn draw_shader_editable_value_with_color_preview(
             shader_cell_scope(ui, rect, |ui| {
                 ui.visuals_mut().extreme_bg_color = foundation_input();
                 let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
-                text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
@@ -2422,7 +2418,6 @@ fn draw_shader_editable_value_with_color_preview(
                         .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
                         .vertical_align(egui::Align::Center),
                 );
-                text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
@@ -2463,7 +2458,6 @@ fn draw_shader_editable_value_with_color_preview(
             shader_cell_scope(ui, rect, |ui| {
                 ui.visuals_mut().extreme_bg_color = foundation_input();
                 let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
-                text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
@@ -2556,7 +2550,6 @@ fn draw_shader_editable_value_with_color_preview(
                         .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
                         .vertical_align(egui::Align::Center),
                 );
-                text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
@@ -2747,7 +2740,6 @@ fn draw_shader_reference_cell(
             resp.clone()
                 .on_hover_text(format!("Referenced {extension} not found on disk"));
         }
-        text_edit_cursor_to_start_on_tab_focus(ui, &resp);
         draft.note_response(&resp);
         if draft.should_commit(ui, &resp) {
             commit = Some(draft.text.trim().to_owned());

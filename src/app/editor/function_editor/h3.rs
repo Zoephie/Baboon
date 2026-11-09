@@ -55,7 +55,6 @@ fn function_name_input(
             )
         })
         .inner;
-    text_edit_cursor_to_start_on_tab_focus(ui, &response);
     response.changed() | function_name_suggestions(ui, id, value, editable, inputs)
 }
 
