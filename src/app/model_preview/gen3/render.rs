@@ -226,7 +226,7 @@ impl<G: Gen3Game> GameRender for Gen3Pipeline<G> {
         self.state.frame_values = self.game.frame_values();
         unsafe {
             // Halo 3's and ODST's self shadow draws through dx9 shadow passes.
-            cx.core.prepare_h2_programs(cx.gl, cx.frame);
+            cx.core.prepare_dx9_programs(cx.gl, cx.frame);
             // A material with translated passes draws through them; the rest
             // carry only the shadow passes, which replace nothing.
             let frame = cx.frame;

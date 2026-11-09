@@ -127,7 +127,7 @@ pub(crate) struct ShieldState<'a> {
 
 /// A `shield_impact` as `s_shield_parameters::postprocess` leaves it.
 #[derive(Debug)]
-pub(crate) struct ReachShieldSettings {
+pub(crate) struct ShieldSettings {
     pub(in crate::app::model_preview) procedural: bool,
     render_always: bool,
     recent_intensity: f32,
@@ -156,7 +156,7 @@ fn edge_lines(outer: f32, center: f32, inner: f32) -> ([f32; 2], [f32; 2]) {
     ([1.0 / (c - o), 1.0 / (c - i)], [-o / (c - o), -i / (c - i)])
 }
 
-impl ReachShieldSettings {
+impl ShieldSettings {
     pub(crate) fn read(reader: &TagReader, path: &str) -> Option<Self> {
         let tag = reader.load(path, "shield_impact", b"shit").ok()?;
         let root = tag.root();
@@ -523,7 +523,7 @@ mod tests {
         let Some(source) = kit() else {
             return;
         };
-        let settings = ReachShieldSettings::read(
+        let settings = ShieldSettings::read(
             &crate::app::model_preview::load::TagReader::new(&source),
             "fx\\shield_impacts\\spartan_3p",
         )

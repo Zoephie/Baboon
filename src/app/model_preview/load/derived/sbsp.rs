@@ -59,7 +59,7 @@ pub(in crate::app::model_preview) fn build_sbsp_preview(
                 .and_then(|field| field.as_block())
                 .is_some_and(|block| !block.is_empty());
             if has_render_geometry {
-                build_sbsp_preview_h3(tag, render_only)?
+                build_sbsp_preview_gen3(tag, render_only)?
             } else {
                 ass_to_preview(
                     &AssFile::from_scenario_structure_bsp(tag)
@@ -78,7 +78,7 @@ pub(in crate::app::model_preview) fn build_sbsp_preview(
 /// frames, and the `materials` block's shader references. That is what lets
 /// the existing shader→texture pipeline shade a BSP exactly like a model —
 /// diffuse, normal maps, and alpha-test cutouts included.
-fn build_sbsp_preview_h3(tag: &TagFile, render_only: bool) -> Result<RenderModelPreview, String> {
+fn build_sbsp_preview_gen3(tag: &TagFile, render_only: bool) -> Result<RenderModelPreview, String> {
     let root = tag.root();
     let mut preview = empty_preview();
     preview.materials = sbsp_preview_materials(&root);

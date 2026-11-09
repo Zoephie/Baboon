@@ -87,7 +87,7 @@ impl RenderCore {
                 self.draw_h2_passes(gl, frame, slot, &order, Dx9Layer::Prt, None);
                 if frame.self_shadow
                     && !frame.default_lights
-                    && self.draw_h2_shadow(gl, frame, slot, &order, ShadowStyle::h2(frame))
+                    && self.draw_dx9_shadow(gl, frame, slot, &order, ShadowStyle::h2(frame))
                 {
                     gl.enable(glow::STENCIL_TEST);
                     gl.stencil_func(glow::EQUAL, 1, 0xFF);
@@ -106,7 +106,7 @@ impl RenderCore {
                 }
                 if frame.default_lights {
                     let shadowed = frame.self_shadow
-                        && self.draw_h2_shadow(gl, frame, slot, &order, ShadowStyle::h2(frame));
+                        && self.draw_dx9_shadow(gl, frame, slot, &order, ShadowStyle::h2(frame));
                     for (index, light) in H2_DEFAULT_LIGHTS.iter().enumerate() {
                         if shadowed && index == 0 {
                             gl.enable(glow::STENCIL_TEST);

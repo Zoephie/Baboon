@@ -15,7 +15,7 @@ use blam_tags::TagFile;
 use super::super::common::fields::elements;
 use super::super::functions::FunctionValues;
 use super::super::gen3::shaders::{Gen3Pass, Gen3Texture};
-use super::super::gen3::shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
+use super::super::gen3::shield::{OSCILLATION, PLASMA, ShieldSettings, shield_impact_path};
 use crate::app::model_preview::h4::materials::shaders::rewire_depth_fade;
 use crate::core::hlsl::emit::Stage;
 
@@ -28,7 +28,7 @@ pub(crate) const WORLD_SCALE: &str = super::super::gen3::shield::WORLD_SCALE;
 /// The shield's settings, its textures under Halo 4's names, and its pass.
 #[derive(Debug)]
 pub(crate) struct H4Shield {
-    pub(crate) settings: ReachShieldSettings,
+    pub(crate) settings: ShieldSettings,
     pub(crate) textures: Vec<Gen3Texture>,
     pub(crate) pass: Arc<Gen3Pass>,
 }
@@ -55,7 +55,7 @@ impl H4Shield {
 /// lands in the preview for the hit blob (technique 1) to shape.
 pub(crate) fn read_h4_shield(reader: &TagReader, model: &TagFile) -> Option<Arc<H4Shield>> {
     let path = shield_impact_path(model)?;
-    let settings = ReachShieldSettings::read(reader, &path)?;
+    let settings = ShieldSettings::read(reader, &path)?;
     let pass = Arc::new(h4_shield_pass(reader, 0).ok()?);
     let rename = |name: &str| {
         match name {

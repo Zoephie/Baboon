@@ -210,7 +210,7 @@ pub(in crate::app::model_preview) struct PreviewLoadSettings {
     /// Halo 2 units: what the left hand holds, by path.
     pub(in crate::app::model_preview) secondary_weapon: Option<String>,
     /// Halo 2 units: their weapons, when an earlier load found them.
-    pub(in crate::app::model_preview) h2_equippable: Option<Vec<super::super::weapons::Equippable>>,
+    pub(in crate::app::model_preview) equippable: Option<Vec<super::super::weapons::Equippable>>,
 }
 
 impl PreviewLoadSettings {
@@ -220,7 +220,7 @@ impl PreviewLoadSettings {
             scenario_selection: state.scenario_bsp_selection.clone(),
             weapon: state.weapon.clone(),
             secondary_weapon: state.secondary_weapon.clone(),
-            h2_equippable: match &state.data {
+            equippable: match &state.data {
                 Some(Ok(data)) => data
                     .weapons
                     .as_ref()
@@ -386,7 +386,7 @@ impl Baboon {
             let variant = remembered.or_else(|| default_variant_index(data));
             reset_model_preview_selection(state, data, variant);
             // A weapon change only swaps what the unit holds.
-            if let Some((geometry_id, regions)) = state.ce_weapon_carry.take() {
+            if let Some((geometry_id, regions)) = state.weapon_carry.take() {
                 for (region, selection) in regions {
                     if let Some(kept) = state.region_selections.get_mut(&region) {
                         *kept = selection;

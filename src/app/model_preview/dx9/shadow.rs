@@ -133,7 +133,7 @@ pub(in crate::app::model_preview) fn h2_shadow_matrix(
 impl RenderCore {
     /// Mark in the stencil what the key light cannot reach: the shadow map
     /// from the light's side, then the model in view against it.
-    pub(in crate::app::model_preview) unsafe fn draw_h2_shadow(
+    pub(in crate::app::model_preview) unsafe fn draw_dx9_shadow(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,

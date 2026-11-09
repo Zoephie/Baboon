@@ -33,7 +33,7 @@ fn a_models_overlay_passes_stay_on_its_own_object() {
         material(1, false, None),
     ];
     let mut textures = vec![MaterialTextures::default(); materials.len()];
-    let [(_, pass), ..] = h2_shadow_passes();
+    let [(_, pass), ..] = dx9_shadow_passes();
     textures[1].h2_layers[Dx9Layer::Transparent as usize] = vec![pass.clone()];
     textures[2].h2_layers[Dx9Layer::Transparent as usize] = vec![pass];
     share_object_layers(&materials, &mut textures);

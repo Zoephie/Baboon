@@ -19,7 +19,7 @@ impl GameRender for PlainRender {
             cx.core
                 .draw_slot_batches(cx.gl, frame, cx.slot, &|core, material| {
                     (frame.game_shaders && core.gen3_material(frame, material).is_some())
-                        || core.h2_replaces_slots(frame, material)
+                        || core.dx9_replaces_slots(frame, material)
                 })
         }
     }

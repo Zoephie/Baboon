@@ -21,9 +21,9 @@ use eframe::glow::HasContext as _;
 use std::sync::Arc;
 
 /// The object function values behind the shield's two quantities.
-pub(in crate::app::model_preview) const H3_SHIELD_DAMAGE: &str = "current_shield_damage";
+pub(in crate::app::model_preview) const SHIELD_DAMAGE: &str = "current_shield_damage";
 
-pub(in crate::app::model_preview) const H3_OVERSHIELD: &str = "object_overshield_amount";
+pub(in crate::app::model_preview) const OVERSHIELD: &str = "object_overshield_amount";
 
 /// Whether the shield is showing, whose plasma scrolls with game time.
 pub(in crate::app::model_preview) fn gen3_shield_showing(
@@ -35,7 +35,7 @@ pub(in crate::app::model_preview) fn gen3_shield_showing(
             .copied()
             .unwrap_or(0.0)
     };
-    reading(H3_SHIELD_DAMAGE) > 0.0 || reading(H3_OVERSHIELD) > 0.0
+    reading(SHIELD_DAMAGE) > 0.0 || reading(OVERSHIELD) > 0.0
 }
 
 impl RenderCore {
@@ -283,8 +283,8 @@ impl Gen3State {
                         // `render_object_context`: the overshield in fifths of a byte.
                         let quantities = [
                             frame.time,
-                            reading(H3_SHIELD_DAMAGE),
-                            reading(H3_OVERSHIELD),
+                            reading(SHIELD_DAMAGE),
+                            reading(OVERSHIELD),
                             0.0,
                         ];
                         gl.uniform_4_f32_slice(location.as_ref(), &quantities);
@@ -982,7 +982,7 @@ impl Gen3State {
         let damage = frame
             .function_values
             .as_ref()
-            .and_then(|values| values.get(H3_SHIELD_DAMAGE))
+            .and_then(|values| values.get(SHIELD_DAMAGE))
             .copied()
             .unwrap_or(0.0);
         if !shield.settings.showing(damage) {

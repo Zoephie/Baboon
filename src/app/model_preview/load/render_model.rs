@@ -218,7 +218,7 @@ pub(in crate::app) fn build_render_preview(
     // Instances draw `static_lighting_sh`, with no transfer of their own.
     let instance_vertices = preview.instances.vertex_count;
     preview.gen3.prt =
-        super::super::gen3::prt::read_h3_prt(render_tag, &render_model, &render_meshes)
+        super::super::gen3::prt::read_gen3_prt(render_tag, &render_model, &render_meshes)
             .map(|mut prt| {
                 prt.pad(instance_vertices);
                 prt

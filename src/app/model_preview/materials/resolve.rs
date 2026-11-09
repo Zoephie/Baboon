@@ -11,7 +11,7 @@ use super::super::{
 use super::binding::{cached_bitmap, slot_binding};
 use super::slots::{MAX_TEXTURE_EDGE, SLOT_PARAMETERS};
 use super::{
-    Dx9DrawPass, Dx9Layer, Dx9VertexStage, Image, SamplerKind, h2_shadow_passes,
+    Dx9DrawPass, Dx9Layer, Dx9VertexStage, Image, SamplerKind, dx9_shadow_passes,
     prepare_h3_material, reach_reference, reach_version_update,
 };
 use blam_tags::render_method::{RenderMethod, ResolvedRenderMethod};
@@ -68,7 +68,7 @@ pub(crate) fn resolve_model_textures(
             .flat_map(|layer| &texture.h2_layers[*layer as usize])
             .any(|pass| pass.stage != Dx9VertexStage::CeModel);
         if lit || texture.h3.is_some() {
-            for (layer, pass) in h2_shadow_passes() {
+            for (layer, pass) in dx9_shadow_passes() {
                 texture.h2_layers[layer as usize] = vec![pass];
             }
         }

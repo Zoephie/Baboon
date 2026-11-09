@@ -48,7 +48,7 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) loaded_secondary_weapon: Option<String>,
     /// What outlives the reload a weapon change makes: the old geometry's id,
     /// for its function inputs, and the region selections.
-    pub(in crate::app) ce_weapon_carry: Option<(u64, HashMap<String, ModelRegionSelection>)>,
+    pub(in crate::app) weapon_carry: Option<(u64, HashMap<String, ModelRegionSelection>)>,
     /// The clip selected before a reload, picked again by name once listed.
     pub(in crate::app) clip_after_load: Option<String>,
     /// The variant selected before a reload, or one just created, chosen
@@ -144,7 +144,7 @@ impl Default for ModelPreviewState {
             loaded_weapon: None,
             secondary_weapon: None,
             loaded_secondary_weapon: None,
-            ce_weapon_carry: None,
+            weapon_carry: None,
             clip_after_load: None,
             variant_after_load: None,
             show_collision: false,

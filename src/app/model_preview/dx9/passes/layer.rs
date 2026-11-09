@@ -45,7 +45,7 @@ pub(crate) enum Dx9Layer {
     HologramBloom,
     /// A mask written to the frame's alpha, for the glow drawn from it.
     Bloom,
-    /// Not the game's: see `h2_shadow_passes`.
+    /// Not the game's: see `dx9_shadow_passes`.
     ShadowCaster,
     ShadowMask,
     /// Halo 3's `shadow_apply`, darkening what the lit pass drew.

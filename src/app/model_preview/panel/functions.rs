@@ -1,7 +1,7 @@
 //! The object function controls: CE event effects, the function sliders and CE's function inputs.
 
 use super::super::{ModelPreviewData, ModelPreviewState, ce, frame};
-use super::weapons::{draw_ce_weapon_picker, draw_h2_weapon_pickers};
+use super::weapons::{draw_ce_weapon_picker, draw_unit_weapon_pickers};
 use eframe::egui::Ui;
 
 pub(in crate::app::model_preview) fn draw_object_functions(
@@ -25,7 +25,7 @@ pub(in crate::app::model_preview) fn draw_object_functions(
         time,
     };
     ce::panel::draw_ce_event_effects(ui, controls, held_name);
-    draw_h2_weapon_pickers(ui, data, state);
+    draw_unit_weapon_pickers(ui, data, state);
     if let Some(functions) = &data.object_functions {
         let time = ui.input(|input| input.time) as f32;
         let values = frame::object_function_values(data, &state.function_inputs, time);

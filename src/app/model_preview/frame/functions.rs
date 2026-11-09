@@ -105,7 +105,7 @@ pub(in crate::app::model_preview) fn shader_input_names(
     let gate = (shield || gen3_shield || reach_shield).then_some("current_shield_damage");
     let gate = gate
         .into_iter()
-        .chain(gen3_shield.then_some(gen3::pipeline::H3_OVERSHIELD));
+        .chain(gen3_shield.then_some(gen3::pipeline::OVERSHIELD));
     let sourced = sourced.iter().map(String::as_str);
     for name in passes
         .flat_map(|pass| pass.function_inputs())
@@ -207,7 +207,7 @@ pub(in crate::app::model_preview) fn object_moves(
         || data.preview.any_feature(|list| list.moves())
         || data.preview.reach.shield.as_ref().is_some_and(|shield| {
             let damage = function_values
-                .and_then(|values| values.get(gen3::pipeline::H3_SHIELD_DAMAGE))
+                .and_then(|values| values.get(gen3::pipeline::SHIELD_DAMAGE))
                 .copied()
                 .unwrap_or(0.0);
             shield.settings.showing(damage)

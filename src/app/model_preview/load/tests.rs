@@ -306,7 +306,7 @@ fn reach_lights_quadratic_meshes_by_sh_and_clamps_its_ambient_transfer() {
         let tag = TagFile::read(tags.join(path)).unwrap();
         let model = RenderModel::from_tag(&tag).unwrap();
         let meshes = RenderModel::derive_render_meshes(&tag).unwrap();
-        super::super::gen3::prt::read_h3_prt(&tag, &model, &meshes).unwrap()
+        super::super::gen3::prt::read_gen3_prt(&tag, &model, &meshes).unwrap()
     };
     // Its meshes bake quadratic transfer, which Reach's tool no longer lights by.
     let quadratic = read(

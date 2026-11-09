@@ -21,9 +21,9 @@ fn a_shadow_fades_as_the_probe_grows_even() {
 fn a_shield_shows_once_either_reading_rises() {
     let values =
         |name: &str, value: f32| functions::FunctionValues::from([(name.to_owned(), value)]);
-    assert!(gen3_shield_showing(Some(&values(H3_SHIELD_DAMAGE, 0.5))));
-    assert!(gen3_shield_showing(Some(&values(H3_OVERSHIELD, 0.5))));
-    assert!(!gen3_shield_showing(Some(&values(H3_OVERSHIELD, 0.0))));
+    assert!(gen3_shield_showing(Some(&values(SHIELD_DAMAGE, 0.5))));
+    assert!(gen3_shield_showing(Some(&values(OVERSHIELD, 0.5))));
+    assert!(!gen3_shield_showing(Some(&values(OVERSHIELD, 0.0))));
     assert!(!gen3_shield_showing(Some(&values("body_vitality", 1.0))));
     assert!(!gen3_shield_showing(None));
 }

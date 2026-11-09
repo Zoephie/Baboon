@@ -120,7 +120,7 @@ impl ObjectLoad<'_> {
         // hands by IK sets and chains (`biped_postprocess_node_matrices`,
         // X360 0x84B1A738), never the legacy `weapon ik`.
         let legacy_weapon_ik = reader.source.game() != Some(GameId::Halo4);
-        let known = settings.h2_equippable.as_deref();
+        let known = settings.equippable.as_deref();
         let is_biped = model_tag.header.group_tag == u32::from_be_bytes(*b"bipd");
         let weapons = feature(notes, "the unit's weapons", || {
             is_biped.then(|| super::super::weapons::unit_weapons(reader, model_tag, known))

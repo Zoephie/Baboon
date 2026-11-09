@@ -116,7 +116,7 @@ pub(in crate::app::model_preview) fn carry_through_weapon_change(
     state: &mut ModelPreviewState,
 ) {
     state.remember_selection();
-    state.ce_weapon_carry = Some((data.geometry_id, state.region_selections.clone()));
+    state.weapon_carry = Some((data.geometry_id, state.region_selections.clone()));
 }
 
 /// Which weapon a Halo CE biped holds. Changing it reloads the preview, so
@@ -155,7 +155,7 @@ pub(in crate::app::model_preview) fn draw_ce_weapon_picker(
 
 /// A Halo 2 unit's two hands. The left only opens for what can pair, and
 /// a primary that cannot pair empties it.
-pub(in crate::app::model_preview) fn draw_h2_weapon_pickers(
+pub(in crate::app::model_preview) fn draw_unit_weapon_pickers(
     ui: &mut Ui,
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,

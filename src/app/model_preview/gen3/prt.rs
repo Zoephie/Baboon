@@ -80,7 +80,7 @@ impl Gen3Prt {
 
 /// `render geometry`'s `per_mesh_prt_data`, or none if any mesh's data does not
 /// hold exactly a vertex's worth for each of its vertices.
-pub(in crate::app) fn read_h3_prt(
+pub(in crate::app) fn read_gen3_prt(
     tag: &TagFile,
     model: &RenderModel,
     meshes: &[RenderMesh],

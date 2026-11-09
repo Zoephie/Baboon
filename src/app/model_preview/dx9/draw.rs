@@ -312,7 +312,7 @@ impl RenderCore {
     /// Whether a material's passes stand in for the slots. Transparent ones
     /// always do. Opaque ones need game shaders on, and a template with a
     /// lightmap layer needs that layer to have prepared.
-    pub(in crate::app::model_preview) fn h2_replaces_slots(
+    pub(in crate::app::model_preview) fn dx9_replaces_slots(
         &self,
         frame: &ModelGpuFrame,
         material: usize,
@@ -361,7 +361,7 @@ impl RenderCore {
 
     /// Link the dx9 pass programs the frame's materials name: Halo 2's and
     /// Halo CE's passes, and the shadow passes Halo 3 and ODST borrow.
-    pub(in crate::app::model_preview) unsafe fn prepare_h2_programs(
+    pub(in crate::app::model_preview) unsafe fn prepare_dx9_programs(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -578,7 +578,7 @@ impl RenderCore {
             };
             let material = batch.material_index as usize;
             if !self.h2_material_ready(frame, material, layer)
-                || (layer != Dx9Layer::Transparent && !self.h2_replaces_slots(frame, material))
+                || (layer != Dx9Layer::Transparent && !self.dx9_replaces_slots(frame, material))
             {
                 continue;
             }

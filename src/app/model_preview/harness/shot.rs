@@ -265,7 +265,7 @@ pub(super) fn render(
     let settings = PreviewLoadSettings {
         weapon: options.weapon.clone(),
         secondary_weapon: options.secondary_weapon.clone(),
-        h2_equippable: None,
+        equippable: None,
         ..Default::default()
     };
     let mut data = load_model_preview(&tag, &entry, &names, Some(source), &settings).unwrap();

@@ -10,14 +10,14 @@ use blam_tags::TagFile;
 
 use super::super::gen3::shaders::{Gen3Pass, Gen3Sources};
 use super::super::gen3::shield::{
-    DEPTH_DECODE, OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path,
+    DEPTH_DECODE, OSCILLATION, PLASMA, ShieldSettings, shield_impact_path,
 };
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
 /// The two explicit shaders and the settings that pick between them.
 #[derive(Debug)]
 pub(crate) struct ReachShield {
-    pub(crate) settings: ReachShieldSettings,
+    pub(crate) settings: ShieldSettings,
     /// Explicit shader 61, `shield_impact`.
     pass: Arc<Gen3Pass>,
     /// 119, `shield_impact_procedural_uv`.
@@ -42,7 +42,7 @@ impl ReachShield {
 /// The model's shield, with both its passes, if it has one.
 pub(crate) fn read_reach_shield(reader: &TagReader, model: &TagFile) -> Option<Arc<ReachShield>> {
     let path = shield_impact_path(model)?;
-    let settings = ReachShieldSettings::read(reader, &path)?;
+    let settings = ShieldSettings::read(reader, &path)?;
     let mut sources = Gen3Sources::new(&reader.source);
     let pass = Arc::new(shield_pass(&*sources.explicit_pass("shield_impact").ok()?));
     let procedural = sources

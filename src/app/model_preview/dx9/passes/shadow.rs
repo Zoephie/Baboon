@@ -13,7 +13,7 @@ use crate::app::model_preview::gen3::shadow::{H3_SHADOW_APPLY, H3_SHADOW_APPLY_B
 /// The passes behind the preview's own key light shadow. Under the default
 /// lights the game draws no shadows at all: layers 10 and 11 only run for a
 /// light object that casts them.
-pub(crate) fn h2_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
+pub(crate) fn dx9_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
     let pass = |stage, fragment: String, compare, write| Dx9DrawPass {
         stage,
         fragment,

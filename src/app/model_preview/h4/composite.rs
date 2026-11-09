@@ -7,7 +7,7 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use super::super::common::image::Image;
 use super::super::frame::ModelGpuFrame;
-use super::super::gen3::pipeline::{H3_SHIELD_DAMAGE, HALF_LENS};
+use super::super::gen3::pipeline::{SHIELD_DAMAGE, HALF_LENS};
 use super::super::renderer::RenderCore;
 use super::render::H4Game;
 use crate::app::model_preview::common::image::{ImageTexels, Sampler};
@@ -36,7 +36,7 @@ impl H4Game {
         let damage = frame
             .function_values
             .as_ref()
-            .and_then(|values| values.get(H3_SHIELD_DAMAGE))
+            .and_then(|values| values.get(SHIELD_DAMAGE))
             .copied()
             .unwrap_or(0.0);
         if !shield.settings.showing(damage) {
