@@ -115,13 +115,13 @@ impl ParticleSystem {
                 let rgb: [f32; 3] =
                     std::array::from_fn(|axis| (tint[axis] * color[axis]).clamp(0.0, 1.0));
                 let [size_factor, aspect_factor] = emitter
-                    .h4
+                    .update_terms
                     .as_ref()
-                    .map_or([1.0; 2], |h4| h4.size_and_aspect(&state));
+                    .map_or([1.0; 2], |terms| terms.size_and_aspect(&state));
                 let white_point = emitter
-                    .h4
+                    .update_terms
                     .as_ref()
-                    .and_then(|h4| h4.white_point.as_ref())
+                    .and_then(|terms| terms.white_point())
                     .map_or(1.0, |white| white.scalar(&state));
                 let packed = H4ParticleState {
                     position: particle.position,
@@ -179,9 +179,9 @@ impl ParticleSystem {
                     .as_constant()
                     .is_none_or(|value| value != 0.0)
                     || emitter
-                        .h4
+                        .update_terms
                         .as_ref()
-                        .and_then(|h4| h4.white_point.as_ref())
+                        .and_then(|terms| terms.white_point())
                         .is_some_and(|white| {
                             white
                                 .function

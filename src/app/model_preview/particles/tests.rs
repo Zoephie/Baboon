@@ -921,54 +921,10 @@ fn reachs_volumes_fill_their_boxes_and_a_plane_heads_along_x() {
 }
 
 /// An emitter with nothing but `shape`, for what reads its fields alone.
-fn h4_terms(live_forever: bool, disable_velocity: bool, size_scale: f32) -> H4EmitterTerms {
-    H4EmitterTerms {
-        live_forever,
-        disable_velocity,
-        size_scale,
-        scale: None,
-        white_point: None,
-    }
-}
-
-/// `liveForever` brings the age round, and from past 0.99 back to 0;
-/// without it the age runs on to death.
-#[test]
-fn a_particle_that_lives_forever_comes_round() {
-    let forever = h4_terms(true, false, 1.0);
-    assert!((forever.age(1.25) - 0.25).abs() < 1e-6);
-    assert_eq!(forever.age(0.995), 0.0);
-    assert_eq!(forever.age(0.5), 0.5);
-    assert_eq!(h4_terms(false, false, 1.0).age(1.25), 1.25);
-}
-
-/// `disableVelocity` holds it in place; otherwise the size scale
-/// multiplies the step.
-#[test]
-fn velocity_moves_by_the_size_scale_unless_disabled() {
-    assert_eq!(h4_terms(false, true, 2.0).travel(0.5), 0.0);
-    assert_eq!(h4_terms(false, false, 2.0).travel(0.5), 1.0);
-}
-
-/// Scale y and the size scale go into the size, scale x over scale y
-/// into the aspect; with neither the size scale alone.
-#[test]
-fn scale_x_and_y_bake_into_size_and_aspect() {
-    let base = ParticleState::default();
-    let none = h4_terms(false, false, 3.0);
-    assert_eq!(none.size_and_aspect(&base), [3.0, 1.0]);
-    let constant = |value: f32| ParticleProperty::fixed(value).unwrap();
-    let scaled = H4EmitterTerms {
-        scale: Some([constant(2.0), constant(0.5)]),
-        ..h4_terms(false, false, 1.0)
-    };
-    assert_eq!(scaled.size_and_aspect(&base), [0.5, 4.0]);
-}
-
 fn test_emitter(shape: EmissionShape) -> Emitter {
     let fixed = || ParticleProperty::fixed(0.0).unwrap();
     Emitter {
-        h4: None,
+        update_terms: None,
         update: ParticleUpdate::Gpu,
         card_lerps: false,
         card_at_rest: false,

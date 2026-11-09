@@ -647,8 +647,8 @@ impl Emitter {
             if self.persistent {
                 particle.age = particle.age.fract();
             }
-            if let Some(h4) = &self.h4 {
-                particle.age = h4.age(particle.age);
+            if let Some(terms) = &self.update_terms {
+                particle.age = terms.age(particle.age);
             }
             if particle.age > 1.0 || (particle.resting && dies_at_rest) {
                 ended.push((particle.id, particle.position, particle.velocity));
@@ -670,7 +670,10 @@ impl Emitter {
                 return true;
             }
             particle.landed = false;
-            let travel = self.h4.as_ref().map_or(dt, |h4| h4.travel(dt));
+            let travel = self
+                .update_terms
+                .as_ref()
+                .map_or(dt, |terms| terms.travel(dt));
             for axis in 0..3 {
                 particle.position[axis] += particle.velocity[axis] * travel;
             }
@@ -723,15 +726,18 @@ impl Emitter {
             dt
         };
         particle.age += particle.inverse_lifespan * dt;
-        if let Some(h4) = &self.h4 {
-            particle.age = h4.age(particle.age);
+        if let Some(terms) = &self.update_terms {
+            particle.age = terms.age(particle.age);
         }
         if particle.age >= 1.0 {
             ended.push((particle.id, particle.position, particle.velocity));
             return false;
         }
         let (position, velocity) = (particle.position, particle.velocity);
-        let travel = self.h4.as_ref().map_or(dt, |h4| h4.travel(dt));
+        let travel = self
+            .update_terms
+            .as_ref()
+            .map_or(dt, |terms| terms.travel(dt));
         particle.position = std::array::from_fn(|axis| position[axis] + velocity[axis] * travel);
         let state = particle.state(state);
         if let (Some(turbulence), Some(xform)) = (&self.turbulence, turbulence) {

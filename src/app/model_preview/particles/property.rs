@@ -122,7 +122,7 @@ impl ParticleInput {
 
 /// `c_particle_state_list`.
 #[derive(Debug, Clone, Copy, Default)]
-pub(super) struct ParticleState {
+pub(in crate::app::model_preview) struct ParticleState {
     pub(super) age: f32,
     pub(super) system_age: f32,
     pub(super) seeds: [f32; SEEDS],
@@ -180,7 +180,7 @@ impl ParticleProperty {
 
     /// A property with its randoms not yet given seeds, for Reach, which
     /// gathers what a definition's properties read before allocating any.
-    pub(super) fn unallocated(property: TagStruct<'_>) -> Option<Self> {
+    pub(in crate::app::model_preview) fn unallocated(property: TagStruct<'_>) -> Option<Self> {
         let input = |field: &str| {
             ParticleInput::named(&property.read_enum_option(field).unwrap_or_default())
         };
@@ -273,7 +273,7 @@ impl ParticleProperty {
         Self::read(holder.descend(name)?, seeds)
     }
 
-    pub(super) fn scalar(&self, state: &ParticleState) -> f32 {
+    pub(in crate::app::model_preview) fn scalar(&self, state: &ParticleState) -> f32 {
         self.unscaled(state) * self.scale
     }
 

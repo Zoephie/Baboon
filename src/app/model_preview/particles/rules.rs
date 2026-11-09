@@ -42,8 +42,9 @@ pub(in crate::app::model_preview) struct ParticleRules {
     pub(in crate::app::model_preview) random_volume_velocities: bool,
     /// Reach and Halo 4: the emitter's `axis scale`.
     pub(in crate::app::model_preview) scales_axes: bool,
-    /// Halo 4: the emitter's own terms past Reach's.
-    pub(in crate::app::model_preview) h4_emitter_terms: bool,
+    /// Halo 4: the reader of the emitter's own terms past Reach's.
+    pub(in crate::app::model_preview) read_emitter_terms:
+        Option<super::emitter::EmitterTermsReader>,
     /// Halo 2: a system's particle and emitters read as Halo 2 lays them
     /// out, with its own LOD defaults.
     pub(in crate::app::model_preview) own_system: Option<OwnParticleSystem>,
@@ -68,7 +69,7 @@ impl ParticleRules {
         card_lerps: false,
         random_volume_velocities: false,
         scales_axes: false,
-        h4_emitter_terms: false,
+        read_emitter_terms: None,
         own_system: None,
         only_facing_still_particles_move: false,
         cheap_turbulence_types: false,

@@ -350,7 +350,7 @@ pub(in crate::app::model_preview) fn read_h2_emitter(
         })
         .collect();
     Some(Emitter {
-        h4: None,
+        update_terms: None,
         update: ParticleUpdate::Cpu,
         card_lerps: false,
         card_at_rest: false,

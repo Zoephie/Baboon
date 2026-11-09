@@ -15,7 +15,7 @@ pub(in crate::app::model_preview) const RULES: GameRules = GameRules {
     // Halo 4's simulation is Reach's, with terms of its own.
     particles: ParticleRules {
         read_material: Some(super::effects::particles::read_h4_particle_material),
-        h4_emitter_terms: true,
+        read_emitter_terms: Some(super::effects::emitter_terms::read_h4_emitter_terms),
         cheap_turbulence_types: true,
         ..SIMULATION
     },

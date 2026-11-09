@@ -239,53 +239,42 @@ pub(in crate::app::model_preview) struct Emitter {
     pub(in crate::app::model_preview) axis_scale: [f32; 3],
     /// Reach's `turbulence` movement, which only the card runs.
     pub(in crate::app::model_preview) turbulence: Option<ParticleTurbulence>,
-    /// Halo 4's own update terms.
-    pub(in crate::app::model_preview) h4: Option<H4EmitterTerms>,
+    /// The game's own update terms.
+    pub(in crate::app::model_preview) update_terms: Option<Box<dyn EmitterTerms>>,
 }
 
-/// What Halo 4's `particle_update.fx` adds over Reach's: its system's
-/// `particles live forever` and `disable velocity`, its `size scale`
-/// (`m_scaleMultiplier`), and the emitter's scale x and y and alpha white
-/// point.
-#[derive(Debug)]
-pub(in crate::app::model_preview) struct H4EmitterTerms {
-    pub(super) live_forever: bool,
-    pub(super) disable_velocity: bool,
-    pub(super) size_scale: f32,
-    pub(super) scale: Option<[ParticleProperty; 2]>,
-    pub(super) white_point: Option<ParticleProperty>,
+/// What a game's own update adds over the shared one, on each emitter: how
+/// a particle ages, travels and sizes, and its alpha white point. Its
+/// `Debug` is the emitter's.
+pub(in crate::app::model_preview) trait EmitterTerms:
+    std::fmt::Debug + Send + Sync
+{
+    /// A particle's age after the shared step brought it to `age`.
+    fn age(&self, age: f32) -> f32;
+
+    /// The step a frame of `dt` moves a particle along its velocity.
+    fn travel(&self, dt: f32) -> f32;
+
+    /// The size's and aspect's factors.
+    fn size_and_aspect(&self, state: &ParticleState) -> [f32; 2];
+
+    /// The alpha white point, where the emitter names one.
+    fn white_point(&self) -> Option<&ParticleProperty>;
 }
 
-impl H4EmitterTerms {
-    /// `liveForever`: the age comes round, and from just short of 1 back to 0.
-    pub(super) fn age(&self, age: f32) -> f32 {
-        if !self.live_forever {
-            return age;
-        }
-        let age = age.fract();
-        if age > 0.99 { 0.0 } else { age }
-    }
-
-    /// The step a frame moves a particle along its velocity.
-    pub(super) fn travel(&self, dt: f32) -> f32 {
-        if self.disable_velocity {
-            0.0
-        } else {
-            dt * self.size_scale
-        }
-    }
-
-    /// `m_size`'s and `m_aspect`'s factors: scale y and the size scale, and
-    /// scale x over scale y.
-    pub(super) fn size_and_aspect(&self, state: &ParticleState) -> [f32; 2] {
-        let [x, y] = self
-            .scale
-            .as_ref()
-            .map_or([1.0; 2], |[x, y]| [x.scalar(state), y.scalar(state)]);
-        let aspect = if y != 0.0 { x / y } else { 1.0 };
-        [y * self.size_scale, aspect]
-    }
+/// What the shared emitter reader has read that a game's terms build on:
+/// the movement's `particles live forever` and `disable velocity`, and the
+/// system's `size scale`.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::app::model_preview) struct EmitterTermsRead {
+    pub(in crate::app::model_preview) live_forever: bool,
+    pub(in crate::app::model_preview) disable_velocity: bool,
+    pub(in crate::app::model_preview) size_scale: f32,
 }
+
+/// A game's reader of its own [`EmitterTerms`] from an emitter.
+pub(in crate::app::model_preview) type EmitterTermsReader =
+    fn(TagStruct<'_>, EmitterTermsRead) -> Box<dyn EmitterTerms>;
 
 /// A Halo 3 or ODST emitter's `physics` movement, when its flags name one:
 /// gravity is parameter 0, air friction 1 and rotational friction 2.
@@ -513,24 +502,13 @@ pub(super) fn read_emitter(
             [1.0; 3]
         },
         turbulence,
-        h4: rules.h4_emitter_terms.then(|| {
-            // Read past Reach's allocation [inferred: their seeds follow].
-            let property = |name: &str| {
-                emitter
-                    .descend(name)
-                    .and_then(|holder| ParticleProperty::unallocated(holder))
-            };
-            let scale = property("particle scale x")
-                .zip(property("particle scale y"))
-                .map(|(x, y)| [x, y]);
-            H4EmitterTerms {
+        update_terms: rules.read_emitter_terms.map(|read| {
+            let read_so_far = EmitterTermsRead {
                 live_forever,
                 disable_velocity,
-                // `c_particle_system_definition::postprocess_block_proc`.
-                size_scale: if size_scale < 1e-4 { 1.0 } else { size_scale },
-                scale,
-                white_point: property("particle alpha white point"),
-            }
+                size_scale,
+            };
+            read(emitter, read_so_far)
         }),
     })
 }
