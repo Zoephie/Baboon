@@ -203,7 +203,7 @@ fn every_stage_source_goes_through_the_shader_dump() {
     for stage in STAGES {
         record_source(&stage.source("#version 330\n"));
     }
-    for (_, pass) in crate::app::model_preview::dx9::passes::dx9_shadow_passes() {
+    for (_, pass) in crate::app::model_preview::load::shadow_passes() {
         record_source(&pass.fragment);
     }
 }

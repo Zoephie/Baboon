@@ -1,19 +1,21 @@
-//! The self-shadow passes, and the shadow apply that Halo 3 shares.
+//! The self-shadow passes, and the plain pass the games' own shadow passes
+//! are made from.
 
 use super::super::super::gl::glsl::fill;
 use super::Dx9VertexStage;
 use super::layer::Dx9Layer;
 use super::lights::SHADOW_BIAS;
-use super::pass::{
-    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass,
-    PASS_GLSL_VERSION, identity_rows,
-};
+use super::pass::{Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass, PASS_GLSL_VERSION, identity_rows};
 
-/// The passes behind the preview's own key light shadow. Under the default
-/// lights the game draws no shadows at all: layers 10 and 11 only run for a
-/// light object that casts them.
-pub(crate) fn dx9_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
-    let pass = |stage, fragment: String, compare, write| Dx9DrawPass {
+/// A pass of the self shadow's: no blend, bias or textures, culling by the
+/// frame, testing depth by `compare` and writing it if `write`.
+pub(in crate::app::model_preview) fn shadow_pass(
+    stage: Dx9VertexStage,
+    fragment: String,
+    compare: Dx9Compare,
+    write: bool,
+) -> Dx9DrawPass {
+    Dx9DrawPass {
         stage,
         fragment,
         blend: None,
@@ -42,7 +44,15 @@ pub(crate) fn dx9_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
         animated_tint_facing: Vec::new(),
         animated_tint_glancing: Vec::new(),
         ce_animation: None,
-    };
+    }
+}
+
+/// The passes behind the preview's own key light shadow. Under the default
+/// lights the game draws no shadows at all: layers 10 and 11 only run for a
+/// light object that casts them. The games add their own beside these (see
+/// `load::games::shadow_passes`).
+pub(crate) fn dx9_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 2] {
+    let pass = shadow_pass;
     [
         (
             Dx9Layer::ShadowCaster,
@@ -68,49 +78,5 @@ pub(crate) fn dx9_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
                 false,
             ),
         ),
-        (
-            Dx9Layer::GelMask,
-            Dx9DrawPass {
-                channels: [false, false, false, true],
-                ..pass(
-                    Dx9VertexStage::LightGel,
-                    fill(
-                        include_str!("shaders/gel_mask.frag"),
-                        &[("version", &PASS_GLSL_VERSION)],
-                    ),
-                    Dx9Compare::Equal,
-                    false,
-                )
-            },
-        ),
-        (
-            Dx9Layer::ShadowApply,
-            Dx9DrawPass {
-                depth_bias: H3_SHADOW_APPLY_BIAS,
-                // The accumulation's alpha is what covers the background.
-                channels: [true, true, true, false],
-                blend: Some(Dx9Blend {
-                    equation: Dx9BlendEquation::Add,
-                    source: Dx9BlendFactor::Zero,
-                    destination: Dx9BlendFactor::SrcAlpha,
-                    constant: [0; 4],
-                }),
-                ..pass(
-                    Dx9VertexStage::ShadowMask,
-                    format!("{PASS_GLSL_VERSION}{H3_SHADOW_APPLY}"),
-                    // The lit pass's depth is another program's: near, not equal.
-                    Dx9Compare::LessOrEqual,
-                    false,
-                )
-            },
-        ),
     ]
 }
-
-pub(in crate::app::model_preview) const H3_SHADOW_APPLY_BIAS: f32 = -0.00002;
-
-/// `shadow_apply_bilinear`'s pixel shader in the preview's box: one object
-/// filling the map. `FASTER_SHADOWS` at `DX_VERSION` 11 leaves no slope to bias
-/// by, that being the shadow generate's own.
-pub(in crate::app::model_preview) const H3_SHADOW_APPLY: &str =
-    include_str!("shaders/shadow_apply.glsl");

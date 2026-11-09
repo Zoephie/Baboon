@@ -1,7 +1,12 @@
 //! Halo 3's and ODST's self shadow: drawn through the dx9 passes with its
 //! own map size, bias and light, and applied after the opaque pass.
 
+use super::super::dx9::passes::{
+    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9DrawPass, Dx9Layer,
+    PASS_GLSL_VERSION, shadow_pass,
+};
 use super::super::dx9::shadow::{ShadowNormalTarget, ShadowStyle};
+use super::super::dx9::stage::Dx9VertexStage;
 use super::super::frame::ModelGpuFrame;
 use super::super::gen3;
 use super::super::gen3::pipeline::{dominant_light, frame_probe, gen3_shadow_alpha};
@@ -47,4 +52,38 @@ pub(in crate::app::model_preview) fn h3_shadow_style(
 pub(in crate::app::model_preview) fn h3_shadow_light(frame: &ModelGpuFrame) -> ([f32; 3], f32) {
     let ([x, y, z, _], _, contrast) = dominant_light(&frame_probe(frame));
     ([x, y, z], gen3_shadow_alpha(contrast))
+}
+
+pub(in crate::app::model_preview) const H3_SHADOW_APPLY_BIAS: f32 = -0.00002;
+
+/// `shadow_apply_bilinear`'s pixel shader in the preview's box: one object
+/// filling the map. `FASTER_SHADOWS` at `DX_VERSION` 11 leaves no slope to bias
+/// by, that being the shadow generate's own.
+pub(in crate::app::model_preview) const H3_SHADOW_APPLY: &str =
+    include_str!("shaders/shadow_apply.glsl");
+
+/// The self shadow's apply after the opaque pass, through the dx9 shadow
+/// passes' mask stage: the map's shadow multiplied over what drew.
+pub(in crate::app::model_preview) fn shadow_apply_pass() -> (Dx9Layer, Dx9DrawPass) {
+    (
+        Dx9Layer::ShadowApply,
+        Dx9DrawPass {
+            depth_bias: H3_SHADOW_APPLY_BIAS,
+            // The accumulation's alpha is what covers the background.
+            channels: [true, true, true, false],
+            blend: Some(Dx9Blend {
+                equation: Dx9BlendEquation::Add,
+                source: Dx9BlendFactor::Zero,
+                destination: Dx9BlendFactor::SrcAlpha,
+                constant: [0; 4],
+            }),
+            ..shadow_pass(
+                Dx9VertexStage::ShadowMask,
+                format!("{PASS_GLSL_VERSION}{H3_SHADOW_APPLY}"),
+                // The lit pass's depth is another program's: near, not equal.
+                Dx9Compare::LessOrEqual,
+                false,
+            )
+        },
+    )
 }

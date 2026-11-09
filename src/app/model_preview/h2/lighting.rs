@@ -4,7 +4,11 @@
 use eframe::glow::{self, HasContext as _};
 
 use super::super::common::features::paths;
-use super::super::dx9::passes::{Dx9Layer, Dx9Light};
+use super::super::dx9::passes::{
+    Dx9Compare, Dx9DrawPass, Dx9Layer, Dx9Light, PASS_GLSL_VERSION, shadow_pass,
+};
+use super::super::dx9::stage::Dx9VertexStage;
+use super::super::gl::glsl::fill;
 use super::super::{ModelGpuFrame, RenderCore};
 use super::prt::H2Binds;
 
@@ -102,4 +106,24 @@ pub(in crate::app::model_preview) unsafe fn draw_h2_gel_lights(
             gl.color_mask(true, true, true, true);
         }
     }
+}
+
+/// The gel mask a frustum light with a gel draws first: the gel's alpha into
+/// the target's, where the lit pass is.
+pub(in crate::app::model_preview) fn gel_mask_pass() -> (Dx9Layer, Dx9DrawPass) {
+    (
+        Dx9Layer::GelMask,
+        Dx9DrawPass {
+            channels: [false, false, false, true],
+            ..shadow_pass(
+                Dx9VertexStage::LightGel,
+                fill(
+                    include_str!("shaders/gel_mask.frag"),
+                    &[("version", &PASS_GLSL_VERSION)],
+                ),
+                Dx9Compare::Equal,
+                false,
+            )
+        },
+    )
 }

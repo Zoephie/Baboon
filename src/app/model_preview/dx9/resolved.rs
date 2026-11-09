@@ -3,7 +3,7 @@
 //! the object lightmap's fallback, and the preview's shadow passes.
 
 use super::super::{MaterialTextures, RenderModelPreviewMaterial};
-use super::passes::{Dx9DrawPass, Dx9Layer, dx9_shadow_passes};
+use super::passes::{Dx9DrawPass, Dx9Layer};
 use super::stage::Dx9VertexStage;
 
 /// Every resolved material's DX9 layers, finished once the model's are all
@@ -11,6 +11,7 @@ use super::stage::Dx9VertexStage;
 pub(in crate::app::model_preview) fn finish_dx9_layers(
     materials: &[RenderModelPreviewMaterial],
     textures: &mut [MaterialTextures],
+    shadow_passes: &[(Dx9Layer, Dx9DrawPass)],
 ) {
     share_object_layers(materials, textures);
     for texture in textures {
@@ -24,8 +25,8 @@ pub(in crate::app::model_preview) fn finish_dx9_layers(
             .flat_map(|layer| &texture.dx9_layers[*layer as usize])
             .any(|pass| pass.stage != Dx9VertexStage::CeModel);
         if lit || texture.gen3.is_some() {
-            for (layer, pass) in dx9_shadow_passes() {
-                texture.dx9_layers[layer as usize] = vec![pass];
+            for (layer, pass) in shadow_passes {
+                texture.dx9_layers[*layer as usize] = vec![pass.clone()];
             }
         }
     }
@@ -111,7 +112,7 @@ mod tests {
             material(1, false, None),
         ];
         let mut textures = vec![MaterialTextures::default(); materials.len()];
-        let [(_, pass), ..] = dx9_shadow_passes();
+        let [(_, pass), ..] = super::super::passes::dx9_shadow_passes();
         textures[1].dx9_layers[Dx9Layer::Transparent as usize] = vec![pass.clone()];
         textures[2].dx9_layers[Dx9Layer::Transparent as usize] = vec![pass];
         share_object_layers(&materials, &mut textures);

@@ -4,6 +4,7 @@
 use super::super::animation::{DecodedAnimationPose, PreviewAnimationEntry};
 use super::super::cloth::{ClothGame, ClothRules};
 use super::super::common::marker::MarkerFrame;
+use super::super::dx9::passes::{Dx9DrawPass, Dx9Layer};
 use super::super::functions::{FunctionRules, TypeExporter};
 use super::super::{
     GameId, ModelPreviewData, RenderModelPreview, TagEntry, TagFile, TagSource,
@@ -367,6 +368,16 @@ pub(in crate::app::model_preview) fn function_rules(
 /// A shader whose game resolves it its own way: Halo 4's `material`, Halo
 /// CE's shaders, and Halo 2's template-and-parameters `shader`. `None` for a
 /// render method, which the shared resolver reads.
+/// Every lit dx9 material's and gen3 material's shadow passes: dx9's own,
+/// then Halo 2's gel mask and Halo 3's shadow apply, which draw through the
+/// same machinery.
+pub(in crate::app::model_preview) fn shadow_passes() -> Vec<(Dx9Layer, Dx9DrawPass)> {
+    let mut passes = super::super::dx9::passes::dx9_shadow_passes().to_vec();
+    passes.push(super::super::h2::lighting::gel_mask_pass());
+    passes.push(super::super::h3::shadow::shadow_apply_pass());
+    passes
+}
+
 pub(in crate::app::model_preview) fn resolve_own_shader(
     reader: &TagReader,
     shader: &TagFile,

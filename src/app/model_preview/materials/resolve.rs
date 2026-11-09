@@ -52,7 +52,11 @@ pub(crate) fn resolve_model_textures(
             })
         })
         .collect();
-    super::super::dx9::resolved::finish_dx9_layers(materials, &mut textures);
+    super::super::dx9::resolved::finish_dx9_layers(
+        materials,
+        &mut textures,
+        &super::super::load::shadow_passes(),
+    );
     textures
 }
 
