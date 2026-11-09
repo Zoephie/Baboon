@@ -12,7 +12,8 @@ use super::render::{Gen3Batch, Gen3Cx, Gen3Game};
 use super::sprites::SpriteStage;
 
 use super::shaders::{
-    Gen3Animated, Gen3Blend, Gen3Dialect, Gen3Material, Gen3Pass, Gen3Shield, Gen3Value,
+    Gen3Animated, Gen3Blend, Gen3Dialect, Gen3Material, Gen3Pass, Gen3Shield, Gen3ShieldSettings,
+    Gen3Value,
 };
 
 use super::super::common::view::camera_view_frame;

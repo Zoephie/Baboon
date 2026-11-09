@@ -11,8 +11,8 @@ use super::targets::Gen3Targets;
 use super::uniforms::{camera_to_world, set_value, view_matrix, view_projection};
 use super::{
     Gen3Batch, Gen3Blend, Gen3Cx, Gen3Dialect, Gen3Game, Gen3Material, Gen3Pass, Gen3Shield,
-    Gen3State, Gen3Value, SpriteStage, TextureKind, camera_view_frame, layered_distance,
-    model_draw_range,
+    Gen3ShieldSettings, Gen3State, Gen3Value, SpriteStage, TextureKind, camera_view_frame,
+    layered_distance, model_draw_range,
 };
 use crate::app::model_preview::gen3;
 use crate::app::model_preview::gl::blit::blit_depth;
@@ -111,7 +111,7 @@ impl Gen3State {
         batch: &RenderModelPreviewBatch,
         material: &Gen3Material,
         pass: &Arc<Gen3Pass>,
-        shield: Option<&Gen3Shield>,
+        shield: Option<(&Gen3Shield, &Gen3ShieldSettings)>,
     ) {
         let range = model_draw_range(
             batch.index_start,
@@ -259,15 +259,7 @@ impl Gen3State {
                     {
                         set_value(gl, location.as_ref(), ty, &Gen3Value::Floats(*value));
                     }
-                    let settings = frame
-                        .preview
-                        .h3
-                        .shield
-                        .as_ref()
-                        .or(shield.map(|shield| &shield.settings));
-                    if let Some(value) = shield
-                        .and(settings)
-                        .and_then(|settings| settings.values.get(name))
+                    if let Some(value) = shield.and_then(|(_, settings)| settings.values.get(name))
                     {
                         set_value(gl, location.as_ref(), ty, value);
                     }
@@ -450,7 +442,7 @@ impl Gen3State {
             self.blended_transparents(core, game, &drawing, blended, sprites);
             let mut bloom = self.camo(core, game, &drawing);
             self.pass_values = None;
-            self.shield_impact(core, &drawing);
+            self.shield_impact(core, &*game, &drawing);
             game.shield(&mut Gen3Cx {
                 gl,
                 frame,
@@ -918,7 +910,12 @@ impl Gen3State {
     }
 
     /// `render_object_context`'s shield impact, over every lit part.
-    unsafe fn shield_impact(&mut self, core: &mut RenderCore, drawing: &Gen3Frame<'_>) {
+    unsafe fn shield_impact(
+        &mut self,
+        core: &mut RenderCore,
+        game: &dyn Gen3Game,
+        drawing: &Gen3Frame<'_>,
+    ) {
         let Gen3Frame {
             gl, frame, slot, ..
         } = *drawing;
@@ -929,14 +926,16 @@ impl Gen3State {
             gen3_set_blend(gl, Gen3Blend::Additive);
             for (batch, material) in &drawing.batches {
                 if let Some(shield) = material.shield.as_ref() {
-                    // `render_object_shield_impact`: by the settings that win.
-                    let settings = frame.preview.h3.shield.as_ref().unwrap_or(&shield.settings);
+                    // `render_object_shield_impact`: by the settings that win,
+                    // the object's own ahead of the material's.
+                    let settings = game.shield_settings(frame).unwrap_or(&*shield.settings);
                     let pass = shield
                         .procedural
                         .as_ref()
                         .filter(|_| settings.procedural)
                         .unwrap_or(&shield.pass);
-                    self.draw_pass(core, gl, frame, slot, batch, material, pass, Some(shield));
+                    let shield = Some((&**shield, settings));
+                    self.draw_pass(core, gl, frame, slot, batch, material, pass, shield);
                 }
             }
             gl.color_mask(true, true, true, true);

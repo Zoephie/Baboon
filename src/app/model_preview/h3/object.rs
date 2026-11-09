@@ -21,7 +21,7 @@ pub(in crate::app::model_preview) fn read_h3_object_features(
         .root()
         .read_tag_ref_path("shield impact parameter override")
         .filter(|path| !path.is_empty())
-        .and_then(|path| super::super::gen3::materials::read_h3_shield_settings(reader, &path));
+        .and_then(|path| super::super::gen3::materials::read_shield_settings(reader, &path));
     preview.h3.lights =
         super::super::h3::lights::read_h3_lights(reader, model_tag, 0, &preview.markers, frame);
     preview.gen3.flares = super::super::gen3::effects::flares::read_h3_flares(

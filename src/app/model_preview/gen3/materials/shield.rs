@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 /// A `shield_impact` tag's constants and noise, as `render_object_context`
 /// submits them.
-pub(in crate::app::model_preview) fn read_h3_shield_settings(
+pub(in crate::app::model_preview) fn read_shield_settings(
     reader: &TagReader,
     path: &str,
 ) -> Option<Arc<Gen3ShieldSettings>> {
@@ -131,7 +131,7 @@ pub(super) fn gen3_shield(
     if let Some(found) = &caches.gen3_shield {
         return found.clone();
     }
-    let settings = read_h3_shield_settings(reader, "globals\\global_shield_impact_settings");
+    let settings = read_shield_settings(reader, "globals\\global_shield_impact_settings");
     let sources = caches
         .h3_sources
         .get_or_insert_with(|| Gen3Sources::new(&reader.source));
