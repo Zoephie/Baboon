@@ -52,16 +52,6 @@ impl CampaignEvolvedLoad {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::super::super::ModelPreviewState;
-
-    #[test]
-    fn campaign_evolved_preview_defaults_to_full_detail() {
-        assert!(ModelPreviewState::default().campaign_evolved.high_detail);
-    }
-}
-
 /// The view menu's High Detail switch, in place of the tag overlays' toggles,
 /// which a model drawn from its Unreal meshes has none of.
 pub(in crate::app::model_preview) const VIEW_SETTINGS: OwnViewSettings = OwnViewSettings {
@@ -74,4 +64,14 @@ fn draw_view_settings(ui: &mut eframe::egui::Ui, state: &mut ModelPreviewState) 
         .on_hover_text(
             "Decode full-resolution Nanite geometry instead of Unreal's coarse fallback.",
         );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::ModelPreviewState;
+
+    #[test]
+    fn campaign_evolved_preview_defaults_to_full_detail() {
+        assert!(ModelPreviewState::default().campaign_evolved.high_detail);
+    }
 }

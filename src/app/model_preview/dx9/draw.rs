@@ -483,6 +483,7 @@ impl RenderCore {
 
     /// Draw Halo 2 materials through their passes, in `order`. Leaves the GL
     /// state the wireframe pass and the UI expect.
+    #[allow(clippy::too_many_arguments)]
     pub(in crate::app::model_preview) unsafe fn draw_dx9_layer(
         &mut self,
         gl: &glow::Context,
