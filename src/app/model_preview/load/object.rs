@@ -1,6 +1,12 @@
 //! Object tags: the model an object names, its features, its colours and functions, and the weapons a unit holds.
 
-use super::*;
+use super::super::{
+    GameId, ModelPreviewData, RenderModelPreview, TagEntry, TagFile, TagNameIndex, TagSource,
+    object_default_variant, read_change_colors,
+};
+use super::jobs::PreviewLoadSettings;
+use super::render_model::preview_model_tag;
+use super::{TagReader, feature, feature_into, load_tag_preview};
 
 /// Every later object names a `.model`, which previews as itself. The
 /// object has the change colors, so nothing needs to go looking for it: its

@@ -1,6 +1,12 @@
 //! Scenarios and structure BSPs: the BSP list, each BSP rebranded as one toggle, and their labels.
 
-use super::*;
+use super::super::{
+    ModelPreviewData, RenderModelPreview, RenderModelPreviewRegion, TagEntry, TagFile,
+    model_preview_data, tag_path, tag_ref_path,
+};
+use super::jobs::PreviewLoadSettings;
+use super::merge::merge_preview_append;
+use super::{TagReader, build_sbsp_preview, feature};
 
 /// The scenario's `structure bsps` block as backslash reference paths, in tag
 /// order. Elements whose reference is empty stay in the list as `None` so the

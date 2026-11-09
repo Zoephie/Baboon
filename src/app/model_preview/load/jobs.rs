@@ -1,6 +1,19 @@
 //! The preview and overlay workers: the requests the UI starts and the handlers for what they send back.
 
-use super::*;
+use super::super::super::Baboon;
+use super::super::{
+    KitStamp, ModelPreviewData, ModelPreviewState, ModelTagPanelTab, NEXT_MODEL_GEOMETRY_ID,
+    PreviewAnimationPlayback, RenderModelPreview, TagEntry, TagFile, TagSource, WorkerMessage,
+    compute_variant_selection, default_variant_index, egui, is_object_family_group, read_entry,
+    reset_model_preview_selection, spawn_worker,
+};
+use super::load_model_preview;
+use super::merge::merge_preview_append;
+use super::overlays::{
+    Overlay, halo1_object_collision_overlay, hlmt_collision_overlay, hlmt_physics_overlay,
+};
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 impl Baboon {
     /// Start building a loaded `.model` preview's collision/physics overlays

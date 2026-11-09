@@ -1,6 +1,13 @@
 //! Model tags: the render model a `.model` names, its variants and instance groups, and its overlay shaders.
 
-use super::*;
+use super::super::{
+    GameId, ModelPreviewData, RenderModelPreview, TagEntry, TagEntryLocation, TagFile,
+    TagNameIndex, TagSource, file_entry_key, group_tag_to_extension, model_preview_data,
+    read_entry, resolve_tag_path,
+};
+use super::render_model::build_render_preview;
+use super::variants::{read_model_variants, read_variant_instances};
+use super::{TagReader, add_overlay_shaders, feature_into};
 
 /// A `.model`: the render model it names, the hologram and shield shaders it
 /// lays over that, its variants' instances, and, when the `.model` itself is

@@ -2,7 +2,11 @@
 //! object, a model and a Halo CE object of its own.
 
 use super::super::particles::{OwnParticleSystem, ParticleMaterialReader, ParticleRules};
-use super::*;
+use super::super::{GameId, ModelPreviewData, RenderModelPreview, TagEntry, TagFile, TagSource};
+use super::jobs::PreviewLoadSettings;
+use super::object::ObjectLoad;
+use super::{TagReader, feature_into};
+use std::sync::Arc;
 
 /// The object's change colors, functions and its game's own features, each
 /// noted if its reader crashes, by the kit's game.

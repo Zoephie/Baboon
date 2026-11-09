@@ -1,3 +1,6 @@
+use super::super::{
+    KitStamp, ModelPreviewData, RenderModel, RenderModelPreviewRegion, read_entry, tag_path,
+};
 use super::*;
 use crate::app::editor::{
     is_model_group, is_previewable_geometry_group, is_previewable_geometry_group_for_game,

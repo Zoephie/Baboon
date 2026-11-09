@@ -1,7 +1,10 @@
 //! Import-tool error report extraction for model preview overlays.
 
 use super::super::common::fields::field_name_matches;
-use super::*;
+use super::super::{
+    MODEL_ERROR_FALLBACK_COLOR, ModelErrorPoint, ModelErrorPrimitive, ModelErrorShape,
+    ModelPreviewLayer, RenderModelPreview, TagField, TagFieldData, TagFile, TagStruct,
+};
 
 /// Attach every drawable error-report primitive in `tag` to `preview`.
 ///
@@ -343,6 +346,16 @@ fn error_field<'a>(value: &TagStruct<'a>, expected: &str) -> Option<TagField<'a>
 mod tests {
     //! Real-tag coverage for model error extraction and wrapper/overlay plumbing.
 
+    use super::super::super::{
+        GameId, ModelErrorShape, ModelPreviewLayer, RenderModelPreview, TagEntry, TagEntryLocation,
+        TagFile, TagNameIndex, TagSource, file_entry_key,
+    };
+    use super::super::jobs::PreviewLoadSettings;
+    use super::super::overlays::hlmt_collision_overlay;
+    use super::super::render_model::build_render_preview;
+    use super::super::{
+        build_collision_preview, build_physics_preview, build_sbsp_preview, load_model_preview,
+    };
     use super::*;
     use std::path::{Path, PathBuf};
 

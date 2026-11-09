@@ -1,6 +1,9 @@
 //! Merging one preview into another: overlays into a model, BSPs into a scenario, and attached objects into their parent.
 
-use super::*;
+use super::super::{RenderModelPreview, RenderModelPreviewBatch};
+use super::{
+    MarkerFrame, Overflow, VertexBase, attach_point, attach_vector, expand_preview_bounds_local,
+};
 
 /// Append every region of `src` into `dst`, offsetting vertex, index, and
 /// material references. Regions with a name `dst` already lists are merged

@@ -5,20 +5,20 @@
 //! panel presentation belong elsewhere.
 
 use super::super::common::geometry::{Overflow, VertexBase};
-use super::*;
-use blam_tags::geometry::{CompressionBounds, read_compression_bounds_at};
-use blam_tags::jms_split::MaterialLabel;
+use super::super::{
+    ModelPreviewData, ModelPreviewLayer, RenderModelPreview, RenderModelPreviewBatch,
+    RenderModelPreviewMaterial, RenderModelPreviewRegion, RenderModelPreviewVertex, TagEntry,
+    TagFile, model_preview_data, owning_model_skeleton,
+};
+use super::{TagReader, expand_preview_bounds_local};
+use blam_tags::JmsFile;
 use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
-use blam_tags::render_model::extract_sbsp_render_geometry_meshes;
-use blam_tags::{AssFile, AssObjectPayload, AssTriangle, JmsFile};
-use std::collections::HashMap;
 
 mod collision;
 pub(in crate::app::model_preview) use collision::*;
 mod physics;
 pub(in crate::app::model_preview) use physics::*;
 mod ass;
-use ass::*;
 mod sbsp;
 pub(in crate::app::model_preview) use sbsp::*;
 

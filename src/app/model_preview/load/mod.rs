@@ -5,22 +5,26 @@ use super::common::geometry::{Overflow, VertexBase};
 use super::common::marker::{MarkerFrame, attach_point, attach_vector};
 use super::dx9::passes::h2_prt_lights;
 use super::h2::prt::read_h2_prt;
-use super::*;
+use super::{
+    GameId, ModelPreviewData, TagEntry, TagFile, TagNameIndex, TagSource, is_object_family_group,
+    load_campaign_evolved_preview,
+};
+use model::load_model;
 use std::sync::Arc;
 
 pub(in crate::app::model_preview) mod reader;
 pub(in crate::app) use reader::TagReader;
 mod variants;
 pub(in crate::app::model_preview) use variants::*;
-mod errors;
-pub(in crate::app::model_preview) use errors::*;
 pub(in crate::app::model_preview) mod derived;
+mod errors;
 pub(in crate::app::model_preview) use derived::*;
 mod merge;
 pub(in crate::app::model_preview) use merge::*;
 mod scenario;
 pub(in crate::app::model_preview) use scenario::*;
 mod overlays;
+#[cfg(test)]
 pub(in crate::app::model_preview) use overlays::*;
 mod jobs;
 pub(in crate::app::model_preview) use jobs::*;
@@ -35,7 +39,6 @@ mod object;
 pub(in crate::app::model_preview) use object::*;
 mod model;
 use super::common::geometry::expand_preview_bounds_local;
-use model::*;
 mod cx;
 pub(in crate::app::model_preview) use cx::*;
 

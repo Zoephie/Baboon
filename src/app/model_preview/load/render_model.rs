@@ -1,6 +1,16 @@
 //! Render models and particle models as preview geometry.
 
-use super::*;
+use super::super::{
+    HashMap, ModelPreviewData, ModelPreviewLayer, RenderModel, RenderModelPreview,
+    RenderModelPreviewBatch, RenderModelPreviewMarker, RenderModelPreviewMaterial,
+    RenderModelPreviewNode, RenderModelPreviewRegion, RenderModelPreviewVertex, TagEntry, TagFile,
+    TagSource, common, is_object_family_group, load_referenced_tag_from_source, model_preview_data,
+    object_reference, tag_path,
+};
+use super::errors::append_model_errors;
+use super::{Overflow, VertexBase, expand_preview_bounds_local, h2_prt_lights, read_h2_prt};
+use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
+use blam_tags::render_model::{Marker, Node, RenderMesh};
 
 /// `particle_model` carries its geometry inline with no wrapper, but
 /// it is not a render_model: no regions, no permutations, no
@@ -694,8 +704,10 @@ pub(in crate::app::model_preview) fn vector3_to_array(v: RealVector3d) -> [f32; 
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::{RenderModel, RenderModelPreview};
     use super::*;
     use blam_tags::math::{RealPoint2d, RealPoint3d, RealVector3d};
+    use blam_tags::render_model::RenderMesh;
     use blam_tags::render_model::{GeometryPartType, RenderMeshPart, RenderVertex};
 
     #[test]

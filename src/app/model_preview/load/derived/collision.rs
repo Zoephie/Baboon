@@ -1,7 +1,18 @@
 //! Collision models as preview geometry: the JMS scene, posed by the bind pose, and its error points.
 
-use super::*;
+use super::super::super::{
+    MAX_PREVIEW_BONES, ModelErrorPoint, ModelErrorPrimitive, ModelErrorShape, ModelPreviewLayer,
+    RenderModelPreview, RenderModelPreviewBatch, RenderModelPreviewMaterial,
+    RenderModelPreviewVertex, TagFile, collision_jms_for_game,
+};
+use super::super::errors::append_model_errors;
+use super::{
+    COLLISION_COLOR, JMS_SCALE, Overflow, VertexBase, empty_preview,
+    ensure_preview_region_permutation, face_normal, finish_preview, point, rotate,
+};
 use crate::app::model_preview::common::geometry::expand_preview_bounds_local;
+use blam_tags::JmsFile;
+use blam_tags::jms_split::MaterialLabel;
 
 /// Preserve a collision JMS's actual region/permutation cells and bone
 /// influences. The generic derived-mesh path intentionally flattens both,

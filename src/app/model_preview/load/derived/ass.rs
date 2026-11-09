@@ -1,7 +1,15 @@
 //! ASS scenes as preview geometry: one region per layer, instances placed.
 
-use super::*;
+use super::super::super::{
+    ModelPreviewLayer, RenderModelPreview, RenderModelPreviewBatch, RenderModelPreviewMaterial,
+    RenderModelPreviewVertex,
+};
+use super::{
+    COLLISION_COLOR, COLLISION_REGION, JMS_SCALE, Overflow, PORTAL_COLOR, VertexBase,
+    WEATHER_COLOR, empty_preview, ensure_preview_region, point, rotate,
+};
 use crate::app::model_preview::common::geometry::expand_preview_bounds_local;
+use blam_tags::{AssFile, AssObjectPayload, AssTriangle};
 
 /// Which preview region an ASS object belongs to, read off its materials.
 /// The ASS builders name recompile-marker layers by convention: `+portal` for

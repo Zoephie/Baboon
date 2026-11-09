@@ -1,6 +1,6 @@
 //! The panic guards around each feature reader: a reader that crashes leaves a note, and the preview loads without it.
 
-use super::*;
+use super::super::RenderModelPreview;
 
 /// Read one feature of a preview: a broken tag that panics its reader costs
 /// that feature, noted as `what`, never the geometry.

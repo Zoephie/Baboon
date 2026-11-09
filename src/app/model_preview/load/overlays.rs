@@ -1,6 +1,10 @@
 //! The collision and physics overlays a model or object names.
 
-use super::*;
+use super::super::{
+    RenderModelPreview, TagFile, model_skeleton, object_reference, render_model_skeleton,
+    tag_ref_path,
+};
+use super::{TagReader, build_collision_preview, build_physics_preview};
 
 /// The `.model`'s collision layer, posed on its own skeleton, ready to merge
 /// over the render preview. `None` when the reference is absent or unreadable

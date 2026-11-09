@@ -1,7 +1,19 @@
+use super::super::super::super::Baboon;
+use super::super::super::{
+    MODEL_ERROR_FALLBACK_COLOR, ModelErrorPoint, ModelErrorPrimitive, ModelErrorShape,
+    ModelPreviewLayer, ModelPreviewState, RenderModelPreview, RenderModelPreviewMaterial,
+    RenderModelPreviewRegion, TagSource, TextureSlot, resolve_model_textures,
+};
+use super::super::merge::merge_preview_append;
+use super::super::overlays::hlmt_collision_overlay;
+use super::super::scenario::{bsp_display_name, rebrand_preview_region};
+use super::ass::ass_to_preview;
 use super::*;
 use crate::app::model_preview::harness::kit::kit_root;
 use crate::core::game::GameId;
+use blam_tags::geometry::CompressionBounds;
 use blam_tags::math::RealRgbColor;
+use blam_tags::{AssFile, AssObjectPayload, AssTriangle};
 use blam_tags::{
     AssInstance, AssMaterial, AssObject, AssVertex, JmsMaterial, JmsNode, JmsTriangle, JmsVertex,
 };

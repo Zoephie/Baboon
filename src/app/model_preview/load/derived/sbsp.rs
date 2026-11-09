@@ -1,7 +1,21 @@
 //! Structure BSPs as preview geometry: the native decode or the JMS/ASS scene, its portals and collision.
 
-use super::*;
+use super::super::super::{
+    ModelPreviewLayer, RenderModelPreview, RenderModelPreviewBatch, RenderModelPreviewMaterial,
+    RenderModelPreviewVertex, TagFieldData, TagFile, TagStruct,
+};
+use super::super::errors::append_model_errors;
+use super::ass::ass_to_preview;
+use super::{
+    COLLISION_COLOR, COLLISION_REGION, Overflow, PORTAL_COLOR, VertexBase, append_jms_triangles,
+    empty_preview, ensure_preview_region, face_normal, finish_preview, point, push_derived_batch,
+};
 use crate::app::model_preview::common::geometry::expand_preview_bounds_local;
+use blam_tags::geometry::{CompressionBounds, read_compression_bounds_at};
+use blam_tags::math::RealVector3d;
+use blam_tags::render_model::extract_sbsp_render_geometry_meshes;
+use blam_tags::{AssFile, JmsFile};
+use std::collections::HashMap;
 
 /// A structure BSP's geometry, per engine: H3-family and H2 through the ASS
 /// scene builders, H1 through its JMS render/collision extractors.

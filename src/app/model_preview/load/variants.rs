@@ -1,7 +1,7 @@
 //! Reading a model's variants and instance groups off its tags.
 
 use super::super::common::fields::read_named_string_exact;
-use super::*;
+use super::super::{HashMap, ModelVariantPreview, TagFile, TagStruct};
 
 /// One permutation a variant's region may take. `None` names nothing, which
 /// leaves the region undrawn.

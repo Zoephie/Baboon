@@ -1,6 +1,7 @@
 //! What every feature reader is handed: the tag reader, the model's markers and the preview being built.
 
-use super::*;
+use super::super::{RenderModelPreviewMarker, TagFile};
+use super::TagReader;
 
 /// What a feature reader reads an object with: the kit, the object's tag, the
 /// owner its features hang on, its markers and where `frame` places each, and

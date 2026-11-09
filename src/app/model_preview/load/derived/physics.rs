@@ -1,7 +1,17 @@
 //! Physics models as preview geometry: each shape tessellated and placed by its parent bone.
 
-use super::*;
+use super::super::super::{
+    MAX_PREVIEW_BONES, ModelPreviewLayer, RenderModelPreview, RenderModelPreviewBatch,
+    RenderModelPreviewMaterial, RenderModelPreviewVertex, TagFile, physics_jms_for_game,
+};
+use super::super::errors::append_model_errors;
+use super::{
+    JMS_SCALE, Overflow, PHYSICS_COLOR, PHYSICS_REGION, VertexBase, empty_preview,
+    ensure_preview_region, face_normal, finish_preview, point, rotate,
+};
 use crate::app::model_preview::common::geometry::expand_preview_bounds_local;
+use blam_tags::JmsFile;
+use blam_tags::math::RealQuaternion;
 
 /// A physics tag (`phmo`) tessellated shape by shape. The tag stores
 /// parametric primitives — spheres, boxes, pills, convex polyhedra — with no
