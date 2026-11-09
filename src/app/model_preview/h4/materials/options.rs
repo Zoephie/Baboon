@@ -40,7 +40,10 @@ pub(in crate::app::model_preview) fn h4_blend(mode: u8) -> Gen3Blend {
         11 => Gen3Blend::MotionBlurStatic,
         12 => Gen3Blend::MotionBlurInhibit,
         // `opaque_alpha_blend` counts as opaque (`GetIsOpaque`, X360
-        // 0x82A9EA18); the rest are screen and shadow-mask modes no object uses.
+        // 0x82A9EA18), and the engine draws it with blending off
+        // (0x82BCCEC8). The rest are screen and shadow-mask modes and
+        // `minimum`/`revsubtract`, which no object's material uses; effects
+        // draw those through `effect_blend`.
         _ => Gen3Blend::Opaque,
     }
 }

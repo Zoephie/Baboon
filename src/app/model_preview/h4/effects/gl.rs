@@ -419,27 +419,35 @@ unsafe fn upload_array(
     }
 }
 
-/// `set_alpha_blend_mode_custom_device_no_cache` (X360 0x82BCCEC8) for the
-/// modes effects use; the packed states of the rest are not decoded, and
-/// draw as `alpha_blend`.
+/// `set_alpha_blend_mode_custom_device_no_cache` (X360 0x82BCCEC8): the
+/// colour's source factor, destination factor and equation, or none with
+/// blending off (`opaque` and `opaque_alpha_blend`). `double_multiply` is
+/// a packed blend state, 0x070E0408: its colour half is DESTCOLOR and
+/// SRCCOLOR added. The other packed states (shadow mask, constant, forge
+/// lightmap, replace) draw as `alpha_blend`, as `alpha_blend_max`'s colour does.
+fn effect_blend(mode: u8) -> Option<(u32, u32, u32)> {
+    Some(match mode {
+        0 | 23 => return None,
+        1 | 24 => (glow::ONE, glow::ONE, glow::FUNC_ADD),
+        2 => (glow::DST_COLOR, glow::ZERO, glow::FUNC_ADD),
+        4 => (glow::DST_COLOR, glow::SRC_COLOR, glow::FUNC_ADD),
+        5 | 7 => (glow::ONE, glow::ONE_MINUS_SRC_ALPHA, glow::FUNC_ADD),
+        6 => (glow::ONE, glow::ONE, glow::MAX),
+        8 => (glow::DST_ALPHA, glow::ONE, glow::FUNC_ADD),
+        9 => (glow::SRC_ALPHA, glow::ONE, glow::FUNC_ADD),
+        10 => (glow::ONE_MINUS_SRC_ALPHA, glow::SRC_ALPHA, glow::FUNC_ADD),
+        17 => (glow::ONE, glow::ONE, glow::MIN),
+        18 => (glow::ONE, glow::ONE, glow::FUNC_REVERSE_SUBTRACT),
+        _ => (glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::FUNC_ADD),
+    })
+}
+
 unsafe fn set_blend(gl: &glow::Context, mode: u8) {
     unsafe {
         gl.enable(glow::BLEND);
-        let (source, destination, equation) = match mode {
-            0 => {
-                gl.disable(glow::BLEND);
-                return;
-            }
-            1 | 24 => (glow::ONE, glow::ONE, glow::FUNC_ADD),
-            2 => (glow::DST_COLOR, glow::ZERO, glow::FUNC_ADD),
-            5 | 7 => (glow::ONE, glow::ONE_MINUS_SRC_ALPHA, glow::FUNC_ADD),
-            6 => (glow::ONE, glow::ONE, glow::MAX),
-            8 => (glow::DST_ALPHA, glow::ONE, glow::FUNC_ADD),
-            9 => (glow::SRC_ALPHA, glow::ONE, glow::FUNC_ADD),
-            10 => (glow::ONE_MINUS_SRC_ALPHA, glow::SRC_ALPHA, glow::FUNC_ADD),
-            17 => (glow::ONE, glow::ONE, glow::MIN),
-            18 => (glow::ONE, glow::ONE, glow::FUNC_REVERSE_SUBTRACT),
-            _ => (glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::FUNC_ADD),
+        let Some((source, destination, equation)) = effect_blend(mode) else {
+            gl.disable(glow::BLEND);
+            return;
         };
         gl.blend_equation(equation);
         gl.blend_func(source, destination);
@@ -452,4 +460,23 @@ fn blend_constant(mode: u8) -> [f32; 4] {
     let z = if matches!(mode, 2 | 4 | 7) { 1.0 } else { 0.0 };
     let w = if matches!(mode, 3 | 24) { -1.0 } else { 1.0 };
     [0.0, 1.0, z, w]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The engine's states (X360 0x82BCCEC8): `opaque_alpha_blend` draws with
+    /// blending off as `opaque` does, and `double_multiply`'s packed state
+    /// multiplies both ways rather than blending by alpha.
+    #[test]
+    fn effects_blend_as_the_engine_sets_each_mode() {
+        assert_eq!(effect_blend(0), None);
+        assert_eq!(effect_blend(23), None, "opaque_alpha_blend");
+        assert_eq!(effect_blend(4), Some((glow::DST_COLOR, glow::SRC_COLOR, glow::FUNC_ADD)), "double_multiply");
+        assert_eq!(effect_blend(7), effect_blend(5), "multiply_add sets pre_multiplied_alpha's state");
+        assert_eq!(effect_blend(3), Some((glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::FUNC_ADD)));
+        assert_eq!(effect_blend(17), Some((glow::ONE, glow::ONE, glow::MIN)), "minimum");
+        assert_eq!(effect_blend(18), Some((glow::ONE, glow::ONE, glow::FUNC_REVERSE_SUBTRACT)), "revsubtract");
+    }
 }
