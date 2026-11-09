@@ -16,6 +16,14 @@ use crate::app::model_preview::common::image::H3Texels;
 use super::super::materials::decode_h2_image;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::named_function::NamedFunction;
+use crate::app::model_preview::gl::blit::blit_depth;
+use eframe::glow::{self, HasContext as _};
+use super::super::RenderModelPreviewBatch;
+use super::super::frame::ModelGpuFrame;
+use super::super::renderer::RenderCore;
+use super::pipeline::h3_set_cull;
+use super::shaders::{H3Material, H3Pass};
+use super::state::Gen3State;
 
 /// `shield_impact` `flags`.
 const PROCEDURAL_UV: &str = "use procedural uv generation";
@@ -288,6 +296,71 @@ pub(crate) fn shield_impact_path(model: &TagFile) -> Option<String> {
 /// off an ordinary part whose material does not refuse them. Decals take it.
 pub(crate) fn draws_shield(shield_only: bool, never_shield: bool, decal: bool) -> bool {
     shield_only || (!never_shield && !decal)
+}
+
+
+/// The parts of `frame` that take the shield, with their materials.
+pub(in crate::app::model_preview) fn shield_parts(
+    core: &RenderCore,
+    frame: &ModelGpuFrame,
+) -> Vec<(RenderModelPreviewBatch, Arc<H3Material>)> {
+    frame
+        .shield_batches
+        .iter()
+        .filter_map(|&index| frame.preview.batches.get(index))
+        .filter_map(|batch| {
+            let index = batch.material_index as usize;
+            let material = core.h3_material(frame, index)?;
+            let textures = frame.textures.as_ref()?.get(index)?;
+            draws_shield(textures.shield_only, textures.never_shield, material.decal)
+                .then(|| (batch.clone(), Arc::clone(material)))
+        })
+        .collect()
+}
+
+impl Gen3State {
+    /// `c_render_shield::render_object_internal` for Reach and Halo 4: each
+    /// of `parts` through the shield's `pass`, with the game's `values`,
+    /// added over what lies behind with no depth written and no face culled.
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::app::model_preview) unsafe fn draw_shield_parts(
+        &mut self,
+        core: &mut RenderCore,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        parts: &[(RenderModelPreviewBatch, Arc<H3Material>)],
+        pass: &Arc<H3Pass>,
+        mut values: HashMap<&'static str, [f32; 4]>,
+    ) {
+        let camera = &frame.camera;
+        let eye = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
+        values.insert(DEPTH_DECODE, [camera.depth_scale * camera.depth_map[0], camera.depth_map[1], camera.perspective, eye]);
+        values.insert(WORLD_SCALE, [camera.scale; 4]);
+        unsafe {
+            // What the pass fades against: everything drawn so far.
+            if let Some(targets) = self.targets.as_ref() {
+                blit_depth(gl, targets.accumulation_framebuffer, targets.depth_copy_framebuffer, targets.size);
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
+                self.depth_copy = Some(targets.depth_copy);
+            }
+            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
+            gl.enable(glow::DEPTH_TEST);
+            gl.depth_func(glow::LEQUAL);
+            gl.depth_mask(false);
+            gl.disable(glow::CULL_FACE);
+            gl.enable(glow::BLEND);
+            gl.blend_equation(glow::FUNC_ADD);
+            gl.blend_func(glow::ONE, glow::ONE);
+            gl.color_mask(true, true, true, true);
+            self.pass_values = Some(values);
+            for (batch, material) in parts {
+                self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
+            }
+            self.pass_values = None;
+            h3_set_cull(gl, frame);
+        }
+    }
 }
 
 #[cfg(test)]

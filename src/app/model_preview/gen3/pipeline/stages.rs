@@ -624,54 +624,14 @@ impl Gen3State {
         if !shield.settings.showing(damage) {
             return;
         }
-        let parts: Vec<_> = frame
-            .shield_batches
-            .iter()
-            .filter_map(|&index| frame.preview.batches.get(index))
-            .filter_map(|batch| {
-                let index = batch.material_index as usize;
-                let material = core.h3_material(frame, index)?;
-                let textures = frame.textures.as_ref()?.get(index)?;
-                super::super::super::gen3::shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
-                    .then(|| (batch.clone(), Arc::clone(material)))
-            })
-            .collect();
+        let parts = super::super::shield::shield_parts(core, frame);
         if parts.is_empty() {
             return;
         }
         let (low, high) = (frame.preview.bounds_min, frame.preview.bounds_max);
         let center = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
         let state = shield.settings.state(damage, frame.time, frame.function_values.as_ref());
-        let mut values = shield.settings.values(&state, center);
-        let camera = &frame.camera;
-        let eye = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
-        values.insert(
-            super::super::super::gen3::shield::DEPTH_DECODE,
-            [camera.depth_scale * camera.depth_map[0], camera.depth_map[1], camera.perspective, eye],
-        );
-        values.insert(super::super::super::gen3::shield::WORLD_SCALE, [camera.scale; 4]);
-        unsafe {
-            // What the pass fades against: everything drawn so far.
-            if let Some(targets) = self.targets.as_ref() {
-                blit_depth(gl, targets.accumulation_framebuffer, targets.depth_copy_framebuffer, targets.size);
-                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
-                self.depth_copy = Some(targets.depth_copy);
-            }
-            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
-            gl.enable(glow::DEPTH_TEST);
-            gl.depth_func(glow::LEQUAL);
-            gl.depth_mask(false);
-            gl.disable(glow::CULL_FACE);
-            gl.enable(glow::BLEND);
-            gl.blend_equation(glow::FUNC_ADD);
-            gl.blend_func(glow::ONE, glow::ONE);
-            gl.color_mask(true, true, true, true);
-            self.pass_values = Some(values);
-            for (batch, material) in &parts {
-                self.draw_pass(core, gl, frame, slot, batch, material, shield.pass(), None);
-            }
-            self.pass_values = None;
-            h3_set_cull(gl, frame);
-        }
+        let values = shield.settings.values(&state, center);
+        unsafe { self.draw_shield_parts(core, gl, frame, slot, &parts, shield.pass(), values) }
     }
 }

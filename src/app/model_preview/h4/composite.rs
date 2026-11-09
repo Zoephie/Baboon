@@ -1,14 +1,13 @@
 //! Halo 4's end of the frame: its colour grading, final composite, full camo
 //! drawn after it, and shield.
 
-use crate::app::model_preview::gl::blit::blit_depth;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::state::Gen3State;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use super::super::common::image::H2Image;
 use crate::app::model_preview::common::image::{H3Sampler, H3Texels};
-use super::super::gen3::pipeline::{H3_SHIELD_DAMAGE, HALF_LENS, h3_set_cull};
+use super::super::gen3::pipeline::{H3_SHIELD_DAMAGE, HALF_LENS};
 use crate::app::model_preview::gl::screen::screen_program;
 use crate::app::model_preview::gl::texture::upload_h2_image_linear;
 use eframe::glow::{self, HasContext};
@@ -37,53 +36,14 @@ impl H4Game {
         if !shield.settings.showing(damage) {
             return;
         }
-        let parts: Vec<_> = frame
-            .shield_batches
-            .iter()
-            .filter_map(|&index| frame.preview.batches.get(index))
-            .filter_map(|batch| {
-                let index = batch.material_index as usize;
-                let material = core.h3_material(frame, index)?;
-                let textures = frame.textures.as_ref()?.get(index)?;
-                super::super::gen3::shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
-                    .then(|| (batch.clone(), Arc::clone(material)))
-            })
-            .collect();
+        let parts = super::super::gen3::shield::shield_parts(core, frame);
         if parts.is_empty() {
             return;
         }
         let (low, high) = (frame.preview.bounds_min, frame.preview.bounds_max);
         let center = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
-        let mut values = shield.values(damage, frame.time, frame.function_values.as_ref(), center);
-        let camera = &frame.camera;
-        let eye = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
-        values.insert(
-            super::shield::DEPTH_DECODE,
-            [camera.depth_scale * camera.depth_map[0], camera.depth_map[1], camera.perspective, eye],
-        );
-        values.insert(super::shield::WORLD_SCALE, [camera.scale; 4]);
-        unsafe {
-            if let Some(targets) = state.targets.as_ref() {
-                blit_depth(gl, targets.accumulation_framebuffer, targets.depth_copy_framebuffer, targets.size);
-                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
-                state.depth_copy = Some(targets.depth_copy);
-            }
-            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
-            gl.enable(glow::DEPTH_TEST);
-            gl.depth_func(glow::LEQUAL);
-            gl.depth_mask(false);
-            gl.disable(glow::CULL_FACE);
-            gl.enable(glow::BLEND);
-            gl.blend_equation(glow::FUNC_ADD);
-            gl.blend_func(glow::ONE, glow::ONE);
-            gl.color_mask(true, true, true, true);
-            state.pass_values = Some(values);
-            for (batch, material) in &parts {
-                state.draw_pass(core, gl, frame, slot, batch, material, &shield.pass, None);
-            }
-            state.pass_values = None;
-            h3_set_cull(gl, frame);
-        }
+        let values = shield.values(damage, frame.time, frame.function_values.as_ref(), center);
+        unsafe { state.draw_shield_parts(core, gl, frame, slot, &parts, &shield.pass, values) }
     }
 
     /// Halo 4's colour grading lookup, uploaded once per preview, and how a
