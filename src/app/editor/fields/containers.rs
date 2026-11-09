@@ -2792,11 +2792,9 @@ pub(in crate::app) fn dropdown_wheel_delta(
     if popup_open || !combo_scroll_cycle_enabled(ui) {
         return None;
     }
-    let hovered = ui
-        .ctx()
-        .input(|input| input.pointer.hover_pos())
-        .is_some_and(|hover_pos| response.rect.contains(hover_pos));
-    if !hovered {
+    // Geometry alone includes buttons behind an open popup. Use egui's
+    // hit-testing so only an exposed, interactive dropdown can take the wheel.
+    if !response.hovered() {
         return None;
     }
     // Hovering is not enough. A wheel gesture belongs to whoever it started on,
@@ -4726,6 +4724,79 @@ mod tests {
         min: egui::Pos2::new(0.0, 150.0),
         max: egui::Pos2::new(400.0, 350.0),
     };
+
+    #[test]
+    fn an_open_dropdown_scrolls_without_cycling_a_covered_dropdown() {
+        for covered_first in [false, true] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            set_combo_scroll_cycle_enabled(&ctx, true);
+            let mut time = 0.0;
+            let mut selected = 0;
+            let mut frame = |events| {
+                time += 0.1;
+                let mut top = egui::Rect::NOTHING;
+                let mut covered = egui::Rect::NOTHING;
+                let mut covered_layer = egui::LayerId::background();
+                let mut row_y = 0.0;
+                let mut open = false;
+                let _ = crate::app::run_ui_test(&ctx, egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 700.0))),
+                    time: Some(time), events, focused: true, ..Default::default()
+                }, |ui| {
+                    begin_wheel_gesture(&ctx);
+                    let mut draw = |is_top| {
+                        let mut child = ui.new_child(egui::UiBuilder::new().id_salt(("overlapping_dropdown", is_top))
+                            .max_rect(egui::Rect::from_min_size(egui::pos2(10.0, if is_top { 10.0 } else { 150.0 }), Vec2::new(280.0, 24.0))));
+                        let (output, delta) = combo_box_with_scroll(&mut child,
+                            ValueComboBox::from_id_salt("choices").width(280.0)
+                                .selected_text(if is_top { "Open options".into() } else { format!("Covered choice {selected}") }),
+                            |ui| {
+                                for index in 0..if is_top { 80 } else { 3 } {
+                                    let row = ui.selectable_label(index == 0, format!("Choice {index}"));
+                                    if is_top && index == 0 { row_y = row.rect.top(); }
+                                }
+                            });
+                        if is_top {
+                            top = output.response.rect;
+                            open = output.inner.is_some();
+                        } else {
+                            covered = output.response.rect;
+                            covered_layer = output.response.layer_id;
+                            if let Some(next) = delta.and_then(|delta| combo_scroll_next_index(selected, 3, delta)) { selected = next; }
+                        }
+                    };
+                    draw(!covered_first);
+                    draw(covered_first);
+                    end_wheel_gesture(&ctx);
+                });
+                (top, covered, covered_layer, row_y, open, selected)
+            };
+            let initial = frame(vec![]);
+            let at = initial.0.center();
+            for pressed in [true, false] {
+                frame(vec![egui::Event::PointerMoved(at), egui::Event::PointerButton {
+                    pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default(),
+                }]);
+            }
+            for _ in 0..4 { frame(vec![]); }
+            let before = frame(vec![]);
+            assert!(before.4, "the real options popup is open");
+            let at = before.1.center();
+            frame(vec![egui::Event::PointerMoved(at)]);
+            assert_ne!(ctx.layer_id_at(at), Some(before.2), "the menu covers the other dropdown");
+            let wheel = || egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point,
+                delta: Vec2::new(0.0, -40.0), modifiers: Default::default(), phase: egui::TouchPhase::Move };
+            for _ in 0..6 { frame(vec![wheel()]); }
+            let after = frame(vec![]);
+            assert_eq!(after.5, 0, "covered_first={covered_first}: scrolling the menu must not change the covered value");
+            assert!(before.3 - after.3 > 50.0, "the visible options still scroll");
+            frame(vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None,
+                pressed: true, repeat: false, modifiers: Default::default() }]);
+            for _ in 0..4 { frame(vec![]); }
+            assert_eq!(frame(vec![wheel()]).5, 1, "an uncovered closed dropdown still supports wheel cycling");
+        }
+    }
     const OVER_PANEL: egui::Pos2 = egui::Pos2::new(200.0, 50.0);
     const OVER_VIEWPORT: egui::Pos2 = egui::Pos2::new(200.0, 250.0);
 
@@ -4901,6 +4972,9 @@ mod tests {
     #[test]
     fn a_dropdown_pointed_at_first_still_cycles() {
         let ctx = cycling_ctx();
+        // As in the live UI, draw the control before pointing and scrolling;
+        // egui resolves hover against widgets from the previous pass.
+        dropdown_frame(&ctx, false, OVER_BOX, BOX_RECT);
         assert!(
             dropdown_frame(&ctx, true, OVER_BOX, BOX_RECT),
             "a gesture starting on a dropdown should be the dropdown's"
