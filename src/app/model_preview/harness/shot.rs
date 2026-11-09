@@ -376,6 +376,9 @@ pub(super) fn render(
         gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::RENDERBUFFER, Some(color));
         gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::RENDERBUFFER, Some(depth));
         assert_eq!(gl.check_framebuffer_status(glow::FRAMEBUFFER), glow::FRAMEBUFFER_COMPLETE);
+        // As the renderer's own targets leave it, so no shot's state says
+        // whether the renderer made its targets in it.
+        gl.bind_renderbuffer(glow::RENDERBUFFER, None);
         gl.viewport(0, 0, width, height);
         gl.color_mask(true, true, true, true);
         gl.depth_mask(true);
@@ -464,6 +467,10 @@ pub(in crate::app::model_preview) fn shoot(source: &TagSource, shots: &[(Shot, S
     shots
         .iter()
         .map(|(shot, options)| {
+            // Each shot starts from the same bindings, so what G-gl reads
+            // after it is the shot's own, not the shots before it.
+            unsafe { reset_bindings(&gl) };
+            take_gl_log();
             let Rendered { pixels, geometry_id, gl_state } = render(&gl, &mut renderer, source, shot, options);
             let gl_calls = take_gl_log();
             let mut simulation = String::new();
@@ -473,6 +480,25 @@ pub(in crate::app::model_preview) fn shoot(source: &TagSource, shots: &[(Shot, S
             Shown { pixels, simulation, gl_state, gl_calls }
         })
         .collect()
+}
+
+/// Unbinds what a paint may leave bound: every unit's textures, the program,
+/// the vertex array and the buffers, with the first unit active.
+unsafe fn reset_bindings(gl: &glow::Context) {
+    unsafe {
+        for unit in 0..16 {
+            gl.active_texture(glow::TEXTURE0 + unit);
+            gl.bind_texture(glow::TEXTURE_2D, None);
+            gl.bind_texture(glow::TEXTURE_CUBE_MAP, None);
+            gl.bind_texture(glow::TEXTURE_3D, None);
+        }
+        gl.active_texture(glow::TEXTURE0);
+        gl.use_program(None);
+        gl.bind_vertex_array(None);
+        gl.bind_buffer(glow::ARRAY_BUFFER, None);
+        gl.bind_renderbuffer(glow::RENDERBUFFER, None);
+        gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+    }
 }
 
 /// The size [`render`] shoots at.
