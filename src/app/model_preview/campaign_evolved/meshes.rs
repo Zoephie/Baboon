@@ -1,6 +1,25 @@
 //! A model's meshes: skeletal and static meshes, their regions, materials and parts.
 
-use super::*;
+use super::super::super::{TagEntry, TagEntryLocation};
+use super::super::{ModelVariantPreview, TagReader, read_model_variants};
+use super::MountedContainer;
+use super::export::{CEV_CV, CEV_HV};
+use super::index::{
+    ActorRef, CEV_CLASSES, cev_find_character_root, cev_mesh_sync_index, is_first_person_model,
+};
+use super::metahuman::{cev_add_metahuman_head, cev_head_node_name};
+use super::packages::{
+    cev_load_variant_meshes, cev_read_bulk_by_package, cev_read_uasset_by_package,
+};
+use blam_tags::TagFile;
+use blam_tags::iostore::skeletal_mesh::SkeletalMesh;
+use blam_tags::iostore::static_mesh::StaticMesh;
+use blam_tags::iostore::unversioned::{MeshRef, MeshSyncRegions, Permutation, Region};
+use blam_tags::iostore::usmap::Usmap;
+use blam_tags::iostore::zen::FZenPackageHeader;
+use blam_tags::jms::{UeMeshPart, UeStaticPart, UeWorldPart};
+use std::io::Cursor;
+use std::sync::Arc;
 
 /// A Campaign Evolved model's skeleton and Unreal render geometry, resolved
 /// the one way both its preview and its JMS export need.

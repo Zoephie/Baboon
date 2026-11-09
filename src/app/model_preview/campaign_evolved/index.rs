@@ -1,6 +1,14 @@
 //! Finding a character's meshes: the mesh-sync and path indexes over the game's packages.
 
-use super::*;
+use super::super::spawn_background;
+use super::MountedContainer;
+use super::export::{CEV_CV, CEV_HV};
+use blam_tags::iostore::IoStoreArchive;
+use blam_tags::iostore::ue_types::FPackageObjectIndex;
+use blam_tags::iostore::zen::FZenPackageHeader;
+use std::collections::HashMap;
+use std::io::Cursor;
+use std::sync::{Arc, LazyLock, Mutex};
 
 /// Heuristic: is this a first-person hand/body model (`spartans_fp`,
 /// `.../fp_body`)? Those are `FirstPersonHands`/`FirstPersonBody`

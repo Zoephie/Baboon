@@ -1,6 +1,9 @@
+use super::super::super::read_entry;
+use super::packages::{cev_package_entries, cev_package_file_name_and_suffix};
 use super::*;
 use crate::core::format::TagNameIndex;
 use crate::core::source::TagSource;
+use blam_tags::paths::tag_ref_path;
 use std::path::PathBuf;
 
 fn test_jms_vertex(uv: [f32; 2]) -> blam_tags::jms::JmsVertex {

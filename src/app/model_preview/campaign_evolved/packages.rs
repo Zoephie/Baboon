@@ -1,6 +1,11 @@
 //! Reading a package's assets and its variant meshes.
 
-use super::*;
+use super::MountedContainer;
+use super::export::{CEV_CV, CEV_HV};
+use super::index::cev_path_index;
+use blam_tags::iostore::skeletal_mesh::SkeletalMesh;
+use blam_tags::iostore::zen::FZenPackageHeader;
+use std::io::Cursor;
 
 /// The `.uasset` entries of a UE package path (`/Game/Characters/.../SK_Foo`):
 /// those whose path ends with the corresponding `/...SK_Foo.uasset` tail, in

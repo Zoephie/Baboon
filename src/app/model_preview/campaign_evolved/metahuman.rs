@@ -1,6 +1,21 @@
 //! MetaHuman heads and helmets: their tables and the head added to a preview.
 
-use super::*;
+use super::MountedContainer;
+use super::export::{CEV_CV, CEV_HV};
+use super::index::{
+    ActorRef, cev_container_set_key, cev_mesh_sync_index, cev_path_index, cev_read_header,
+};
+use super::meshes::{
+    CevMeshes, cev_read_default_materials, cev_read_skeletal_mesh, cev_read_static_mesh,
+};
+use blam_tags::TagFile;
+use blam_tags::iostore::skeletal_mesh::SkeletalMesh;
+use blam_tags::iostore::unversioned::{PropValue, PropertyBlock};
+use blam_tags::iostore::usmap::Usmap;
+use blam_tags::iostore::zen::FZenPackageHeader;
+use std::collections::HashMap;
+use std::io::Cursor;
+use std::sync::{Arc, LazyLock, Mutex};
 
 // ---------------------------------------------------------------------------
 // MetaHuman head resolution
