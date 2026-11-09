@@ -10,12 +10,14 @@ use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::super::gen3::effects::screen::H3ScreenSettings;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::h3_set_cull;
-use super::lights::ReachLitLight;
+use super::lights::{ReachLitLight, inline_rows};
 
 /// Reach's hooks, and the self shadow mask from its making to the lit pass.
 #[derive(Default)]
 pub(in crate::app::model_preview) struct ReachGame {
     mask: Option<glow::NativeTexture>,
+    /// This frame's lights, from the inline lights to the screen lights.
+    lit: Vec<ReachLitLight>,
     /// The shadow's map and mask, kept between frames, and its apply program.
     pub(super) shadow: Option<super::shadow_pass::ReachShadowTargets>,
     pub(super) shadow_program: Option<glow::NativeProgram>,
@@ -56,8 +58,9 @@ impl Gen3Game for ReachGame {
     }
 
     /// `build_simple_light_draw_list`, before the static pass reads it.
-    fn frame_lights(&mut self, cx: &mut Gen3Cx<'_>) -> Vec<ReachLitLight> {
-        Self::frame_lights_of(cx)
+    fn inline_lights(&mut self, cx: &mut Gen3Cx<'_>) -> Vec<[[f32; 4]; 5]> {
+        self.lit = Self::frame_lights_of(cx);
+        inline_rows(&self.lit)
     }
 
     fn lit_values(&mut self, cx: &mut Gen3Cx<'_>) {
@@ -69,9 +72,10 @@ impl Gen3Game for ReachGame {
     }
 
     /// `c_lights_view::render`: after the static lighting, before what blends.
-    unsafe fn screen_lights(&mut self, cx: &mut Gen3Cx<'_>, lit: &[ReachLitLight], accumulation: glow::NativeFramebuffer) {
+    unsafe fn screen_lights(&mut self, cx: &mut Gen3Cx<'_>, accumulation: glow::NativeFramebuffer) {
+        let lit = std::mem::take(&mut self.lit);
         unsafe {
-            self.draw_screen_lights(cx, lit, accumulation);
+            self.draw_screen_lights(cx, &lit, accumulation);
             cx.core.bind_slot_vertices(cx.gl, cx.slot);
             h3_set_cull(cx.gl, cx.frame);
             cx.gl.depth_func(glow::LEQUAL);

@@ -110,7 +110,7 @@ impl Gen3Game for H4Game {
 
     /// `MidnightLightParfait::Render`: after the static lighting, before
     /// what blends.
-    unsafe fn screen_lights(&mut self, cx: &mut Gen3Cx<'_>, _lit: &[super::super::reach::lights::ReachLitLight], accumulation: glow::NativeFramebuffer) {
+    unsafe fn screen_lights(&mut self, cx: &mut Gen3Cx<'_>, accumulation: glow::NativeFramebuffer) {
         unsafe {
             self.draw_lights(cx, accumulation);
             cx.core.bind_slot_vertices(cx.gl, cx.slot);

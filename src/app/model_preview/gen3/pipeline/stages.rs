@@ -299,9 +299,9 @@ impl Gen3State {
             self.albedo_decals(core, &drawing);
             game.after_albedo(&mut Gen3Cx { gl, frame, core, slot, state: self }, drawing.albedo_target, drawing.size);
             game.self_shadow(&mut Gen3Cx { gl, frame, core, slot, state: self }, &drawing.batches, order, drawing.framebuffer);
-            let (blended, reach_lit) = self.static_lighting(core, game, &drawing);
+            let blended = self.static_lighting(core, game, &drawing);
             self.dynamic_lights(core, game, &drawing);
-            game.screen_lights(&mut Gen3Cx { gl, frame, core, slot, state: self }, &reach_lit, drawing.accumulation_target);
+            game.screen_lights(&mut Gen3Cx { gl, frame, core, slot, state: self }, drawing.accumulation_target);
             let sprites = self.begin_transparents(core, game, &drawing);
             self.blended_transparents(core, game, &drawing, blended, sprites);
             let mut bloom = self.camo(core, game, &drawing);

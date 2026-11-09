@@ -6,7 +6,6 @@ use std::sync::Arc;
 use eframe::glow;
 
 use super::super::RenderModelPreviewBatch;
-use super::super::reach::lights::ReachLitLight;
 use super::super::common::plain::PlainRender;
 use super::super::frame::ModelGpuFrame;
 use super::super::renderer::{FrameCx, GameRender, RenderCore};
@@ -67,8 +66,9 @@ pub(in crate::app::model_preview) trait Gen3Game {
     /// lights, each on its own over `batches`.
     unsafe fn dynamic_lights(&mut self, _cx: &mut Gen3Cx<'_>, _batches: &[Gen3Batch]) {}
 
-    /// The lights the lit pass reads inline, which the screen lights draw too.
-    fn frame_lights(&mut self, _cx: &mut Gen3Cx<'_>) -> Vec<ReachLitLight> {
+    /// The lights the lit pass reads inline, as `simple_lights` rows; the
+    /// game draws the rest over the screen.
+    fn inline_lights(&mut self, _cx: &mut Gen3Cx<'_>) -> Vec<[[f32; 4]; 5]> {
         Vec::new()
     }
 
@@ -76,7 +76,7 @@ pub(in crate::app::model_preview) trait Gen3Game {
     fn lit_values(&mut self, _cx: &mut Gen3Cx<'_>) {}
 
     /// Lights drawn over the screen after the static lighting.
-    unsafe fn screen_lights(&mut self, _cx: &mut Gen3Cx<'_>, _lit: &[ReachLitLight], _accumulation: glow::NativeFramebuffer) {}
+    unsafe fn screen_lights(&mut self, _cx: &mut Gen3Cx<'_>, _accumulation: glow::NativeFramebuffer) {}
 
     /// What composites among the blended parts, where it lies farther than
     /// `nearer_than`.

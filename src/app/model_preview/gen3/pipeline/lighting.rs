@@ -123,13 +123,13 @@ impl Gen3State {
     /// The static lighting into the accumulation target: the frame's inline
     /// lights (`build_simple_light_draw_list`), the opaque parts' lit pass,
     /// then what the game draws after the opaque parts. What blends, for the
-    /// transparents, and the lights the screen lights draw.
+    /// transparents.
     pub(super) unsafe fn static_lighting<'b>(
         &mut self,
         core: &mut RenderCore,
         game: &mut dyn Gen3Game,
         drawing: &'b Gen3Frame<'_>,
-    ) -> (Vec<&'b Gen3Batch>, Vec<ReachLitLight>) {
+    ) -> Vec<&'b Gen3Batch> {
         let Gen3Frame { gl, frame, slot, order, .. } = *drawing;
         unsafe {
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(drawing.accumulation_target));
@@ -142,8 +142,7 @@ impl Gen3State {
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear(glow::COLOR_BUFFER_BIT);
             // `build_simple_light_draw_list`, before the static pass reads it.
-            let reach_lit = game.frame_lights(&mut Gen3Cx { gl, frame, core, slot, state: self });
-            self.set_reach_inline_lights(&reach_lit);
+            self.inline_lights = game.inline_lights(&mut Gen3Cx { gl, frame, core, slot, state: self });
             let (opaque, blended): (Vec<_>, Vec<_>) =
                 drawing.batches
                     .iter()
@@ -157,7 +156,7 @@ impl Gen3State {
             self.shadow_mask = None;
             self.pass_values = None;
             game.after_opaque(&mut Gen3Cx { gl, frame, core, slot, state: self }, order);
-            (blended, reach_lit)
+            blended
         }
     }
 
@@ -173,11 +172,6 @@ impl Gen3State {
             gl.blend_func(glow::ONE, glow::ONE);
             game.dynamic_lights(&mut Gen3Cx { gl, frame, core, slot, state: self }, &drawing.batches);
         }
-    }
-
-    /// The inline lights, as the static pass reads them.
-    pub(in crate::app::model_preview) fn set_reach_inline_lights(&mut self, lit: &[ReachLitLight]) {
-        self.inline_lights = inline_rows(lit);
     }
 
     /// `simple_lights` and `simple_light_count` for a Reach static pass.
