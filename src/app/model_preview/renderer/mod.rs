@@ -122,6 +122,7 @@ impl ModelGlRenderer {
     /// shared program and grid, the game's shading, the wireframe, what the
     /// game draws over it, and the scene put back.
     pub(super) unsafe fn paint(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+        self.games.of(frame).begin(frame);
         unsafe {
             let Some(slot) = self.core.acquire_frame_slot(gl, frame) else {
                 return;

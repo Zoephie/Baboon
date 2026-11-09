@@ -15,6 +15,9 @@ pub(in crate::app::model_preview) struct FrameCx<'a> {
 /// A game's drawing: the renderer runs the frame and hands these steps to
 /// the game it is from.
 pub(in crate::app::model_preview) trait GameRender {
+    /// First, before the frame finds its slot: what the last frame left
+    /// for this model and must not outlive a frame that draws nothing.
+    fn begin(&mut self, _frame: &ModelGpuFrame) {}
     /// Before the scene target: what moves the geometry or makes lights.
     unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>);
     /// The shading, when the mode draws any.
@@ -97,5 +100,21 @@ mod tests {
         assert_eq!(route(Some(GameId::Halo2), Some(Game::Halo2)), Route::Dx9);
         assert_eq!(route(None, Some(Game::Halo3)), Route::Gen3, "a gen3 tag of no game");
         assert_eq!(route(None, None), Route::Plain, "geometry no tag gave");
+    }
+
+    /// A frame begins by forgetting that the model's Halo CE event effects
+    /// were running, before it looks for a slot: a frame that finds none
+    /// draws nothing, so it must not leave the viewport asking for frames.
+    #[test]
+    fn a_halo_ce_frame_forgets_its_running_events_before_it_finds_a_slot() {
+        use super::super::super::ce::draw::{CE_EVENTS_RUNNING, ce_events_running};
+        let preview = RenderModelPreview { game: Some(GameId::HaloCe), ..Default::default() };
+        let data = model_preview_data(String::new(), String::new(), preview, Vec::new());
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(64.0, 64.0));
+        let frame = build_frame(&data, &ModelPreviewState::default(), rect, 0.0, [0.0; 3], &[]);
+        CE_EVENTS_RUNNING.with(|running| running.borrow_mut().insert(frame.geometry_id));
+        assert!(ce_events_running(frame.geometry_id));
+        GameRenders::default().of(&frame).begin(&frame);
+        assert!(!ce_events_running(frame.geometry_id));
     }
 }

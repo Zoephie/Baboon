@@ -12,6 +12,9 @@ use super::draw::h2_draw_order;
 
 /// Where Halo CE's and Halo 2's shading differ.
 pub(in crate::app::model_preview) trait Dx9Game {
+    /// First, before the frame finds its slot (see `GameRender::begin`).
+    fn begin(&mut self, _frame: &ModelGpuFrame) {}
+
     /// Before the scene target: what moves the model's vertices or makes
     /// lights, once a frame.
     unsafe fn prepare(&mut self, _cx: &mut FrameCx<'_>) {}

@@ -23,9 +23,13 @@ pub(in crate::app::model_preview) struct CeGame {
 }
 
 impl Dx9Game for CeGame {
+    fn begin(&mut self, frame: &ModelGpuFrame) {
+        // Set again if this frame steps the effects and something runs on,
+        // so a frame that finds no slot leaves nothing asking for frames.
+        CE_EVENTS_RUNNING.with(|running| running.borrow_mut().remove(&frame.geometry_id));
+    }
+
     unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
-        // Set again if this frame steps the effects and something runs on.
-        CE_EVENTS_RUNNING.with(|running| running.borrow_mut().remove(&cx.frame.geometry_id));
         unsafe {
             let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
             let ce = self.slots.of(slot, cx.core.slot_uploads(slot));

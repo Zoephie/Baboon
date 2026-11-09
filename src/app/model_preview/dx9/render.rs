@@ -3,6 +3,7 @@
 
 use super::super::ce::render::CeGame;
 use super::super::h2::render::H2Game;
+use super::super::frame::ModelGpuFrame;
 use super::super::renderer::{FrameCx, GameRender};
 use super::pipeline::Dx9Game;
 use crate::core::game::GameId;
@@ -27,6 +28,10 @@ impl Dx9Render {
 }
 
 impl GameRender for Dx9Render {
+    fn begin(&mut self, frame: &ModelGpuFrame) {
+        self.game(frame.preview.game).begin(frame);
+    }
+
     unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
         unsafe { self.game(cx.frame.preview.game).prepare(cx) }
     }
