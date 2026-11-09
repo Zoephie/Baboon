@@ -87,14 +87,14 @@ pub(in crate::app::model_preview) fn build_frame(
         light_follows_camera: state.light_follows_camera,
         time,
         h2_prt_clusters: None,
-        object_states: object_states(data, &state.ce_function_inputs, &state.ce_shots, time),
+        object_states: object_states(data, &state.ce.function_inputs, &state.ce.shots, time),
         object_moves: object_moves(data, &state.function_inputs, time, function_values.as_ref()),
         function_values,
         attached_values: attached_values(data, time),
         attached_colors: attached_colors(data),
         shown: common::features::FeatureShown::of(&data.preview, &state.region_selections),
         ce_points: Vec::new(),
-        ce_plays: ce_event_plays(data, &state.ce_event_counts, state.ce_event_scales),
+        ce_plays: ce_event_plays(data, &state.ce.event_counts, state.ce.event_scales),
         change_colors: change_colors_for(
             &data.change_colors,
             state

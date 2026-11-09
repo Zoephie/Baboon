@@ -19,9 +19,9 @@ pub(in crate::app::model_preview) fn draw_object_functions(
         effects: &data.preview.ce.effects,
         firing: &data.preview.ce.firing,
         geometry: data.geometry_id,
-        counts: &mut state.ce_event_counts,
-        shots: &mut state.ce_shots,
-        scales: &mut state.ce_event_scales,
+        counts: &mut state.ce.event_counts,
+        shots: &mut state.ce.shots,
+        scales: &mut state.ce.event_scales,
         time,
     };
     ce::panel::draw_ce_event_effects(ui, controls, held_name);
@@ -81,11 +81,11 @@ pub(in crate::app::model_preview) fn draw_object_functions(
             functions,
             name,
             (data.geometry_id, object),
-            &mut state.ce_function_inputs,
+            &mut state.ce.function_inputs,
             read(object),
             ce::firing::fired_input(
                 &data.preview.ce.firing,
-                &state.ce_shots,
+                &state.ce.shots,
                 data.geometry_id,
                 object,
                 time,

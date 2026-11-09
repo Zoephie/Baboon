@@ -112,6 +112,30 @@ struct WeaponHold {
     ik_points: Vec<(String, String)>,
 }
 
+/// What a Halo CE load reads of the last: the biped's weapons, when an
+/// earlier load found them.
+#[derive(Clone, Default)]
+pub(in crate::app::model_preview) struct CeLoadSettings {
+    pub(in crate::app::model_preview) equippable: Option<Vec<CeEquippable>>,
+}
+
+impl CeLoadSettings {
+    pub(in crate::app::model_preview) fn of(
+        data: Option<&Result<crate::app::model_preview::ModelPreviewData, String>>,
+    ) -> Self {
+        Self {
+            equippable: match data {
+                Some(Ok(data)) => data
+                    .ce
+                    .weapons
+                    .as_ref()
+                    .map(|weapons| weapons.equippable.clone()),
+                _ => None,
+            },
+        }
+    }
+}
+
 /// A weapon a biped's animations can hold.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CeEquippable {

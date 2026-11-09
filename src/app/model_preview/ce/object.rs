@@ -175,7 +175,7 @@ pub(in crate::app::model_preview) fn load_ce_object(
     let is_biped = model_tag.header.group_tag == u32::from_be_bytes(*b"bipd");
     let chosen = settings.weapon.as_deref();
     let weapons = feature(&mut notes, "the biped's weapons", || {
-        let known = settings.ce_equippable.as_deref();
+        let known = settings.ce.equippable.as_deref();
         is_biped.then(|| super::weapons::biped_weapons(reader, model_tag, chosen, known))
     });
     let held = match &weapons {

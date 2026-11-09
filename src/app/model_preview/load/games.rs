@@ -239,7 +239,7 @@ pub(super) fn load_unreal_model(
         model_tag,
         entry,
         reader,
-        settings.high_detail,
+        settings.campaign_evolved.high_detail,
     )
 }
 

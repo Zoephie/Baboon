@@ -97,7 +97,7 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
     let skinning_rows = bones.as_deref().map(Vec::as_slice);
     let firing = ce::firing::shots_moving(
         &data.preview.ce.firing,
-        &state.ce_shots,
+        &state.ce.shots,
         data.geometry_id,
         time,
     );

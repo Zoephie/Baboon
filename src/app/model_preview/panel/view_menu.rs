@@ -53,7 +53,7 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
                 }
             }
             if is_campaign_evolved {
-                ui.baboon_checkbox(&mut state.high_detail, "High Detail")
+                ui.baboon_checkbox(&mut state.campaign_evolved.high_detail, "High Detail")
                     .on_hover_text(
                         "Decode full-resolution Nanite geometry instead of Unreal's coarse fallback.",
                     );

@@ -402,7 +402,8 @@ pub(super) fn render(
     state.prt = !options.no_prt;
     if let Some(values) = options.inputs {
         state
-            .ce_function_inputs
+            .ce
+            .function_inputs
             .insert((data.geometry_id, 0), values);
     }
     for (name, value) in &options.functions {
@@ -488,13 +489,14 @@ pub(super) fn render(
             if fire {
                 let weapon = data.preview.ce.firing.last().expect("a weapon to fire");
                 let fired = state
-                    .ce_shots
+                    .ce
+                    .shots
                     .entry((data.geometry_id, weapon.object))
                     .or_default();
                 let effect = fired.fire(
                     weapon,
                     text.parse().unwrap(),
-                    state.ce_event_scales[0],
+                    state.ce.event_scales[0],
                     frame.time,
                 );
                 eprintln!(
@@ -521,7 +523,7 @@ pub(super) fn render(
                 at = (at + 1.0 / 60.0).min(end);
                 frame.time = at;
                 frame.object_states =
-                    object_states(&data, &state.ce_function_inputs, &state.ce_shots, at);
+                    object_states(&data, &state.ce.function_inputs, &state.ce.shots, at);
                 frame.ce_points = frame.ce_point_lights();
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
                 renderer.paint(gl, &frame);

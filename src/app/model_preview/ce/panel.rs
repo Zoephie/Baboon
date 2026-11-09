@@ -5,6 +5,30 @@ use crate::app::model_preview::ce::functions::{
 };
 use eframe::egui::{self, Ui};
 
+/// What the panel has set and played of an opened Halo CE object.
+pub(in crate::app) struct CePanelState {
+    /// What the panel set the object's function inputs to.
+    pub(in crate::app) function_inputs: CeFunctionInputs,
+    /// How many times the panel has played each event effect, by model and
+    /// index among the preview's effects.
+    pub(in crate::app) event_counts: CeEventCounts,
+    /// Scale A and scale B the panel plays event effects at.
+    pub(in crate::app) event_scales: [f32; 2],
+    /// The shots the panel has fired from weapons' triggers.
+    pub(in crate::app) shots: super::firing::CeShots,
+}
+
+impl Default for CePanelState {
+    fn default() -> Self {
+        Self {
+            function_inputs: Default::default(),
+            event_counts: Default::default(),
+            event_scales: super::functions::CE_EVENT_SCALES,
+            shots: Default::default(),
+        }
+    }
+}
+
 /// What the Effects section plays and fires, and where it keeps track.
 pub(in crate::app::model_preview) struct CeEffectControls<'a> {
     pub(in crate::app::model_preview) effects: &'a [super::effects::CeEffectAt],

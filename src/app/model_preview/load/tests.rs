@@ -6,6 +6,7 @@ use crate::app::editor::{
     is_model_group, is_previewable_geometry_group, is_previewable_geometry_group_for_game,
 };
 use crate::app::model_preview::RenderModelPreview;
+use crate::app::model_preview::campaign_evolved::CampaignEvolvedLoad;
 use crate::app::model_preview::harness::kit::kit_root;
 use crate::app::model_preview::load::build_particle_model_preview;
 use crate::app::model_preview::state::ModelTagPanelTab;
@@ -692,14 +693,14 @@ fn a_result_for_a_superseded_request_is_dropped() {
     let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
         return;
     };
-    assert!(fixture.state().high_detail);
+    assert!(fixture.state().campaign_evolved.high_detail);
     fixture.frame();
     let first = fixture.state().preview_load_id.expect("a worker started");
     // Let the superseded worker finish, so dropping its result is a choice
     // the app makes rather than a race it happened to win.
     let reply = wait_for_reply(&fixture);
 
-    fixture.state_mut().high_detail = false;
+    fixture.state_mut().campaign_evolved.high_detail = false;
     let key = fixture.key.clone();
     fixture
         .app
@@ -717,7 +718,7 @@ fn a_result_for_a_superseded_request_is_dropped() {
     );
 
     fixture.frames_until_loaded();
-    assert!(!fixture.state().loaded_high_detail);
+    assert!(!fixture.state().campaign_evolved.loaded_high_detail);
 }
 
 /// Refresh, an edit or a saved variant reloads the preview: the variant
@@ -1349,7 +1350,7 @@ fn a_scenario_lists_its_bsps_without_loading_them() {
 
     // Choosing one needs a source to load it from.
     let settings = PreviewLoadSettings {
-        high_detail: true,
+        campaign_evolved: CampaignEvolvedLoad { high_detail: true },
         scenario_selection: [0].into_iter().collect(),
         ..Default::default()
     };

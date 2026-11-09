@@ -32,13 +32,8 @@ pub(in crate::app) struct ModelPreviewState {
     /// Case-insensitive substring filter on marker names (empty = show all).
     /// Only applied while `show_markers` is on.
     pub(in crate::app) marker_filter: String,
-    /// Campaign Evolved only: decode the full-resolution **Nanite** geometry for
-    /// static mesh pieces instead of the coarse LOD fallback. On by default for
-    /// faithful previews; users can disable it for unusually heavy models.
-    pub(in crate::app) high_detail: bool,
-    /// The `high_detail` value the cached `data` was built with, so toggling it
-    /// invalidates the cache and reloads.
-    pub(in crate::app) loaded_high_detail: bool,
+    /// Campaign Evolved's settings.
+    pub(in crate::app) campaign_evolved: super::campaign_evolved::CampaignEvolvedState,
     /// Bipeds: the weapon held, by path. They start with none.
     pub(in crate::app) weapon: Option<String>,
     /// The `weapon` the cached `data` was built with.
@@ -84,15 +79,8 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) bloom: bool,
     pub(in crate::app) self_shadow: bool,
     pub(in crate::app) prt: bool,
-    /// What the panel set an opened Halo CE object's function inputs to.
-    pub(in crate::app) ce_function_inputs: super::ce::functions::CeFunctionInputs,
-    /// How many times the panel has played each Halo CE event effect, by
-    /// model and index among the preview's effects.
-    pub(in crate::app) ce_event_counts: super::ce::functions::CeEventCounts,
-    /// Scale A and scale B the panel plays Halo CE event effects at.
-    pub(in crate::app) ce_event_scales: [f32; 2],
-    /// The shots the panel has fired from Halo CE weapons' triggers.
-    pub(in crate::app) ce_shots: super::ce::firing::CeShots,
+    /// What the panel has set and played of an opened Halo CE object.
+    pub(in crate::app) ce: super::ce::panel::CePanelState,
     /// What the panel has set of a Halo 2 or later object's functions.
     pub(in crate::app) function_inputs: super::functions::FunctionInputs,
     /// A texture-resolve job is running for the loaded model.
@@ -138,8 +126,7 @@ impl Default for ModelPreviewState {
             show_non_critical_errors: false,
             show_armature: false,
             marker_filter: String::new(),
-            high_detail: true,
-            loaded_high_detail: false,
+            campaign_evolved: Default::default(),
             weapon: None,
             loaded_weapon: None,
             secondary_weapon: None,
@@ -162,10 +149,7 @@ impl Default for ModelPreviewState {
             bloom: true,
             self_shadow: false,
             prt: true,
-            ce_function_inputs: Default::default(),
-            ce_event_counts: Default::default(),
-            ce_event_scales: super::ce::functions::CE_EVENT_SCALES,
-            ce_shots: Default::default(),
+            ce: Default::default(),
             function_inputs: Default::default(),
             textures_pending: false,
             show_render: true,
@@ -221,7 +205,7 @@ impl ModelPreviewState {
     pub(in crate::app) fn needs_preview_load(&self, entry_key: &str) -> bool {
         self.loaded_key.as_deref() != Some(entry_key)
             || self.data.is_none()
-            || self.loaded_high_detail != self.high_detail
+            || !self.campaign_evolved.loaded_as_set()
             || self.loaded_weapon != self.weapon
             || self.loaded_secondary_weapon != self.secondary_weapon
             || self.loaded_scenario_selection != self.scenario_bsp_selection

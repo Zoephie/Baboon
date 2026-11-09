@@ -687,11 +687,6 @@ fn section_body_stays_below_header_inside_a_horizontal_row() {
 }
 
 #[test]
-fn campaign_evolved_preview_defaults_to_full_detail() {
-    assert!(ModelPreviewState::default().high_detail);
-}
-
-#[test]
 fn model_geometry_uses_the_model_preview_tab_name() {
     assert_eq!(
         preview_panel_title(u32::from_be_bytes(*b"hlmt")),

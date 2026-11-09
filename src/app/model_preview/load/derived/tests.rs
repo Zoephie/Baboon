@@ -744,10 +744,12 @@ fn a_bsp_toggle_shows_the_reference_leaf() {
 /// thread for every tick is exactly the freeze this design removed.
 #[test]
 fn overlay_toggles_never_invalidate_but_the_bsp_selection_does() {
-    let mut state = ModelPreviewState::default();
-    state.loaded_key = Some("file:a.model".to_owned());
-    state.data = Some(Err("placeholder".to_owned()));
-    state.loaded_high_detail = state.high_detail;
+    let mut state = ModelPreviewState {
+        loaded_key: Some("file:a.model".to_owned()),
+        data: Some(Err("placeholder".to_owned())),
+        ..Default::default()
+    };
+    state.campaign_evolved.loaded_high_detail = state.campaign_evolved.high_detail;
     assert!(!state.needs_preview_load("file:a.model"));
 
     state.show_collision = true;

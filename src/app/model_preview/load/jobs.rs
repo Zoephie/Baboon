@@ -196,13 +196,13 @@ impl Baboon {
 /// parse so the loader never holds the mutable state alongside it.
 #[derive(Clone, Default)]
 pub(in crate::app::model_preview) struct PreviewLoadSettings {
-    pub(in crate::app::model_preview) high_detail: bool,
+    pub(in crate::app::model_preview) campaign_evolved:
+        super::super::campaign_evolved::CampaignEvolvedLoad,
     pub(in crate::app::model_preview) scenario_selection: std::collections::BTreeSet<usize>,
     /// The weapon a unit holds, by path.
     pub(in crate::app::model_preview) weapon: Option<String>,
-    /// Halo CE: the biped's weapons, when an earlier load found them.
-    pub(in crate::app::model_preview) ce_equippable:
-        Option<Vec<super::super::ce::weapons::CeEquippable>>,
+    /// Halo CE's.
+    pub(in crate::app::model_preview) ce: super::super::ce::weapons::CeLoadSettings,
     /// Halo 2 and later units: what the left hand holds, by path.
     pub(in crate::app::model_preview) secondary_weapon: Option<String>,
     /// Halo 2 and later units: their weapons, when an earlier load found them.
@@ -212,7 +212,9 @@ pub(in crate::app::model_preview) struct PreviewLoadSettings {
 impl PreviewLoadSettings {
     fn of(state: &ModelPreviewState) -> Self {
         Self {
-            high_detail: state.high_detail,
+            campaign_evolved: super::super::campaign_evolved::CampaignEvolvedLoad::of(
+                &state.campaign_evolved,
+            ),
             scenario_selection: state.scenario_bsp_selection.clone(),
             weapon: state.weapon.clone(),
             secondary_weapon: state.secondary_weapon.clone(),
@@ -223,14 +225,7 @@ impl PreviewLoadSettings {
                     .map(|weapons| weapons.equippable.clone()),
                 _ => None,
             },
-            ce_equippable: match &state.data {
-                Some(Ok(data)) => data
-                    .ce
-                    .weapons
-                    .as_ref()
-                    .map(|weapons| weapons.equippable.clone()),
-                _ => None,
-            },
+            ce: super::super::ce::weapons::CeLoadSettings::of(state.data.as_ref()),
         }
     }
 }
@@ -258,7 +253,7 @@ impl Baboon {
             return false;
         }
         let desired_matches = state.loaded_key.as_deref() == Some(key)
-            && state.loaded_high_detail == state.high_detail
+            && state.campaign_evolved.loaded_as_set()
             && state.loaded_scenario_selection == state.scenario_bsp_selection
             && state.loaded_weapon == state.weapon
             && state.loaded_secondary_weapon == state.secondary_weapon;
@@ -288,7 +283,9 @@ impl Baboon {
             .get_mut(key)
             .expect("preview state checked above");
         state.loaded_key = Some(key.to_owned());
-        state.loaded_high_detail = settings.high_detail;
+        settings
+            .campaign_evolved
+            .loading_into(&mut state.campaign_evolved);
         state.loaded_scenario_selection = settings.scenario_selection.clone();
         state.loaded_weapon = settings.weapon.clone();
         state.loaded_secondary_weapon = settings.secondary_weapon.clone();
@@ -389,9 +386,10 @@ impl Baboon {
                         *kept = selection;
                     }
                 }
-                if let Some(inputs) = state.ce_function_inputs.get(&(geometry_id, 0)).copied() {
+                if let Some(inputs) = state.ce.function_inputs.get(&(geometry_id, 0)).copied() {
                     state
-                        .ce_function_inputs
+                        .ce
+                        .function_inputs
                         .insert((data.geometry_id, 0), inputs);
                 }
                 // Halo 2's, by name. A name only the old weapon had is
