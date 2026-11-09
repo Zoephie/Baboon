@@ -166,7 +166,7 @@ fn read_cloth_tag(
 /// `cross(normal, tangent)`, its sign from the position's w, which
 /// `cloth_render_opaque` (the 360's 0x82C8D6A0) writes as 1; the tangent is
 /// `global_forward3d`.
-pub(super) fn reach_binormal(normal: [f32; 3]) -> [f32; 3] {
+pub(super) fn forward_binormal(normal: [f32; 3]) -> [f32; 3] {
     cross(normal, [1.0, 0.0, 0.0])
 }
 
@@ -178,7 +178,7 @@ pub(super) fn sheet_vertices(uvs: &[[f32; 2]], game: ClothGame) -> Vec<RenderMod
             let (tangent, binormal) = match game.rules().sheet_basis {
                 ClothSheetBasis::TurnsOver => ([1.0 * side, 0.0, 0.0], [0.0, 0.0, 1.0 * side]),
                 ClothSheetBasis::BinormalTurns => ([1.0, 0.0, 0.0], [0.0, *side, 0.0]),
-                ClothSheetBasis::RestNormal => ([1.0, 0.0, 0.0], reach_binormal([0.0, 1.0, 0.0])),
+                ClothSheetBasis::RestNormal => ([1.0, 0.0, 0.0], forward_binormal([0.0, 1.0, 0.0])),
             };
             uvs.iter().map(move |uv| RenderModelPreviewVertex {
                 texcoord: *uv,

@@ -145,7 +145,7 @@ fn cloth_steps_by_its_games_ticks_whatever_the_frame_rate() {
     );
     assert_eq!(
         ticks_over_a_second(ClothGame::Reach, 60),
-        REACH_TICK_RATE,
+        FIXED_TICK_RATE,
         "Reach at its own rate"
     );
 }
@@ -203,7 +203,7 @@ fn spheres_push_points_to_their_skin_and_leave_the_rest() {
 #[test]
 fn a_sheet_stays_on_its_pins_and_near_its_size() {
     let (cloth, mut running, pins) = hung();
-    let mut wind = H3Wind::default();
+    let mut wind = SharedWind::default();
     for tick in 0..300 {
         let blown = wind.step(tick as f32);
         running.relax(&cloth, &pins);
@@ -246,7 +246,7 @@ fn gravity_pulls_what_is_not_pinned_and_wind_stirs_it() {
         "nothing pushes it out of its plane"
     );
     let (cloth, mut blown, pins) = hung();
-    let mut wind = H3Wind::default();
+    let mut wind = SharedWind::default();
     for tick in 0..120 {
         let push = wind.step(tick as f32);
         blown.relax(&cloth, &pins);
@@ -288,7 +288,7 @@ fn halo_2_links_pull_a_stretched_sheet_back_with_the_pin_held() {
     let mut running = RunningCloth::at_rest(&cloth, pins, [0.0; 3]);
     running.places[15][1] += 0.3;
     for _ in 0..200 {
-        running.relax_h2(&cloth, pins);
+        running.relax_pulling(&cloth, pins);
     }
     assert_eq!(running.places[cloth.pins[0].vertex], pins[0]);
     for link in &cloth.links {
@@ -307,7 +307,7 @@ fn a_halo_2_link_at_length_does_not_pull() {
     cloth.game = ClothGame::Halo2;
     cloth.pins.clear();
     let before = running.places.clone();
-    running.relax_h2(&cloth, &pins);
+    running.relax_pulling(&cloth, &pins);
     for (place, was) in running.places.iter().zip(&before) {
         assert!(
             distance(*place, *was) < 0.02,
@@ -331,8 +331,8 @@ fn halo_2_normals_keep_some_of_the_last_tick() {
 
 #[test]
 fn the_halo_2_wind_stays_a_unit_away_from_straight_up() {
-    let limit = H2_WIND_POLE_ANGLE.cos();
-    let held = held_from_straight_up([0.0, 0.0, 1.0], H2_WIND_POLE_ANGLE);
+    let limit = HELD_WIND_POLE_ANGLE.cos();
+    let held = held_from_straight_up([0.0, 0.0, 1.0], HELD_WIND_POLE_ANGLE);
     assert!((held[2] - limit).abs() < 1e-6);
     assert!((dot(held, held) - 1.0).abs() < 1e-5);
     assert!(
@@ -340,13 +340,13 @@ fn the_halo_2_wind_stays_a_unit_away_from_straight_up() {
         "with nothing level to keep, it goes to the front"
     );
     let clear = unit_or_unchanged([1.0, 0.0, 0.2]);
-    let kept = held_from_straight_up(clear, H2_WIND_POLE_ANGLE);
+    let kept = held_from_straight_up(clear, HELD_WIND_POLE_ANGLE);
     assert!(distance(kept, clear) < 1e-5, "{kept:?}");
 }
 
 #[test]
 fn the_halo_2_wind_stays_within_its_strength() {
-    let mut wind = H2Wind::default();
+    let mut wind = HeldWind::default();
     for tick in 0..5000 {
         let push = wind.step(tick as f32);
         assert!(dot(push, push).sqrt() <= (0.1 + 0.0075) * 0.4 * 0.2 + 1e-5);
@@ -364,7 +364,7 @@ fn the_wind_stays_out_of_the_straight_up_cone() {
 
 #[test]
 fn the_wind_never_blows_harder_than_its_limit() {
-    let mut wind = H3Wind::default();
+    let mut wind = SharedWind::default();
     for tick in 0..5000 {
         let push = wind.step(tick as f32);
         assert!(dot(push, push).sqrt() <= (0.1 + 0.0075) * 0.4 * 0.2 + 1e-5);
@@ -534,12 +534,12 @@ fn a_reach_sheet_starts_at_its_objects_bounding_sphere() {
 /// than Halo 3's ever blows.
 #[test]
 fn the_reach_wind_stays_between_its_least_and_most() {
-    let mut wind = ReachWind::default();
+    let mut wind = FrameWind::default();
     for frame in 1..5000 {
-        let push = wind.step(frame, frame as f32 * REACH_TICK_RATE);
+        let push = wind.step(frame, frame as f32 * FIXED_TICK_RATE);
         let strength = dot(push, push).sqrt();
         assert!(
-            (REACH_WIND_LEAST - 1e-5..=REACH_WIND_MOST + 1e-5).contains(&strength),
+            (FRAME_WIND_LEAST - 1e-5..=FRAME_WIND_MOST + 1e-5).contains(&strength),
             "{strength}"
         );
         assert!(strength > (0.1 + 0.0075) * 0.4 * 0.2, "past Halo 3's");
@@ -549,7 +549,7 @@ fn the_reach_wind_stays_between_its_least_and_most() {
 /// It moves once a drawn frame, however many ticks that frame runs.
 #[test]
 fn the_reach_wind_moves_only_on_a_new_frame() {
-    let mut wind = ReachWind::default();
+    let mut wind = FrameWind::default();
     let first = wind.step(1, 0.0);
     assert_eq!(wind.step(1, 30.0), first, "the same frame");
     assert_ne!(wind.step(2, 60.0), first);

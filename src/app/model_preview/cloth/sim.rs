@@ -2,12 +2,12 @@
 
 use super::super::resume_point;
 use super::links::{ClothPin, rough_sqrt};
-use super::read::{ClothAt, reach_binormal};
+use super::read::{ClothAt, forward_binormal};
 use super::rules::{
-    ClothGame, ClothWind, ERROR_MAX, MOST_HELD_LINKS, MOST_ITERATIONS, NEARLY_ZERO,
-    REACH_CENTER_JUMP, REACH_CREATION_RELAXATIONS,
+    CENTER_JUMP, ClothGame, ClothWind, ERROR_MAX, MOST_HELD_LINKS, MOST_ITERATIONS, NEARLY_ZERO,
+    NEW_SHEET_RELAXATIONS,
 };
-use super::wind::{H2_MOST_PASSES, H2Wind, H3Wind, ReachWind};
+use super::wind::{FrameWind, HeldWind, PULL_MOST_PASSES, SharedWind};
 use super::{cross, dot, minus, posed_on, unit_or_unchanged};
 
 /// A cloth's points as they stand.
@@ -51,7 +51,7 @@ impl RunningCloth {
     pub(super) fn pin(&mut self, cloth: &ClothAt, pins: &[[f32; 3]]) {
         if cloth.game.rules().follows_center {
             let jump = minus(self.center, self.last_center);
-            if dot(jump, jump) > REACH_CENTER_JUMP * REACH_CENTER_JUMP {
+            if dot(jump, jump) > CENTER_JUMP * CENTER_JUMP {
                 for place in &mut self.places {
                     *place = std::array::from_fn(|axis| place[axis] + jump[axis]);
                 }
@@ -124,12 +124,12 @@ impl RunningCloth {
 
     /// Halo 2's `cloth_constrain_positions`: one pass over every link, by a
     /// rule of its own, with a held end leaving all the work to the other.
-    pub(super) fn relax_h2(&mut self, cloth: &ClothAt, pins: &[[f32; 3]]) {
+    pub(super) fn relax_pulling(&mut self, cloth: &ClothAt, pins: &[[f32; 3]]) {
         let held = |vertex: usize| cloth.pins.iter().any(|pin| pin.vertex == vertex);
         let count = cloth.iterations.clamp(1, MOST_ITERATIONS);
         let (mut done, mut passes) = (0, 0);
         self.pin(cloth, pins);
-        while done < count && passes < H2_MOST_PASSES {
+        while done < count && passes < PULL_MOST_PASSES {
             for link in &cloth.links {
                 let [a, b] = link.ends;
                 let rod = minus(self.places[b], self.places[a]);
@@ -233,9 +233,9 @@ impl RunningCloth {
 /// What a slot keeps of its cloth from frame to frame.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ClothField {
-    wind: H3Wind,
-    h2_wind: H2Wind,
-    reach_wind: ReachWind,
+    wind: SharedWind,
+    held_wind: HeldWind,
+    frame_wind: FrameWind,
     time: Option<f32>,
     pub(super) ticks: f32,
     /// The frames drawn, each a call of `advance`: Reach's wind moves once a
@@ -256,7 +256,7 @@ impl ClothField {
         let mut running = RunningCloth::at_rest(cloth, pins, center);
         if cloth.game.rules().settles_new_sheet {
             running.pin(cloth, pins);
-            for _ in 0..REACH_CREATION_RELAXATIONS {
+            for _ in 0..NEW_SHEET_RELAXATIONS {
                 running.relax(cloth, pins);
             }
         }
@@ -295,8 +295,8 @@ impl ClothField {
             now += tick;
             self.ticks += 1.0;
             let shared = match rules.wind {
-                ClothWind::Halo2 => Some(self.h2_wind.step(self.ticks)),
-                ClothWind::Halo3 => Some(self.wind.step(self.ticks * 30.0 * tick)),
+                ClothWind::HeldFromUp => Some(self.held_wind.step(self.ticks)),
+                ClothWind::OneShared => Some(self.wind.step(self.ticks * 30.0 * tick)),
                 ClothWind::PerCloth => None,
             };
             for (index, (cloth, running)) in cloths.iter().zip(&mut self.running).enumerate() {
@@ -304,7 +304,7 @@ impl ClothField {
                 let clock = self.ticks * rate + (index & 0xFF) as f32 * 0.75;
                 let wind = match shared {
                     Some(wind) => wind,
-                    None => self.reach_wind.step(self.frames, clock),
+                    None => self.frame_wind.step(self.frames, clock),
                 };
                 let pins = pins_of(cloth);
                 let spheres: Vec<([f32; 3], f32)> = cloth
@@ -318,8 +318,8 @@ impl ClothField {
                     })
                     .collect();
                 running.center = center_of(cloth);
-                if cloth.game.rules().relaxes_as_halo2 {
-                    running.relax_h2(cloth, &pins);
+                if cloth.game.rules().relaxes_by_pull {
+                    running.relax_pulling(cloth, &pins);
                 } else {
                     running.relax(cloth, &pins);
                 }
@@ -344,7 +344,7 @@ impl ClothField {
                             .game
                             .rules()
                             .derives_binormal
-                            .then(|| reach_binormal(normal));
+                            .then(|| forward_binormal(normal));
                         (*place, normal, binormal)
                     })
                 };

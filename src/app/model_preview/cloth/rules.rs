@@ -18,11 +18,11 @@ pub(in crate::app::model_preview) const MOST_PASSES: usize = 16;
 
 /// How far Reach's `cloth_enforce_attachments` (the 360's 0x82C8F9B0) lets
 /// the object's bounding sphere move before it carries the whole sheet along.
-pub(super) const REACH_CENTER_JUMP: f32 = 0.4;
+pub(super) const CENTER_JUMP: f32 = 0.4;
 
 /// The relaxations Reach's `cloth_new_attachment` (the 360's 0x82C8E2F0)
 /// settles a new sheet with.
-pub(super) const REACH_CREATION_RELAXATIONS: usize = 5;
+pub(super) const NEW_SHEET_RELAXATIONS: usize = 5;
 
 pub(super) const ERROR_MAX: f32 = 2.0;
 
@@ -48,7 +48,7 @@ pub(crate) enum ClothGame {
 /// `game_time_initialize_for_new_map`, 0x82D7A998), which was not read for
 /// MCC. 30 is the 360's, and the antennas' fixed step, 0.0333 a tick, is a
 /// 30th of a second.
-pub(crate) const REACH_TICK_RATE: f32 = 30.0;
+pub(crate) const FIXED_TICK_RATE: f32 = 30.0;
 
 /// Where the games' cloth differs, decision by decision.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -56,7 +56,7 @@ pub(crate) struct ClothRules {
     /// The game's ticks a second: `cloth_update` runs each cloth at most once
     /// a tick (`last_update_tick`), whatever the frame's time. Halo 2 ticks at
     /// 30; Halo 3 and ODST at their native rate, the 60 of `get_vblank_rate`;
-    /// Reach at [`REACH_TICK_RATE`].
+    /// Reach at [`FIXED_TICK_RATE`].
     pub(in crate::app::model_preview) tick_rate: f32,
     /// The most vertices a sheet keeps (`cloth_generate_flag_grid`).
     pub(in crate::app::model_preview) most_vertices: usize,
@@ -92,7 +92,7 @@ pub(crate) struct ClothRules {
     /// Whose wind blows the sheets.
     pub(in crate::app::model_preview) wind: ClothWind,
     /// Whether the sheet relaxes as Halo 2's does.
-    pub(in crate::app::model_preview) relaxes_as_halo2: bool,
+    pub(in crate::app::model_preview) relaxes_by_pull: bool,
     /// Halo 2 adds to what the normal was, so each carries a little of the
     /// last tick, and an unset one points up; the others start from nothing
     /// and point along x.
@@ -118,9 +118,10 @@ pub(in crate::app::model_preview) enum ClothSheetBasis {
 /// Whose wind blows a slot's cloth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::app::model_preview) enum ClothWind {
-    Halo2,
-    /// Halo 3's wind clock counts the ticks the wind was authored at, 30 a second.
-    Halo3,
+    /// Halo 2's: one wind, held from straight up.
+    HeldFromUp,
+    /// Halo 3's: one shared wind, whose clock counts the ticks the wind was authored at, 30 a second.
+    OneShared,
     /// Reach's moves as each cloth's verlet asks, on its own clock.
     PerCloth,
 }

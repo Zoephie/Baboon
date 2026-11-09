@@ -6,12 +6,12 @@ use super::{cross, dot, high_bits, lcg_step, minus, unit_or_unchanged};
 
 /// `cloth_update_wind` in Halo 2: its limit from straight up, and the ticks per
 /// second that its clock counts in.
-pub(super) const H2_WIND_POLE_ANGLE: f32 = 0.349_065_9;
+pub(super) const HELD_WIND_POLE_ANGLE: f32 = 0.349_065_9;
 
-const H2_WIND_CLOCK: f32 = 30.0;
+const HELD_WIND_CLOCK: f32 = 30.0;
 
 /// Halo 2 has no limit on a sheet that keeps coming apart; this one is ours.
-pub(super) const H2_MOST_PASSES: usize = 64;
+pub(super) const PULL_MOST_PASSES: usize = 64;
 
 /// `real_vector3d_exclude_from_pole_by_angle`'s and the wind's own.
 const WIND_POLE_ANGLE: f32 = 20.0 * std::f32::consts::PI / 180.0;
@@ -32,13 +32,13 @@ pub(crate) fn turned_about(vector: [f32; 3], axis: [f32; 3], angle: f32) -> [f32
 /// `cloth_update_wind`: one wind for everything, wandering by itself. It reads
 /// nothing of a level, so a preview blows as a map does.
 #[derive(Debug, Clone)]
-pub(crate) struct H3Wind {
+pub(crate) struct SharedWind {
     direction: [f32; 3],
     scale: f32,
     random: u32,
 }
 
-impl Default for H3Wind {
+impl Default for SharedWind {
     fn default() -> Self {
         Self {
             direction: [0.0; 3],
@@ -63,7 +63,7 @@ fn random_direction(mut next: impl FnMut() -> f32) -> [f32; 3] {
     [flat * cos, flat * sin, z]
 }
 
-impl H3Wind {
+impl SharedWind {
     fn next(&mut self) -> f32 {
         next_random(&mut self.random) / 65_536.0
     }
@@ -95,13 +95,13 @@ impl H3Wind {
 
 /// Halo 2's `cloth_update_wind`, whose one wind wanders by other sums.
 #[derive(Debug, Clone)]
-pub(super) struct H2Wind {
+pub(super) struct HeldWind {
     direction: [f32; 3],
     scale: f32,
     random: u32,
 }
 
-impl Default for H2Wind {
+impl Default for HeldWind {
     fn default() -> Self {
         Self {
             direction: [0.0; 3],
@@ -111,7 +111,7 @@ impl Default for H2Wind {
     }
 }
 
-impl H2Wind {
+impl HeldWind {
     fn next(&mut self) -> f32 {
         next_random(&mut self.random) * 1.525_902_2e-5
     }
@@ -122,7 +122,7 @@ impl H2Wind {
 
     /// What the wind accelerates by this tick, before the cloth's own scale.
     pub(super) fn step(&mut self, tick: f32) -> [f32; 3] {
-        let t = tick * H2_WIND_CLOCK;
+        let t = tick * HELD_WIND_CLOCK;
         let turn = (t * 0.005).cos();
         let angle = self.next() * turn * turn * 0.15;
         if self.direction == [0.0; 3] {
@@ -131,7 +131,7 @@ impl H2Wind {
         let about = self.random_direction();
         self.direction = held_from_straight_up(
             turned_about(self.direction, about, angle),
-            H2_WIND_POLE_ANGLE,
+            HELD_WIND_POLE_ANGLE,
         );
         let slow = (t * 0.0001).cos();
         let drift =
@@ -145,7 +145,7 @@ impl H2Wind {
 /// Reach's `cloth_update_wind` (the 360's 0x82C902A0, MCC's 0x140D98EF0):
 /// one wind for every cloth, which moves on only when a new frame is drawn.
 #[derive(Debug, Clone)]
-pub(super) struct ReachWind {
+pub(super) struct FrameWind {
     direction: [f32; 3],
     scale: f32,
     random: u32,
@@ -153,7 +153,7 @@ pub(super) struct ReachWind {
     last_frame: u64,
 }
 
-impl Default for ReachWind {
+impl Default for FrameWind {
     fn default() -> Self {
         Self {
             direction: [0.0; 3],
@@ -165,11 +165,11 @@ impl Default for ReachWind {
 }
 
 /// Reach's least and greatest wind, either way.
-pub(super) const REACH_WIND_LEAST: f32 = 0.05;
+pub(super) const FRAME_WIND_LEAST: f32 = 0.05;
 
-pub(super) const REACH_WIND_MOST: f32 = 0.2;
+pub(super) const FRAME_WIND_MOST: f32 = 0.2;
 
-impl ReachWind {
+impl FrameWind {
     /// `real_random`: the upper half of the seed over 65535.
     fn next(&mut self) -> f32 {
         next_random(&mut self.random) * (1.0 / 65_535.0)
@@ -201,11 +201,11 @@ impl ReachWind {
             self.scale += drift;
             // Never stiller than its least: nothing at all counts as the other way.
             self.scale = if self.scale <= 0.0 {
-                self.scale.min(-REACH_WIND_LEAST)
+                self.scale.min(-FRAME_WIND_LEAST)
             } else {
-                self.scale.max(REACH_WIND_LEAST)
+                self.scale.max(FRAME_WIND_LEAST)
             };
-            self.scale = self.scale.clamp(-REACH_WIND_MOST, REACH_WIND_MOST);
+            self.scale = self.scale.clamp(-FRAME_WIND_MOST, FRAME_WIND_MOST);
         }
         self.direction.map(|axis| axis * self.scale.abs())
     }

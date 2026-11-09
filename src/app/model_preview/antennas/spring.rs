@@ -3,7 +3,7 @@
 //! its marker, once a game tick, under its point physics. The near end is the
 //! marker itself; [`super::Antenna`] draws the curve between.
 
-use super::super::cloth::REACH_TICK_RATE;
+use super::super::cloth::FIXED_TICK_RATE;
 use super::super::common::view::posed_on;
 use super::Antenna;
 use crate::app::model_preview::common::math::{minus, plus, scaled};
@@ -131,7 +131,7 @@ impl AntennaSprings {
         }
         self.time = Some(time);
         // `game_time > last_update_tick`: at most one step a tick.
-        let due = ((time - self.start) * REACH_TICK_RATE).floor() as u64;
+        let due = ((time - self.start) * FIXED_TICK_RATE).floor() as u64;
         while self.ticks < due {
             self.ticks += 1;
             for (antenna, running) in antennas.iter().zip(&mut self.running) {
@@ -247,7 +247,7 @@ mod tests {
             });
             field.ticks
         };
-        assert_eq!(ticks_over_a_second(60), REACH_TICK_RATE as u64);
-        assert_eq!(ticks_over_a_second(240), REACH_TICK_RATE as u64);
+        assert_eq!(ticks_over_a_second(60), FIXED_TICK_RATE as u64);
+        assert_eq!(ticks_over_a_second(240), FIXED_TICK_RATE as u64);
     }
 }

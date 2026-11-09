@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use blam_tags::TagFile;
 
-use super::super::cloth::{H3Wind, away_from_pole, turned_about};
+use super::super::cloth::{SharedWind, away_from_pole, turned_about};
 use super::super::common::fields::{elements, object_block};
 use super::super::effects::marker_name;
 use super::super::gen3::materials::read_gen3_bitmap;
@@ -540,7 +540,7 @@ impl RunningLeaves {
 /// What a slot keeps of its leaves from frame to frame.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct H3LeafField {
-    wind: H3Wind,
+    wind: SharedWind,
     time: Option<f32>,
     /// The game's time, in seconds, that the wind's clock reads.
     seconds: f32,
