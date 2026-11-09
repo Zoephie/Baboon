@@ -14,8 +14,12 @@ use super::super::gl::target::copy_frame;
 use super::super::common::sprite_gl::{SpriteGl, link_sprite_gl};
 
 use super::super::gl::pass_state::PassState;
-use super::super::*;
+use super::super::{
+    ModelGpuCamera, ModelGpuFrame, ModelGpuSlot, RenderCore, antennas, ce_flare_clip, gen3, gl,
+    particles,
+};
 use super::view::ViewFrame;
+use crate::app::model_preview::common;
 
 impl RenderCore {
     /// Link the sprite and particle programs on first use, bring the slot's

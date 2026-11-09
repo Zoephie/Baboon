@@ -5,8 +5,10 @@ use eframe::glow::{self, HasContext as _};
 
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::glsl::{VIEW_DEPTH, fill};
-use super::super::*;
-use super::camera::*;
+#[cfg(test)]
+use super::super::reach;
+use super::super::{ModelGpuCamera, ce_flare_clip, link_h2_program};
+use crate::app::model_preview::common;
 
 /// The vertex stream of Halo CE's lens flares: clip position, then texcoord.
 pub(in crate::app::model_preview) const CE_FLARE_STRIDE: i32 = 6 * 4;

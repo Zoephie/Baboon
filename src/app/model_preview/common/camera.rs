@@ -3,7 +3,7 @@
 
 use eframe::egui::{self, Vec2};
 
-use super::super::*;
+use super::super::{ModelPreviewData, ModelPreviewState, RenderModelPreview};
 
 #[derive(Clone, Copy)]
 pub(in crate::app::model_preview) struct ModelGpuCamera {
@@ -336,6 +336,7 @@ pub(in crate::app::model_preview) fn ce_flare_pixels(
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::RenderModelPreview;
     use super::*;
 
     #[test]

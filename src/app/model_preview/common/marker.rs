@@ -1,7 +1,7 @@
 //! A marker as a rigid frame, and how a point or direction of one object
 //! lands on another's marker.
 
-use super::super::*;
+use super::super::{RenderModelPreview, RenderModelPreviewMarker};
 
 /// A marker as a rigid transform: its three axes, then its position.
 #[derive(Debug, Clone, Copy, PartialEq)]
