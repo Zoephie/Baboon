@@ -13,5 +13,6 @@ pub(in crate::app::model_preview) const RULES: GameRules = GameRules {
         above: super::panel::draw_ce_object_controls,
         below: super::panel::draw_ce_function_inputs,
     }),
+    runs_on: Some(super::draw::runs_on),
     ..GameRules::DEFAULT
 };

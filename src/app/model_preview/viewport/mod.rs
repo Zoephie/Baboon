@@ -2,10 +2,9 @@
 //! overlays drawn on top (error reports, markers, the armature).
 
 use super::super::ui_kit::style::foundation_input_edge;
-use super::ce::draw::ce_events_running;
 use super::{
     MAX_PREVIEW_SCALE, ModelPreviewData, ModelPreviewState, PreviewCamera, armature_node_positions,
-    build_frame, ce, min_preview_scale, model_gl_failure, paint_model_gl, preview_background,
+    build_frame, min_preview_scale, model_gl_failure, paint_model_gl, preview_background,
     preview_center_radius, preview_clock, unrotate_view_vector, viewport_wheel_zoom,
 };
 use eframe::egui;
@@ -95,13 +94,11 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
     let camera = PreviewCamera::new(data, state, rect);
     let bones = frame.bones.clone();
     let skinning_rows = bones.as_deref().map(Vec::as_slice);
-    let firing = ce::firing::shots_moving(
-        &data.preview.ce.firing,
-        &state.ce.shots,
-        data.geometry_id,
-        time,
-    );
-    if frame.moves() || ce_events_running(data.geometry_id) || firing {
+    // What runs on outside the frame, as a game keeps it.
+    let running = super::load::rules(data.preview.game)
+        .runs_on
+        .is_some_and(|runs_on| runs_on(data, state, time));
+    if frame.moves() || running {
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(33));
     }

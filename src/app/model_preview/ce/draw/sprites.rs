@@ -25,6 +25,22 @@ pub(in crate::app::model_preview) fn ce_events_running(geometry_id: u64) -> bool
     CE_EVENTS_RUNNING.with(|running| running.borrow().contains(&geometry_id))
 }
 
+/// Whether a played event effect or a weapon's shots still run on `data` at
+/// `time`, so the view keeps drawing.
+pub(in crate::app::model_preview) fn runs_on(
+    data: &crate::app::model_preview::ModelPreviewData,
+    state: &crate::app::model_preview::ModelPreviewState,
+    time: f32,
+) -> bool {
+    let firing = ce::firing::shots_moving(
+        &data.preview.ce.firing,
+        &state.ce.shots,
+        data.geometry_id,
+        time,
+    );
+    ce_events_running(data.geometry_id) || firing
+}
+
 /// `effect_update` for Halo CE's attached effects, up to the frame's time.
 /// Stepping to a time it has reached does nothing, so the model's lights
 /// and the sprites can both ask for it.

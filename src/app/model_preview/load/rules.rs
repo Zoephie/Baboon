@@ -46,6 +46,10 @@ pub(crate) struct GameRules {
     pub(crate) lit_options: bool,
     /// The game's own object controls in the panel, around the shared ones.
     pub(crate) object_controls: Option<ObjectControls>,
+    /// Whether something of the object runs on at `time` outside what the
+    /// frame knows moves, so the view keeps drawing.
+    pub(crate) runs_on:
+        Option<fn(&super::super::ModelPreviewData, &super::super::ModelPreviewState, f32) -> bool>,
 }
 
 /// A game's own controls for an object, drawn around the shared weapon
@@ -80,5 +84,6 @@ impl GameRules {
         textures: false,
         lit_options: true,
         object_controls: None,
+        runs_on: None,
     };
 }
