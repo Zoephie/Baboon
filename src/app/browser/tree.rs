@@ -2000,7 +2000,7 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
     label: &str,
 ) -> Option<BrowserAction> {
     const GAP: f32 = 4.0;
-    let width = (ui.available_width() - GAP * 2.0) / 3.0;
+    let width = (ui.available_width() - GAP * 3.0) / 4.0;
     let enabled = !rel_path.as_os_str().is_empty();
     let mut action = None;
     ui.horizontal(|ui| {
@@ -2025,6 +2025,12 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
                 rel_path: rel_path.to_path_buf(),
                 label: label.to_owned(),
             });
+        }
+        if context_menu_primary_button(ui, "Delete", enabled, width)
+            .on_hover_text("Delete this folder after reviewing its tags and outside references")
+            .clicked()
+        {
+            action = Some(BrowserAction::DeleteLooseFolder { rel_path: rel_path.to_path_buf() });
         }
     });
     if action.is_some() {
@@ -3739,7 +3745,7 @@ mod tests {
     #[test]
     fn folder_primary_buttons_fill_the_row_and_dispatch_from_both_menus() {
         for header in [false, true] {
-            for (index, label) in ["Rename", "Move", "Copy To"].into_iter().enumerate() {
+            for (index, label) in ["Rename", "Move", "Copy To", "Delete"].into_iter().enumerate() {
                 let ctx = egui::Context::default();
                 let row_width = std::cell::Cell::new(0.0);
                 let frame = |events| {
@@ -3788,12 +3794,12 @@ mod tests {
                         _ => None,
                     })
                     .collect();
-                assert_eq!(buttons.len(), 3);
+                assert_eq!(buttons.len(), 4);
                 for button in &buttons {
-                    assert!((button.width() - (row_width.get() - 8.0) / 3.0).abs() < 1.0);
+                    assert!((button.width() - (row_width.get() - 12.0) / 4.0).abs() < 1.0);
                     assert_eq!(button.top(), buttons[0].top());
                 }
-                assert!((buttons[2].right() - buttons[0].left() - row_width.get()).abs() < 1.0);
+                assert!((buttons[3].right() - buttons[0].left() - row_width.get()).abs() < 1.0);
                 let pos = buttons[index].center();
                 frame(vec![egui::Event::PointerMoved(pos)]);
                 let event = |pressed| egui::Event::PointerButton {
@@ -3808,7 +3814,8 @@ mod tests {
                     match (label, action) {
                         ("Rename", Some(BrowserAction::RenameLooseFolder { rel_path, .. }))
                         | ("Move", Some(BrowserAction::MoveLooseFolder { rel_path, .. }))
-                        | ("Copy To", Some(BrowserAction::CopyLooseFolder { rel_path, .. })) =>
+                        | ("Copy To", Some(BrowserAction::CopyLooseFolder { rel_path, .. }))
+                        | ("Delete", Some(BrowserAction::DeleteLooseFolder { rel_path })) =>
                             rel_path == Path::new("objects/brute"),
                         _ => false,
                     },

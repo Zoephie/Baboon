@@ -326,16 +326,14 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
         close_menu(ui);
         cx.send(AppAction::Defer(DeferredFileAction::SaveCurrentTag));
     }
-    if ui
-        .add_enabled(
-            !menu.home && cx.model.kits[cx.model.active].selected_key.is_some()
-                && !cx.model.editing_kit_is_read_only(cx.model.active),
-            egui::Button::new("Save Current Tag As..."),
-        )
+    if shortcut_menu_button(ui, "Save Current Tag As...", None,
+        egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::S,
+        !menu.home && cx.model.kits[cx.model.active].selected_key.is_some()
+            && !cx.model.editing_kit_is_read_only(cx.model.active))
         .clicked()
     {
         close_menu(ui);
-        cx.send(AppAction::SaveCurrentTagAs);
+        cx.send(AppAction::Defer(DeferredFileAction::SaveCurrentTagAs));
     }
     if !menu.home && cx.model.current_source_is_container() {
         if shortcut_menu_button(

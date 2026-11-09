@@ -25,7 +25,7 @@ const DELETED_TAGS_DIR: &str = "deleted-tags";
 /// undo that reaches across a restart — so the file is moved somewhere findable
 /// rather than unlinked. The timestamped run folder keeps repeated deletions of
 /// the same path from colliding.
-fn loose_trash_destination(
+pub(super) fn loose_trash_destination(
     game: Option<&str>,
     display_path: &str,
     now_unix_secs: u64,

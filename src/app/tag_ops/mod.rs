@@ -22,6 +22,7 @@ use crate::app::browser::{
 };
 
 pub(in crate::app) mod delete;
+pub(in crate::app) mod folder_delete;
 pub(in crate::app) mod duplicate;
 pub(in crate::app) mod rename_in_place;
 pub(in crate::app) mod folder_rename;
@@ -66,6 +67,7 @@ pub(in crate::app) struct TagOpsFeature {
 pub(in crate::app) enum TagOpsCommand {
     /// Delete the tag the delete confirmation names.
     Delete,
+    DeleteFolder,
     /// Make or rename the folder in the container folder dialog. The dialog
     /// closes only when the name is accepted; a rejection keeps it up with
     /// its reason attached.
@@ -90,6 +92,7 @@ impl Baboon {
     pub(in crate::app) fn apply_tag_ops_command(&mut self, command: TagOpsCommand, ctx: &egui::Context) {
         match command {
             TagOpsCommand::Delete => self.begin_delete_tag(ctx.clone()),
+            TagOpsCommand::DeleteFolder => self.begin_delete_folder(ctx.clone()),
             TagOpsCommand::ApplyContainerFolder => {
                 if self.apply_container_folder_dialog() {
                     self.dialogs.close::<ContainerFolderDialog>();

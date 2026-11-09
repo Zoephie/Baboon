@@ -534,10 +534,18 @@ pub(crate) fn build_folder_directory_tree(root: &Path) -> Result<TagTree> {
 /// Remove a tag without unloading folders, remapping every positional entry
 /// index after compacting the lazy list. Empty directories stay materialized.
 pub(super) fn remove_loaded_folder_entry(tree: &mut TagTree, entries: &mut Vec<TagEntry>, key: &str) {
+    retain_loaded_folder_entries(tree, entries, |entry| entry.key != key);
+}
+
+/// Compact a lazy browser's entries once while preserving loaded directories
+/// and remapping every node's positional indices.
+pub(crate) fn retain_loaded_folder_entries(
+    tree: &mut TagTree, entries: &mut Vec<TagEntry>, mut keep: impl FnMut(&TagEntry) -> bool,
+) {
     let mut indices = Vec::with_capacity(entries.len());
     let mut next = 0;
     entries.retain(|entry| {
-        let keep = entry.key != key;
+        let keep = keep(entry);
         indices.push(keep.then_some(next));
         if keep { next += 1; }
         keep

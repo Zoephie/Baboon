@@ -498,7 +498,7 @@ impl EditorCaches {
     }
 }
 
-/// Scroll the enclosing scroll area while something is dragged over it.
+/// Scroll the enclosing scroll area while content is dragged over it.
 ///
 /// egui 0.36 stops a scroll area taking the mouse wheel while any drag is in
 /// progress, so a tag dragged from the browser could no longer be carried to
@@ -509,7 +509,7 @@ pub(in crate::app) fn scroll_during_drag(ui: &mut Ui) {
     const EDGE: f32 = 32.0;
     const EDGE_SPEED: f32 = 14.0;
     let ctx = ui.ctx().clone();
-    if ctx.dragged_id().is_none() {
+    if !egui::DragAndDrop::has_any_payload(&ctx) {
         return;
     }
     let clip = ui.clip_rect();

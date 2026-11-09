@@ -4112,7 +4112,7 @@ mod tests {
                         progress: Some(0.5),
                     });
                 },
-                &["Renaming smoke to fog", "Baboon is locked until references are updated."],
+                &["Renaming smoke to fog", "Baboon is locked until the folder operation finishes."],
             ),
             // --- ui/dialogs/ ---
             case(
@@ -4159,7 +4159,7 @@ mod tests {
             case(
                 "delete_confirm_loose",
                 &["dialog:DeleteConfirm"],
-                &["tag_ops/delete_confirm.rs"],
+                &[],
                 loose_kit,
                 |h| {
                     let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
@@ -4173,12 +4173,20 @@ mod tests {
                         has_unsaved_edits: true,
                     });
                 },
-                &["Delete tag?", "levels\\smoke\\smoke.scenario"],
+                &["Delete Tag?", "Delete Tag", "Cancel", "levels\\smoke\\smoke.scenario"],
+            ),
+            case(
+                "delete_folder_confirm",
+                &["dialog:DeleteFolderConfirm"],
+                &[],
+                loose_kit,
+                |h| h.app.open_delete_folder("objects/weapons/rifle".into(), h.ctx.clone()),
+                &["Delete Folder?", "Delete Folder", "Cancel"],
             ),
             case(
                 "delete_confirm_container",
                 &["dialog:DeleteConfirm"],
-                &["tag_ops/delete_confirm.rs"],
+                &[],
                 container_kit,
                 |h| {
                     h.app.dialogs.open(DeleteConfirm {
@@ -4193,7 +4201,7 @@ mod tests {
                         has_unsaved_edits: false,
                     });
                 },
-                &["Delete from Campaign Evolved container?"],
+                &["Delete from Campaign Evolved Container?", "Delete Tag", "Cancel"],
             ),
             case(
                 "rename_tag",
@@ -5025,7 +5033,7 @@ mod tests {
         );
         let sources = window_sources();
         assert!(
-            sources.iter().any(|s| s == "tag_ops/delete_confirm.rs")
+            sources.iter().any(|s| s == "tag_ops/rename_tag_window.rs")
                 && sources.iter().any(|s| s == "shell/settings.rs"),
             "the source scan found {sources:?}; it no longer finds windows"
         );

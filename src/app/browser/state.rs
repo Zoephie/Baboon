@@ -119,6 +119,7 @@ pub(in crate::app) enum BrowserAction {
     RenameTag(String),
     DuplicateTag(String),
     DeleteTag(String),
+    DeleteLooseFolder { rel_path: PathBuf },
     MoveTag(String),
     /// Import a tag file into a Campaign Evolved container, at `folder_rel`
     /// (`None` = root).

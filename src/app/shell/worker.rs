@@ -327,6 +327,10 @@ pub(in crate::app) enum WorkerMessage {
         stamp: KitStamp,
         result: Result<FolderRefactorFinished, String>,
     },
+    FolderDeleteFinished {
+        stamp: KitStamp,
+        result: Result<crate::app::tag_ops::folder_delete::DeletedFolder, String>,
+    },
     FolderConversionProgress(FolderConversionProgress),
     FolderConversionFinished(Result<FolderConversionReport, String>),
     /// The same shape, for the import that reads a monolithic cache. Kept apart

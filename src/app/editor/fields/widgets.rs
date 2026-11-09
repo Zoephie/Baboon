@@ -1779,7 +1779,7 @@ mod tests {
 
     /// How far a scroll area scrolled under a mouse wheel turned while a drag
     /// from outside it is held over it.
-    fn wheel_while_dragging(take_wheel: bool) -> f32 {
+    fn scroll_while_dragging(take_wheel: bool, payload: bool, edge: bool) -> f32 {
         let ctx = egui::Context::default();
         ctx.global_style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
         let mut time = 0.0;
@@ -1797,7 +1797,7 @@ mod tests {
                     // The drag starts above the scroll area, as one from the
                     // browser starts outside the editor.
                     let (_, source) = ui.allocate_exact_size(egui::vec2(100.0, 60.0), egui::Sense::drag());
-                    source.dnd_set_drag_payload(7_u32);
+                    if payload { source.dnd_set_drag_payload(7_u32); }
                     let output = crate::app::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                         if take_wheel {
                             scroll_during_drag(ui);
@@ -1811,7 +1811,7 @@ mod tests {
             });
         };
         let source = egui::pos2(50.0, 30.0);
-        let over = egui::pos2(300.0, 200.0);
+        let over = egui::pos2(300.0, if edge { 350.0 } else { 200.0 });
         for _ in 0..3 {
             frame(vec![egui::Event::PointerMoved(source)], &mut offset);
         }
@@ -1824,12 +1824,12 @@ mod tests {
         }
         for _ in 0..10 {
             frame(
-                vec![egui::Event::MouseWheel {
+                if edge { Vec::new() } else { vec![egui::Event::MouseWheel {
                     unit: egui::MouseWheelUnit::Point,
                     delta: egui::vec2(0.0, -40.0),
                     phase: egui::TouchPhase::Move,
                     modifiers: egui::Modifiers::NONE,
-                }],
+                }] },
                 &mut offset,
             );
         }
@@ -1841,8 +1841,16 @@ mod tests {
     /// below the fold couldn't be reached to drop on.
     #[test]
     fn the_wheel_scrolls_while_a_tag_is_dragged() {
-        assert_eq!(wheel_while_dragging(false), 0.0, "control: egui ignores the wheel mid-drag");
-        assert!(wheel_while_dragging(true) > 0.0, "the editor takes it");
+        assert_eq!(scroll_while_dragging(false, true, false), 0.0, "control: egui ignores the wheel mid-drag");
+        assert!(scroll_while_dragging(true, true, false) > 0.0, "the editor takes it");
+    }
+
+    #[test]
+    fn edge_scrolling_requires_dragged_content_rather_than_a_window_or_control() {
+        assert_eq!(scroll_while_dragging(true, false, true), 0.0,
+            "moving a window or control near the edge must not scroll the pane");
+        assert!(scroll_while_dragging(true, true, true) > 0.0,
+            "dragging content to the edge still scrolls");
     }
 }
 
