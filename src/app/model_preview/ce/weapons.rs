@@ -306,6 +306,22 @@ pub(in crate::app::model_preview) fn biped_weapons(
     }
 }
 
+/// Once a Halo CE unit's clips are listed after a weapon change, the clip to
+/// play for `clip` with the weapon at `held` in hand.
+pub(in crate::app::model_preview) fn clip_after_listing(
+    weapons: &CeBipedWeapons,
+    clips: &[PreviewAnimationEntry],
+    clip: &str,
+    held: Option<&String>,
+) -> Option<usize> {
+    let held = weapons
+        .equippable
+        .iter()
+        .find(|weapon| Some(&weapon.path) == held);
+    let class = held.map_or(UNARMED, |weapon| weapon.class.as_str());
+    clip_after_weapon_change(clips, &weapons.hidden_clips, clip, class)
+}
+
 /// The clip to play after a weapon change: the same one if it is still shown,
 /// or this weapon's idle in the same seat.
 pub(in crate::app::model_preview) fn clip_after_weapon_change(

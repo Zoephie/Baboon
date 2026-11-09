@@ -29,8 +29,9 @@ pub(in crate::app::model_preview) use render_model::*;
 mod games;
 use games::{add_overlay_shaders, load_own_object, load_unreal_model};
 pub(in crate::app::model_preview) use games::{
-    decode_own_animation, function_rules, list_own_animations, read_attached_features,
-    read_extension_weapon_features, resolve_own_shader, rules, type_exports,
+    decode_own_animation, function_rules, list_own_animations, own_clip_after_listing,
+    read_attached_features, read_extension_weapon_features, resolve_own_shader, rules,
+    type_exports,
 };
 mod rules;
 pub(in crate::app::model_preview) use rules::GameRules;

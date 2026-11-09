@@ -209,6 +209,22 @@ pub(in crate::app::model_preview) fn decode_own_animation(
         .then(|| super::super::ce::animation::decode_ce_animation(source, model, animation_index))
 }
 
+/// Once the clips are listed after a weapon change, the clip to play where
+/// the game picks it its own way: a Halo CE unit's, taking the `waiting`
+/// one. `None` for any other model, or with no clip waiting.
+pub(in crate::app::model_preview) fn own_clip_after_listing(
+    data: &ModelPreviewData,
+    waiting: &mut Option<String>,
+    held: Option<&String>,
+    clips: &[PreviewAnimationEntry],
+) -> Option<Option<usize>> {
+    let weapons = data.ce.weapons.as_ref()?;
+    let clip = waiting.take()?;
+    Some(super::super::ce::weapons::clip_after_listing(
+        weapons, clips, &clip, held,
+    ))
+}
+
 /// An object whose game loads it its own way: a Halo CE object, which names
 /// its gbxmodel itself. `None` for any other tag.
 pub(super) fn load_own_object(

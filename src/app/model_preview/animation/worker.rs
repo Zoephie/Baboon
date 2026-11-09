@@ -206,25 +206,14 @@ impl Baboon {
         match result {
             Ok(entries) => {
                 if let Some(Ok(data)) = state.data.as_mut() {
-                    // Taken only by the game it is for: H2 reads it below.
-                    let ce_clip = data
-                        .ce
-                        .weapons
-                        .as_ref()
-                        .and_then(|weapons| Some((state.clip_after_load.take()?, weapons)));
-                    if let Some((clip, weapons)) = ce_clip {
-                        let held = weapons
-                            .equippable
-                            .iter()
-                            .find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
-                        let class = held.map_or("unarmed", |weapon| weapon.class.as_str());
-                        state.animation.selected =
-                            super::super::ce::weapons::clip_after_weapon_change(
-                                &entries,
-                                &weapons.hidden_clips,
-                                &clip,
-                                class,
-                            );
+                    // Taken only by the game it is for: the rest read it below.
+                    if let Some(selected) = super::super::load::own_clip_after_listing(
+                        data,
+                        &mut state.clip_after_load,
+                        state.weapon.as_ref(),
+                        &entries,
+                    ) {
+                        state.animation.selected = selected;
                     }
                     if let Some(weapons) = data.weapons.as_mut() {
                         let (class, kinds) = weapons
