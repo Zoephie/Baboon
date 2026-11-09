@@ -1,4 +1,4 @@
-//! Shared keyboard scrolling for the last-clicked scroll pane.
+//! Shared keyboard and middle-click scrolling for scroll panes.
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -41,14 +41,14 @@ fn keyboard_scroll(ui: &Ui, id: egui::Id, viewport: egui::Rect, content_height: 
     ui.ctx().request_repaint();
 }
 
-/// Keep egui's sizing, virtualization and mouse behavior, adding only scoped
-/// Home/End/Page Up/Page Down handling after the contents handle their input.
-pub(in crate::app) struct KeyboardScrollArea { inner: egui::ScrollArea, vertical: bool, salt: egui::IdSalt }
+/// Keep egui's sizing and virtualization, adding scoped keyboard scrolling
+/// and registering each viewport with the shared middle-click controller.
+pub(in crate::app) struct KeyboardScrollArea { inner: egui::ScrollArea, axes: egui::Vec2b, salt: egui::IdSalt }
 
 impl KeyboardScrollArea {
-    pub fn vertical() -> Self { Self { inner: egui::ScrollArea::vertical(), vertical: true, salt: egui::IdSalt::new("scroll_area") } }
-    pub fn horizontal() -> Self { Self { inner: egui::ScrollArea::horizontal(), vertical: false, salt: egui::IdSalt::new("scroll_area") } }
-    pub fn both() -> Self { Self { inner: egui::ScrollArea::both(), vertical: true, salt: egui::IdSalt::new("scroll_area") } }
+    pub fn vertical() -> Self { Self { inner: egui::ScrollArea::vertical(), axes: egui::Vec2b::new(false, true), salt: egui::IdSalt::new("scroll_area") } }
+    pub fn horizontal() -> Self { Self { inner: egui::ScrollArea::horizontal(), axes: egui::Vec2b::new(true, false), salt: egui::IdSalt::new("scroll_area") } }
+    pub fn both() -> Self { Self { inner: egui::ScrollArea::both(), axes: egui::Vec2b::TRUE, salt: egui::IdSalt::new("scroll_area") } }
     pub fn id_salt(mut self, salt: impl egui::AsIdSalt) -> Self { self.salt = egui::IdSalt::new(salt); self.inner = self.inner.id_salt(self.salt); self }
     pub fn auto_shrink(mut self, value: impl Into<egui::Vec2b>) -> Self { self.inner = self.inner.auto_shrink(value); self }
     pub fn max_height(mut self, value: f32) -> Self { self.inner = self.inner.max_height(value); self }
@@ -65,13 +65,15 @@ impl KeyboardScrollArea {
     pub fn show_viewport<R>(self, ui: &mut Ui, contents: impl FnOnce(&mut Ui, egui::Rect) -> R) -> egui::scroll_area::ScrollAreaOutput<R> {
         let id = ui.make_persistent_id(self.salt);
         let area_bounds = ui.available_rect_before_wrap();
-        self.inner.show_viewport(ui, |ui, viewport| {
+        let output = self.inner.show_viewport(ui, |ui, viewport| {
             let mut bounds = egui::Rect::from_min_size(ui.max_rect().min + viewport.min.to_vec2(), viewport.size()).intersect(ui.clip_rect());
             bounds.max.x = (bounds.max.x + ui.spacing().scroll.allocated_width()).min(area_bounds.right());
             let result = contents(ui, viewport);
-            if self.vertical { keyboard_scroll(ui, id, viewport, ui.min_size().y, bounds); }
+            if self.axes.y { keyboard_scroll(ui, id, viewport, ui.min_size().y, bounds); }
             result
-        })
+        });
+        super::autoscroll::register(ui, &output, self.axes);
+        output
     }
 
     pub fn show_rows<R>(self, ui: &mut Ui, row_height: f32, total: usize,
@@ -80,14 +82,16 @@ impl KeyboardScrollArea {
         let id = ui.make_persistent_id(self.salt);
         let area_bounds = ui.available_rect_before_wrap();
         let stride = row_height + spacing;
-        self.inner.show_rows(ui, row_height, total, |ui, rows| {
+        let output = self.inner.show_rows(ui, row_height, total, |ui, rows| {
             let origin = ui.cursor().top() - rows.start as f32 * stride;
             let clip = ui.clip_rect();
             let viewport = egui::Rect::from_min_size(egui::pos2(0.0, clip.top() - origin), clip.size());
             let result = contents(ui, rows);
-            if self.vertical { keyboard_scroll(ui, id, viewport, (total as f32 * stride - spacing).max(0.0), clip.intersect(area_bounds)); }
+            if self.axes.y { keyboard_scroll(ui, id, viewport, (total as f32 * stride - spacing).max(0.0), clip.intersect(area_bounds)); }
             result
-        })
+        });
+        super::autoscroll::register(ui, &output, self.axes);
+        output
     }
 }
 

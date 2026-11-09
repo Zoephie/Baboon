@@ -501,6 +501,7 @@ impl Baboon {
             BrowserAction::RenameTag(key) => self.open_rename_tag(&key),
             BrowserAction::DuplicateTag(key) => self.open_duplicate_tag(&key),
             BrowserAction::DeleteTag(key) => self.open_delete_tag(&key),
+            BrowserAction::DeleteLooseFolder { rel_path } => self.open_delete_folder(rel_path, ctx),
             BrowserAction::FindReferences(key) => self.show_references_for(&key),
             BrowserAction::ExploreReferences(key) => self.open_content_explorer(&key),
             BrowserAction::DumpReferences(key) => self.begin_dump_tag_references(&key, ctx),
@@ -1245,6 +1246,7 @@ mod tests {
             A::RenameContainerFolder { .. } => 47,
             A::DeleteContainerFolder { .. } => 48,
             A::StringTransfer { .. } => 49,
+            A::DeleteLooseFolder { .. } => 50,
         }
     }
 

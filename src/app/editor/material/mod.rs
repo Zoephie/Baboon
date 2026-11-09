@@ -376,7 +376,7 @@ pub(in crate::app) fn draw_material_value_row(
             value_rect,
             0.0,
             Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
-            egui::StrokeKind::Middle,
+            egui::StrokeKind::Inside,
         );
     let text_offset = if let Some(color) = color {
         let swatch_size = (value_rect.height() - 4.0).max(12.0);

@@ -34,6 +34,7 @@ pub(super) fn draw_model_viewport(
     desired_size: Vec2,
 ) {
     let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
+    crate::app::ui_kit::autoscroll::reserve_middle_drag(ui, &response);
     let painter = ui.painter_at(rect);
 
     // Pixels → world units at the current zoom, for the pan and zoom-to-cursor

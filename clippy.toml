@@ -1,6 +1,11 @@
 # Lints for the rules the codebase keeps that the compiler cannot see.
 
 disallowed-methods = [
+    # Selection artwork is supplied by the app's themed wrapper. Native
+    # checkboxes are only used inside that wrapper and its comparison test.
+    { path = "egui::Ui::checkbox", reason = "use CheckboxUi::baboon_checkbox for the shared SVG checkbox style" },
+    { path = "egui::Checkbox::new", reason = "use ThemedCheckbox::new for the shared SVG checkbox style" },
+    { path = "egui::Checkbox::without_text", reason = "use ThemedCheckbox::without_text for the shared SVG checkbox style" },
     # The typed enum readers panic when a tag's value has no option name this
     # build knows: a tag from a newer kit, a damaged tag, a schema drift. In the
     # editor that takes the whole app down with the user's unsaved work.

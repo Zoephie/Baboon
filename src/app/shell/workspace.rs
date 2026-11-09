@@ -52,6 +52,7 @@ impl Baboon {
                 self.draw_workspace_tiles(ui, ctx);
             });
         self.draw_auxiliary_windows(ctx);
+        crate::app::ui_kit::autoscroll::draw_blocker(ui);
         // The draws' commands land first: some of them queue the very requests
         // processed next (the tag pane sends its sound player's plays this way),
         // and the next frame's draws have to see those requests settled, or
@@ -188,6 +189,7 @@ impl Baboon {
                 self.open_chimp_save_dialog(self.model.active)
             }
             Some(DeferredFileAction::SaveCurrentTag) => self.save_current_tag(ctx),
+            Some(DeferredFileAction::SaveCurrentTagAs) => self.save_current_tag_as(),
             Some(DeferredFileAction::SaveProject) => {
                 let (kit, now) = (self.model.active, ctx.input(|input| input.time));
                 self.save_campaign_project_file(kit, now);
@@ -918,7 +920,7 @@ pub(in crate::app) fn draw_folder_refactor_lock(ctx: &egui::Context, folder_refa
                     ui.add(bar.text(RichText::new(&progress.phase).color(text_dark())));
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("Baboon is locked until references are updated.")
+                        RichText::new("Baboon is locked until the folder operation finishes.")
                             .color(subtle_dark())
                             .small(),
                     );

@@ -124,12 +124,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         let scope = format!("kit{}_tile{}", self.kit.0, tile_id.0);
         let caches = self.inputs.tags.get(&(self.kit, key));
         Frame::NONE
-            .inner_margin(egui::Margin {
-                left: 10,
-                right: 10,
-                top: 8,
-                bottom: 0,
-            })
+            .inner_margin(pane_content_margin())
             .show(ui, |ui| {
                 crate::app::ScrollArea::vertical()
                     .id_salt(("tag_tile", tile_id.0))
@@ -378,7 +373,9 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
             };
             // The selected tab is an extension of the page, like Find/Replace:
             // rounded above, flush below, with no outline separating the two.
-            crate::app::shell::frame::paint_connected_tab(ui, tab_rect, bg, state.active);
+            let focused = workspace_has_focus(ui.ctx()) && self.cx.model.active == self.kit_index
+                && pane_key.is_some_and(|key| self.cx.model.kits[self.kit_index].current_pane.as_ref() == Some(key));
+            crate::app::shell::frame::paint_connected_tab(ui, tab_rect, bg, state.active, focused);
             if dirty {
                 ui.painter().rect_filled(tab_rect.shrink(2.0), 2.0,
                     crate::app::browser::modified_text().gamma_multiply(0.12));
@@ -697,13 +694,17 @@ pub(in crate::app) fn draw_tag_tiles(
         close_all: false,
         close_all_but: None,
     };
-    tree.ui(&mut behavior, ui);
+    if super::tab_selection::with_tab_neighbour_selection(&mut tree, |tree| tree.ui(&mut behavior, ui)) {
+        ui.ctx().request_repaint();
+    }
     // Only panes laid out this frame have rectangles. Paint each visible page
     // separately, so split groups keep their own frame and active-tab opening.
     for (id, tile) in tree.tiles.iter() {
-        if matches!(tile, egui_tiles::Tile::Pane(_)) && let Some(rect) = tree.tiles.rect(*id) {
+        if let egui_tiles::Tile::Pane(key) = tile && let Some(rect) = tree.tiles.rect(*id) {
             let tab = behavior.active_tab_rects.get(id);
-            crate::app::shell::frame::paint_page_outline(ui, rect, page_corners(rect, tab), tab);
+            let focused = workspace_has_focus(ui.ctx()) && cx.model.active == kit_index
+                && cx.model.kits[kit_index].current_pane.as_ref() == Some(key);
+            crate::app::shell::frame::paint_page_outline(ui, rect, page_corners(rect, tab), tab, focused);
         }
     }
     let TagPaneBehavior {

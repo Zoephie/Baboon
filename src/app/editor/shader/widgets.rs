@@ -30,13 +30,20 @@ pub(in crate::app) fn draw_shader_scroll_area(
         .max_height(height)
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            ui.set_min_width(TAG_FIELD_SCROLL_MIN_WIDTH);
-            draw_shader_columns_header(ui);
-            ScrollArea::vertical()
+            ui.set_min_width(SHADER_GRID_MIN_WIDTH);
+            let header = ui.allocate_exact_size(Vec2::new(shader_grid_width(ui), TABLE_HEADER_HEIGHT), Sense::hover()).0;
+            let body = ScrollArea::vertical()
                 .id_salt(("shader_vertical", &scope))
                 .max_height(ui.available_height().max(0.0))
                 .auto_shrink([false, false])
                 .show(ui, contents);
+            // Use the body's viewport after scrollbar space is accounted for,
+            // so responsive header/body splitters stay in the same columns.
+            let mut header_ui = ui.new_child(egui::UiBuilder::new()
+                .id_salt(("shader_columns_header", &scope))
+                .max_rect(egui::Rect::from_min_size(header.min,
+                    Vec2::new(body.inner_rect.width().max(SHADER_GRID_MIN_WIDTH), header.height()))));
+            draw_shader_columns_header(&mut header_ui);
         });
 }
 
@@ -284,15 +291,15 @@ pub(in crate::app) fn draw_shader_category_row(
     let available = shader_grid_width(ui);
     let label_width = shader_label_width(ui);
     let default_width = shader_default_width(ui);
-    let value_width = (available - label_width - default_width - 26.0).max(240.0);
-    let height = BUTTON_HEIGHT + 8.0;
+    let value_width = (available - label_width - default_width - 12.0 - SHADER_ROW_RIGHT_PADDING).max(40.0);
+    let height = shader_row_height(BUTTON_HEIGHT);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
     let row_fill = Color32::TRANSPARENT;
     ui.painter().rect_filled(rect, 0.0, row_fill);
     shader_row_separator(ui, rect);
     let label_rect = egui::Rect::from_min_size(
         rect.left_top() + Vec2::new(4.0, 0.0),
-        Vec2::new(label_width, height),
+        Vec2::new(label_width, height - SHADER_ROW_BORDER_WIDTH),
     );
     ui.painter().text(
         label_rect.right_center() - Vec2::new(6.0, 0.0),
@@ -304,7 +311,7 @@ pub(in crate::app) fn draw_shader_category_row(
 
     let default_rect = egui::Rect::from_min_size(
         label_rect.right_top() + Vec2::new(2.0, 4.0),
-        Vec2::new(default_width, height - 8.0),
+        Vec2::new(default_width, shader_row_inner_height(height)),
     );
     let default_text = category
         .options
@@ -327,7 +334,7 @@ pub(in crate::app) fn draw_shader_category_row(
 
     let combo_rect = egui::Rect::from_min_size(
         default_rect.right_top() + Vec2::new(6.0, 0.0),
-        Vec2::new(value_width, height - 8.0),
+        Vec2::new(value_width, shader_row_inner_height(height)),
     );
     let selected_index = category.selected.max(0) as usize;
     let selected_text = category
@@ -680,27 +687,11 @@ pub(in crate::app) fn draw_shader_flags_row(
     let available = shader_grid_width(ui);
     let label_width = shader_label_width(ui);
     let default_width = shader_default_width(ui);
-    let value_width =
-        (available - label_width - default_width - 12.0 - SHADER_ROW_RIGHT_PADDING).max(40.0);
-    let mut measure = ui.new_child(
-        egui::UiBuilder::new()
-            .id_salt(("shader_flags_measure", &row.path))
-            .max_rect(egui::Rect::from_min_size(
-                ui.cursor().min,
-                Vec2::new(value_width - 8.0, 0.0),
-            ))
-            .layout(egui::Layout::top_down(egui::Align::Min))
-            .invisible(),
-    );
-    measure.spacing_mut().item_spacing.y = 0.0;
-    for option in &row.options {
-        measure.baboon_checkbox(&mut false, option.label);
-    }
-    let height = (measure.min_rect().height() + 16.0).max(BUTTON_HEIGHT + 8.0);
+    let height = shader_row_height(flag_panel_height(row.options.len(), false));
     let (rect, _) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
     let label_rect = egui::Rect::from_min_size(
         rect.left_top() + Vec2::new(4.0, 0.0),
-        Vec2::new(label_width, height),
+        Vec2::new(label_width, height - SHADER_ROW_BORDER_WIDTH),
     );
     ui.painter().text(
         label_rect.right_top() + Vec2::new(-6.0, shader_label_top_padding(ui)),
@@ -711,7 +702,7 @@ pub(in crate::app) fn draw_shader_flags_row(
     );
     let default_rect = egui::Rect::from_min_size(
         label_rect.right_top() + Vec2::new(2.0, 4.0),
-        Vec2::new(default_width, height - 8.0),
+        Vec2::new(default_width, shader_row_inner_height(height)),
     );
     draw_shader_grid_cell(ui, default_rect, None, "default:flags", &mut None);
     let value_rect = egui::Rect::from_min_max(
@@ -721,35 +712,19 @@ pub(in crate::app) fn draw_shader_flags_row(
             default_rect.bottom(),
         ),
     );
-    shader_input_box(ui, value_rect);
+    paint_flag_panel(ui, value_rect);
     let enabled = edit.editable && !row.path.is_empty();
-    shader_cell_scope(ui, value_rect.shrink(4.0), |ui| {
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            for option in &row.options {
-                let mut checked = row.raw & (1u64 << option.bit) != 0;
-                let response = ui
-                    .push_id(
-                        (edit.view_scope, edit.tag_key, &row.path, option.bit),
-                        |ui| {
-                            ui.add_enabled(enabled, ThemedCheckbox::new(&mut checked, option.label))
-                        },
-                    )
-                    .inner;
-                if response.changed() {
-                    let next_mask = if checked {
-                        row.raw | (1u64 << option.bit)
-                    } else {
-                        row.raw & !(1u64 << option.bit)
-                    };
-                    edit.pending.push(PendingFieldEdit {
-                        path: row.path.clone(),
-                        input: next_mask.to_string(),
-                    });
-                }
-            }
-        });
-    });
+    let mut next_mask = row.raw;
+    for (index, option) in row.options.iter().enumerate() {
+        let bit = 1u64.checked_shl(option.bit).unwrap_or(0);
+        let id = ui.make_persistent_id((edit.view_scope, edit.tag_key, &row.path, option.bit));
+        if draw_flag_option(ui, value_rect, index, id, option.label, None,
+            row.raw & bit != 0, enabled).clicked()
+        {
+            next_mask ^= bit;
+            edit.pending.push(PendingFieldEdit { path: row.path.clone(), input: next_mask.to_string() });
+        }
+    }
     shader_row_separator(ui, rect);
 }
 
@@ -782,20 +757,22 @@ pub(super) fn draw_shader_grid_cell_with_icon(
     game: Option<GameId>,
 ) {
     let mut cell_ui = ui.new_child(egui::UiBuilder::new().id_salt(id_source).max_rect(rect));
-    if id_source.starts_with("default:") || id_source.starts_with("category_default:") {
-        cell_ui.multiply_opacity(0.5);
-    }
+    // Painted cells are read-only even when they are not in the defaults column.
+    cell_ui.set_opacity(cell_ui.opacity().min(0.5));
     let ui = &mut cell_ui;
-    let fill = material_input();
+    let fill = foundation_input();
     let text_color = material_text();
-    let visuals = &ui.visuals().widgets.inactive;
-    ui.painter().rect_filled(rect, visuals.corner_radius, fill);
-    ui.painter().rect_stroke(
-        rect,
-        visuals.corner_radius,
-        visuals.bg_stroke,
-        egui::StrokeKind::Inside,
-    );
+    // Color cells draw this background through their swatch renderer below.
+    // Paint it once so translucent fills do not become darker by stacking.
+    if cell.and_then(|cell| cell.color.as_ref()).is_none() {
+        ui.painter().rect_filled(rect, INPUT_CORNER_RADIUS, fill);
+        ui.painter().rect_stroke(
+            rect,
+            INPUT_CORNER_RADIUS,
+            Stroke::new(1.0, foundation_input_edge()),
+            egui::StrokeKind::Inside,
+        );
+    }
 
     if icon_group.is_some() {
         paint_tag_icon_at(ui, icon_group, game, shader_tag_icon_rect(rect));
@@ -1000,6 +977,29 @@ mod shader_section_tests {
     use crate::app::editor::fields::with_test_edit_context;
 
     #[test]
+    fn shader_section_preserves_last_dropdown_corners() {
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        let button = std::cell::Cell::new(egui::Rect::NOTHING);
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            with_test_edit_context(|edit| {
+                draw_shader_section(ui, "STANDARD PARAMETERS", "enum_corners", edit, |ui, _| {
+                    let row = ui.allocate_exact_size(Vec2::new(ui.available_width(), shader_row_height(BUTTON_HEIGHT)), Sense::hover()).0;
+                    let rect = egui::Rect::from_min_max(row.min + Vec2::splat(4.0), row.max - Vec2::new(4.0, 5.0));
+                    shader_cell_scope(ui, rect, |ui| {
+                        button.set(crate::app::ui_kit::ValueComboBox::from_id_salt("shader_lod_bias")
+                            .selected_text("none").width(rect.width()).show_ui(ui, |_| {}).response.rect);
+                    });
+                });
+            });
+        });
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Rect(rect) if rect.rect == button.get()
+                && rect.fill != Color32::TRANSPARENT && rect.corner_radius.nw > 0)),
+            "The last dropdown must retain its rounded fill when the section clips its bottom row");
+    }
+
+    #[test]
     fn shader_section_clips_the_last_row_accent_and_suppresses_duplicate_bottom_border() {
         let ctx = egui::Context::default();
         ctx.set_fonts(foundation_fonts());
@@ -1046,6 +1046,39 @@ mod shader_section_tests {
     }
 
     #[test]
+    fn shader_scroll_area_fits_split_view_widths() {
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        for width in [440.0, 600.0, 900.0, 480.0] {
+            for pass in 0..3 {
+                let split = std::cell::Cell::new(0.0);
+                let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(width, 400.0))),
+                    ..Default::default()
+                }, |ui| {
+                    let available = ui.available_width();
+                    draw_shader_scroll_area(ui, "split_width_test", |ui| {
+                        assert!(shader_grid_width(ui) <= available + 0.1,
+                            "The real scroll area must fit {available}px without horizontal scrolling; got {}", shader_grid_width(ui));
+                        split.set(ui.cursor().min.x + shader_label_width(ui) + 5.0);
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(shader_grid_width(ui), 1000.0), Sense::hover());
+                        ui.painter().rect_filled(rect, 0.0, foundation_input());
+                    });
+                });
+                if pass == 2 {
+                    let header_split = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                        egui::Shape::LineSegment { points, .. }
+                            if points[0].x == points[1].x && (points[1].y - points[0].y).abs() == TABLE_HEADER_HEIGHT => Some(points[0].x),
+                        _ => None,
+                    }).min_by(f32::total_cmp).expect("header column splitter");
+                    assert!((header_split - split.get()).abs() < 1.0,
+                        "Header and body columns must align beside the vertical scrollbar");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn shader_column_header_stays_fixed_while_the_body_scrolls() {
         let ctx = egui::Context::default();
         let body_y = std::cell::Cell::new(0.0);
@@ -1075,7 +1108,7 @@ mod shader_section_tests {
                 .shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) if text.galley.text() == "field" => Some(text.pos.y),
+                    egui::Shape::Text(text) if text.galley.text() == "Field" => Some(text.pos.y),
                     _ => None,
                 })
                 .unwrap()

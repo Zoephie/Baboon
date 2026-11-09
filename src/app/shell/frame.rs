@@ -148,7 +148,7 @@ pub(in crate::app) fn browser_favorites_divider(ui: &mut Ui, favorites_visible: 
 }
 
 /// A tab connected to the surface below it: round above, open along the bottom.
-pub(in crate::app) fn paint_connected_tab(ui: &Ui, rect: egui::Rect, fill: Color32, active: bool) {
+pub(in crate::app) fn paint_connected_tab(ui: &Ui, rect: egui::Rect, fill: Color32, active: bool, focused: bool) {
     let corners = egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 };
     // Cover the bar's baseline with an opaque area, rather than an
     // antialiased stroke laid over another stroke at a fractional pixel.
@@ -169,15 +169,16 @@ pub(in crate::app) fn paint_connected_tab(ui: &Ui, rect: egui::Rect, fill: Color
             }
         }
         points.push(r.right_bottom());
-        ui.painter().add(egui::Shape::line(points, Stroke::new(1.0, grid_line())));
+        let border = if focused { focused_tab_border(ui.visuals().dark_mode) } else { grid_line() };
+        ui.painter().add(egui::Shape::line(points, Stroke::new(1.0, border)));
     }
 }
 
 /// Leave the active tab's opening out of the page outline entirely.
 pub(in crate::app) fn paint_page_outline(
-    ui: &Ui, rect: egui::Rect, corners: egui::CornerRadius, tab: Option<&egui::Rect>,
+    ui: &Ui, rect: egui::Rect, corners: egui::CornerRadius, tab: Option<&egui::Rect>, focused: bool,
 ) {
-    let stroke = Stroke::new(1.0, grid_line());
+    let stroke = Stroke::new(1.0, if focused { focused_tab_border(ui.visuals().dark_mode) } else { grid_line() });
     let Some(tab) = tab else {
         ui.painter().rect_stroke(rect, corners, stroke, egui::StrokeKind::Inside);
         return;
@@ -3243,6 +3244,26 @@ mod tests {
         h.app.model.loaded_tags_root().expect("a loose kit is loaded")
     }
 
+    fn halo2_bitmap_kit(h: &mut Harness) {
+        let root = temp_dir("frame-smoke-h2-bitmap").join("tags");
+        let path = root.join(tag_path::to_relative("bitmaps\\smoke.bitmap"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fixture::new_tag_for("halo2_mcc", "bitmap").write(&path).unwrap();
+        let mut source = crate::core::source::load_editing_kit_layout(
+            root.clone(),
+            "Halo 2 Smoke Kit".to_owned(),
+            GameId::Halo2,
+            &h.app.model.default_names,
+            &locate_definitions_root(),
+        ).expect("the synthetic Halo 2 kit loads");
+        source.entries = crate::core::source::scan_folder_subtree_entries(
+            &root, std::path::Path::new(""), &source.names,
+        ).unwrap();
+        source.all_entries = source.entries.clone();
+        source.complete_scan = true;
+        h.app.install_loaded_source(source);
+    }
+
     const CE_TAG: &str = "objects\\weapons\\rifle\\rifle.weapon";
 
     /// A Campaign Evolved container workspace with no containers on disk: its
@@ -3387,6 +3408,17 @@ mod tests {
 
     fn cases() -> Vec<Case> {
         let mut cases = vec![
+            case(
+                "bitmap_reimport_confirm",
+                &["dialog:BitmapReimportConfirm"],
+                &[],
+                halo2_bitmap_kit,
+                |h| {
+                    let key = h.app.model.source().unwrap().entries[0].key.clone();
+                    h.app.begin_reimport_bitmap(key, h.ctx.clone());
+                },
+                &["Reimport Bitmap Folder?", "Reimport Folder", "Cancel"],
+            ),
             case(
                 "home_welcome_with_loaded_kit",
                 &["shell.home_open"],
@@ -4080,7 +4112,7 @@ mod tests {
                         progress: Some(0.5),
                     });
                 },
-                &["Renaming smoke to fog", "Baboon is locked until references are updated."],
+                &["Renaming smoke to fog", "Baboon is locked until the folder operation finishes."],
             ),
             // --- ui/dialogs/ ---
             case(
@@ -4127,7 +4159,7 @@ mod tests {
             case(
                 "delete_confirm_loose",
                 &["dialog:DeleteConfirm"],
-                &["tag_ops/delete_confirm.rs"],
+                &[],
                 loose_kit,
                 |h| {
                     let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
@@ -4141,12 +4173,20 @@ mod tests {
                         has_unsaved_edits: true,
                     });
                 },
-                &["Delete tag?", "levels\\smoke\\smoke.scenario"],
+                &["Delete Tag?", "Delete Tag", "Cancel", "levels\\smoke\\smoke.scenario"],
+            ),
+            case(
+                "delete_folder_confirm",
+                &["dialog:DeleteFolderConfirm"],
+                &[],
+                loose_kit,
+                |h| h.app.open_delete_folder("objects/weapons/rifle".into(), h.ctx.clone()),
+                &["Delete Folder?", "Delete Folder", "Cancel"],
             ),
             case(
                 "delete_confirm_container",
                 &["dialog:DeleteConfirm"],
-                &["tag_ops/delete_confirm.rs"],
+                &[],
                 container_kit,
                 |h| {
                     h.app.dialogs.open(DeleteConfirm {
@@ -4161,7 +4201,7 @@ mod tests {
                         has_unsaved_edits: false,
                     });
                 },
-                &["Delete from Campaign Evolved container?"],
+                &["Delete from Campaign Evolved Container?", "Delete Tag", "Cancel"],
             ),
             case(
                 "rename_tag",
@@ -4993,7 +5033,7 @@ mod tests {
         );
         let sources = window_sources();
         assert!(
-            sources.iter().any(|s| s == "tag_ops/delete_confirm.rs")
+            sources.iter().any(|s| s == "tag_ops/rename_tag_window.rs")
                 && sources.iter().any(|s| s == "shell/settings.rs"),
             "the source scan found {sources:?}; it no longer finds windows"
         );
@@ -5578,23 +5618,18 @@ mod tests {
         press_at(h, target, button);
     }
 
-    /// [`press`] on the tab titled `text`. The browser tree, which opens down
-    /// to the current tag, paints the same file names; the tab bar is the
-    /// topmost painting to the right of the tree's.
+    /// Press a tag tab, distinguishing its title from matching browser entries
+    /// using the native tab response bounds rather than browser indentation.
     fn press_tab(h: &mut Harness, text: &str, button: egui::PointerButton) {
-        let rects: Vec<egui::Rect> = h
-            .painted_rects
-            .iter()
-            .filter(|(painted, _)| painted == text)
-            .map(|(_, rect)| *rect)
-            .collect();
-        let tree_right = rects.iter().map(|rect| rect.left()).fold(f32::INFINITY, f32::min);
-        let target = rects
-            .iter()
-            .filter(|rect| rect.left() > tree_right)
-            .min_by(|a, b| a.top().total_cmp(&b.top()))
-            .or(rects.first())
-            .map(|rect| rect.center())
+        let kit = h.app.model.kits[h.app.model.active].id;
+        let tree = &h.app.views[kit].tag_tree;
+        let tabs: Vec<_> = tree.tiles.iter().filter_map(|(id, tile)| {
+            matches!(tile, egui_tiles::Tile::Pane(_))
+                .then(|| h.ctx.read_response(id.egui_id(tree.id())).map(|response| response.rect)).flatten()
+        }).collect();
+        let target = h.painted_rects.iter()
+            .find(|(painted, rect)| painted == text && tabs.iter().any(|tab| tab.contains(rect.center())))
+            .map(|(_, rect)| rect.center())
             .unwrap_or_else(|| panic!("no tab {text:?} is painted: {:?}", h.painted));
         press_at(h, target, button);
     }
@@ -5732,7 +5767,7 @@ mod tests {
     }
 
     #[test]
-    fn tag_content_scrolls_to_the_page_bottom_border() {
+    fn tag_content_keeps_the_shared_bottom_gutter() {
         let (mut h, keys) = three_tabs();
         let mut output = None;
         for _ in 0..2 {
@@ -5750,8 +5785,9 @@ mod tests {
             egui::Shape::Text(text) if text.galley.text().starts_with("OBJECT") => Some(shape.clip_rect),
             _ => None,
         }).expect("the actual field group was painted");
-        assert!((clip.bottom() - page.bottom()).abs() < 1.0,
-            "scrolling content reaches the page border: clip={clip:?}, page={page:?}");
+        let gutter = f32::from(crate::app::ui_kit::style::pane_content_margin().bottom);
+        assert!((page.bottom() - clip.bottom() - gutter).abs() < 1.0,
+            "scrolling content keeps the {gutter}px bottom gutter: clip={clip:?}, page={page:?}");
     }
 
     fn home_group(h: &Harness) -> egui_tiles::TileId {
@@ -5928,6 +5964,24 @@ mod tests {
         assert_eq!(open_tabs(&h), keys);
         press_tab(&mut h, "tag_000.biped", egui::PointerButton::Middle);
         assert_eq!(open_tabs(&h), keys[1..]);
+        assert_eq!(h.app.model.kits[h.app.model.active].selected_key, Some(keys[2].clone()));
+    }
+
+    #[test]
+    fn closing_an_active_tab_from_the_tab_bar_selects_its_neighbour() {
+        for closing in 0..3 {
+            let (mut h, keys) = three_tabs();
+            let label = format!("tag_{closing:03}.biped");
+            let active = h.app.model.active;
+            h.app.kit_and_view(active).open_tag_pane(&keys[closing]);
+            idle(&mut h);
+            press_tab(&mut h, &label, egui::PointerButton::Middle);
+            let expected = if closing == 0 { 1 } else { closing - 1 };
+            let kit = &h.app.model.kits[h.app.model.active];
+            assert!(!kit.open_tabs.contains(&keys[closing]), "tab {closing} did not close: {:?}", kit.open_tabs);
+            assert_eq!(kit.selected_key, Some(keys[expected].clone()), "after closing tab {closing}; remaining {:?}", kit.open_tabs);
+            assert_eq!(kit.current_pane, Some(keys[expected].clone()));
+        }
     }
 
     /// The tab menu's "Close all but this" keeps the tab it was opened on.
@@ -6198,6 +6252,112 @@ mod tests {
             app.commands.send(crate::app::context::Command::Status("Changed".to_owned()));
         });
         assert_eq!(changed, Duration::ZERO, "a change applied after drawing is drawn");
+    }
+
+    #[test]
+    fn ce_collision_material_type_dropdown_stays_open() {
+        let kit = LooseKit::new("ce-collision-material-menu", "haloce_mcc");
+        let path = kit.write_classic_ce("objects/collision", "model_collision_geometry");
+        let source = kit.source();
+        let mut tag = read_entry(&source.source, &source.entries[0]).unwrap();
+        crate::core::document::apply::apply_block_ops(&mut tag, vec![BlockOp {
+            path: "materials".to_owned(), kind: BlockOpKind::Add,
+        }], &mut Default::default());
+        assert_eq!(tag.root().field("materials").unwrap().as_block().unwrap().len(), 1);
+        tag.write(&path).unwrap();
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        let key = kit.open(&mut h.app, "objects/collision.model_collision_geometry");
+        settle(&mut h, 8);
+        for _ in 0..15 {
+            if h.painted.iter().any(|text| text == "material type") { break; }
+            h.frame(vec![pointer_at(PANE_POINT), wheel(-200.0)]);
+            settle(&mut h, 3);
+        }
+        settle(&mut h, 40); // Let wheel inertia finish before targeting a field.
+        assert!(h.painted.iter().any(|text| text == "material type"), "material field not visible: {:?}", h.painted);
+        let option = h.painted_rects.iter().rfind(|(text, _)| text.contains("dirt"))
+            .expect("default material type is displayed").1.center();
+        assert!(option.y > 200.0 && option.y < SCREEN.y - 50.0, "the material dropdown is in view: {option:?}");
+        click_point(&mut h, option);
+        for _ in 0..12 { h.frame(Vec::new()); }
+        assert!(h.painted.iter().any(|text| text == "Search…"),
+            "the material dropdown must remain open after its search gains focus: {:?}", h.painted);
+        assert!(!h.app.model.kits[h.app.model.active].parsed_tags[&key].dirty.is_set(),
+            "opening the dropdown does not modify the tag");
+        h.frame(vec![egui::Event::Text("metal".to_owned())]);
+        settle(&mut h, 4);
+        assert!(h.painted.iter().any(|text| text == "metal (thin)"), "search filters the material options");
+        click(&mut h, "metal (thin)", 0);
+        settle(&mut h, 4);
+        let tag = &h.app.model.kits[h.app.model.active].parsed_tags[&key].tag;
+        assert_eq!(tag.root().descend("materials[0]").unwrap().read_int_any("material type"), Some(6));
+    }
+
+    #[test]
+    fn block_entry_dropdown_focuses_search_in_full_editor() {
+        let kit = LooseKit::new("block-search-focus", "haloce_mcc");
+        let path = kit.write_classic_ce("objects/collision", "model_collision_geometry");
+        let source = kit.source();
+        let mut tag = read_entry(&source.source, &source.entries[0]).unwrap();
+        for name in ["Alpha", "Bravo"] {
+            crate::core::document::apply::add_block_element(&mut tag, "materials").unwrap();
+            let index = if name == "Alpha" { 0 } else { 1 };
+            crate::core::document::apply::apply_field_edit(&mut tag,
+                &format!("materials[{index}]/name"), name).unwrap();
+        }
+        tag.write(&path).unwrap();
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        let key = kit.open(&mut h.app, "objects/collision.model_collision_geometry");
+        settle(&mut h, 12);
+        let jump = h.ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new((
+            "block_index_jump_test", key.as_str(), "indirect damage material",
+        )))).unwrap();
+        click_point(&mut h, jump.center());
+        settle(&mut h, 30);
+        let selector = h.painted_rects.iter().find(|(text, _)| text.contains("0.") && text.contains("Alpha"))
+            .expect("the materials selector is visible").1.center();
+        click_point(&mut h, selector);
+        settle(&mut h, 8);
+        assert!(h.painted.iter().any(|text| text == "Search Entries"));
+        h.frame(vec![egui::Event::Text("Bravo".to_owned())]);
+        settle(&mut h, 3);
+        assert!(h.painted.iter().any(|text| text == "Bravo"),
+            "the popup filters immediately: {:?}", h.painted);
+    }
+
+    #[test]
+    fn block_index_jump_scrolls_to_already_selected_and_other_entries() {
+        for index in [0, 1] {
+            let kit = LooseKit::new("block-index-jump", "haloce_mcc");
+            let path = kit.write_classic_ce("objects/collision", "model_collision_geometry");
+            let source = kit.source();
+            let mut tag = read_entry(&source.source, &source.entries[0]).unwrap();
+            for _ in 0..2 {
+                crate::core::document::apply::add_block_element(&mut tag, "materials").unwrap();
+            }
+            for (path, value) in [
+                ("materials[0]/name", "Alpha"), ("materials[1]/name", "Bravo"),
+                ("indirect damage material", if index == 0 { "0" } else { "1" }),
+            ] {
+                crate::core::document::apply::apply_field_edit(&mut tag, path, value).unwrap();
+            }
+            tag.write(&path).unwrap();
+            let mut h = Harness::new();
+            kit.install(&mut h.app);
+            let key = kit.open(&mut h.app, "objects/collision.model_collision_geometry");
+            settle(&mut h, 12);
+            let jump = h.ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new((
+                "block_index_jump_test", key.as_str(), "indirect damage material",
+            )))).expect("the index reference's Jump To button is visible");
+            click_point(&mut h, jump.center());
+            settle(&mut h, 30);
+            let expected = if index == 0 { "Alpha" } else { "Bravo" };
+            assert!(h.painted_rects.iter().any(|(text, rect)| text == expected
+                && rect.top() > 150.0 && rect.bottom() < SCREEN.y - 40.0),
+                "Jump To must show material {index} without opening its dropdown: {:?}", h.painted);
+        }
     }
 
     /// Rows out of view are not built, and what shows is what drawing every

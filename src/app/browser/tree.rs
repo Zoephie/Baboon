@@ -2000,7 +2000,7 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
     label: &str,
 ) -> Option<BrowserAction> {
     const GAP: f32 = 4.0;
-    let width = (ui.available_width() - GAP * 2.0) / 3.0;
+    let width = (ui.available_width() - GAP * 3.0) / 4.0;
     let enabled = !rel_path.as_os_str().is_empty();
     let mut action = None;
     ui.horizontal(|ui| {
@@ -2025,6 +2025,12 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
                 rel_path: rel_path.to_path_buf(),
                 label: label.to_owned(),
             });
+        }
+        if context_menu_primary_button(ui, "Delete", enabled, width)
+            .on_hover_text("Delete this folder after reviewing its tags and outside references")
+            .clicked()
+        {
+            action = Some(BrowserAction::DeleteLooseFolder { rel_path: rel_path.to_path_buf() });
         }
     });
     if action.is_some() {
@@ -3452,7 +3458,7 @@ pub(in crate::app) fn tag_json_relative_path(entry: &TagEntry) -> PathBuf {
 }
 
 /// What "Extract bitmap source" does, where its menu items offer it.
-const BITMAP_SOURCE_HOVER: &str = "Write the source image the bitmap was imported from as a \
+pub(in crate::app) const BITMAP_SOURCE_HOVER: &str = "Write the source image the bitmap was imported from as a \
      .tif that tool bitmaps can import again. Existing files are left alone.";
 
 pub(in crate::app) fn is_bitmap_group(group_tag: u32) -> bool {
@@ -3739,7 +3745,7 @@ mod tests {
     #[test]
     fn folder_primary_buttons_fill_the_row_and_dispatch_from_both_menus() {
         for header in [false, true] {
-            for (index, label) in ["Rename", "Move", "Copy To"].into_iter().enumerate() {
+            for (index, label) in ["Rename", "Move", "Copy To", "Delete"].into_iter().enumerate() {
                 let ctx = egui::Context::default();
                 let row_width = std::cell::Cell::new(0.0);
                 let frame = |events| {
@@ -3788,12 +3794,12 @@ mod tests {
                         _ => None,
                     })
                     .collect();
-                assert_eq!(buttons.len(), 3);
+                assert_eq!(buttons.len(), 4);
                 for button in &buttons {
-                    assert!((button.width() - (row_width.get() - 8.0) / 3.0).abs() < 1.0);
+                    assert!((button.width() - (row_width.get() - 12.0) / 4.0).abs() < 1.0);
                     assert_eq!(button.top(), buttons[0].top());
                 }
-                assert!((buttons[2].right() - buttons[0].left() - row_width.get()).abs() < 1.0);
+                assert!((buttons[3].right() - buttons[0].left() - row_width.get()).abs() < 1.0);
                 let pos = buttons[index].center();
                 frame(vec![egui::Event::PointerMoved(pos)]);
                 let event = |pressed| egui::Event::PointerButton {
@@ -3808,7 +3814,8 @@ mod tests {
                     match (label, action) {
                         ("Rename", Some(BrowserAction::RenameLooseFolder { rel_path, .. }))
                         | ("Move", Some(BrowserAction::MoveLooseFolder { rel_path, .. }))
-                        | ("Copy To", Some(BrowserAction::CopyLooseFolder { rel_path, .. })) =>
+                        | ("Copy To", Some(BrowserAction::CopyLooseFolder { rel_path, .. }))
+                        | ("Delete", Some(BrowserAction::DeleteLooseFolder { rel_path })) =>
                             rel_path == Path::new("objects/brute"),
                         _ => false,
                     },
@@ -5153,6 +5160,7 @@ mod tests {
         offset: f32,
         /// The current tag or folder, as the panel names it.
         selected: Option<String>,
+        free_scroll: bool,
     }
 
     impl Browser {
@@ -5171,6 +5179,7 @@ mod tests {
                 content_height: 0.0,
                 offset: 0.0,
                 selected: None,
+                free_scroll: false,
             }
         }
 
@@ -5185,7 +5194,8 @@ mod tests {
             // A reveal scrolls the area itself, so its frames are left free.
             let offset = match (offset, reveal) {
                 (Some(offset), _) => Some(self.resolve(offset)),
-                (None, None) => Some(self.offset),
+                (None, None) if !self.free_scroll => Some(self.offset),
+                (None, None) => None,
                 (None, Some(_)) => None,
             };
             let input = egui::RawInput {
@@ -5675,5 +5685,68 @@ mod tests {
                 assert_same_view(&skipping.scrolled(offset), &full.scrolled(offset), &context);
             }
         }
+    }
+
+    #[test]
+    fn deleting_a_visible_tag_keeps_the_tree_scroll_position() {
+        let mut browser = Browser::new(true);
+        browser.scrolled(0.0);
+        browser.scrolled(90_000.0);
+        let before = browser.scrolled(90_000.0);
+        let key = before.visible.iter().find(|(name, _)| name.starts_with("file:")).unwrap().0.clone();
+        let offset = browser.offset;
+        browser.entries.retain(|entry| entry.key != key);
+        browser.tree = crate::core::source::build_tree(&browser.entries);
+        browser.free_scroll = true;
+        for _ in 0..4 {
+            browser.frame(None, "", Vec::new(), None);
+            assert!((browser.offset - offset).abs() <= 24.0, "deletion moved the scroll offset from {offset} to {}", browser.offset);
+        }
+    }
+
+    #[test]
+    fn deleting_a_visible_loose_tag_keeps_the_lazy_tree_scroll_position() {
+        let root = crate::core::test_kits::unique_temp_dir("baboon-delete-scroll");
+        let dir = root.join("objects");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut header = [0u8; 64];
+        header[48..52].copy_from_slice(b"bipd");
+        header[60..64].copy_from_slice(b"BLAM");
+        for tag in 0..100 {
+            std::fs::write(dir.join(format!("tag_{tag:03}.biped")), header).unwrap();
+        }
+        let mut browser = Browser::lazy(&root, true);
+        browser.scrolled(0.0);
+        browser.click_row("objects");
+        browser.time += 1.0;
+        browser.scrolled(0.0);
+        browser.scrolled(0.0);
+        let before = browser.scrolled(900.0);
+        let key = before.visible.iter().find(|(name, _)| browser.entries.iter().any(|entry| entry.key == *name)).unwrap().0.clone();
+        let entry = browser.entries.iter().find(|entry| entry.key == key).unwrap();
+        let TagEntryLocation::LooseFile(path) = &entry.location else { panic!("loose tag"); };
+        std::fs::remove_file(path).unwrap();
+        let mut source = crate::core::source::LoadedSourceData {
+            label: "delete scroll".into(),
+            source: TagSource::LooseFolder { root: root.clone(), game: None, definitions_root: Default::default() },
+            names: Default::default(), game: None,
+            entries: std::mem::take(&mut browser.entries),
+            tree: std::mem::take(&mut browser.tree),
+            group_tree: Default::default(), all_entries: Vec::new(),
+            reverse_dependencies: None, initial_tag: None,
+            key_hints: Default::default(), complete_scan: false, chosen_kit_layout: None,
+        };
+        assert!(source.remove_entry(&key, &[]));
+        browser.entries = source.entries;
+        browser.tree = source.tree;
+        browser.free_scroll = true;
+        let offset = browser.offset;
+        let mut offsets = Vec::new();
+        for _ in 0..4 {
+            browser.frame(None, "", Vec::new(), None);
+            offsets.push(browser.offset);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(offsets.iter().all(|after| (after - offset).abs() <= 24.0), "deletion moved the scroll offset from {offset} to {offsets:?}");
     }
 }

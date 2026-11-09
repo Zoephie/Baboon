@@ -221,6 +221,10 @@ impl Baboon {
                 WorkerMessage::FolderRefactorFinished { stamp, result } => {
                     self.handle_folder_refactor_finished(stamp, result)
                 }
+                WorkerMessage::FolderDeleteFinished { stamp, result } => {
+                    self.handle_folder_delete_finished(stamp, result, ctx);
+                    false
+                }
                 WorkerMessage::FolderConversionProgress(progress) => {
                     self.handle_folder_conversion_progress(progress)
                 }

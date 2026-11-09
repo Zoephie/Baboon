@@ -160,11 +160,7 @@ pub(in crate::app) fn foundation_visuals() -> egui::Visuals {
     visuals.panel_fill = editor_bg();
     visuals.window_fill = editor_bg();
     visuals.faint_bg_color = row_type();
-    visuals.extreme_bg_color = if is_dark_mode() {
-        Color32::from_rgb(23, 23, 23)
-    } else {
-        foundation_input()
-    };
+    visuals.extreme_bg_color = foundation_input();
     visuals.selection.bg_fill = selection_fill_for(is_dark_mode());
     visuals.selection.stroke = Stroke::new(1.0_f32, selection_stroke_for(is_dark_mode()));
     visuals.widgets.noninteractive.bg_fill = row_type();
@@ -570,6 +566,11 @@ pub(in crate::app) fn grid_line() -> Color32 {
     }
 }
 
+/// Neutral emphasis for the tab owning the currently focused pane.
+pub(in crate::app) fn focused_tab_border(dark_mode: bool) -> Color32 {
+    Color32::from_gray(if dark_mode { 160 } else { 90 })
+}
+
 pub(in crate::app) fn foundation_group_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(43, 43, 43)
@@ -626,22 +627,24 @@ pub(in crate::app) fn foundation_jump_cyan() -> Color32 {
     Color32::from_rgb(77, 208, 225)
 }
 
-pub(in crate::app) fn foundation_input() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(31, 31, 31)
-    } else {
-        Color32::from_rgb(248, 248, 247)
-    }
+fn input_fill_for(dark_mode: bool) -> Color32 {
+    // Match the literal sRGB overlay convention used by buttons: black in
+    // dark mode, white in light mode, both at approximately 30% alpha.
+    neutral_button_fill(!dark_mode, 77)
 }
 
-/// A value box whose value can't be changed: Foundation greys a read-only
-/// field's box (`#EDEDED` against white), and Baboon dims its own the same way.
+pub(in crate::app) fn foundation_input() -> Color32 {
+    input_fill_for(is_dark_mode())
+}
+
+/// Read-only inputs share the palette and fade as a whole in read_only_input_scope.
 pub(in crate::app) fn foundation_input_read_only() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(38, 38, 38)
-    } else {
-        Color32::from_rgb(234, 234, 232)
-    }
+    foundation_input()
+}
+
+/// Keep page content equally inset from its side and bottom borders.
+pub(in crate::app) fn pane_content_margin() -> egui::Margin {
+    egui::Margin { left: 10, right: 10, top: 8, bottom: 10 }
 }
 
 pub(in crate::app) fn foundation_input_edge() -> Color32 {
@@ -926,14 +929,6 @@ pub(in crate::app) fn material_function_row() -> Color32 {
         Color32::from_rgb(58, 47, 32)
     } else {
         MATERIAL_FUNCTION_ROW
-    }
-}
-
-pub(in crate::app) fn material_input() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(27, 28, 27)
-    } else {
-        Color32::WHITE
     }
 }
 

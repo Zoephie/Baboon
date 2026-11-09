@@ -306,13 +306,27 @@ pub(in crate::app) fn foundation_value_cell_with_error(
     editable: bool,
     invalid: bool,
 ) -> egui::Response {
+    foundation_value_cell_with_error_and_corners(
+        ui, text, width, id, editable, invalid, crate::app::ui_kit::INPUT_CORNER_RADIUS,
+    )
+}
+
+pub(in crate::app) fn foundation_value_cell_with_error_and_corners(
+    ui: &mut Ui,
+    text: &mut String,
+    width: f32,
+    id: egui::Id,
+    editable: bool,
+    invalid: bool,
+    corners: egui::CornerRadius,
+) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
     let fill = invalid.then(invalid_value_fill);
     let color = if invalid { invalid_value_text() } else { text_dark() };
     if editable {
-        foundation_value_text_filled(ui, rect, text, Some(id), color, VALUE_PADDING, fill, None)
+        foundation_value_text_filled_with_placeholder(ui, rect, text, Some(id), color, VALUE_PADDING, fill, None, false, corners)
     } else {
-        foundation_value_text_filled(ui, rect, &mut text.as_str(), Some(id), color, VALUE_PADDING, fill, None)
+        foundation_value_text_filled_with_placeholder(ui, rect, &mut text.as_str(), Some(id), color, VALUE_PADDING, fill, None, false, corners)
     }
 }
 
@@ -325,9 +339,9 @@ pub(in crate::app) fn foundation_string_id_value_cell(
     let color = if invalid { invalid_value_text() } else { text_dark() };
     let fill = invalid.then(invalid_value_fill);
     if editable {
-        foundation_value_text_filled_with_placeholder(ui, rect, text, Some(id), color, VALUE_PADDING, fill, None, true)
+        foundation_value_text_filled_with_placeholder(ui, rect, text, Some(id), color, VALUE_PADDING, fill, None, true, crate::app::ui_kit::INPUT_CORNER_RADIUS)
     } else {
-        foundation_value_text_filled_with_placeholder(ui, rect, &mut text.as_str(), Some(id), color, VALUE_PADDING, fill, None, true)
+        foundation_value_text_filled_with_placeholder(ui, rect, &mut text.as_str(), Some(id), color, VALUE_PADDING, fill, None, true, crate::app::ui_kit::INPUT_CORNER_RADIUS)
     }
 }
 
@@ -359,7 +373,7 @@ fn foundation_value_text_filled(
     fill: Option<Color32>,
     status: Option<&str>,
 ) -> egui::Response {
-    foundation_value_text_filled_with_placeholder(ui, rect, text, id, color, left_padding, fill, status, false)
+    foundation_value_text_filled_with_placeholder(ui, rect, text, id, color, left_padding, fill, status, false, crate::app::ui_kit::INPUT_CORNER_RADIUS)
 }
 
 fn foundation_value_text_filled_with_placeholder(
@@ -372,59 +386,58 @@ fn foundation_value_text_filled_with_placeholder(
     fill: Option<Color32>,
     status: Option<&str>,
     string_id_placeholder: bool,
+    corners: egui::CornerRadius,
 ) -> egui::Response {
-    // A box whose text can't change is greyed, as Foundation greys a
-    // read-only field's: a dimmer fill and dimmer text (a missing reference
-    // keeps its red). It still takes focus, so its text can be copied.
-    let read_only = !text.is_mutable();
-    let invalid = fill == Some(invalid_value_fill());
-    let unapplied = fill == Some(unapplied_value_fill());
-    let status_color = if unapplied { unapplied_value_text() } else { invalid_value_text() };
-    let state = if invalid { InputState::Invalid } else if unapplied { InputState::Warning } else { InputState::Normal };
-    let appearance = input_appearance(ui, state, read_only, false);
-    let fill = fill.unwrap_or(appearance.fill);
-    let color = if read_only && color == text_dark() { subtle_dark() } else { color };
-    ui.painter().rect_filled(rect, appearance.corners, fill);
-    let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
-    let status = status.map(|status| ui.painter().layout_no_wrap(status.to_owned(), FontId::proportional(11.0), status_color));
-    let right_padding = 4.0 + status.as_ref().map_or(0.0, |galley| galley.size().x + 8.0);
-    let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
-        findable_galley(ui, text.as_str(), font_id.clone(), color, FindTargetKind::Value)
-    };
-    // A frame of our own, so egui doesn't draw a different one for a buffer
-    // it can't change; egui ignores `.margin()` once a frame is given.
-    let showing_placeholder = string_id_placeholder && text.as_str().is_empty();
-    let mut edit = crate::app::ui_kit::singleline_text_edit(text)
-        .frame(egui::Frame::NONE.inner_margin(egui::Margin {
-            left: left_padding as i8,
-            right: right_padding.ceil() as i8,
-            top: 2,
-            bottom: 2,
-        }))
-        .font(font_id.clone())
-        .text_color(color)
-        .vertical_align(egui::Align::Center)
-        .clip_text(true)
-        .layouter(&mut layouter);
-    if string_id_placeholder { edit = edit.hint_text(placeholder_text("NONE")); }
-    if let Some(id) = id {
-        edit = edit.id(id);
-    }
-    // egui forces hint text to the UI's weak-text colour, so scope that colour
-    // to this input to keep NONE at exactly half the normal text opacity.
-    let previous_weak = ui.visuals().weak_text_color;
-    if showing_placeholder { ui.visuals_mut().weak_text_color = Some(text_dark().gamma_multiply(0.5)); }
-    let response = ui.put(rect, edit);
-    if showing_placeholder { ui.visuals_mut().weak_text_color = previous_weak; }
-    let appearance = input_appearance(ui, state, read_only, response.has_focus());
-    ui.painter().rect_stroke(rect, appearance.corners, appearance.stroke, egui::StrokeKind::Middle);
-    if let Some(status) = status {
-        ui.painter().with_clip_rect(rect.shrink(1.0)).galley(
-            egui::pos2(rect.right() - 4.0 - status.size().x, rect.center().y - status.size().y * 0.5),
-            status, status_color);
-    }
-    text_edit_cursor_to_start_on_tab_focus(ui, &response);
-    response
+    crate::app::ui_kit::read_only_input_scope(ui, !text.is_mutable(), |ui| {
+        // Fade the whole box, preserving validation hues and selectable text.
+        let read_only = !text.is_mutable();
+        let invalid = fill == Some(invalid_value_fill());
+        let unapplied = fill == Some(unapplied_value_fill());
+        let status_color = if unapplied { unapplied_value_text() } else { invalid_value_text() };
+        let state = if invalid { InputState::Invalid } else if unapplied { InputState::Warning } else { InputState::Normal };
+        let appearance = input_appearance(ui, state, read_only, false);
+        let fill = fill.unwrap_or(appearance.fill);
+        ui.painter().rect_filled(rect, corners, fill);
+        let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
+        let status = status.map(|status| ui.painter().layout_no_wrap(status.to_owned(), FontId::proportional(11.0), status_color));
+        let right_padding = 4.0 + status.as_ref().map_or(0.0, |galley| galley.size().x + 8.0);
+        let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
+            findable_galley(ui, text.as_str(), font_id.clone(), color, FindTargetKind::Value)
+        };
+        // A frame of our own, so egui doesn't draw a different one for a buffer
+        // it can't change; egui ignores `.margin()` once a frame is given.
+        let showing_placeholder = string_id_placeholder && text.as_str().is_empty();
+        let mut edit = crate::app::ui_kit::singleline_text_edit(text)
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin {
+                left: left_padding as i8,
+                right: right_padding.ceil() as i8,
+                top: 2,
+                bottom: 2,
+            }))
+            .font(font_id.clone())
+            .text_color(color)
+            .vertical_align(egui::Align::Center)
+            .clip_text(true)
+            .layouter(&mut layouter);
+        if string_id_placeholder { edit = edit.hint_text(placeholder_text("NONE")); }
+        if let Some(id) = id {
+            edit = edit.id(id);
+        }
+        // egui forces hint text to the UI's weak-text colour, so scope that colour
+        // to this input to keep NONE at exactly half the normal text opacity.
+        let previous_weak = ui.visuals().weak_text_color;
+        if showing_placeholder { ui.visuals_mut().weak_text_color = Some(text_dark().gamma_multiply(0.5)); }
+        let response = ui.put(rect, edit);
+        if showing_placeholder { ui.visuals_mut().weak_text_color = previous_weak; }
+        let appearance = input_appearance(ui, state, read_only, response.has_focus());
+        ui.painter().rect_stroke(rect, corners, appearance.stroke, egui::StrokeKind::Inside);
+        if let Some(status) = status {
+            ui.painter().with_clip_rect(rect.shrink(1.0)).galley(
+                egui::pos2(rect.right() - 4.0 - status.size().x, rect.center().y - status.size().y * 0.5),
+                status, status_color);
+        }
+        response
+    })
 }
 
 fn tag_reference_value_width(available: f32) -> f32 {
@@ -461,22 +474,24 @@ pub(super) fn foundation_tag_reference_input_cell_colored(
     missing: bool,
     show_hover_text: bool,
 ) -> egui::Response {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
-    let response = foundation_value_text_filled(
-        ui,
-        rect,
-        &mut text,
-        None,
-        if missing { invalid_value_text() } else { color },
-        tag_reference_icon_footprint(),
-        missing.then(invalid_value_fill),
-        missing.then_some("missing"),
-    );
-    paint_tag_reference_icon(ui, rect, icon);
-    if response.hovered() && show_hover_text {
-        return response.on_hover_text(hover.unwrap_or(text));
-    }
-    response
+    crate::app::ui_kit::read_only_input_scope(ui, true, |ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
+        let response = foundation_value_text_filled(
+            ui,
+            rect,
+            &mut text,
+            None,
+            if missing { invalid_value_text() } else { color },
+            tag_reference_icon_footprint(),
+            missing.then(invalid_value_fill),
+            missing.then_some("missing"),
+        );
+        paint_tag_reference_icon(ui, rect, icon);
+        if response.hovered() && show_hover_text {
+            return response.on_hover_text(hover.unwrap_or(text));
+        }
+        response
+    })
 }
 
 pub(super) fn foundation_tag_reference_text_edit_cell(
@@ -506,19 +521,6 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
         response.on_hover_text("Referenced tag not found on disk")
     } else {
         response
-    }
-}
-
-pub(in crate::app) fn text_edit_cursor_to_start_on_tab_focus(ui: &Ui, response: &egui::Response) {
-    if response.gained_focus() && ui.input(|input| input.key_pressed(egui::Key::Tab)) {
-        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id) {
-            state
-                .cursor
-                .set_char_range(Some(egui::text::CCursorRange::one(
-                    egui::text::CCursor::new(0),
-                )));
-            state.store(ui.ctx(), response.id);
-        }
     }
 }
 
@@ -941,6 +943,7 @@ pub(in crate::app) fn picker_search_field(
         crate::app::ui_kit::singleline_text_edit(filter)
             .hint_text(placeholder_text(hint))
             .desired_width(ui.available_width())
+            .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
             .margin(egui::Margin {
                 left: 4,
                 right: 28,
@@ -1001,17 +1004,14 @@ pub(in crate::app) fn picker_button(
     foreground: Color32,
     enabled: bool,
 ) -> egui::Response {
-    let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
     let response = ui
         .scope(|ui| {
             if !enabled {
                 ui.disable();
             }
-            if open {
-                ui.visuals_mut().widgets.inactive.weak_bg_fill =
-                    ui.visuals().widgets.open.weak_bg_fill;
-            }
-            ui.add_sized(Vec2::new(width, BUTTON_HEIGHT), egui::Button::new(""))
+            crate::app::ui_kit::with_open_dropdown_visuals(ui, Some(popup_id), |ui| {
+                ui.add_sized(Vec2::new(width, BUTTON_HEIGHT), egui::Button::new(""))
+            })
         })
         .inner;
     let foreground = if !enabled || !ui.is_enabled() {
@@ -1165,6 +1165,7 @@ mod tests {
                     for rect in [standard_rect, tag_rect] {
                         assert_eq!(border(rect).corner_radius, egui::CornerRadius::same(2));
                         assert_eq!(border(rect).stroke, expected_stroke, "validation border survives focus");
+                        assert_eq!(border(rect).stroke_kind, egui::StrokeKind::Inside, "every input state keeps its border within the field");
                     }
                     let fill = |rect| output.shapes.iter().find_map(|shape| match &shape.shape {
                         egui::Shape::Rect(shape) if shape.rect == rect && shape.fill != Color32::TRANSPARENT => Some(shape.fill),
@@ -1183,10 +1184,12 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.set_global_style(foundation_style());
         let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
-            for (value, editable) in [("readonlyvalue", false), ("editablevalue", true)] {
+            for (value, editable, opacity) in [("readonlyvalue", false, 1.0), ("editablevalue", true, 1.0), ("nestedreadonly", false, 0.5)] {
+                ui.set_opacity(opacity);
                 let mut text = value.to_owned();
                 foundation_value_cell(ui, &mut text, 120.0, egui::Id::new(value), editable);
             }
+            ui.set_opacity(1.0);
             foundation_input_cell(ui, "displayedvalue", 120.0);
         });
         let mut texts = std::collections::HashMap::new();
@@ -1194,10 +1197,13 @@ mod tests {
             if let egui::Shape::Text(text) = &clipped.shape {
                 let font = text.galley.job.sections[0].format.font_id.clone();
                 texts.insert(text.galley.text().to_owned(), (text.pos.x + text.galley.rect.left(), font));
+                let expected = if text.galley.text() == "editablevalue" { text_dark() } else { text_dark().gamma_multiply(0.5) };
+                assert!(text.galley.rows.iter().flat_map(|row| &row.visuals.mesh.vertices).any(|vertex| vertex.color == expected),
+                    "{}: read-only inputs fade once, including inside an already faded parent", text.galley.text());
             }
         }
         let editable = &texts["editablevalue"];
-        for read_only in ["readonlyvalue", "displayedvalue"] {
+        for read_only in ["readonlyvalue", "displayedvalue", "nestedreadonly"] {
             assert_eq!(&texts[read_only], editable, "{read_only} is laid out unlike an editable value");
         }
     }
@@ -1766,7 +1772,7 @@ mod tests {
 
     /// How far a scroll area scrolled under a mouse wheel turned while a drag
     /// from outside it is held over it.
-    fn wheel_while_dragging(take_wheel: bool) -> f32 {
+    fn scroll_while_dragging(take_wheel: bool, payload: bool, edge: bool) -> f32 {
         let ctx = egui::Context::default();
         ctx.global_style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
         let mut time = 0.0;
@@ -1784,7 +1790,7 @@ mod tests {
                     // The drag starts above the scroll area, as one from the
                     // browser starts outside the editor.
                     let (_, source) = ui.allocate_exact_size(egui::vec2(100.0, 60.0), egui::Sense::drag());
-                    source.dnd_set_drag_payload(7_u32);
+                    if payload { source.dnd_set_drag_payload(7_u32); }
                     let output = crate::app::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                         if take_wheel {
                             scroll_during_drag(ui);
@@ -1798,7 +1804,7 @@ mod tests {
             });
         };
         let source = egui::pos2(50.0, 30.0);
-        let over = egui::pos2(300.0, 200.0);
+        let over = egui::pos2(300.0, if edge { 350.0 } else { 200.0 });
         for _ in 0..3 {
             frame(vec![egui::Event::PointerMoved(source)], &mut offset);
         }
@@ -1811,12 +1817,12 @@ mod tests {
         }
         for _ in 0..10 {
             frame(
-                vec![egui::Event::MouseWheel {
+                if edge { Vec::new() } else { vec![egui::Event::MouseWheel {
                     unit: egui::MouseWheelUnit::Point,
                     delta: egui::vec2(0.0, -40.0),
                     phase: egui::TouchPhase::Move,
                     modifiers: egui::Modifiers::NONE,
-                }],
+                }] },
                 &mut offset,
             );
         }
@@ -1828,7 +1834,57 @@ mod tests {
     /// below the fold couldn't be reached to drop on.
     #[test]
     fn the_wheel_scrolls_while_a_tag_is_dragged() {
-        assert_eq!(wheel_while_dragging(false), 0.0, "control: egui ignores the wheel mid-drag");
-        assert!(wheel_while_dragging(true) > 0.0, "the editor takes it");
+        assert_eq!(scroll_while_dragging(false, true, false), 0.0, "control: egui ignores the wheel mid-drag");
+        assert!(scroll_while_dragging(true, true, false) > 0.0, "the editor takes it");
     }
+
+    #[test]
+    fn edge_scrolling_requires_dragged_content_rather_than_a_window_or_control() {
+        assert_eq!(scroll_while_dragging(true, false, true), 0.0,
+            "moving a window or control near the edge must not scroll the pane");
+        assert!(scroll_while_dragging(true, true, true) > 0.0,
+            "dragging content to the edge still scrolls");
+    }
+}
+
+/// Shared flags-list geometry; the containing editor chooses the panel width.
+pub(in crate::app) const FLAG_OPTION_HEIGHT: f32 = 21.0;
+
+pub(in crate::app) fn flag_panel_height(options: usize, show_raw: bool) -> f32 {
+    if options == 0 { 32.0 }
+    else { 12.0 + FLAG_OPTION_HEIGHT * options as f32 + if show_raw { 24.0 } else { 0.0 } }
+}
+
+pub(in crate::app) fn paint_flag_panel(ui: &Ui, rect: egui::Rect) {
+    ui.painter().rect_filled(rect, INPUT_CORNER_RADIUS, foundation_input());
+    ui.painter().rect_stroke(rect, INPUT_CORNER_RADIUS,
+        Stroke::new(1.0, foundation_input_edge()), egui::StrokeKind::Inside);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::app) fn draw_flag_option(
+    ui: &mut Ui, panel: egui::Rect, index: usize, id: egui::Id,
+    label: &str, help: Option<&str>, checked: bool, enabled: bool,
+) -> egui::Response {
+    let row = egui::Rect::from_min_size(
+        panel.left_top() + Vec2::new(8.0, 6.0 + index as f32 * FLAG_OPTION_HEIGHT),
+        Vec2::new((panel.width() - 16.0).max(0.0), FLAG_OPTION_HEIGHT),
+    );
+    let enabled = enabled && ui.is_enabled();
+    let response = ui.interact(row, id, if enabled { Sense::click() } else { Sense::hover() });
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, checked, label));
+    if response.hovered() {
+        ui.painter().rect_filled(row, 0.0, foundation_flag_hover());
+        response.clone().on_hover_text(match help {
+            Some(help) => format!("{label}\n\n{help}"),
+            None => label.to_owned(),
+        });
+    }
+    let checkbox = egui::Rect::from_min_size(row.left_top() + Vec2::new(0.0, 2.5), Vec2::splat(16.0));
+    let mut checkbox_ui = ui.new_child(egui::UiBuilder::new().max_rect(checkbox));
+    if !enabled { checkbox_ui.disable(); }
+    paint_checkbox_at(&checkbox_ui, checkbox, checked, response.hovered() || response.has_focus());
+    paint_findable_text(ui, row.left_center() + Vec2::new(20.0, 0.0), Align2::LEFT_CENTER,
+        &truncate_for_cell(label, row.width() - 24.0), FontId::proportional(12.5), text_dark(), FindTargetKind::Value);
+    response
 }

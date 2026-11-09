@@ -19,6 +19,9 @@ pub(in crate::app) const SHORTCUTS: &[(egui::Modifiers, egui::Key, fn() -> AppAc
     (egui::Modifiers::COMMAND, egui::Key::N, || AppAction::NewTag),
     (egui::Modifiers::COMMAND, egui::Key::F, || AppAction::OpenFind),
     (egui::Modifiers::COMMAND, egui::Key::H, || AppAction::OpenReplace),
+    (egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::S, || {
+        AppAction::Defer(DeferredFileAction::SaveCurrentTagAs)
+    }),
     (egui::Modifiers::COMMAND, egui::Key::S, || {
         AppAction::Defer(DeferredFileAction::SaveCurrentTag)
     }),
@@ -72,7 +75,6 @@ pub(in crate::app) enum AppAction {
     OpenTagsFolder,
     OpenDataFolder,
     Recent(RecentAction),
-    SaveCurrentTagAs,
     UndoLastPoke,
     ReviewChanges,
     Undo,
@@ -176,7 +178,6 @@ impl Baboon {
             AppAction::OpenTagsFolder => self.open_loaded_tags_folder(),
             AppAction::OpenDataFolder => self.open_loaded_data_folder(),
             AppAction::Recent(action) => self.apply_recent_action(action, ctx),
-            AppAction::SaveCurrentTagAs => self.save_current_tag_as(),
             AppAction::UndoLastPoke => self.begin_undo_last_poke(ctx.clone()),
             AppAction::ReviewChanges => self.review_changes(),
             AppAction::Undo => self.undo_current_tag(),
@@ -340,5 +341,16 @@ mod tests {
             [AppAction::Defer(DeferredFileAction::SaveCurrentTag)]
         ));
         assert!(matches!(pressed(cmd, egui::Key::Z).as_slice(), [AppAction::Undo]));
+    }
+
+    #[test]
+    fn save_as_shortcut_takes_precedence_over_save() {
+        for command in [egui::Modifiers::CTRL, egui::Modifiers::MAC_CMD] {
+            let command = command.plus(egui::Modifiers::COMMAND);
+            assert!(matches!(pressed(command.plus(egui::Modifiers::SHIFT), egui::Key::S).as_slice(),
+                [AppAction::Defer(DeferredFileAction::SaveCurrentTagAs)]));
+            assert!(matches!(pressed(command, egui::Key::S).as_slice(),
+                [AppAction::Defer(DeferredFileAction::SaveCurrentTag)]));
+        }
     }
 }

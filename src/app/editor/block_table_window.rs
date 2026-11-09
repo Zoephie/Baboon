@@ -68,7 +68,7 @@ fn draw_block_table(ctx: &egui::Context, table: &mut BlockTableState) -> BlockTa
             let list_rect = egui::Rect::from_min_size(ui.cursor().min,
                 Vec2::new(ui.available_width(), list_height + 26.0 + ui.spacing().item_spacing.y));
             ui.scope_builder(egui::UiBuilder::new().max_rect(list_rect), |ui| {
-            egui_extras::TableBuilder::new(ui)
+            let scroll = egui_extras::TableBuilder::new(ui)
                 .id_salt("block_entry_table")
                 .striped(false)
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
@@ -176,6 +176,7 @@ fn draw_block_table(ctx: &egui::Context, table: &mut BlockTableState) -> BlockTa
                         });
                     }
                 });
+                crate::app::ui_kit::autoscroll::register(ui, &scroll, egui::Vec2b::new(false, true));
             });
             if count == 0 { ui.label(RichText::new("Empty block").color(subtle_dark())); }
             if let Some(status) = &table.status { ui.label(RichText::new(status).color(REFERENCE_MISSING_COLOR)); }

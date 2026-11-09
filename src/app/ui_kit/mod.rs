@@ -2,12 +2,19 @@
 //! artwork. It knows nothing about tags or features.
 
 use super::*;
+mod focus;
+pub(in crate::app) mod autoscroll;
+pub(in crate::app) use focus::{install_focus_outlines, workspace_has_focus};
 pub(in crate::app) mod scroll;
 
 pub(in crate::app) mod style;
 pub(in crate::app) use style::*;
 mod input;
 pub(in crate::app) use input::*;
+mod text_focus;
+pub(in crate::app) use text_focus::install_text_focus;
+mod table_header;
+pub(in crate::app) use table_header::*;
 mod dropdown;
 pub(in crate::app) use dropdown::{ValueComboBox, ValueComboUi, value_dropdown_contents};
 pub(in crate::app) mod button_icons;
