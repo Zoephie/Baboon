@@ -551,7 +551,7 @@ impl CeGlowField {
     pub(crate) fn advance(&mut self, glows: &[CeGlow], outputs_of: impl Fn(u8) -> [f32; 4], bones: Option<&[[f32; 4]]>, time: f32) {
         if self.running.len() != glows.len() || self.time.is_none_or(|last| time < last) {
             self.running = (0..glows.len())
-                .map(|at| RunningGlow { random: Lcg(at as u32 * 977 + 1), ..RunningGlow::default() })
+                .map(|at| RunningGlow { random: Lcg(CeRandom(at as u32 * 977 + 1)), ..RunningGlow::default() })
                 .collect();
             self.time = Some(time);
         }

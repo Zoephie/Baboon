@@ -15,9 +15,9 @@ use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
 use super::super::common::image::Image;
 use super::super::materials::decode_image;
 use super::super::*;
+use super::super::ce::random::CeRandom;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{cross, dot, nonzero_unit};
-use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 use crate::app::model_preview::ce::blend::FramebufferBlend;
 
 mod light_volume;

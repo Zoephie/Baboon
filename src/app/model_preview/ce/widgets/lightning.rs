@@ -144,12 +144,11 @@ pub(in crate::app::model_preview) fn read_ce_lightning(
         .collect()
 }
 
-pub(super) struct Lcg(pub(super) u32);
+pub(super) struct Lcg(pub(super) CeRandom);
 
 impl Lcg {
     fn next(&mut self) -> f32 {
-        self.0 = lcg_step(self.0);
-        high24_over_2_24(self.0)
+        self.0.next()
     }
 }
 
@@ -172,7 +171,7 @@ impl CeLightning {
         view: &ViewFrame,
         seed: u32,
     ) -> Vec<CeLightningQuad> {
-        let mut random = Lcg(seed | 1);
+        let mut random = Lcg(CeRandom(seed | 1));
         let value = |source: Option<usize>| source.map_or(1.0, |slot| outputs[slot]);
         let jitter_scale = value(self.jitter_source);
         let thickness_scale = value(self.thickness_source);
@@ -274,13 +273,13 @@ impl CeLightning {
 
 impl Default for Lcg {
     fn default() -> Self {
-        Lcg(1)
+        Lcg(CeRandom(1))
     }
 }
 
 impl std::fmt::Debug for Lcg {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_tuple("Lcg").field(&self.0).finish()
+        formatter.debug_tuple("Lcg").field(&self.0.0).finish()
     }
 }
 

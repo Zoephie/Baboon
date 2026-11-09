@@ -17,7 +17,7 @@ use super::super::materials::decode_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_up};
-use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
+use super::random::CeRandom;
 use crate::app::model_preview::ce::blend::FramebufferBlend;
 
 const PRE_ROLL: f32 = 4.0;
@@ -312,12 +312,12 @@ struct Point {
     density: f32,
 }
 
-struct Random(u32);
+/// The contrail's draws, which print without their seed.
+struct ContrailRandom(CeRandom);
 
-impl Random {
+impl ContrailRandom {
     fn next(&mut self) -> f32 {
-        self.0 = lcg_step(self.0);
-        high24_over_2_24(self.0)
+        self.0.next()
     }
 }
 
@@ -330,7 +330,7 @@ fn scaled_range(bounds: [f32; 2], scaled: [bool; 2], scale: f32, random: f32) ->
 }
 
 /// `contrail_update_points` for one point.
-fn step_point(point: &mut Point, states: &[PointState], ground: f32, dt: f32, random: &mut Random) {
+fn step_point(point: &mut Point, states: &[PointState], ground: f32, dt: f32, random: &mut ContrailRandom) {
     if point.done {
         return;
     }
@@ -391,18 +391,18 @@ struct RunningContrail {
     frame: i32,
     frame_time: f32,
     scroll: [f32; 2],
-    random: Random,
+    random: ContrailRandom,
 }
 
-impl std::fmt::Debug for Random {
+impl std::fmt::Debug for ContrailRandom {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "Random")
     }
 }
 
-impl Clone for Random {
+impl Clone for ContrailRandom {
     fn clone(&self) -> Self {
-        Random(self.0)
+        ContrailRandom(self.0)
     }
 }
 
@@ -460,7 +460,7 @@ impl CeContrailField {
                         frame: 0,
                         frame_time: 0.0,
                         scroll: [0.0; 2],
-                        random: Random(at as u32 * 977 + 1),
+                        random: ContrailRandom(CeRandom(at as u32 * 977 + 1)),
                     };
                     next_frame(&mut running, &contrail.def);
                     running
@@ -733,7 +733,7 @@ mod tests {
             new: true,
             density: 1.0,
         };
-        let mut random = Random(1);
+        let mut random = ContrailRandom(CeRandom(1));
         step_point(&mut point, &states, 0.0, 0.1, &mut random);
         assert!(point.moving_on);
         assert_eq!(point.state, 0);

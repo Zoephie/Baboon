@@ -8,34 +8,6 @@ pub(super) const MOST_EVENTS_A_TICK: usize = 8;
 /// The game's pool is shared by the whole level.
 const MOST_PARTICLES: usize = 1024;
 
-/// `seed_random` and the draws made from it.
-#[derive(Debug, Clone, Copy, Default)]
-pub(in crate::app::model_preview) struct Random(u32);
-
-impl Random {
-    pub(super) fn next(&mut self) -> f32 {
-        self.0 = lcg_step(self.0);
-        high24_over_2_24(self.0)
-    }
-
-    pub(super) fn range(&mut self, low: f32, high: f32) -> f32 {
-        low + (high - low) * self.next()
-    }
-
-    /// `seed_random`: the high half of the next seed.
-    pub(in crate::app::model_preview) fn bits(&mut self) -> u32 {
-        self.0 = lcg_step(self.0);
-        high_bits(self.0)
-    }
-
-    fn direction(&mut self) -> [f32; 3] {
-        let z = self.range(-1.0, 1.0);
-        let (sin, cos) = self.range(0.0, std::f32::consts::TAU).sin_cos();
-        let flat = (1.0 - z * z).max(0.0).sqrt();
-        [flat * cos, flat * sin, z]
-    }
-}
-
 /// `effect_datum`, the parts the preview keeps.
 #[derive(Debug, Clone)]
 pub(super) struct RunningEffect {
@@ -118,8 +90,8 @@ pub(crate) struct CeParticleField {
     /// `game_time_get`.
     pub(super) tick: u32,
     owed: CeTicks,
-    random: Option<Random>,
-    system_random: Option<SystemRandom>,
+    random: Option<CeRandom>,
+    system_random: Option<CeRandom>,
 }
 
 /// What an attached effect reads of its object.
@@ -192,10 +164,10 @@ impl CeParticleField {
             self.spawned.clear();
             // Plays made before the restart are not made again.
             self.played = plays.counts.clone();
-            self.system_random = Some(SystemRandom::seeded(0x5eed_4321));
+            self.system_random = Some(CeRandom::seeded(0x5eed_4321));
             self.tick = 0;
             self.owed = CeTicks::default();
-            self.random = Some(Random(0x1234_5678));
+            self.random = Some(CeRandom(0x1234_5678));
             let mut random = self.random.take().unwrap();
             for (running, effect) in self.effects.iter_mut().zip(effects) {
                 set_event(running, &effect.def, 0, &mut random);
@@ -207,7 +179,7 @@ impl CeParticleField {
             return;
         };
         let now = resume_point(now, time, PRE_ROLL);
-        let mut random = self.random.take().unwrap_or(Random(1));
+        let mut random = self.random.take().unwrap_or(CeRandom(1));
         self.play_events(effects, plays, &mut random);
         for dt in frame_steps(now, time) {
             let effects: Vec<CeEffectAt> = effects.iter().chain(&self.spawned).cloned().collect();
@@ -240,7 +212,7 @@ impl CeParticleField {
     /// `effect_new_from_object` for each play not yet made: a copy of the
     /// event's effect on the object's markers, at the plays' scales, white,
     /// at rest, among those particles have made.
-    fn play_events(&mut self, effects: &[CeEffectAt], plays: &CeEventPlays, random: &mut Random) {
+    fn play_events(&mut self, effects: &[CeEffectAt], plays: &CeEventPlays, random: &mut CeRandom) {
         self.played.resize(effects.len(), 0);
         for (index, effect) in effects.iter().enumerate() {
             let wanted = plays.counts.get(index).copied().unwrap_or(0);
@@ -271,7 +243,7 @@ impl CeParticleField {
         bones: Option<&[[f32; 4]]>,
         ground: f32,
         others: usize,
-        random: &mut Random,
+        random: &mut CeRandom,
     ) {
         self.tick += 1;
         let mut system_room = MOST_SYSTEM_PARTICLES.saturating_sub(self.system_particle_count() + others);
@@ -282,7 +254,7 @@ impl CeParticleField {
             }
             let state = inputs(effect.object);
             let running = &mut self.effects[index];
-            let system_random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
+            let system_random = self.system_random.get_or_insert_with(|| CeRandom::seeded(1));
             let made = Made {
                 particles: &mut self.particles,
                 lights: &mut self.lights,
@@ -306,10 +278,10 @@ impl CeParticleField {
     /// `particle_systems_update` by the frame, then, only when ticks ran,
     /// `particles_update` by them, with the effects what they hit and died
     /// of make. A particle that steps a frame per update steps one per tick.
-    fn frame_parts(&mut self, effects: &[CeEffectAt], ground: f32, dt: f32, ticked: f32, others: usize, random: &mut Random) {
+    fn frame_parts(&mut self, effects: &[CeEffectAt], ground: f32, dt: f32, ticked: f32, others: usize, random: &mut CeRandom) {
         let mut system_room = MOST_SYSTEM_PARTICLES.saturating_sub(self.system_particle_count() + others);
         // Those with no type in a state go.
-        let system_random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
+        let system_random = self.system_random.get_or_insert_with(|| CeRandom::seeded(1));
         self.systems.retain_mut(|(effect, def, running)| {
             effects
                 .get(*effect)
@@ -401,7 +373,7 @@ impl CeParticleField {
         let effects = self.all(effects);
         let mut quads = Vec::new();
         let time = self.tick as f32 * STEP;
-        let random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
+        let random = self.system_random.get_or_insert_with(|| CeRandom::seeded(1));
         for (effect, def, running) in &mut self.systems {
             let Some(at) = effects.get(*effect) else {
                 continue;
@@ -645,7 +617,7 @@ pub(super) struct Made<'a> {
     pub(super) particles: &'a mut Vec<CeParticle>,
     pub(super) lights: &'a mut Vec<CeRunningLight>,
     pub(super) systems: &'a mut Vec<(usize, usize, CeRunningSystem)>,
-    pub(super) system_random: &'a mut SystemRandom,
+    pub(super) system_random: &'a mut CeRandom,
     /// What is left of the particle systems' shared particles.
     pub(super) system_room: &'a mut usize,
     pub(super) ground: f32,
@@ -697,7 +669,7 @@ pub(super) fn generate_parts(index: usize, running: &RunningEffect, effect: &CeE
 }
 
 /// `effect_real_random_range`, with a range's pair from each scale.
-fn effect_random_range(value: [f32; 2], running: &RunningEffect, a: [bool; 2], b: [bool; 2], random: &mut Random) -> f32 {
+fn effect_random_range(value: [f32; 2], running: &RunningEffect, a: [bool; 2], b: [bool; 2], random: &mut CeRandom) -> f32 {
     let [lower, delta] = scaled(value, running, a, b);
     random.range(0.0, delta) + lower
 }
@@ -712,8 +684,8 @@ pub(super) fn generate_systems(
     running: &RunningEffect,
     effect: &CeEffectAt,
     systems: &mut Vec<(usize, usize, CeRunningSystem)>,
-    random: &mut Random,
-    system_random: &mut SystemRandom,
+    random: &mut CeRandom,
+    system_random: &mut CeRandom,
     room: &mut usize,
     bones: Option<&[[f32; 4]]>,
     ground: f32,
@@ -766,7 +738,7 @@ pub(super) fn generate_particles(
     running: &mut RunningEffect,
     effect: &CeEffectAt,
     particles: &mut Vec<CeParticle>,
-    random: &mut Random,
+    random: &mut CeRandom,
     bones: Option<&[[f32; 4]]>,
 ) {
     let def = &effect.def;

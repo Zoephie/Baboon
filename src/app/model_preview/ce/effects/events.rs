@@ -65,7 +65,7 @@ pub(super) fn integral(function: Distribution, fraction: f32) -> f32 {
 }
 
 /// `effect_set_event`.
-pub(super) fn set_event(running: &mut RunningEffect, def: &CeEffectDef, event: usize, random: &mut Random) {
+pub(super) fn set_event(running: &mut RunningEffect, def: &CeEffectDef, event: usize, random: &mut CeRandom) {
     if let Some(found) = def.events.get(event) {
         running.event = event;
         running.time = 0.0;
@@ -82,7 +82,7 @@ pub(super) fn update_effect(
     effect: &CeEffectAt,
     inputs: &CeObjectInputs,
     made: Made<'_>,
-    random: &mut Random,
+    random: &mut CeRandom,
     bones: Option<&[[f32; 4]]>,
     dt: f32,
 ) {
@@ -99,7 +99,7 @@ pub(super) fn update_effect(
 /// What an attached effect takes of its object each tick: on while its
 /// primary scale is, restarting when it has run out, stopping when it goes
 /// off.
-fn attached_inputs(running: &mut RunningEffect, effect: &CeEffectAt, inputs: &CeObjectInputs, random: &mut Random) {
+fn attached_inputs(running: &mut RunningEffect, effect: &CeEffectAt, inputs: &CeObjectInputs, random: &mut CeRandom) {
     let def = &effect.def;
     // `object_get_function_value`: none is on at one.
     let (scale_a, on) = match effect.primary {
@@ -147,7 +147,7 @@ fn run_events(
     running: &mut RunningEffect,
     effect: &CeEffectAt,
     made: Made<'_>,
-    random: &mut Random,
+    random: &mut CeRandom,
     bones: Option<&[[f32; 4]]>,
     dt: f32,
 ) {

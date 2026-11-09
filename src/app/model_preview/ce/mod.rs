@@ -21,6 +21,7 @@ pub(super) mod sprite_sheet;
 pub(super) mod transition;
 pub(super) mod blend;
 pub(super) mod panel;
+pub(super) mod random;
 
 /// What a Halo CE object brings to its preview beyond its geometry: its
 /// lights' flares, antennas, effects, firing, contrails and widgets.

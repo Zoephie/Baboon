@@ -21,15 +21,15 @@ use super::super::common::point_physics::CePointPhysics;
 use super::lights::{CeEffectLightDef, CeLight, read_effect_light};
 use super::super::common::view::{ViewFrame, posed_on};
 use super::particle_systems::{
-    CePctlDef, CePctlQuad, CeRunningSystem, MOST_SYSTEM_PARTICLES, Random as SystemRandom, new_unattached, read_pctl_def,
+    CePctlDef, CePctlQuad, CeRunningSystem, MOST_SYSTEM_PARTICLES, new_unattached, read_pctl_def,
     unattached_quads, update_unattached,
 };
 use crate::app::model_preview::common::fields::argb;
 use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
 use super::super::common::image::Image;
 use super::super::*;
+use super::super::ce::random::CeRandom;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
-use crate::app::model_preview::common::random::{high24_over_2_24, high_bits, lcg_step};
 use crate::app::model_preview::ce::sprite_sheet::{CeSecondaryDraw, CeSecondaryMap, CeSpriteFrame, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
 use crate::app::model_preview::ce::ticks::{CeTicks, PRE_ROLL, STEP};
 use crate::app::model_preview::ce::blend::FramebufferBlend;

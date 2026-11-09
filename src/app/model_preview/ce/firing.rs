@@ -18,7 +18,8 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, has_flag, object_block};
 use crate::app::model_preview::common::time::TICKS_PER_SECOND;
-use super::effects::{CeEffectAt, Random};
+use super::effects::CeEffectAt;
+use super::random::CeRandom;
 use crate::app::model_preview::ce::ticks::STEP;
 
 /// Below this a recovery time is none: tool bakes a whole tick's fall.
@@ -128,7 +129,7 @@ pub(crate) struct CeWeaponShots {
     /// The heat at the tick of the last shot.
     heat: Option<(i64, f32)>,
     /// The seed of the random choices.
-    random: Random,
+    random: CeRandom,
 }
 
 /// Shots fired from the panel, by model and object.

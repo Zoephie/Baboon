@@ -120,47 +120,17 @@ impl CeRunningSystem {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct Random(u32);
-
-impl Random {
-    pub(crate) fn seeded(seed: u32) -> Self {
-        Self(seed)
-    }
-
-    fn next(&mut self) -> f32 {
-        self.0 = lcg_step(self.0);
-        high24_over_2_24(self.0)
-    }
-
-    fn range(&mut self, low: f32, high: f32) -> f32 {
-        low + (high - low) * self.next()
-    }
-
-    /// `seed_random_range`: an integer in [low, high).
-    pub(super) fn index(&mut self, high: usize) -> usize {
-        ((self.next() * high as f32) as usize).min(high.saturating_sub(1))
-    }
-
-    fn direction(&mut self) -> [f32; 3] {
-        let z = self.range(-1.0, 1.0);
-        let (sin, cos) = self.range(0.0, std::f32::consts::TAU).sin_cos();
-        let flat = (1.0 - z * z).max(0.0).sqrt();
-        [flat * cos, flat * sin, z]
-    }
-}
-
 /// Every particle system of the object, carried from frame to frame.
 #[derive(Debug, Default)]
 pub(crate) struct CeParticleSystemField {
     time: Option<f32>,
     systems: Vec<CeRunningSystem>,
-    random: Option<Random>,
+    random: Option<CeRandom>,
 }
 
 /// `randomize_particle_variables`: scale, rates and alpha at random, the
 /// color's channels together.
-fn randomize(state: &CeParticleState, random: &mut Random) -> ParticleVariables {
+fn randomize(state: &CeParticleState, random: &mut CeRandom) -> ParticleVariables {
     let together = random.range(0.0, 1.0);
     let animation = random.range(state.animation_rate[0], state.animation_rate[1]);
     let rotation = random.range(state.rotation_rate[0], state.rotation_rate[1]);
@@ -218,7 +188,7 @@ impl CeParticleSystemField {
         others: usize,
     ) {
         if self.systems.len() != systems.len() || self.time.is_none_or(|last| time < last) {
-            let mut random = Random(0x5eed_1234);
+            let mut random = CeRandom(0x5eed_1234);
             self.systems = systems.iter().map(|system| new_system(&system.def, true, &mut random)).collect();
             self.random = Some(random);
             self.time = Some(time - PRE_ROLL);
@@ -227,7 +197,7 @@ impl CeParticleSystemField {
             return;
         };
         let now = resume_point(now, time, PRE_ROLL);
-        let mut random = self.random.take().unwrap_or(Random(1));
+        let mut random = self.random.take().unwrap_or(CeRandom(1));
         for step in frame_steps(now, time) {
             let mut room = MOST_SYSTEM_PARTICLES.saturating_sub(self.particle_count() + others);
             for (system, running) in systems.iter().zip(&mut self.systems) {
@@ -254,7 +224,7 @@ impl CeParticleSystemField {
         pixel: impl Fn([f32; 3]) -> f32,
     ) -> Vec<CePctlQuad> {
         let mut quads = Vec::new();
-        let mut random = self.random.take().unwrap_or(Random(1));
+        let mut random = self.random.take().unwrap_or(CeRandom(1));
         let time = self.time.unwrap_or(0.0);
         for (index, (system, running)) in systems.iter().zip(&mut self.systems).enumerate() {
             system_quads(&system.def, running, index, view, &pixel, &mut random, time, &mut quads);
@@ -266,7 +236,7 @@ impl CeParticleSystemField {
 
 /// `particle_system_new_attached` and `particle_system_initialize`: every
 /// type in its first state for a time from its bounds.
-fn new_system(def: &CePctlDef, attached: bool, random: &mut Random) -> CeRunningSystem {
+fn new_system(def: &CePctlDef, attached: bool, random: &mut CeRandom) -> CeRunningSystem {
     let types = def
         .types
         .iter()
@@ -301,7 +271,7 @@ pub(crate) fn new_unattached(
     color: [f32; 4],
     scale: f32,
     ground: f32,
-    random: &mut Random,
+    random: &mut CeRandom,
     room: &mut usize,
 ) -> CeRunningSystem {
     let mut running = new_system(def, false, random);
@@ -325,7 +295,7 @@ pub(crate) fn update_unattached(
     running: &mut CeRunningSystem,
     ground: f32,
     dt: f32,
-    random: &mut Random,
+    random: &mut CeRandom,
     room: &mut usize,
 ) -> bool {
     // `particle_system_update_default`, which explosion uses too.
@@ -348,7 +318,7 @@ fn update_system(
     bones: Option<&[[f32; 4]]>,
     ground: f32,
     dt: f32,
-    random: &mut Random,
+    random: &mut CeRandom,
     room: &mut usize,
 ) {
     // `object_get_function_value`: none is on at one.
@@ -376,7 +346,7 @@ fn step_types(
     markers: &[([f32; 3], [f32; 3])],
     ground: f32,
     dt: f32,
-    random: &mut Random,
+    random: &mut CeRandom,
     room: &mut usize,
 ) -> bool {
     let mut active = false;
@@ -468,7 +438,7 @@ fn new_particles(
     markers: &[([f32; 3], [f32; 3])],
     system_velocity: [f32; 3],
     dt: f32,
-    random: &mut Random,
+    random: &mut CeRandom,
     room: &mut usize,
 ) {
     let Some(state) = run.state else {
@@ -530,7 +500,7 @@ fn new_particles(
 /// `particle_system_new_particle_explosion`: out from the marker at random,
 /// spread across by the first constant and up by the second, going at the
 /// third times that; the axis lies flat, square to the way out.
-fn explosion(kind: &ParticleType, marker: [f32; 3], random: &mut Random) -> ([f32; 3], [f32; 3], [f32; 3]) {
+fn explosion(kind: &ParticleType, marker: [f32; 3], random: &mut CeRandom) -> ([f32; 3], [f32; 3], [f32; 3]) {
     let [across, up, speed] = kind.constants;
     let direction = random.direction();
     let out = [direction[0] * across, direction[1] * across, direction[2] * up];
@@ -545,7 +515,7 @@ fn explosion(kind: &ParticleType, marker: [f32; 3], random: &mut Random) -> ([f3
 /// first constant per tick, a share (the second) of it at random; the axis
 /// is square to the way it goes and the forward, or to up when the third
 /// constant is set.
-fn jet(kind: &ParticleType, marker: [f32; 3], forward: [f32; 3], random: &mut Random) -> ([f32; 3], [f32; 3], [f32; 3]) {
+fn jet(kind: &ParticleType, marker: [f32; 3], forward: [f32; 3], random: &mut CeRandom) -> ([f32; 3], [f32; 3], [f32; 3]) {
     let [speed, spread, upright] = kind.constants;
     let per_tick = speed * 0.033_333_335;
     let scattered = spread * per_tick;
@@ -558,7 +528,7 @@ fn jet(kind: &ParticleType, marker: [f32; 3], forward: [f32; 3], random: &mut Ra
 
 /// The particles of one type through their states, turned, animated and
 /// moved; those out of states, or killed where the flags say, go.
-fn update_particles(kind: &ParticleType, run: &mut RunningType, ground: f32, dt: f32, random: &mut Random) {
+fn update_particles(kind: &ParticleType, run: &mut RunningType, ground: f32, dt: f32, random: &mut CeRandom) {
     let multipliers = run.variables;
     let states = &kind.particle_states;
     run.particles.retain_mut(|particle| {

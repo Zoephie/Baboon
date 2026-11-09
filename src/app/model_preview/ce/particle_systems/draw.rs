@@ -10,7 +10,7 @@ pub(super) fn system_quads(
     index: usize,
     view: &ViewFrame,
     pixel: &impl Fn([f32; 3]) -> f32,
-    random: &mut Random,
+    random: &mut CeRandom,
     time: f32,
     quads: &mut Vec<CePctlQuad>,
 ) {
@@ -204,7 +204,7 @@ pub(crate) fn unattached_quads(
     index: usize,
     view: &ViewFrame,
     pixel: impl Fn([f32; 3]) -> f32,
-    random: &mut Random,
+    random: &mut CeRandom,
     time: f32,
 ) -> Vec<CePctlQuad> {
     let mut quads = Vec::new();
