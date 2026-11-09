@@ -447,7 +447,11 @@ pub(in crate::app) fn draw_foundation_enum_row(
                 FindTargetKind::Value,
             )
             .unwrap_or_else(|| selected_label.clone().into());
-            let (_, wheel_delta) = combo_box_with_scroll(
+            // Focusing the trigger or its search disables offscreen-row
+            // culling. Anchor the popup to the field, not the auto IDs of the
+            // surrounding layout, which change when those rows are restored.
+            let enum_id = edit.widget_id((path, "enum_popup"));
+            let (_, wheel_delta) = ui.scope_builder(egui::UiBuilder::new().id(enum_id), |ui| combo_box_with_scroll(
                 ui,
                 crate::app::ui_kit::ValueComboBox::from_id_salt((edit.view_scope, edit.tag_key, path, "enum"))
                     .width(240.0_f32.min(ui.available_size_before_wrap().x.max(1.0)))
@@ -465,7 +469,7 @@ pub(in crate::app) fn draw_foundation_enum_row(
                         }
                     }
                 },
-            );
+            )).inner;
             if let Some(delta) = wheel_delta
                 && let Some(next) =
                     combo_scroll_next_i64(selected, 0, options.len() as i64 - 1, delta)

@@ -6245,6 +6245,46 @@ mod tests {
         assert_eq!(changed, Duration::ZERO, "a change applied after drawing is drawn");
     }
 
+    #[test]
+    fn ce_collision_material_type_dropdown_stays_open() {
+        let kit = LooseKit::new("ce-collision-material-menu", "haloce_mcc");
+        let path = kit.write_classic_ce("objects/collision", "model_collision_geometry");
+        let source = kit.source();
+        let mut tag = read_entry(&source.source, &source.entries[0]).unwrap();
+        crate::core::document::apply::apply_block_ops(&mut tag, vec![BlockOp {
+            path: "materials".to_owned(), kind: BlockOpKind::Add,
+        }], &mut Default::default());
+        assert_eq!(tag.root().field("materials").unwrap().as_block().unwrap().len(), 1);
+        tag.write(&path).unwrap();
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        let key = kit.open(&mut h.app, "objects/collision.model_collision_geometry");
+        settle(&mut h, 8);
+        for _ in 0..15 {
+            if h.painted.iter().any(|text| text == "material type") { break; }
+            h.frame(vec![pointer_at(PANE_POINT), wheel(-200.0)]);
+            settle(&mut h, 3);
+        }
+        settle(&mut h, 40); // Let wheel inertia finish before targeting a field.
+        assert!(h.painted.iter().any(|text| text == "material type"), "material field not visible: {:?}", h.painted);
+        let option = h.painted_rects.iter().rfind(|(text, _)| text.contains("dirt"))
+            .expect("default material type is displayed").1.center();
+        assert!(option.y > 200.0 && option.y < SCREEN.y - 50.0, "the material dropdown is in view: {option:?}");
+        click_point(&mut h, option);
+        for _ in 0..12 { h.frame(Vec::new()); }
+        assert!(h.painted.iter().any(|text| text == "Search…"),
+            "the material dropdown must remain open after its search gains focus: {:?}", h.painted);
+        assert!(!h.app.model.kits[h.app.model.active].parsed_tags[&key].dirty.is_set(),
+            "opening the dropdown does not modify the tag");
+        h.frame(vec![egui::Event::Text("metal".to_owned())]);
+        settle(&mut h, 4);
+        assert!(h.painted.iter().any(|text| text == "metal (thin)"), "search filters the material options");
+        click(&mut h, "metal (thin)", 0);
+        settle(&mut h, 4);
+        let tag = &h.app.model.kits[h.app.model.active].parsed_tags[&key].tag;
+        assert_eq!(tag.root().descend("materials[0]").unwrap().read_int_any("material type"), Some(6));
+    }
+
     /// Rows out of view are not built, and what shows is what drawing every
     /// row shows, scrolled anywhere. Painted text alone can't tell: egui
     /// skips painting text out of view by itself, so rows built are counted.
