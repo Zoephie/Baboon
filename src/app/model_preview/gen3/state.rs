@@ -61,11 +61,8 @@ pub(in crate::app::model_preview) struct Gen3State {
     /// The light's view a self shadow's depth draws through in place of the
     /// camera, while it draws: Reach's and Halo 4's.
     pub(in crate::app::model_preview) shadow_view_projection: Option<[f32; 16]>,
-    /// The picture as Halo 4's camo reads it, bytes as they are.
-    pub(in crate::app::model_preview) camo_scene: Option<glow::NativeTexture>,
-    /// Which draw of a Halo 4 material is under way, when not its albedo or
-    /// own pass (a hologram's or `opaque_alpha_blend`'s fringe).
-    pub(in crate::app::model_preview) submit_draw: Option<super::super::h4::materials::submit::H4Draw>,
+    /// What the game sets in its passes that the shared binder does not.
+    pub(in crate::app::model_preview) hooks: Box<dyn super::pipeline::Gen3PassHooks>,
 }
 
 impl Default for Gen3State {
@@ -87,8 +84,7 @@ impl Default for Gen3State {
             stops: Default::default(),
             sprite_queue: Default::default(),
             shadow_view_projection: Default::default(),
-            camo_scene: Default::default(),
-            submit_draw: Default::default(),
+            hooks: Box::new(super::pipeline::NoPassHooks),
         }
     }
 }

@@ -12,7 +12,7 @@ pub(super) const DECAL_DEPTH_BIAS: f32 = -0.000005;
 /// 0x826E9E40), none for `shader_foliage` (`rmfl`, 0x726D666C) and back faces
 /// for every other group. Only the material's own passes; a shield or shadow
 /// drawn over the part keeps its own culling.
-pub(super) fn reach_draws_two_sided(material: &H3Material, pass: &Arc<H3Pass>, group: Option<u32>) -> bool {
+pub(in crate::app::model_preview) fn reach_draws_two_sided(material: &H3Material, pass: &Arc<H3Pass>, group: Option<u32>) -> bool {
     let foliage = group == Some(u32::from_be_bytes(*b"rmfl"));
     let own = [material.albedo.as_ref(), Some(&material.lit), material.camo.as_ref(), material.dynamic_light.as_ref()]
         .into_iter()

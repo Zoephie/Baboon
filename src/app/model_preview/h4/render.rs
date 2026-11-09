@@ -47,6 +47,10 @@ pub(in crate::app::model_preview) struct H4Game {
 }
 
 impl Gen3Game for H4Game {
+    fn pass_hooks(&self) -> Box<dyn super::super::gen3::pipeline::Gen3PassHooks> {
+        Box::new(super::pass_hooks::H4PassHooks::default())
+    }
+
     /// Holograms draw apart from the scene (`RenderHolograms`). Full camo
     /// (`render_object_mesh_parts`): a camo object's parts draw only into the
     /// shadow and as camo, so nothing of it lands in the light; below full

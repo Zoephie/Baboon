@@ -80,24 +80,24 @@ impl H4Game {
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(true);
             h3_set_cull(gl, frame);
-            state.submit_draw = Some(H4Draw::HologramOpaque);
+            super::super::pass_hooks::h4_pass_hooks(state).submit_draw = Some(H4Draw::HologramOpaque);
             for (batch, material) in holograms.iter().filter(|(_, material)| !post_bloom(material)) {
                 state.draw_pass(core, gl, frame, slot, batch, material, &material.lit, None);
             }
-            state.submit_draw = None;
+            super::super::pass_hooks::h4_pass_hooks(state).submit_draw = None;
             // Mode 1 (`g_disableHologramOrderIndependentTransparency`, the
             // default) then draws pass 2, "hologram blend": blended holograms
             // alone, tested but not written, through `alpha_blend_max`.
             gl.enable(glow::BLEND);
             set_alpha_blend_max(gl);
             gl.depth_mask(false);
-            state.submit_draw = Some(H4Draw::HologramBlend);
+            super::super::pass_hooks::h4_pass_hooks(state).submit_draw = Some(H4Draw::HologramBlend);
             for (batch, material) in holograms.iter().filter(|(_, material)| {
                 !post_bloom(material) && material.h4().is_some_and(|submit| submit.is_blended_hologram())
             }) {
                 state.draw_pass(core, gl, frame, slot, batch, material, &material.lit, None);
             }
-            state.submit_draw = None;
+            super::super::pass_hooks::h4_pass_hooks(state).submit_draw = None;
             gl.blend_equation(glow::FUNC_ADD);
             gl.disable(glow::BLEND);
             gl.disable(glow::SCISSOR_TEST);

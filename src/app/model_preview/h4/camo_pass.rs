@@ -44,10 +44,11 @@ impl H4Game {
             .collect(),
         );
         unsafe {
-            if state.camo_scene.is_none() {
-                state.camo_scene = gl.create_texture().ok();
+            let hooks = super::pass_hooks::h4_pass_hooks(state);
+            if hooks.camo_scene.is_none() {
+                hooks.camo_scene = gl.create_texture().ok();
             }
-            gl.bind_texture(glow::TEXTURE_2D, state.camo_scene);
+            gl.bind_texture(glow::TEXTURE_2D, hooks.camo_scene);
             gl.copy_tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8, 0, 0, size[0], size[1], 0);
             for (name, value) in [
                 (glow::TEXTURE_MIN_FILTER, glow::LINEAR),

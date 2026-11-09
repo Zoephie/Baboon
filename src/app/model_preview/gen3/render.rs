@@ -10,7 +10,7 @@ use super::super::common::plain::PlainRender;
 use super::super::frame::ModelGpuFrame;
 use super::super::renderer::{FrameCx, GameRender, RenderCore};
 use super::effects::screen::H3ScreenSettings;
-use super::pipeline::{FrameValues, PictureCopies, halo3_frame_values};
+use super::pipeline::{FrameValues, Gen3PassHooks, NoPassHooks, PictureCopies, halo3_frame_values};
 use super::shaders::H3Material;
 use super::sprites::{Gen3Sprite, Gen3Sprites};
 use super::state::Gen3State;
@@ -32,6 +32,11 @@ pub(in crate::app::model_preview) struct Gen3Cx<'a> {
 /// ([`Gen3State::draw`]). Each default is what a game without the stage
 /// does: Halo 3's and ODST's, whose own differences are the self shadow.
 pub(in crate::app::model_preview) trait Gen3Game {
+    /// What the game sets in its passes that the shared binder does not.
+    fn pass_hooks(&self) -> Box<dyn Gen3PassHooks> {
+        Box::new(NoPassHooks)
+    }
+
     /// Take out of `batches` what draws apart from the scene.
     fn split(&mut self, _frame: &ModelGpuFrame, _batches: &mut Vec<Gen3Batch>) {}
 
@@ -144,11 +149,17 @@ pub(in crate::app::model_preview) trait Gen3Game {
 /// A gen3 game's drawing: the slot's own draw, then the gen3 pipeline with
 /// `G`'s hooks. Each gen3 game has its own, which the renderer's game table
 /// picks.
-#[derive(Default)]
 pub(in crate::app::model_preview) struct Gen3Pipeline<G> {
     /// The pipeline's own state, between and within frames.
     state: Gen3State,
     game: G,
+}
+
+impl<G: Gen3Game + Default> Default for Gen3Pipeline<G> {
+    fn default() -> Self {
+        let game = G::default();
+        Self { state: Gen3State { hooks: game.pass_hooks(), ..Default::default() }, game }
+    }
 }
 
 impl<G: Gen3Game> Gen3Pipeline<G> {

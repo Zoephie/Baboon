@@ -31,6 +31,10 @@ pub(in crate::app::model_preview) struct ReachGame {
 }
 
 impl Gen3Game for ReachGame {
+    fn pass_hooks(&self) -> Box<dyn super::super::gen3::pipeline::Gen3PassHooks> {
+        Box::new(super::pass_hooks::ReachPassHooks)
+    }
+
     /// `c_player_view::render` hands the screen effects' stops to
     /// `setup_camera_fx_parameters` before anything draws.
     fn stops(&self, screen: &H3ScreenSettings) -> f32 {

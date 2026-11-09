@@ -11,6 +11,7 @@ pub(in crate::app::model_preview) mod bloom;
 pub(in crate::app::model_preview) mod composite;
 pub(in crate::app::model_preview) mod lighting;
 pub(in crate::app::model_preview) mod light_pass;
+pub(in crate::app::model_preview) mod pass_hooks;
 pub(super) mod lights;
 pub(in crate::app::model_preview) mod render;
 pub(super) mod shadow;

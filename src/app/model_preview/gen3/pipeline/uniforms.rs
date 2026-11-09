@@ -52,7 +52,7 @@ pub(super) fn frame_key(uniform: &str, frame: usize) -> String {
 /// following the camera the rig also turns about the vertical by the eye's
 /// heading, so the key light keeps the side it was authored on toward the
 /// viewer; this is the preview's own.
-pub(super) fn h4_hologram_node(frame: &ModelGpuFrame) -> [[f32; 4]; 3] {
+pub(in crate::app::model_preview) fn h4_hologram_node(frame: &ModelGpuFrame) -> [[f32; 4]; 3] {
     let node = 1.min(frame.preview.nodes.len().saturating_sub(1));
     let mut rows = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
     if let Some(posed) = frame.bones.as_ref().and_then(|bones| bones.get(node * 3..node * 3 + 3)) {

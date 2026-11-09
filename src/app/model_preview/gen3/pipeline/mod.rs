@@ -36,6 +36,8 @@ mod blend;
 pub(in crate::app::model_preview) use blend::*;
 mod sort;
 use sort::*;
+mod hooks;
+pub(in crate::app::model_preview) use hooks::*;
 mod stages;
 pub(in crate::app::model_preview) use stages::*;
 mod finish;

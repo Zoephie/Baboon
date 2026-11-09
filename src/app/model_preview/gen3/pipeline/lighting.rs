@@ -173,12 +173,4 @@ impl Gen3State {
             game.dynamic_lights(&mut Gen3Cx { gl, frame, core, slot, state: self }, &drawing.batches);
         }
     }
-
-    /// `simple_lights` and `simple_light_count` for a Reach static pass.
-    pub(in crate::app::model_preview) fn reach_simple_light(&self, name: &str) -> Option<H3Value> {
-        match name {
-            "simple_light_count" => Some(H3Value::Integer(self.inline_lights.len() as i32)),
-            _ => None,
-        }
-    }
 }

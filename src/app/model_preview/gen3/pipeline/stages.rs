@@ -84,27 +84,7 @@ impl Gen3State {
             self.with_program(core, gl, pass, |state, this, program| {
                 gl.use_program(Some(program.program));
                 let size = state.targets.as_ref().map_or([1, 1], |targets| targets.size);
-                let h4_values = material.h4().map(|submit| {
-                    let object = batch.material_index as usize;
-                    let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
-                    let drawn =
-                        super::super::super::h4::materials::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
-                    let albedo = material.albedo.as_ref().is_some_and(|albedo| Arc::ptr_eq(albedo, pass));
-                    let fringe = material.fringe.as_ref().is_some_and(|fringe| Arc::ptr_eq(fringe, pass));
-                    let draw = match state.submit_draw {
-                        Some(draw) => draw,
-                        None if albedo => super::super::super::h4::materials::submit::H4Draw::Albedo,
-                        None if fringe => super::super::super::h4::materials::submit::H4Draw::Fringe,
-                        None => super::super::super::h4::materials::submit::H4Draw::Lit,
-                    };
-                    let mut values = submit.draw_values(draw, &drawn, h4_hologram_node(frame));
-                    // Only the opened object's count is read; attached Halo 4
-                    // objects bring geometry alone.
-                    let count = if owner == 0 { frame.preview.h4.change_color_count } else { 0 };
-                    let colors = super::super::super::h4::materials::submit::object_parameters(frame.change_colors_of(object), count);
-                    values.insert("ps_material_object_parameters".to_owned(), H3Value::FloatArray(colors));
-                    values
-                });
+                let draw_values = state.hooks.draw_values(frame, batch, material, pass);
                 for (name, ty) in &pass.uniforms {
                     let location = program.location(gl, name);
                     if location.is_none() {
@@ -131,8 +111,7 @@ impl Gen3State {
                         "simple_lights" => {
                             if let Some(lit) = &state.light {
                                 gl.uniform_4_f32_slice(location.as_ref(), lit.rows.as_flattened());
-                            } else if material.dialect() == H3Dialect::Reach && !state.inline_lights.is_empty() {
-                                let inline = state.inline_lights.as_flattened().as_flattened();
+                            } else if let Some(inline) = state.hooks.inline_simple_lights(material, &state.inline_lights) {
                                 gl.uniform_4_f32_slice(location.as_ref(), inline);
                             }
                             continue;
@@ -145,21 +124,7 @@ impl Gen3State {
                         }
                         _ => {}
                     }
-                    // The shadow's generate draws from the light.
-                    if material.dialect() == H3Dialect::Halo4
-                        && name == "vs_view_view_projection_matrix"
-                        && let Some(matrix) = state.shadow_view_projection
-                    {
-                        gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
-                        continue;
-                    }
-                    if material.dialect() == H3Dialect::Halo4
-                        && let Some(matrix) = h4_matrix(frame, name)
-                    {
-                        match matrix.len() {
-                            9 => gl.uniform_matrix_3_f32_slice(location.as_ref(), false, &matrix),
-                            _ => gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix),
-                        }
+                    if state.hooks.set_matrix(gl, location.as_ref(), frame, material, name, state.shadow_view_projection) {
                         continue;
                     }
                     // The dynamic pass borrows this constant for its gel's xform.
@@ -172,12 +137,11 @@ impl Gen3State {
                         let [r, g, b] = frame.change_colors_of(batch.material_index as usize)[*channel];
                         H3Value::Floats([r, g, b, 1.0])
                     });
-                    let reach_light =
-                        (material.dialect() == H3Dialect::Reach).then(|| state.reach_simple_light(name)).flatten();
+                    let light = state.hooks.light_value(material, name, &state.inline_lights);
                     let mut value = change_color
-                        .or(reach_light)
+                        .or(light)
                         .or_else(|| (state.frame_values)(frame, name, size, state.stops))
-                        .or_else(|| h4_values.as_ref().and_then(|values| values.get(name)).cloned())
+                        .or_else(|| draw_values.as_ref().and_then(|values| values.get(name)).cloned())
                         .or_else(|| material.values.get(name).cloned());
                     let object = batch.material_index as usize;
                     let screen_values = state.screen_alpha.map(|alpha| {
@@ -232,7 +196,7 @@ impl Gen3State {
                         "ps_view_shadow_mask" => state.shadow_mask.or(this.placeholder),
                         "GlobalTexture_scene_ldr_texture" => targets.map(|targets| targets.behind),
                         // Halo 4's camo: what the object hides.
-                        "sceneTexture_texture" => state.camo_scene.or(targets.map(|targets| targets.behind)),
+                        "sceneTexture_texture" => state.hooks.camo_scene().or(targets.map(|targets| targets.behind)),
                         "depth_buffer" | "psDepthSampler_texture" => state.depth_copy,
                         "shadow_mask_texture" => state.shadow_mask,
                         other if material.screen_maps.iter().any(|map| other.ends_with(map.as_str())) => {
@@ -264,7 +228,7 @@ impl Gen3State {
                     gl.uniform_1_i32(location.as_ref(), unit as i32);
                 }
                 let group = frame.preview.materials.get(batch.material_index as usize).map(|known| known.shader_group);
-                let two_sided = !frame.show_backfaces && reach_draws_two_sided(material, pass, group);
+                let two_sided = !frame.show_backfaces && state.hooks.two_sided(material, pass, group);
                 if two_sided {
                     gl.disable(glow::CULL_FACE);
                 }
