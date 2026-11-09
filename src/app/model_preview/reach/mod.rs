@@ -6,6 +6,7 @@
 pub(in crate::app::model_preview) mod attached;
 pub(in crate::app::model_preview) mod bloom;
 pub(super) mod camo;
+pub(in crate::app::model_preview) mod cloth;
 pub(in crate::app::model_preview) mod composite;
 mod features;
 pub(in crate::app::model_preview) mod light_pass;

@@ -4,6 +4,7 @@
 
 pub(in crate::app::model_preview) mod attached;
 pub(super) mod bloom;
+pub(in crate::app::model_preview) mod cloth;
 pub(super) mod contrails;
 pub(super) mod effect_part;
 mod features;

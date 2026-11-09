@@ -2,6 +2,7 @@
 
 use eframe::glow::{self, HasContext as _};
 
+use super::super::cloth::ClothGame;
 use super::super::common::features::paths;
 use super::super::common::slots::GameSlots;
 use super::super::common::sprites::draw_sprite_quad;
@@ -35,7 +36,7 @@ impl Dx9Game for H2Game {
                 .preview
                 .cloth
                 .first()
-                .is_some_and(|cloth| cloth.halo2())
+                .is_some_and(|cloth| cloth.game() == ClothGame::Halo2)
             {
                 cx.core.move_cloth(cx.gl, cx.frame, cx.slot);
             }

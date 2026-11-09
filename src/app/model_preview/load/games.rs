@@ -1,6 +1,7 @@
 //! The one place the loader names a game: what each game reads of an
 //! object, a model and a Halo CE object of its own.
 
+use super::super::cloth::{ClothGame, ClothRules};
 use super::super::common::marker::MarkerFrame;
 use super::super::functions::TypeExporter;
 use super::super::{
@@ -285,5 +286,16 @@ pub(in crate::app::model_preview) fn resolve_own_shader(
             super::super::h2::shader::resolve::resolve_h2_shader(reader, shader, caches),
         ),
         _ => None,
+    }
+}
+
+impl ClothGame {
+    /// The game's cloth rules, from its own folder.
+    pub(crate) const fn rules(self) -> ClothRules {
+        match self {
+            ClothGame::Halo2 => super::super::h2::cloth::CLOTH,
+            ClothGame::Halo3 => super::super::h3::cloth::CLOTH,
+            ClothGame::Reach => super::super::reach::cloth::CLOTH,
+        }
     }
 }

@@ -33,11 +33,7 @@ pub(crate) struct ClothAt {
 }
 
 impl ClothAt {
-    pub(crate) fn halo2(&self) -> bool {
-        self.game == ClothGame::Halo2
-    }
-
-    #[cfg(test)]
+    /// Which game's cloth the sheet is.
     pub(crate) fn game(&self) -> ClothGame {
         self.game
     }
