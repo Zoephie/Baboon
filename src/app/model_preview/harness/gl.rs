@@ -52,6 +52,9 @@ fn headless_gl_loading(recording: bool) -> glow::Context {
             if recording && let Some(shim) = gl_log::shim(name) {
                 return shim;
             }
+            if let Some(shim) = gl_log::synced_shim(name) {
+                return shim;
+            }
             let name = CString::new(name).unwrap();
             dlsym(-2isize as *mut c_void, name.as_ptr()) as *const c_void
         })
@@ -193,12 +196,61 @@ mod gl_log {
         check_feedback("glDrawArraysInstanced");
         let real: extern "system" fn(u32, i32, i32, i32) =
             unsafe { std::mem::transmute(real("glDrawArraysInstanced", &REAL)) };
-        real(mode, first, count, instances)
+        real(mode, first, count, instances);
+        finish();
     }
 
     /// The stand-ins that check a draw without logging it.
     pub(super) fn checked_shim(name: &str) -> Option<*const c_void> {
         match name {
+            "glDrawArraysInstanced" => Some(draw_arrays_instanced as *const c_void),
+            _ => None,
+        }
+    }
+
+    /// Waits for the GPU to finish what it was given, after each draw. Apple's
+    /// GL-on-Metal driver otherwise lets a frame's picture depend on how its
+    /// work was scheduled: with identical calls, uniforms and uploads, Halo
+    /// 4's storm lich came out in up to five variants in five processes, and
+    /// the power-core shots flaked under load. Syncing every draw makes each
+    /// shot's pixels its own. It is not logged, so the call log is the app's.
+    fn finish() {
+        static REAL: OnceLock<usize> = OnceLock::new();
+        let real: extern "system" fn() = unsafe { std::mem::transmute(real("glFinish", &REAL)) };
+        real()
+    }
+
+    /// The plain context's draws: only the sync, nothing checked or logged.
+    pub(super) fn synced_shim(name: &str) -> Option<*const c_void> {
+        extern "system" fn draw_arrays(mode: u32, first: i32, count: i32) {
+            static REAL: OnceLock<usize> = OnceLock::new();
+            let real: extern "system" fn(u32, i32, i32) =
+                unsafe { std::mem::transmute(real("glDrawArrays", &REAL)) };
+            real(mode, first, count);
+            finish();
+        }
+        extern "system" fn draw_elements(mode: u32, count: i32, kind: u32, indices: *const c_void) {
+            static REAL: OnceLock<usize> = OnceLock::new();
+            let real: extern "system" fn(u32, i32, u32, *const c_void) =
+                unsafe { std::mem::transmute(real("glDrawElements", &REAL)) };
+            real(mode, count, kind, indices);
+            finish();
+        }
+        extern "system" fn draw_arrays_instanced(
+            mode: u32,
+            first: i32,
+            count: i32,
+            instances: i32,
+        ) {
+            static REAL: OnceLock<usize> = OnceLock::new();
+            let real: extern "system" fn(u32, i32, i32, i32) =
+                unsafe { std::mem::transmute(real("glDrawArraysInstanced", &REAL)) };
+            real(mode, first, count, instances);
+            finish();
+        }
+        match name {
+            "glDrawArrays" => Some(draw_arrays as *const c_void),
+            "glDrawElements" => Some(draw_elements as *const c_void),
             "glDrawArraysInstanced" => Some(draw_arrays_instanced as *const c_void),
             _ => None,
         }
@@ -228,7 +280,11 @@ mod gl_log {
                         check_feedback($name);
                     }
                     let real: extern "system" fn($($ty),*) = unsafe { std::mem::transmute(real($name, &REAL)) };
-                    real($($arg),*)
+                    let result = real($($arg),*);
+                    if $name.starts_with("glDraw") {
+                        finish();
+                    }
+                    result
                 }
             )*
 
