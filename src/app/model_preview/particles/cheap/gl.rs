@@ -7,37 +7,13 @@ use eframe::glow::{self, HasContext as _};
 
 /// The cheap particle program: the quads as built, the render texture's
 /// layer sampled a half level sharp, by the vertex colour, at `g_exposure.x`.
-pub(in crate::app::model_preview) const CHEAP_PARTICLE_VERTEX: &str = "#version 330 core
-layout(location = 0) in vec4 a_clip;
-layout(location = 1) in vec3 a_texcoord;
-layout(location = 2) in vec4 a_color;
-out vec3 v_texcoord;
-out vec4 v_color;
-void main() {
-    gl_Position = a_clip;
-    v_texcoord = a_texcoord;
-    v_color = a_color;
-}
-";
+pub(in crate::app::model_preview) const CHEAP_PARTICLE_VERTEX: &str = include_str!("shaders/cheap.vert");
 
 /// `cheap_particles_render.hlsl`'s pixel shader with no fog to add. Its
 /// alpha goes out whole, where the game's is a 32nd: the target's bias is
 /// taken to undo that, as the tool's \"alpha of zero gives you additive\"
 /// needs [inferred: not traced to the target's exponent bias].
-pub(in crate::app::model_preview) const CHEAP_PARTICLE_FRAGMENT: &str = "#version 330 core
-uniform sampler2DArray u_render;
-uniform float u_exposure;
-// Halo 4 runs from its exposure to its self-illumination one by alpha;
-// Reach's two are the same.
-uniform float u_self_illum;
-in vec3 v_texcoord;
-in vec4 v_color;
-out vec4 out_color;
-void main() {
-    vec4 texel = texture(u_render, v_texcoord, -0.5) * v_color;
-    out_color = vec4(texel.rgb * mix(u_exposure, u_self_illum, texel.a), texel.a);
-}
-";
+pub(in crate::app::model_preview) const CHEAP_PARTICLE_FRAGMENT: &str = include_str!("shaders/cheap.frag");
 
 /// A cheap particle vertex: clip position, texcoord and layer, colour.
 pub(in crate::app::model_preview) const CHEAP_FLOATS: usize = 11;

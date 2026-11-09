@@ -15,12 +15,7 @@ pub(in crate::app::model_preview) fn premultiplied_over(array: glow::NativeVerte
         .bind_vertex_array(array)
 }
 
-const COMPOSITE_VERTEX: &str = "#version 410 core
-void main() {
-    vec2 corner = vec2(gl_VertexID & 1, gl_VertexID >> 1) * 4.0 - 1.0;
-    gl_Position = vec4(corner, 0.0, 1.0);
-}
-";
+const COMPOSITE_VERTEX: &str = include_str!("shaders/composite.vert");
 
 /// A full-screen program for `fragment`, or none if it fails to compile or
 /// link. A failure is logged once and remembered, so callers that ask again

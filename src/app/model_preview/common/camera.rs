@@ -69,7 +69,7 @@ pub(in crate::app::model_preview) fn eye_position(camera: &ModelGpuCamera) -> [f
 /// Polygon offset units in one whole of window depth, on a 24 bit buffer.
 pub(in crate::app::model_preview) const DEPTH_UNITS: f32 = (1 << 24) as f32;
 
-/// `u_depth` for [`glsl_view_depth`]: the projection's depth terms, then
+/// `u_depth` for [`VIEW_DEPTH`](crate::app::model_preview::gl::glsl::VIEW_DEPTH): the projection's depth terms, then
 /// the preview's scale, which brings its units back to the world's.
 pub(in crate::app::model_preview) fn scene_depth_terms(camera: &ModelGpuCamera) -> [f32; 4] {
     [camera.depth_scale * camera.depth_map[0], camera.depth_map[1], camera.perspective, camera.scale]

@@ -3,7 +3,7 @@
 
 use eframe::glow::{self, HasContext as _};
 
-use super::super::gl::glsl::glsl_view_depth;
+use super::super::gl::glsl::{fill, VIEW_DEPTH};
 use super::super::gl::buffer::slice_bytes;
 use super::super::*;
 use super::camera::*;
@@ -11,54 +11,11 @@ use super::camera::*;
 /// The vertex stream of Halo CE's lens flares: clip position, then texcoord.
 pub(in crate::app::model_preview) const CE_FLARE_STRIDE: i32 = 6 * 4;
 
-pub(in crate::app::model_preview) const CE_FLARE_VERTEX: &str = "#version 330
-layout(location = 0) in vec4 a_clip;
-layout(location = 1) in vec2 a_uv;
-out vec2 v_uv;
-void main() {
-    gl_Position = a_clip;
-    v_uv = a_uv;
-}
-";
+pub(in crate::app::model_preview) const CE_FLARE_VERTEX: &str = include_str!("shaders/flare.vert");
 
-pub(in crate::app::model_preview) const CE_FLARE_FRAGMENT: &str = concat!("#version 330
-in vec2 v_uv;
-uniform sampler2D u_map;
-uniform vec4 u_color;
-uniform float u_highlight;
-uniform vec2 u_tint;
-uniform vec2 u_circular;
-uniform float u_fade;
-uniform vec4 u_depth;
-uniform sampler2D u_scene_depth;
-out vec4 out_color;
-", glsl_view_depth!(), "void main() {
-    vec4 map = texture(u_map, v_uv);
-    if (u_circular.x > 0.0) {
-        // Reach's light volume `circular` albedo: a disc, and no map.
-        vec2 delta = 2.0 * v_uv - 1.0;
-        float disc = pow(clamp(u_circular.x - u_circular.x * dot(delta, delta), 0.0, 1.0), u_circular.y);
-        map = vec4(vec3(disc), 1.0);
-    }
-    if (u_fade > 0.0) {
-        // Reach's light volume depth fade, as the particles'.
-        float scene = texelFetch(u_scene_depth, ivec2(gl_FragCoord.xy), 0).r;
-        float behind = (view_depth(scene) - view_depth(gl_FragCoord.z)) / u_depth.w;
-        map.a *= clamp(behind / u_fade, 0.0, 1.0);
-    }
-    if (u_tint.y > 0.0) {
-        vec4 lifted = pow(map, vec4(u_tint.y)) * map;
-        out_color = vec4((lifted.rgb * u_tint.x + map.rgb * u_color.rgb) * u_color.a, 1.0);
-    } else if (u_highlight < 0.0) {
-        out_color = vec4(u_color.rgb * map.rgb, u_color.a * map.a);
-    } else {
-        // The pixel shader of `sub_92E4A0`, read from its bytecode.
-        vec3 square = map.rgb * map.rgb;
-        vec3 sixth = square * square * square;
-        out_color = vec4((1.0 - u_color.rgb) * u_highlight * sixth + map.rgb * u_color.rgb, u_color.a);
-    }
+pub(in crate::app::model_preview) fn ce_flare_fragment() -> String {
+    fill(include_str!("shaders/flare.frag"), &[("view_depth", &VIEW_DEPTH)])
 }
-");
 
 /// What every game's camera-facing quads draw with (flares, antennas, effect
 /// sprites), made on first use.
@@ -173,7 +130,7 @@ pub(in crate::app::model_preview) unsafe fn draw_flare_sprites(
 
 pub(in crate::app::model_preview) unsafe fn link_sprite_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<SpriteGl> {
     unsafe {
-        let program = link_h2_program(gl, main, CE_FLARE_VERTEX, CE_FLARE_FRAGMENT)
+        let program = link_h2_program(gl, main, CE_FLARE_VERTEX, &ce_flare_fragment())
             .map_err(|error| eprintln!("model preview: {error}"))
             .ok()?;
         let vertex_array = gl.create_vertex_array().ok()?;
@@ -211,7 +168,7 @@ mod tests {
     /// particle program is checked.
     #[test]
     fn the_flare_and_reach_composite_programs_compile_under_glslang() {
-        assert_compiles_under_glslang("flare", &[("vert", CE_FLARE_VERTEX), ("frag", CE_FLARE_FRAGMENT)]);
+        assert_compiles_under_glslang("flare", &[("vert", CE_FLARE_VERTEX), ("frag", &ce_flare_fragment())]);
         assert_compiles_under_glslang("reach_composite", &[("frag", super::reach::composite::REACH_COMPOSITE_FRAGMENT)]);
     }
 }
