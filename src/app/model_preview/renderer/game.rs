@@ -2,6 +2,7 @@
 
 use super::*;
 use eframe::glow;
+use super::super::gen3::render::Gen3Pipeline;
 
 /// What a game's drawing is handed each frame.
 pub(in crate::app::model_preview) struct FrameCx<'a> {
@@ -36,15 +37,17 @@ pub(in crate::app::model_preview) trait GameRender {
 pub(super) struct GameRenders {
     pub(super) plain: common::plain::PlainRender,
     pub(super) dx9: dx9::render::Dx9Render,
-    pub(super) gen3: gen3::render::Gen3Render,
+    pub(super) h3: Gen3Pipeline<h3::render::H3Game>,
+    pub(super) reach: Gen3Pipeline<reach::render::ReachGame>,
+    pub(super) h4: Gen3Pipeline<h4::render::H4Game>,
 }
 
 impl GameRenders {
     /// Each game's own simulations for `slot`.
     #[cfg(test)]
     pub(super) fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
-        let Self { plain, dx9, gen3 } = self;
-        for game in [plain as &dyn GameRender, dx9, gen3] {
+        let Self { plain, dx9, h3, reach, h4 } = self;
+        for game in [plain as &dyn GameRender, dx9, h3, reach, h4] {
             game.each_simulation(slot, uploads, visit);
         }
     }
@@ -52,7 +55,9 @@ impl GameRenders {
     /// The drawing for `frame`, by [`Route::of`] its preview.
     pub(super) fn of(&mut self, frame: &ModelGpuFrame) -> &mut dyn GameRender {
         match Route::of(&frame.preview) {
-            Route::Gen3 => &mut self.gen3,
+            Route::Halo3 => &mut self.h3,
+            Route::Reach => &mut self.reach,
+            Route::Halo4 => &mut self.h4,
             Route::Dx9 => &mut self.dx9,
             Route::Plain => &mut self.plain,
         }
@@ -62,7 +67,10 @@ impl GameRenders {
 /// Which drawing a preview goes to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Route {
-    Gen3,
+    /// Halo 3's and ODST's, and a gen3 tag's of no game.
+    Halo3,
+    Reach,
+    Halo4,
     Dx9,
     Plain,
 }
@@ -73,9 +81,11 @@ impl Route {
     /// plainly when no tag gave it (Chimp's meshes).
     pub(super) fn of(preview: &RenderModelPreview) -> Self {
         match preview.game {
-            Some(GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4) => Self::Gen3,
+            Some(GameId::Halo3 | GameId::Halo3Odst) => Self::Halo3,
+            Some(GameId::HaloReach) => Self::Reach,
+            Some(GameId::Halo4) => Self::Halo4,
             Some(GameId::HaloCe | GameId::Halo2) => Self::Dx9,
-            _ if preview.generation == Some(blam_tags::game::Game::Halo3) => Self::Gen3,
+            _ if preview.generation == Some(blam_tags::game::Game::Halo3) => Self::Halo3,
             _ => Self::Plain,
         }
     }
@@ -93,12 +103,13 @@ mod tests {
         let route = |game: Option<GameId>, generation: Option<Game>| {
             Route::of(&RenderModelPreview { game, generation, ..Default::default() })
         };
-        for game in [GameId::Halo3, GameId::Halo3Odst, GameId::HaloReach, GameId::Halo4] {
-            assert_eq!(route(Some(game), Some(Game::Halo3)), Route::Gen3, "{game:?}");
-        }
+        assert_eq!(route(Some(GameId::Halo3), Some(Game::Halo3)), Route::Halo3);
+        assert_eq!(route(Some(GameId::Halo3Odst), Some(Game::Halo3)), Route::Halo3);
+        assert_eq!(route(Some(GameId::HaloReach), Some(Game::Halo3)), Route::Reach);
+        assert_eq!(route(Some(GameId::Halo4), Some(Game::Halo3)), Route::Halo4);
         assert_eq!(route(Some(GameId::HaloCe), Some(Game::Halo1)), Route::Dx9);
         assert_eq!(route(Some(GameId::Halo2), Some(Game::Halo2)), Route::Dx9);
-        assert_eq!(route(None, Some(Game::Halo3)), Route::Gen3, "a gen3 tag of no game");
+        assert_eq!(route(None, Some(Game::Halo3)), Route::Halo3, "a gen3 tag of no game, as Halo 3's");
         assert_eq!(route(None, None), Route::Plain, "geometry no tag gave");
     }
 

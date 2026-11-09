@@ -6,10 +6,7 @@ use std::sync::Arc;
 use eframe::glow;
 
 use super::super::RenderModelPreviewBatch;
-use super::super::h3::render::H3Game;
-use super::super::h4::render::H4Game;
 use super::super::reach::lights::ReachLitLight;
-use super::super::reach::render::ReachGame;
 use super::super::common::plain::PlainRender;
 use super::super::frame::ModelGpuFrame;
 use super::super::renderer::{FrameCx, GameRender, RenderCore};
@@ -17,7 +14,6 @@ use super::effects::screen::H3ScreenSettings;
 use super::shaders::H3Material;
 use super::sprites::{Gen3Sprite, Gen3Sprites};
 use super::state::Gen3State;
-use crate::core::game::GameId;
 
 /// A batch the gen3 pipeline draws, with its material.
 pub(in crate::app::model_preview) type Gen3Batch = (RenderModelPreviewBatch, Arc<H3Material>);
@@ -127,31 +123,24 @@ pub(in crate::app::model_preview) trait Gen3Game {
     fn each_simulation(&self, _slot: usize, _uploads: u64, _visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {}
 }
 
-/// Halo 3's, ODST's, Reach's and Halo 4's drawing: the slot's own draw, then
-/// the gen3 pipeline with the game's hooks.
+/// A gen3 game's drawing: the slot's own draw, then the gen3 pipeline with
+/// `G`'s hooks. Each gen3 game has its own, which the renderer's game table
+/// picks.
 #[derive(Default)]
-pub(in crate::app::model_preview) struct Gen3Render {
+pub(in crate::app::model_preview) struct Gen3Pipeline<G> {
     /// The pipeline's own state, between and within frames.
     state: Gen3State,
-    h3: H3Game,
-    reach: ReachGame,
-    h4: H4Game,
+    game: G,
 }
 
-impl Gen3Render {
-    /// The pipeline's state, and the hooks of `game`.
-    fn parts(&mut self, game: Option<GameId>) -> (&mut Gen3State, &mut dyn Gen3Game) {
-        let Self { state, h3, reach, h4 } = self;
-        let game: &mut dyn Gen3Game = match game {
-            Some(GameId::HaloReach) => reach,
-            Some(GameId::Halo4) => h4,
-            _ => h3,
-        };
-        (state, game)
+impl<G: Gen3Game> Gen3Pipeline<G> {
+    /// The pipeline's state, and the game's hooks.
+    fn parts(&mut self) -> (&mut Gen3State, &mut dyn Gen3Game) {
+        (&mut self.state, &mut self.game)
     }
 }
 
-impl GameRender for Gen3Render {
+impl<G: Gen3Game> GameRender for Gen3Pipeline<G> {
     /// The scene's depth copy is the frame's own, made while its picture draws.
     unsafe fn prepare(&mut self, _cx: &mut FrameCx<'_>) {
         self.state.depth_copy = None;
@@ -174,7 +163,7 @@ impl GameRender for Gen3Render {
             let frame = cx.frame;
             cx.core.draw_slot_batches(cx.gl, frame, cx.slot, &|core, material| core.h3_material(frame, material).is_some());
             let order = cx.frame.visible_batches.clone();
-            let (state, game) = self.parts(cx.frame.preview.game);
+            let (state, game) = self.parts();
             state.draw(cx.core, game, cx.gl, cx.frame, cx.slot, &order);
         }
     }
@@ -184,7 +173,7 @@ impl GameRender for Gen3Render {
             unsafe {
                 if cx.core.draws_object_sprites(cx.frame) {
                     use super::sprites::SpriteStage;
-                    let (state, game) = self.parts(cx.frame.preview.game);
+                    let (state, game) = self.parts();
                     state.draw_sprites(cx.core, game, cx.gl, cx.frame, cx.slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
                     state.draw_sprites(cx.core, game, cx.gl, cx.frame, cx.slot, SpriteStage::Rest);
                 }
@@ -194,10 +183,7 @@ impl GameRender for Gen3Render {
 
     #[cfg(test)]
     fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
-        let Self { h3, reach, h4, .. } = self;
-        for game in [h3 as &dyn Gen3Game, reach, h4] {
-            game.each_simulation(slot, uploads, visit);
-        }
+        self.game.each_simulation(slot, uploads, visit);
     }
 }
 

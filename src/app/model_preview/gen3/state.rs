@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use eframe::glow;
 
-/// What the gen3 pipeline keeps between and within frames. `Gen3Render`
+/// What the gen3 pipeline keeps between and within frames. `Gen3Pipeline`
 /// owns it, and the pipeline's stages are its methods, each handed the core.
 #[derive(Default)]
 pub(in crate::app::model_preview) struct Gen3State {
