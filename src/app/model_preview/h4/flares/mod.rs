@@ -12,7 +12,7 @@ use super::super::effects::part_markers;
 use super::super::functions::FunctionValues;
 use super::super::functions::object_value;
 use super::super::gen3::effects::flares::{OcclusionOffset, rotation_function};
-use super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
+use super::super::gen3::materials::{Gen3Bitmap, read_gen3_bitmap};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
 use crate::app::model_preview::common::marker::MarkerFrame;

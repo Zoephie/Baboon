@@ -430,7 +430,7 @@ pub(in crate::app::model_preview) fn antenna_quads(
             Some((
                 antenna.quads(bones, view, tip),
                 (*texture)?,
-                antenna.is_reach(),
+                antenna.has_spring(),
             ))
         })
         .collect()

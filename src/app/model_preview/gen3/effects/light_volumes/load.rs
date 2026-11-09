@@ -6,7 +6,7 @@ use super::property::{Gen3VolumeProperty, Gen3VolumeState, SEEDS, VolumeProperti
 use super::{
     EffectTimes, Extension, Gen3Bitmap, Gen3Blend, H3_EXPOSURE, MarkerFrame, Sampler, SamplerKind,
     elements, for_each_attached_part, has_flag, inline_real, part_frame, reach_alt_exposure,
-    read_h3_bitmap, read_h3_definition, read_part_placement, resolve_embedded_method,
+    read_gen3_bitmap, read_h3_definition, read_part_placement, resolve_embedded_method,
 };
 use blam_tags::TagStruct;
 use std::sync::Arc;
@@ -197,7 +197,7 @@ pub(super) fn read_definition(
         match baked {
             Some((bitmap, sampler)) => (Some(bitmap), Some(sampler)),
             None => (
-                Some(read_h3_bitmap(reader, &map, 0, SamplerKind::Texture2D)?),
+                Some(read_gen3_bitmap(reader, &map, 0, SamplerKind::Texture2D)?),
                 None,
             ),
         }

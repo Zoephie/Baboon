@@ -221,7 +221,7 @@ pub(in crate::app::model_preview) fn read_h4_color_grading(
     let path = grading
         .read_tag_ref_path("color grading texture")
         .filter(|path| !path.is_empty())?;
-    super::super::gen3::materials::read_h3_bitmap(
+    super::super::gen3::materials::read_gen3_bitmap(
         reader,
         &path,
         0,

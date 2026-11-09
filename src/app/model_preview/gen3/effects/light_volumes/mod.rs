@@ -12,7 +12,7 @@ use super::super::super::effects::{
     EffectTimes, for_each_attached_part, part_frame, read_part_placement,
 };
 use super::super::super::functions::FunctionValues;
-use super::super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap, resolve_embedded_method};
+use super::super::super::gen3::materials::{Gen3Bitmap, read_gen3_bitmap, resolve_embedded_method};
 use super::super::super::gen3::pipeline::reach_alt_exposure;
 use super::super::super::particles::inline_real;
 use super::super::effects::strips::EPSILON;

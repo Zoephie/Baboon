@@ -22,7 +22,7 @@ const TELEPORT: f32 = 1.0;
 
 /// What an antenna's tag gives its spring.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ReachAntennaSpring {
+pub(crate) struct AntennaSpring {
     /// `spring strength coefficient`: how much of the way to its rest the far
     /// end is pulled each tick.
     pub(crate) strength: f32,
@@ -47,7 +47,7 @@ impl RunningAntenna {
     /// Both ends where the spring rests them. The game starts the far end
     /// straight up from the world's origin and lets it fall into place; that
     /// first transient is not something to reproduce. \[inferred\]
-    fn at_rest(marker: [f32; 3], forward: [f32; 3], spring: &ReachAntennaSpring) -> Self {
+    fn at_rest(marker: [f32; 3], forward: [f32; 3], spring: &AntennaSpring) -> Self {
         Self {
             attach: marker,
             near: marker,
@@ -58,7 +58,7 @@ impl RunningAntenna {
 
     /// One tick of `antenna_update`, with the marker at `marker` facing the
     /// unit `forward`.
-    fn step(&mut self, marker: [f32; 3], forward: [f32; 3], spring: &ReachAntennaSpring) {
+    fn step(&mut self, marker: [f32; 3], forward: [f32; 3], spring: &AntennaSpring) {
         let moved = minus(marker, self.attach);
         if moved.iter().any(|axis| axis.abs() > TELEPORT) {
             self.near = plus(self.near, moved);
@@ -122,7 +122,7 @@ impl AntennaSprings {
             self.running = antennas
                 .iter()
                 .map(|antenna| {
-                    let spring = antenna.reach_spring()?;
+                    let spring = antenna.spring()?;
                     let (marker, forward) = marker_of(antenna);
                     Some(RunningAntenna::at_rest(marker, forward, spring))
                 })
@@ -135,7 +135,7 @@ impl AntennaSprings {
         while self.ticks < due {
             self.ticks += 1;
             for (antenna, running) in antennas.iter().zip(&mut self.running) {
-                if let (Some(spring), Some(running)) = (antenna.reach_spring(), running.as_mut()) {
+                if let (Some(spring), Some(running)) = (antenna.spring(), running.as_mut()) {
                     let (marker, forward) = marker_of(antenna);
                     running.step(marker, forward, spring);
                 }
@@ -176,15 +176,15 @@ mod tests {
         CePointPhysics::new(7.7, false, false, 0.05, 0.0, 0.0)
     }
 
-    fn warthog(physics: Option<CePointPhysics>) -> ReachAntennaSpring {
-        ReachAntennaSpring {
+    fn warthog(physics: Option<CePointPhysics>) -> AntennaSpring {
+        AntennaSpring {
             strength: 0.1,
             length: 0.4,
             physics,
         }
     }
 
-    fn settled(spring: &ReachAntennaSpring, forward: [f32; 3], ticks: usize) -> [f32; 3] {
+    fn settled(spring: &AntennaSpring, forward: [f32; 3], ticks: usize) -> [f32; 3] {
         let mut running = RunningAntenna::at_rest([0.0; 3], forward, spring);
         for _ in 0..ticks {
             running.step([0.0; 3], forward, spring);

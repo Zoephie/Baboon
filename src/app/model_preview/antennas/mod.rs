@@ -1,7 +1,7 @@
-//! Antennas: the lines of sprites a `widget` hangs from a marker. Halo 2's,
-//! Halo 3's, Reach's and Halo 4's are [`Antenna`]s, Reach's far end moved by
-//! its [`spring`]; Halo CE's own are in [`ce`]. The sprite sizing and the
-//! quads they draw are shared.
+//! Antennas: the lines of sprites a `widget` hangs from a marker, and the
+//! sprite sizing and quads every game's share. Halo 2's and Halo 3's are read
+//! here; Reach's (and so Halo 4's), whose far end its [`spring`] moves, in
+//! `reach::antennas`; Halo CE's own in `ce::antennas`.
 
 use std::sync::Arc;
 
@@ -11,17 +11,17 @@ use super::common::fields::{elements, object_block};
 use super::common::image::{Image, Sampler};
 use super::common::math::{cross, dot};
 use super::common::view::{ViewFrame, posed_on};
-use super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
+use super::gen3::materials::{Gen3Bitmap, read_gen3_bitmap};
 use super::materials::decode_image;
 use super::{RenderModelPreviewMarker, TagReader};
-use crate::app::model_preview::common::attached::{Attached, attached};
+use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::fields::argb;
-use crate::app::model_preview::common::marker::MarkerFrame;
 use crate::app::model_preview::common::math::UNSET;
 use crate::app::model_preview::common::sprites::AntennaQuad;
 use crate::core::h2_pixel_shader::SamplerKind;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
-use spring::{ReachAntennaSpring, posed_marker};
+pub(in crate::app::model_preview) use spring::AntennaSpring;
+use spring::posed_marker;
 
 pub(super) mod spring;
 
@@ -42,9 +42,6 @@ pub(in crate::app::model_preview) struct AntennaSprite {
 
 /// What Halo CE, 2 and 3 take off a sprite's pixels besides its spacing.
 pub(in crate::app::model_preview) const ANTENNA_TRIM: f32 = 1.0;
-/// Reach's: `get_vertex_scale_by_distance` (the 360's 0x82C93A88, its
-/// constant at 0x82C93BFC) takes half a pixel.
-pub(in crate::app::model_preview) const REACH_ANTENNA_TRIM: f32 = 0.5;
 
 /// `antenna_new`'s scale for a sprite, or none where a bitmap has no such
 /// sprite to draw: its `pixels`, `width · (right - left) - 2 · spacing -
@@ -77,34 +74,34 @@ pub(in crate::app::model_preview) fn antenna_sprite(
 }
 
 #[derive(Debug, Clone)]
-struct AntennaVertex {
+pub(in crate::app::model_preview) struct AntennaVertex {
     /// `sub_A63CD0`: where the next vertex lies, with +Z the way this one points.
-    offset: [f32; 3],
-    color: [f32; 4],
+    pub(in crate::app::model_preview) offset: [f32; 3],
+    pub(in crate::app::model_preview) color: [f32; 4],
     /// Left, right, top and bottom of the sprite, across the bitmap.
-    rect: [f32; 4],
-    registration: [f32; 2],
+    pub(in crate::app::model_preview) rect: [f32; 4],
+    pub(in crate::app::model_preview) registration: [f32; 2],
     /// World units per width of the bitmap: `antenna_new` runs the sprite the
     /// length of the link.
-    scale: f32,
+    pub(in crate::app::model_preview) scale: f32,
     /// What of the bitmap's width a sprite runs along.
-    covered: f32,
+    pub(in crate::app::model_preview) covered: f32,
     /// Where along the curve this link ends, for an antenna that has one.
-    hermite_t: f32,
+    pub(in crate::app::model_preview) hermite_t: f32,
     /// Reach's: how wide the sprite is, in world units, as `build_sprite`
     /// scales its `texel to world width scale` by the bitmap's width; none
     /// where the sprite has no pixels to draw.
-    width: Option<f32>,
+    pub(in crate::app::model_preview) width: Option<f32>,
 }
 
 /// Halo 3's antenna: one curve through two points, with each link a stretch of
 /// it, as `antenna_get_hermite_vectors` sets it up.
 #[derive(Debug, Clone, Copy)]
-struct AntennaCurve {
-    total_length: f32,
-    point_of_bend: f32,
-    starting_bend: f32,
-    ending_bend: f32,
+pub(in crate::app::model_preview) struct AntennaCurve {
+    pub(in crate::app::model_preview) total_length: f32,
+    pub(in crate::app::model_preview) point_of_bend: f32,
+    pub(in crate::app::model_preview) starting_bend: f32,
+    pub(in crate::app::model_preview) ending_bend: f32,
 }
 
 impl AntennaCurve {
@@ -151,17 +148,17 @@ impl AntennaCurve {
 /// A `widget` that hangs a line of sprites from a marker.
 #[derive(Debug, Clone)]
 pub(crate) struct Antenna {
-    node: usize,
-    position: [f32; 3],
-    forward: [f32; 3],
-    vertices: Vec<AntennaVertex>,
-    curve: Option<AntennaCurve>,
-    /// Reach's spring, which moves the far end; the others rest it.
-    reach: Option<ReachAntennaSpring>,
+    pub(in crate::app::model_preview) node: usize,
+    pub(in crate::app::model_preview) position: [f32; 3],
+    pub(in crate::app::model_preview) forward: [f32; 3],
+    pub(in crate::app::model_preview) vertices: Vec<AntennaVertex>,
+    pub(in crate::app::model_preview) curve: Option<AntennaCurve>,
+    /// The spring that moves the far end, as Reach's has; the others rest it.
+    pub(in crate::app::model_preview) spring: Option<AntennaSpring>,
     /// The region and permutation its marker belongs to, if only one.
-    only_under: Option<(String, String)>,
+    pub(in crate::app::model_preview) only_under: Option<(String, String)>,
     /// Halo 3 and Reach read their bitmap as the card would.
-    pub(crate) h3_bitmap: Option<Gen3Bitmap>,
+    pub(crate) gen3_bitmap: Option<Gen3Bitmap>,
     pub(crate) image: Arc<Image>,
 }
 
@@ -191,16 +188,16 @@ fn aimed(offset: [f32; 3], direction: [f32; 3]) -> [f32; 3] {
 }
 
 impl Antenna {
-    /// Whether this is Reach's, with a spring of its own.
-    pub(crate) fn is_reach(&self) -> bool {
-        self.reach.is_some()
+    /// Whether it has a spring of its own, as Reach's do.
+    pub(crate) fn has_spring(&self) -> bool {
+        self.spring.is_some()
     }
 
     /// How its gen3 bitmap samples, from `build_sprite`. Reach's
     /// `draw_textured_transparent_quad` sets address mode 1 and filter mode
     /// 2, taken to be clamped and trilinear. [inferred]
     pub(crate) fn sampler(&self) -> Sampler {
-        let filter = if self.is_reach() {
+        let filter = if self.has_spring() {
             BitmapFilterMode::Trilinear
         } else {
             BitmapFilterMode::Bilinear
@@ -211,8 +208,8 @@ impl Antenna {
         }
     }
 
-    pub(crate) fn reach_spring(&self) -> Option<&ReachAntennaSpring> {
-        self.reach.as_ref()
+    pub(crate) fn spring(&self) -> Option<&AntennaSpring> {
+        self.spring.as_ref()
     }
 
     /// Where its marker is posed, and the unit way it faces.
@@ -230,7 +227,7 @@ impl Antenna {
         view: &ViewFrame,
         tip: Option<[f32; 3]>,
     ) -> Vec<AntennaQuad> {
-        if let (Some(_), Some(curve)) = (&self.reach, &self.curve) {
+        if let (Some(_), Some(curve)) = (&self.spring, &self.curve) {
             return self.reach_quads(curve, bones, view, tip);
         }
         let (mut origin, mut direction) = posed_on(self.node, self.position, self.forward, bones);
@@ -417,17 +414,17 @@ fn read_antenna(
         });
     }
     let image = decode_image(reader, &bitmap_path, SamplerKind::Texture2D, 0)?;
-    let h3_bitmap =
-        curve.and_then(|_| read_h3_bitmap(reader, &bitmap_path, 0, SamplerKind::Texture2D));
+    let gen3_bitmap =
+        curve.and_then(|_| read_gen3_bitmap(reader, &bitmap_path, 0, SamplerKind::Texture2D));
     Some(Antenna {
         node: marker.node_index.max(0) as usize,
         position: marker.position,
         forward: marker.axes[0],
         vertices,
         curve,
-        reach: None,
+        spring: None,
         only_under: None,
-        h3_bitmap,
+        gen3_bitmap,
         image: Arc::new(image),
     })
 }
@@ -447,145 +444,6 @@ pub(in crate::app::model_preview) fn read_antennas(
         .filter_map(|widget| widget.read_tag_ref_with_group("type"))
         .filter(|(group, _)| *group == antenna_group)
         .filter_map(|(_, path)| read_antenna(reader, &path, markers))
-        .collect()
-}
-
-/// Reach's antenna at `path`, by `antenna_new` (the 360's 0x82C92F10, MCC's
-/// 0x140E51B70): none where the object has no marker of its name, or it has
-/// fewer than two vertices. Its marker is placed by `frame`, so an attached
-/// object's lands on its parent.
-fn read_reach_antenna<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
-    reader: &TagReader,
-    path: &str,
-    markers: &[RenderModelPreviewMarker],
-    frame: &F,
-) -> Option<Antenna> {
-    /// What `antenna_postprocess` (0x84C26A00) floors a total length at.
-    const SHORTEST: f32 = 1e-4;
-    let tag = reader.load(path, "antenna", b"ant!").ok()?;
-    let root = tag.root();
-    let name = root
-        .read_string_id("attachment marker name")
-        .or_else(|| root.read_string("attachment marker name"))?;
-    let marker = markers
-        .iter()
-        .find(|marker| marker.name.eq_ignore_ascii_case(&name))?;
-    let listed = elements(root, "vertices");
-    if listed.len() < 2 {
-        return None;
-    }
-    let bitmap_path = root
-        .read_tag_ref_path("bitmaps")
-        .filter(|path| !path.is_empty())?;
-    let bitmap = reader.load(&bitmap_path, "bitmap", b"bitm").ok()?;
-    let texel_scale = root.read_real("texel to world width scale").unwrap_or(0.0);
-    // `falloff pixels`, `cutoff pixels`, `LOD color`, `angles` and `vector to
-    // next` are read by nothing that draws or moves it.
-    let mut image_index = None;
-    let mut vertices = Vec::new();
-    let mut summed = 0.0;
-    for vertex in listed {
-        let sequence = vertex.read_int_any("sequence index").unwrap_or(0).max(0) as usize;
-        // A sprite with no pixels is left out, and its link still runs on.
-        let sprite = antenna_sprite(&bitmap, sequence, REACH_ANTENNA_TRIM);
-        let AntennaSprite {
-            rect,
-            registration,
-            index,
-            covered,
-            width,
-        } = sprite.unwrap_or(AntennaSprite {
-            rect: [0.0; 4],
-            registration: [0.0; 2],
-            index: 0,
-            covered: 0.0,
-            width: 0.0,
-        });
-        if sprite.is_some() {
-            image_index.get_or_insert(index);
-        }
-        summed += vertex.read_real("length").unwrap_or(0.0);
-        vertices.push(AntennaVertex {
-            offset: [0.0; 3],
-            color: argb(vertex, "color"),
-            rect,
-            registration,
-            scale: 0.0,
-            covered,
-            hermite_t: vertex.read_real("hermite t").unwrap_or(0.0),
-            width: sprite.map(|_| texel_scale * width),
-        });
-    }
-    let stored = root.read_real("runtime total length").unwrap_or(0.0);
-    // The kit's tags hold what the postprocess makes; this is only a net.
-    // [inferred]
-    let total_length = if stored > 0.0 {
-        stored
-    } else {
-        summed.max(SHORTEST)
-    };
-    let curve = AntennaCurve {
-        total_length,
-        point_of_bend: root.read_real("point of bend").unwrap_or(0.0),
-        starting_bend: root.read_real("starting bend").unwrap_or(0.0),
-        ending_bend: root.read_real("ending bend").unwrap_or(0.0),
-    };
-    let physics = root
-        .read_tag_ref_path("physics")
-        .filter(|path| !path.is_empty())
-        .and_then(|path| reader.load(&path, "point_physics", b"pphy").ok())
-        .map(|tag| crate::app::model_preview::common::point_physics::CePointPhysics::read(&tag));
-    let reach = ReachAntennaSpring {
-        strength: root.read_real("spring strength coefficient").unwrap_or(0.0),
-        length: total_length,
-        physics,
-    };
-    let image_index = image_index.unwrap_or(0);
-    let image = decode_image(reader, &bitmap_path, SamplerKind::Texture2D, image_index)?;
-    let h3_bitmap = read_h3_bitmap(
-        reader,
-        &bitmap_path,
-        image_index as i16,
-        SamplerKind::Texture2D,
-    );
-    let (place, node) = frame(marker);
-    Some(Antenna {
-        node,
-        position: place.position,
-        forward: place.axes[0],
-        vertices,
-        curve: Some(curve),
-        reach: Some(reach),
-        only_under: marker.only_under.clone(),
-        h3_bitmap,
-        image: Arc::new(image),
-    })
-}
-
-/// Reach's antennas among `object`'s widgets (`widgets_new`, the 360's
-/// 0x82BCBFC0), named after the attached object they hang on, if any.
-pub(in crate::app::model_preview) fn read_reach_antennas<
-    F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
->(
-    reader: &TagReader,
-    object: &TagFile,
-    markers: &[RenderModelPreviewMarker],
-    frame: &F,
-    name: Option<&str>,
-) -> Vec<Antenna> {
-    let Some(block) = object_block(object, "widgets") else {
-        return Vec::new();
-    };
-    let antenna_group = u32::from_be_bytes(*b"ant!");
-    elements(block, "widgets")
-        .iter()
-        .filter_map(|widget| widget.read_tag_ref_with_group("type"))
-        .filter(|(group, path)| *group == antenna_group && !path.is_empty())
-        .filter_map(|(_, path)| read_reach_antenna(reader, &path, markers, frame))
-        .map(|antenna| match name {
-            Some(name) => antenna.on_attached(name),
-            None => antenna,
-        })
         .collect()
 }
 
@@ -677,13 +535,13 @@ mod tests {
                 starting_bend: 0.3,
                 ending_bend: 0.2,
             }),
-            reach: Some(ReachAntennaSpring {
+            spring: Some(AntennaSpring {
                 strength: 0.1,
                 length: 0.4,
                 physics: None,
             }),
             only_under: None,
-            h3_bitmap: None,
+            gen3_bitmap: None,
             image: Arc::new(Image::Flat(super::super::super::materials::TextureImage {
                 rgba: Vec::new(),
                 width: 0,
@@ -743,7 +601,7 @@ mod tests {
             "{along:?}"
         );
         let halo3 = Antenna {
-            reach: None,
+            spring: None,
             ..reach_antenna([None; 2])
         };
         let [_, right_bottom, _, right_top] = halo3.quads(None, &side_view(), None)[1].corners;
@@ -798,7 +656,12 @@ mod tests {
         };
         let path = "objects\\vehicles\\human\\warthog\\bitmaps\\antenna";
         let bitmap = load_referenced_tag_from_source(&source, path, "bitmap", b"bitm").unwrap();
-        let reach = antenna_sprite(&bitmap, 0, REACH_ANTENNA_TRIM).unwrap();
+        let reach = antenna_sprite(
+            &bitmap,
+            0,
+            crate::app::model_preview::reach::antennas::REACH_ANTENNA_TRIM,
+        )
+        .unwrap();
         assert_eq!(reach.width, 128.0);
         assert!(
             (reach.covered * reach.width - 49.5).abs() < 1e-4,

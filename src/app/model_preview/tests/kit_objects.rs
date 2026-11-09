@@ -126,8 +126,8 @@ fn kit_reach_warthog_hangs_its_antenna_straight() {
     let antennas = &data.preview.antennas;
     assert_eq!(antennas.len(), 1);
     let antenna = &antennas[0];
-    assert!(antenna.is_reach() && antenna.h3_bitmap.is_some());
-    let spring = antenna.reach_spring().unwrap();
+    assert!(antenna.has_spring() && antenna.gen3_bitmap.is_some());
+    let spring = antenna.spring().unwrap();
     assert_eq!(spring.strength, 0.1);
     assert!((spring.length - 0.4).abs() < 1e-6);
     assert!(spring.physics.is_some(), "warthog_antenna_steel");
@@ -170,10 +170,10 @@ fn kit_reach_scorpion_brings_its_cannons_antennas() {
     let data = kit_preview(&root, GameId::HaloReach, path, "vehicle", b"vehi");
     let antennas = &data.preview.antennas;
     assert_eq!(antennas.len(), 2, "short_antenna and medium_antenna");
-    assert!(antennas.iter().all(|antenna| antenna.is_reach()));
+    assert!(antennas.iter().all(|antenna| antenna.has_spring()));
     let lengths: Vec<f32> = antennas
         .iter()
-        .map(|antenna| antenna.reach_spring().unwrap().length)
+        .map(|antenna| antenna.spring().unwrap().length)
         .collect();
     assert!(
         (lengths[0] - 0.25).abs() < 1e-5 && (lengths[1] - 0.45).abs() < 1e-5,
@@ -250,7 +250,7 @@ fn kit_halo_3_cloth_and_antennas_stay_halo_3s() {
         data.preview
             .antennas
             .iter()
-            .all(|antenna| !antenna.is_reach())
+            .all(|antenna| !antenna.has_spring())
     );
 }
 

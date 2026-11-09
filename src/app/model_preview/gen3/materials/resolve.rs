@@ -1,7 +1,7 @@
 //! Resolving a render method: Reach's references and version update, embedded methods and their maps.
 
 use super::super::super::{ResolveCaches, TagReader, TagStruct};
-use super::bitmap::{Gen3Bitmap, gen3_image, read_h3_bitmap};
+use super::bitmap::{Gen3Bitmap, gen3_image, read_gen3_bitmap};
 use super::{Gen3Material, Gen3Pass, Gen3Texture, Sampler, SamplerKind};
 use blam_tags::render_method::{
     BitmapAddressMode, BitmapFilterMode, ParameterSource, RenderMethod, RenderMethodDefinition,
@@ -79,7 +79,7 @@ pub(in crate::app::model_preview) fn read_resolved_map(
     else {
         return None;
     };
-    let bitmap = read_h3_bitmap(
+    let bitmap = read_gen3_bitmap(
         reader,
         &binding.bitmap_path,
         binding.bitmap_index,

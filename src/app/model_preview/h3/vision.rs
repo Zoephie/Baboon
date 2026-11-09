@@ -6,7 +6,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::TagReader;
 use super::super::common::named_function::tag_function_at;
-use super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
+use super::super::gen3::materials::{Gen3Bitmap, read_gen3_bitmap};
 use crate::core::h2_pixel_shader::SamplerKind;
 
 /// `global_z_near` and `global_z_far`, which the outline's depth is measured by.
@@ -135,7 +135,7 @@ pub(in crate::app::model_preview) fn read_h3_vision(
         intensity: real(format!("intensity {class}")),
         ping_intensity: real(format!("ping intensity {class}")),
         dimming: real(format!("overlapping dimming factor {class}")),
-        mask: read_h3_bitmap(reader, &mask, 0, SamplerKind::Texture2D),
+        mask: read_gen3_bitmap(reader, &mask, 0, SamplerKind::Texture2D),
     })
 }
 

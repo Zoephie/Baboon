@@ -11,7 +11,7 @@ fn kit_an_a8_bitmap_samples_black_with_its_alpha() {
         return;
     };
     let first_texel = |path: &str| {
-        let (image, _, _) = read_h3_bitmap(
+        let (image, _, _) = read_gen3_bitmap(
             &crate::app::model_preview::load::TagReader::new(&source),
             path,
             0,

@@ -8,7 +8,7 @@ use blam_tags::TagFile;
 use super::super::cloth::{H3Wind, away_from_pole, turned_about};
 use super::super::common::fields::{elements, object_block};
 use super::super::effects::marker_name;
-use super::super::gen3::materials::read_h3_bitmap;
+use super::super::gen3::materials::read_gen3_bitmap;
 use super::super::gen3::pipeline::EXPOSURE as H3_EXPOSURE;
 use super::super::gen3::shaders::Gen3Blend;
 use super::super::particles::{ParticleCorner, SpriteShader};
@@ -310,7 +310,8 @@ pub(in crate::app::model_preview) fn read_h3_leaves(
                 }
             })
             .collect();
-        let Some(map) = read_h3_bitmap(reader, &plate, bitmap_index, SamplerKind::Texture2D) else {
+        let Some(map) = read_gen3_bitmap(reader, &plate, bitmap_index, SamplerKind::Texture2D)
+        else {
             continue;
         };
         let name = marker_name(root, "marker attach name");

@@ -16,7 +16,7 @@ pub(in crate::app::model_preview) fn gen3_image(
     if let Some(found) = caches.h3_images.get(&key) {
         return found.clone();
     }
-    let found = read_h3_bitmap(reader, path, index, kind);
+    let found = read_gen3_bitmap(reader, path, index, kind);
     caches.h3_images.insert(key, found.clone());
     found
 }
@@ -108,7 +108,7 @@ fn red_only(image: &mut Image) {
     }
 }
 
-pub(in crate::app::model_preview) fn read_h3_bitmap(
+pub(in crate::app::model_preview) fn read_gen3_bitmap(
     reader: &TagReader,
     path: &str,
     index: i16,

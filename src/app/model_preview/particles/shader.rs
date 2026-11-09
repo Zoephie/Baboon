@@ -9,8 +9,8 @@ use super::look::{AlbedoConstants, ParticleAlbedo, ParticleLighting};
 use super::rules::ParticleRules;
 use super::{
     Gen3Bitmap, Gen3Blend, H3_EXPOSURE, Sampler, SamplerKind, dot, elements, reach_alt_exposure,
-    reach_exposure, read_h3_bitmap, read_h3_definition, read_resolved_map, resolve_embedded_method,
-    tag_function_at,
+    reach_exposure, read_gen3_bitmap, read_h3_definition, read_resolved_map,
+    resolve_embedded_method, tag_function_at,
 };
 use blam_tags::render_method::{
     BitmapAddressMode, BitmapFilterMode, ParameterSource, ResolvedRenderMethod, ResolvedValue,
@@ -335,7 +335,7 @@ fn read_map(reader: &TagReader, shader: TagStruct<'_>, name: &str) -> Option<Gen
     let path = parameter(shader, name)?
         .read_tag_ref_path("bitmap")
         .filter(|path| !path.is_empty())?;
-    read_h3_bitmap(reader, &path, 0, SamplerKind::Texture2D)
+    read_gen3_bitmap(reader, &path, 0, SamplerKind::Texture2D)
 }
 
 /// A sprite shader's maps, and the sampler each is baked with. Failing to

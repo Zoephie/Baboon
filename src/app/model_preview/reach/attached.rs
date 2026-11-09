@@ -61,7 +61,7 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<
     super::super::gen3::effects::screen::add_screen_shader_materials(preview);
     preview
         .antennas
-        .extend(super::super::antennas::read_reach_antennas(
+        .extend(super::super::reach::antennas::read_reach_antennas(
             reader, object, markers, frame, name,
         ));
     super::super::cloth::read_cloth(cx, preview, ClothGame::Reach, center);

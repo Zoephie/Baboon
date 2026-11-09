@@ -321,7 +321,7 @@ impl ModelGpuSlot {
                 .preview
                 .antennas
                 .iter()
-                .map(|antenna| match &antenna.h3_bitmap {
+                .map(|antenna| match &antenna.gen3_bitmap {
                     Some((image, texels, mips)) => {
                         crate::app::model_preview::gl::texture::upload_image_linear(
                             gl,

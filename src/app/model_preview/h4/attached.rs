@@ -64,7 +64,7 @@ pub(in crate::app::model_preview) fn read_h4_attached_features<
     }
     preview
         .antennas
-        .extend(super::super::antennas::read_reach_antennas(
+        .extend(super::super::reach::antennas::read_reach_antennas(
             reader, object, markers, frame, name,
         ));
     super::super::cloth::read_cloth(cx, preview, ClothGame::Reach, center);

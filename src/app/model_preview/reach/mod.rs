@@ -3,6 +3,7 @@
 //! gen3 pipeline (`render.rs`): its frame values and lighting, the inline
 //! and screen lights, the self shadow, its bloom and composite.
 
+pub(in crate::app::model_preview) mod antennas;
 pub(in crate::app::model_preview) mod attached;
 pub(in crate::app::model_preview) mod bloom;
 pub(super) mod camo;

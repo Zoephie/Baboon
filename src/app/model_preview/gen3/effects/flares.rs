@@ -19,7 +19,7 @@ use blam_tags::tag_function::transition_function_evaluate;
 
 use super::super::super::common::image::Image;
 use super::super::super::common::named_function::tag_function_at;
-use super::super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
+use super::super::super::gen3::materials::{Gen3Bitmap, read_gen3_bitmap};
 use super::super::super::{RenderModelPreviewMarker, TagReader};
 use super::super::pipeline::EXPOSURE;
 use crate::app::model_preview::common::attached::attached;
@@ -270,7 +270,7 @@ pub(in crate::app::model_preview) fn read_h3_flare(
         .filter(|bitmap| !bitmap.is_empty());
     let bitmap = override_map.or(bitmap)?;
     let index = reflection.read_int_any("bitmap index").unwrap_or(0).max(0) as usize;
-    let bitmap = read_h3_bitmap(reader, &bitmap, index as i16, SamplerKind::Texture2D)?;
+    let bitmap = read_gen3_bitmap(reader, &bitmap, index as i16, SamplerKind::Texture2D)?;
     let (width, height) = match &*bitmap.0 {
         Image::Flat(image) => (image.width as f32, image.height as f32),
         _ => (1.0, 1.0),

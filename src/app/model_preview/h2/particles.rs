@@ -5,7 +5,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::TagReader;
 use super::super::common::fields::{elements, has_flag};
-use super::super::gen3::materials::read_h3_bitmap;
+use super::super::gen3::materials::read_gen3_bitmap;
 use super::super::gen3::shaders::Gen3Blend;
 use super::super::particles::{
     AlbedoConstants, Billboard, EmissionShape, Emitter, MOST_FRAMES, ParticleAlbedo, ParticleAxis,
@@ -215,7 +215,7 @@ pub(in crate::app::model_preview) fn read_h2_look(
         albedo,
         alpha_test,
         frame_blend: !flagged("disable frame blending"),
-        base_map: Some(read_h3_bitmap(reader, &map, 0, SamplerKind::Texture2D)?),
+        base_map: Some(read_gen3_bitmap(reader, &map, 0, SamplerKind::Texture2D)?),
         constants: AlbedoConstants {
             modulation,
             ..Default::default()

@@ -158,7 +158,7 @@ pub(in crate::app::model_preview) fn read_reach_screen_noise(
     let path = noise
         .read_tag_ref_path("default bitmaps")
         .filter(|path| !path.is_empty())?;
-    super::super::gen3::materials::read_h3_bitmap(reader, &path, 0, SamplerKind::Texture2D)
+    super::super::gen3::materials::read_gen3_bitmap(reader, &path, 0, SamplerKind::Texture2D)
 }
 
 #[cfg(test)]

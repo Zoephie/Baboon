@@ -3,7 +3,7 @@
 use super::super::super::{RenderModelPreviewMarker, TagReader};
 use super::{
     Gen3Bitmap, Image, MarkerFrame, ObjectAttachment, OcclusionOffset, SamplerKind, attached,
-    cross, dot, elements, has_flag, object_attachments, part_markers, read_h3_bitmap,
+    cross, dot, elements, has_flag, object_attachments, part_markers, read_gen3_bitmap,
     rotation_function, tag_function_at,
 };
 use blam_tags::{TagFile, TagFunction, TagStruct};
@@ -202,7 +202,7 @@ pub(crate) fn read_h4_lens_flare(reader: &TagReader, path: &str) -> Option<H4Len
         {
             Some(image) => image,
             None => {
-                let Some(read) = read_h3_bitmap(reader, &path, index, SamplerKind::Texture2D)
+                let Some(read) = read_gen3_bitmap(reader, &path, index, SamplerKind::Texture2D)
                 else {
                     continue;
                 };

@@ -20,7 +20,7 @@ use super::effects::{EffectTimes, ObjectEffect, object_effects, part_runs_by};
 use super::functions::FunctionValues;
 use super::gen3::effects::strips::{Gen3StripAt, read_carried_strips};
 use super::gen3::materials::{
-    Gen3Bitmap, read_h3_bitmap, read_resolved_map, resolve_embedded_method,
+    Gen3Bitmap, read_gen3_bitmap, read_resolved_map, resolve_embedded_method,
 };
 use super::gen3::pipeline::EXPOSURE as H3_EXPOSURE;
 use super::gen3::pipeline::{
