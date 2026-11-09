@@ -11,8 +11,15 @@ use super::super::gl::texture::{
     upload_black_cube, upload_black_flat, upload_placeholder_texture, upload_solid_volume,
 };
 use super::super::particles::{CheapGl, ParticleGl};
-use super::*;
+use super::super::{
+    ALL_SLOTS, DetailFunction, ModelGpuFrame, ModelGpuSlot, SLOT_COUNT, effects, material_color,
+};
+use super::grid::{background_is_dark, grid_line_color};
+use super::program::{SAMPLER_UNIFORMS, h2_context_supported, model_shader_sources};
+use super::slot::{MODEL_GPU_SLOTS, MaterialGlTextures, ModelSlotLru};
+use eframe::egui::Color32;
 use eframe::glow;
+use eframe::glow::HasContext as _;
 
 /// The GL state the preview draws with: the shared program, slots and
 /// targets, and, until each game's drawing moves to its own folder, every

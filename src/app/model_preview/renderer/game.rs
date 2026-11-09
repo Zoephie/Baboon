@@ -1,7 +1,8 @@
 //! The game table: what each game's renderer is handed per frame, the trait it implements, and the route from a preview to its game.
 
+use super::super::super::GameId;
 use super::super::gen3::render::Gen3Pipeline;
-use super::*;
+use super::super::{ModelGpuFrame, RenderCore, RenderModelPreview, common, dx9, h3, h4, reach};
 use eframe::glow;
 
 /// What a game's drawing is handed each frame.
@@ -122,7 +123,12 @@ impl Route {
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::super::GameId;
+    use super::super::super::{
+        ModelPreviewState, RenderModelPreview, build_frame, model_preview_data,
+    };
     use super::*;
+    use eframe::egui;
 
     /// Each game's preview goes to its family's drawing; one of no game goes
     /// to gen3 if its tag is gen3, and is drawn plainly if no tag gave it.

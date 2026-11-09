@@ -1,13 +1,20 @@
 //! The GPU slots a preview's buffers and textures live in, least recently drawn first out.
 
+use super::super::dx9::draw::sort_points;
 use super::super::dx9::passes::{Dx9DrawPass, H2_LAYER_COUNT};
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::texture::{upload_image, upload_texture};
 use super::super::particles::{sprite_maps, upload_cheap_render_texture};
-use super::*;
+use super::super::{
+    ALL_SLOTS, DetailComposition, ModelGpuFrame, RenderModelPreviewVertex, SLOT_COUNT, antennas,
+    cloth, effects, gen3, particles,
+};
+use super::grid::grid_line_vertices;
+use super::program::{PRT_CLUSTER_ATTRIBUTE, PRT_WEIGHTS_ATTRIBUTE, bind_preview_vertex_layout};
 use crate::app::model_preview::common::image::Sampler;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use eframe::glow;
+use eframe::glow::HasContext as _;
 
 /// How many models stay on the GPU at once: geometry, ground grid and
 /// textures. Past this, the one drawn longest ago gives up its slot.

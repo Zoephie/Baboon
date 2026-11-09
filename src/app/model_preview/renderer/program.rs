@@ -2,8 +2,9 @@
 
 use super::super::gl::glsl::fill;
 use super::super::gl::link::link;
-use super::*;
+use super::super::{RenderModelPreviewVertex, SLOT_COUNT};
 use eframe::glow;
+use eframe::glow::HasContext as _;
 
 /// GPU skinning bone budget: three vec4 uniform rows per bone. Halo node
 /// indices are bytes, so 256 covers every skeleton any graph can address
@@ -186,6 +187,7 @@ pub(super) fn h2_context_supported(major: u32, minor: u32, embedded: bool) -> bo
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::RenderModelPreviewVertex;
     use super::*;
 
     /// `both_shader_dialects_declare_what_the_renderer_binds` reads the GLSL

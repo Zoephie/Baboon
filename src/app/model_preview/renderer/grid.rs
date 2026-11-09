@@ -1,6 +1,7 @@
 //! The ground grid and the theme colours behind it.
 
-use super::*;
+use super::super::{RenderModelPreview, RenderModelPreviewVertex, preview_center_radius};
+use eframe::egui;
 
 /// Ground-reference grid on the z = 0 plane (the world ground in Halo's
 /// Z-up space), Blender-style: minor lines at a spacing picked from the
@@ -79,7 +80,9 @@ pub(super) fn grid_line_color(background: [f32; 3]) -> [f32; 3] {
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::RenderModelPreview;
     use super::*;
+    use eframe::egui;
 
     #[test]
     fn the_background_is_the_theme_s_and_grid_lines_stay_visible_on_it() {

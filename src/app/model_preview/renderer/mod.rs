@@ -1,9 +1,9 @@
 //! Depth-tested Glow rendering, markers, and preview geometry conversion.
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
-use super::dx9::draw::*;
+use super::ModelGpuFrame;
 use super::gl::scope::PostScope;
-use super::*;
+use eframe::egui;
 use eframe::glow::{self, HasContext as _};
 use std::cell::RefCell;
 use std::collections::HashMap;
