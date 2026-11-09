@@ -7,7 +7,7 @@ use super::super::cloth::FIXED_TICK_RATE;
 use super::super::common::view::posed_on;
 use super::Antenna;
 use crate::app::model_preview::common::math::{minus, plus, scaled};
-use crate::app::model_preview::common::point_physics::CePointPhysics;
+use crate::app::model_preview::common::point_physics::PointPhysics;
 
 /// The step `antennas_update` hands every antenna, whatever the tick's length:
 /// the 360's constant `flt_85251DE4`; MCC's `min(tick, 0.0333)` (0x140E52D1B)
@@ -29,7 +29,7 @@ pub(crate) struct AntennaSpring {
     /// `runtime total length`.
     pub(crate) length: f32,
     /// Its `physics`, if it names one.
-    pub(crate) physics: Option<CePointPhysics>,
+    pub(crate) physics: Option<PointPhysics>,
 }
 
 /// One antenna's two points as they stand: `point[0]` is where the marker
@@ -172,11 +172,11 @@ mod tests {
     use super::*;
 
     /// `warthog_antenna_steel.point_physics`: steel, a little air friction.
-    fn steel() -> CePointPhysics {
-        CePointPhysics::new(7.7, false, false, 0.05, 0.0, 0.0)
+    fn steel() -> PointPhysics {
+        PointPhysics::new(7.7, false, false, 0.05, 0.0, 0.0)
     }
 
-    fn warthog(physics: Option<CePointPhysics>) -> AntennaSpring {
+    fn warthog(physics: Option<PointPhysics>) -> AntennaSpring {
         AntennaSpring {
             strength: 0.1,
             length: 0.4,

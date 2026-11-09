@@ -35,7 +35,7 @@ pub(in crate::app::model_preview) struct ResolveCaches {
     pub(in crate::app::model_preview) h2: super::super::h2::shader::resolve::H2ResolveCaches,
     /// Pass maps by path and shape; a shader samples each in only one shape.
     /// By path, shape and image.
-    pub(in crate::app::model_preview) h2_images:
+    pub(in crate::app::model_preview) dx9_images:
         HashMap<(String, SamplerKind, usize), Option<Arc<Image>>>,
     /// Halo CE's: its camouflage, bitmap image counts and model shader.
     pub(in crate::app::model_preview) ce: super::super::ce::shaders::resolve::CeResolveCaches,

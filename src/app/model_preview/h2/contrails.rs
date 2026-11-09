@@ -34,14 +34,14 @@ const FRICTION_SCALE: f32 = 10_000.0;
 
 /// A `point_physics`, as it is once loaded.
 #[derive(Debug, Clone, Copy)]
-struct PointPhysics {
+struct LoadedPointPhysics {
     mass: f32,
     density: f32,
     air_friction: f32,
     no_gravity: bool,
 }
 
-impl PointPhysics {
+impl LoadedPointPhysics {
     fn read(tag: &TagFile) -> Option<Self> {
         let root = tag.root();
         let density = root.read_real("density")?;
@@ -81,7 +81,7 @@ impl PointPhysics {
 struct PointState {
     duration: [f32; 2],
     transition: [f32; 2],
-    physics: Option<PointPhysics>,
+    physics: Option<LoadedPointPhysics>,
     width: f32,
     /// Alpha, red, green and blue, lower and upper.
     colors: [[f32; 4]; 2],
@@ -130,7 +130,7 @@ fn read_state(reader: &TagReader, state: TagStruct<'_>) -> Option<PointState> {
     Some(PointState {
         duration: [duration.lower, duration.upper],
         transition: [transition.lower, transition.upper],
-        physics: physics.and_then(|tag| PointPhysics::read(&tag)),
+        physics: physics.and_then(|tag| LoadedPointPhysics::read(&tag)),
         width: state.read_real("width")?,
         colors: [color("color lower bound"), color("color upper bound")],
         scaled: [
@@ -524,7 +524,7 @@ attached!(keeps function: H2ContrailAt);
 mod tests {
     use super::*;
 
-    const SMOKE: PointPhysics = PointPhysics {
+    const SMOKE: LoadedPointPhysics = LoadedPointPhysics {
         mass: 0.001 * MASS_OF_DENSITY,
         density: 0.001,
         air_friction: 10.0,
@@ -586,7 +586,7 @@ mod tests {
 
     #[test]
     fn smoke_lighter_than_air_rises_and_what_is_heavier_falls() {
-        let rise = |physics: PointPhysics| {
+        let rise = |physics: LoadedPointPhysics| {
             let (mut place, mut velocity) = ([0.0; 3], [0.0; 3]);
             for _ in 0..30 {
                 physics.step(&mut place, &mut velocity, 0.05, 1.0 / 30.0);
@@ -595,14 +595,14 @@ mod tests {
         };
         assert!(rise(SMOKE) > 0.0);
         assert!(
-            rise(PointPhysics {
+            rise(LoadedPointPhysics {
                 density: 1.0,
                 mass: MASS_OF_DENSITY,
                 ..SMOKE
             }) < 0.0
         );
         assert_eq!(
-            rise(PointPhysics {
+            rise(LoadedPointPhysics {
                 no_gravity: true,
                 ..SMOKE
             }),
@@ -615,7 +615,7 @@ mod tests {
         let (mut place, mut velocity) = ([0.0; 3], [1.0, 0.0, 0.0]);
         SMOKE.step(&mut place, &mut velocity, 0.05, 1.0 / 30.0);
         assert!(velocity[0] < 1.0 && velocity[0] > 0.0);
-        let free = PointPhysics {
+        let free = LoadedPointPhysics {
             air_friction: 0.0,
             ..SMOKE
         };

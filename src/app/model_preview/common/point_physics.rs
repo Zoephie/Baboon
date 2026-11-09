@@ -15,7 +15,7 @@ pub(in crate::app::model_preview) const MASS_OF_DENSITY: f32 = 0.001 * 4.188_790
 
 /// A `point_physics`, as its postprocess leaves it.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct CePointPhysics {
+pub(crate) struct PointPhysics {
     pub(in crate::app::model_preview) mass_over_radius_cubed: f32,
     pub(in crate::app::model_preview) air_buoyancy: f32,
     pub(in crate::app::model_preview) air_friction: f32,
@@ -24,7 +24,7 @@ pub(crate) struct CePointPhysics {
     pub(in crate::app::model_preview) collides_with_structure: bool,
 }
 
-impl CePointPhysics {
+impl PointPhysics {
     pub(in crate::app::model_preview) fn read(tag: &TagFile) -> Self {
         let root = tag.root();
         let real = |name: &str| root.read_real(name).unwrap_or(0.0);

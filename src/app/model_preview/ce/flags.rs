@@ -14,7 +14,7 @@ use super::super::{
     RenderModelPreviewMaterial, RenderModelPreviewRegion, RenderModelPreviewVertex, TagReader,
     frame_steps, resume_point,
 };
-use crate::app::model_preview::common::point_physics::CePointPhysics;
+use crate::app::model_preview::common::point_physics::PointPhysics;
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 
 /// The time `flag_render` gives the update that settles a flag first.
@@ -38,7 +38,7 @@ pub(crate) struct CeFlagAt {
     width: usize,
     height: usize,
     cell: [f32; 2],
-    physics: CePointPhysics,
+    physics: PointPhysics,
     wind_noise: f32,
     attachments: Vec<FlagAttachment>,
     /// The first of its vertices in the preview's.
@@ -158,7 +158,7 @@ fn read_flag(
         width,
         height,
         cell: [real("cell width"), real("cell height")],
-        physics: CePointPhysics::read(&physics),
+        physics: PointPhysics::read(&physics),
         wind_noise: real("wind noise"),
         attachments,
         first_vertex,

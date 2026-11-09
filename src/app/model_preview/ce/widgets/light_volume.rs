@@ -2,8 +2,9 @@
 
 use super::super::super::{RenderModelPreviewMarker, TagReader};
 use super::{
-    AntennaQuad, Image, SamplerKind, ViewFrame, argb, ce_color_interpolate, ce_color_interpolation,
-    decode_image, dot, elements, function_slot_of, has_flag, object_block, posed_on,
+    AntennaQuad, Image, SamplerKind, ViewFrame, argb, decode_image, dot, elements,
+    function_slot_of, has_flag, object_block, posed_on, rgb_colors_interpolate,
+    rgb_interpolation_flags,
 };
 use blam_tags::{TagFile, TagStruct};
 use std::sync::Arc;
@@ -116,7 +117,7 @@ fn read_light_volume(
         brightness,
         source: source_slot,
         count,
-        interpolation: ce_color_interpolation(
+        interpolation: rgb_interpolation_flags(
             has_flag(root, "flags", "interpolate color in hsv"),
             has_flag(root, "flags", "...more colors"),
         ),
@@ -225,7 +226,7 @@ impl CeLightVolume {
                 } else {
                     x
                 };
-                let rgb = ce_color_interpolate(
+                let rgb = rgb_colors_interpolate(
                     self.interpolation,
                     [hither[0], hither[1], hither[2]],
                     [yon[0], yon[1], yon[2]],

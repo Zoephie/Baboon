@@ -4,7 +4,7 @@
 //! (`sub_5251C0`) fills in for the game is filled in here.
 
 use super::super::ce::random::CeRandom;
-use super::super::common::color::{ce_color_interpolate, ce_color_interpolation};
+use super::super::common::color::{rgb_colors_interpolate, rgb_interpolation_flags};
 use super::super::common::fields::{
     elements, function_slot, function_slot_of, has_flag, object_block,
 };

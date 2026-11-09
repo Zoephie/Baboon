@@ -228,7 +228,7 @@ impl Antenna {
         tip: Option<[f32; 3]>,
     ) -> Vec<AntennaQuad> {
         if let (Some(_), Some(curve)) = (&self.spring, &self.curve) {
-            return self.reach_quads(curve, bones, view, tip);
+            return self.spring_quads(curve, bones, view, tip);
         }
         let (mut origin, mut direction) = posed_on(self.node, self.position, self.forward, bones);
         let mut points = vec![origin];
@@ -290,7 +290,7 @@ impl Antenna {
     /// `get_vertex_scale_by_distance` stretches it the link's length over
     /// its pixels; `build_sprite` (0x84BFF6B8) scales both ways by the
     /// bitmap's width, and turns its width across the ray from the eye.
-    fn reach_quads(
+    fn spring_quads(
         &self,
         curve: &AntennaCurve,
         bones: Option<&[[f32; 4]]>,

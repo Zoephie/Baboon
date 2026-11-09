@@ -8,7 +8,7 @@ use super::super::super::dx9::stage::Dx9VertexStage;
 use super::super::super::gl::program::Linked;
 use super::flare::read_flare;
 use super::light::CeLight;
-use super::{UNSET, argb, ce_color_interpolation, dot, has_flag};
+use super::{UNSET, argb, dot, has_flag, rgb_interpolation_flags};
 use eframe::glow::{self, HasContext as _};
 use std::sync::Arc;
 
@@ -114,7 +114,7 @@ pub(super) fn read_light_tag(reader: &TagReader, path: &str) -> Option<CeLight> 
         change_color: None,
         lower,
         upper,
-        interpolation: ce_color_interpolation(
+        interpolation: rgb_interpolation_flags(
             has_flag(root, "interpolation flags", "blend in hsv"),
             has_flag(root, "interpolation flags", "...more colors"),
         ),

@@ -3,7 +3,7 @@
 //! [`super::super::ce::lights`], but the sums are not: brightness, color and rotation
 //! animate, occlusion comes in two sizes, and the pixel shader adds a highlight.
 
-use super::super::common::color::ce_color_interpolate;
+use super::super::common::color::rgb_colors_interpolate;
 use super::super::common::fields::{
     elements, function_slot_of, has_flag, has_flag_in_any, object_block,
 };
@@ -16,7 +16,7 @@ use super::super::functions::FunctionValues;
 use super::super::functions::object_input;
 use super::super::materials::decode_image;
 use crate::app::model_preview::common::attached::attached;
-use crate::app::model_preview::common::color::ce_color_interpolation;
+use crate::app::model_preview::common::color::rgb_interpolation_flags;
 use crate::app::model_preview::common::flares::FlareSprite;
 use crate::app::model_preview::common::flares::OcclusionOffset;
 use crate::app::model_preview::common::marker::MarkerFrame;

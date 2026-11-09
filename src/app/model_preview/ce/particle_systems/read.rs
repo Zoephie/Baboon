@@ -3,7 +3,7 @@
 use super::super::super::{RenderModelPreviewMarker, TagReader};
 use super::sim::{CeParticleState, MOST_MARKERS, TypeState};
 use super::{
-    CePointPhysics, CeSpriteSheet, FramebufferBlend, elements, function_slot_of, has_flag,
+    CeSpriteSheet, FramebufferBlend, PointPhysics, elements, function_slot_of, has_flag,
     has_flag_after, object_block, read_secondary_map, read_sprite_sheet,
 };
 use blam_tags::{TagFieldData, TagFile, TagStruct};
@@ -116,7 +116,7 @@ pub(super) struct ParticleType {
 pub(crate) struct CePctlDef {
     pub(super) types: Vec<ParticleType>,
     /// `point physics`, which moves a system on no object.
-    pub(super) physics: Option<CePointPhysics>,
+    pub(super) physics: Option<PointPhysics>,
     /// Every bitmap its particle states name, for the textures.
     pub(crate) sheets: Vec<Arc<CeSpriteSheet>>,
 }
@@ -168,12 +168,12 @@ fn constants_of(holder: TagStruct<'_>) -> [f32; 3] {
     })
 }
 
-fn read_physics(reader: &TagReader, holder: TagStruct<'_>) -> Option<CePointPhysics> {
+fn read_physics(reader: &TagReader, holder: TagStruct<'_>) -> Option<PointPhysics> {
     let path = holder
         .read_tag_ref_path("point physics")
         .filter(|path| !path.is_empty())?;
     let tag = reader.load(&path, "point_physics", b"pphy").ok()?;
-    Some(CePointPhysics::read(&tag))
+    Some(PointPhysics::read(&tag))
 }
 
 pub(in crate::app::model_preview) fn read_pctl_def(

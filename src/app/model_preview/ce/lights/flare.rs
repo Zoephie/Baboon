@@ -3,8 +3,8 @@
 use super::super::super::TagReader;
 use super::light::CeReflection;
 use super::{
-    Image, OcclusionOffset, SamplerKind, argb, ce_color_interpolation, decode_image, elements,
-    has_flag, has_flag_in_any,
+    Image, OcclusionOffset, SamplerKind, argb, decode_image, elements, has_flag, has_flag_in_any,
+    rgb_interpolation_flags,
 };
 use std::sync::Arc;
 
@@ -76,7 +76,7 @@ pub(super) fn read_flare(reader: &TagReader, path: &str) -> Option<CeFlare> {
             lower: argb(reflection, "color lower bound"),
             upper: argb(reflection, "color upper bound"),
             // Its second `flags` field holds these.
-            interpolation: ce_color_interpolation(
+            interpolation: rgb_interpolation_flags(
                 has_flag_in_any(reflection, "flags", "interpolate color in hsv"),
                 has_flag_in_any(reflection, "flags", "...more colors"),
             ),

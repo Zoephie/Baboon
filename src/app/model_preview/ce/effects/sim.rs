@@ -8,9 +8,8 @@ use super::place::{CeEffectAt, CeLocation, CeSpawn};
 use super::read::CeEffectDef;
 use super::{
     CeLight, CePctlQuad, CeRandom, CeRunningSystem, CeTicks, FramebufferBlend,
-    MOST_SYSTEM_PARTICLES, PRE_ROLL, STEP, ViewFrame, ce_color_interpolate, cross, dot,
-    new_unattached, perpendicular, posed_on, unattached_quads, unit_or_unchanged,
-    update_unattached,
+    MOST_SYSTEM_PARTICLES, PRE_ROLL, STEP, ViewFrame, cross, dot, new_unattached, perpendicular,
+    posed_on, rgb_colors_interpolate, unattached_quads, unit_or_unchanged, update_unattached,
 };
 use blam_tags::TagStruct;
 use std::sync::Arc;
@@ -1011,7 +1010,7 @@ pub(super) fn generate_particles(
                     random.next()
                 };
                 let [low, high] = entry.tint;
-                let rgb = ce_color_interpolate(
+                let rgb = rgb_colors_interpolate(
                     entry.flags.tint_interpolation,
                     [low[0], low[1], low[2]],
                     [high[0], high[1], high[2]],

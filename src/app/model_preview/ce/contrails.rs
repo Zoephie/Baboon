@@ -17,7 +17,7 @@ use super::random::CeRandom;
 use crate::app::model_preview::ce::blend::FramebufferBlend;
 use crate::app::model_preview::common::fields::argb;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_up};
-use crate::app::model_preview::common::point_physics::CePointPhysics;
+use crate::app::model_preview::common::point_physics::PointPhysics;
 use crate::core::h2_pixel_shader::SamplerKind;
 
 const PRE_ROLL: f32 = 4.0;
@@ -121,7 +121,7 @@ impl FadeMode {
 struct PointState {
     duration: [f32; 2],
     transition: [f32; 2],
-    physics: Option<CePointPhysics>,
+    physics: Option<PointPhysics>,
     width: f32,
     /// Alpha, red, green and blue, lower and upper.
     colors: [[f32; 4]; 2],
@@ -137,7 +137,7 @@ fn read_state(reader: &TagReader, state: TagStruct<'_>) -> PointState {
         .read_tag_ref_path("physics")
         .filter(|path| !path.is_empty())
         .and_then(|path| reader.load(&path, "point_physics", b"pphy").ok())
-        .map(|tag| CePointPhysics::read(&tag));
+        .map(|tag| PointPhysics::read(&tag));
     let color = |name: &str| {
         let [red, green, blue, alpha] = argb(state, name);
         [alpha, red, green, blue]

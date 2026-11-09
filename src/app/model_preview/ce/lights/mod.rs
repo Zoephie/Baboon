@@ -1,7 +1,7 @@
 //! Halo CE's lens flares: what `attachments_new` hangs on an object as a
 //! `light`, and the sprites `rasterizer_lens_flares_draw` makes of one.
 
-use super::super::common::color::{ce_color_interpolate, ce_color_interpolation};
+use super::super::common::color::{rgb_colors_interpolate, rgb_interpolation_flags};
 use super::super::common::fields::{
     elements, function_slot_of, has_flag, has_flag_in_any, object_block,
 };

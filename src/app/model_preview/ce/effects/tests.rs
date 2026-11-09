@@ -89,7 +89,7 @@ fn an_event_lets_go_its_particles_along_its_distribution() {
 
 #[test]
 fn a_point_on_the_floor_bounces_by_its_elasticity() {
-    let physics = CePointPhysics {
+    let physics = PointPhysics {
         mass_over_radius_cubed: 1.0,
         air_buoyancy: 0.0,
         air_friction: 0.0,

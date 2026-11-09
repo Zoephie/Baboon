@@ -32,7 +32,7 @@ pub(in crate::app::model_preview) fn tag_function_at(
     name: &str,
 ) -> Option<TagFunction> {
     let Some(field) = holder.field_path(&format!("{name}/data")) else {
-        return h2_laid_out_function(holder.descend(name)?);
+        return laid_out_function(holder.descend(name)?);
     };
     // Later engines keep the bytes as one blob, in their own encoding.
     if let Some(data) = field.as_data() {
@@ -48,7 +48,7 @@ pub(in crate::app::model_preview) fn tag_function_at(
 
 /// Some of Halo 2's functions lay the engine's block out as fields: the header,
 /// its four colors and the graphs' reals. Put back together it is what `data` is.
-fn h2_laid_out_function(mapping: TagStruct<'_>) -> Option<TagFunction> {
+fn laid_out_function(mapping: TagStruct<'_>) -> Option<TagFunction> {
     // Raw, for what a ranged function keeps in its colors is its clamps, as
     // reals, and read as colors they would lose their top bytes. Older tags
     // stop short of the last two slots.

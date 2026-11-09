@@ -4,9 +4,9 @@ use super::super::super::TagReader;
 use super::events::Distribution;
 use super::sim::created_here;
 use super::{
-    CeEffectLightDef, CePctlDef, CePointPhysics, CeSecondaryMap, CeSpriteFrame, CeSpriteSheet,
-    FramebufferBlend, Image, argb, ce_color_interpolation, elements, has_flag, read_effect_light,
-    read_pctl_def, read_secondary_map, read_sprite_sheet,
+    CeEffectLightDef, CePctlDef, CeSecondaryMap, CeSpriteFrame, CeSpriteSheet, FramebufferBlend,
+    Image, PointPhysics, argb, elements, has_flag, read_effect_light, read_pctl_def,
+    read_secondary_map, read_sprite_sheet, rgb_interpolation_flags,
 };
 use blam_tags::{TagFieldData, TagStruct};
 use std::sync::Arc;
@@ -64,7 +64,7 @@ impl EffectParticleFlags {
             stay_attached: set("stay attached to marker"),
             random_initial_angle: set("random initial angle"),
             tint_from_object: set("tint from object color"),
-            tint_interpolation: ce_color_interpolation(
+            tint_interpolation: rgb_interpolation_flags(
                 set("interpolate tint as HSV"),
                 set("... across the long hue path"),
             ),
@@ -108,7 +108,7 @@ impl Scales {
 #[derive(Debug, Clone)]
 pub(crate) struct CeParticleDef {
     pub(super) flags: ParticleFlags,
-    pub(super) physics: Option<CePointPhysics>,
+    pub(super) physics: Option<PointPhysics>,
     pub(super) lifespan: [f32; 2],
     pub(super) fade_in: f32,
     pub(super) fade_out: f32,
@@ -277,7 +277,7 @@ fn read_particle_def(
         .read_tag_ref_path("physics")
         .filter(|path| !path.is_empty())
         .and_then(|path| reader.load(&path, "point_physics", b"pphy").ok())
-        .map(|tag| CePointPhysics::read(&tag));
+        .map(|tag| PointPhysics::read(&tag));
     Some(CeParticleDef {
         flags,
         physics,

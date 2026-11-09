@@ -19,7 +19,7 @@ use crate::app::model_preview::ce::sprite_sheet::{
     CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet,
 };
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
-use crate::app::model_preview::common::point_physics::CePointPhysics;
+use crate::app::model_preview::common::point_physics::PointPhysics;
 
 mod read;
 pub(in crate::app::model_preview) use read::*;

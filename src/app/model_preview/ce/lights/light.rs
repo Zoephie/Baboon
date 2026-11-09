@@ -4,9 +4,9 @@ use super::super::super::{RenderModelPreview, RenderModelPreviewMarker, TagFile,
 use super::flare::CeFlare;
 use super::point::read_light_tag;
 use super::{
-    FlareSprite, MarkerFrame, OcclusionOffset, ViewFrame, attached_marker_frame,
-    ce_color_interpolate, cross, dot, elements, function_slot_of, lerp, object_block,
-    periodic_evaluate, posed_on,
+    FlareSprite, MarkerFrame, OcclusionOffset, ViewFrame, attached_marker_frame, cross, dot,
+    elements, function_slot_of, lerp, object_block, periodic_evaluate, posed_on,
+    rgb_colors_interpolate,
 };
 use std::sync::Arc;
 
@@ -52,7 +52,7 @@ pub(crate) struct CeReflection {
     pub(super) tint: [f32; 4],
     pub(super) lower: [f32; 4],
     pub(super) upper: [f32; 4],
-    /// [`ce_color_interpolate`]'s flags.
+    /// [`rgb_colors_interpolate`]'s flags.
     pub(super) interpolation: i128,
     /// `animation function`'s number, which [`periodic_evaluate`] switches on.
     pub(super) animation_function: usize,
@@ -73,7 +73,7 @@ pub(crate) struct CeLight {
     pub(super) change_color: Option<usize>,
     pub(super) lower: [f32; 4],
     pub(super) upper: [f32; 4],
-    /// `interpolation flags`, for [`ce_color_interpolate`].
+    /// `interpolation flags`, for [`rgb_colors_interpolate`].
     pub(super) interpolation: i128,
     /// `lights_preprocess_scene` submits it to light models.
     pub(super) dynamic: bool,
@@ -126,7 +126,7 @@ pub(super) fn light_color(
     change: [f32; 3],
     value: f32,
 ) -> [f32; 3] {
-    let color = ce_color_interpolate(flags, rgb_of(lower), rgb_of(upper), value);
+    let color = rgb_colors_interpolate(flags, rgb_of(lower), rgb_of(upper), value);
     if lower[3] <= 0.0001 && upper[3] <= 0.0001 {
         return std::array::from_fn(|channel| color[channel] * change[channel]);
     }
@@ -179,7 +179,7 @@ impl CeLight {
     pub(super) fn color(&self, value: f32, change_colors: &[[f32; 3]; 4]) -> [f32; 3] {
         // `rgb_colors_interpolate`, for a light `light_new_unattached` made.
         if self.fixed.is_some() {
-            return ce_color_interpolate(
+            return rgb_colors_interpolate(
                 self.interpolation,
                 rgb_of(self.lower),
                 rgb_of(self.upper),
@@ -350,7 +350,7 @@ impl CeReflection {
             };
             let phase = (self.animation_phase + time) / period;
             let u = periodic_evaluate(self.animation_function, phase);
-            ce_color_interpolate(
+            rgb_colors_interpolate(
                 self.interpolation,
                 rgb_of(self.lower),
                 rgb_of(self.upper),

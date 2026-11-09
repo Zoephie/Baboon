@@ -58,12 +58,12 @@ pub(in crate::app::model_preview) fn hsv_interpolate(
 
 /// `rgb_colors_interpolate`'s flags from a tag's two options: whether to
 /// blend in HSV, and whether the long way round the hue wheel.
-pub(crate) fn ce_color_interpolation(hsv: bool, long_way: bool) -> i128 {
+pub(crate) fn rgb_interpolation_flags(hsv: bool, long_way: bool) -> i128 {
     i128::from(hsv) | i128::from(long_way) << 1
 }
 
 /// `rgb_colors_interpolate`: bit 0 of `flags` blends in HSV, bit 1 the long way.
-pub(crate) fn ce_color_interpolate(
+pub(crate) fn rgb_colors_interpolate(
     flags: i128,
     lower: [f32; 3],
     upper: [f32; 3],

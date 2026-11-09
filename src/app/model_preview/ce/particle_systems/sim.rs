@@ -7,7 +7,7 @@ use super::read::{
     ParticleVariables, RADIUS, RATE, ROTATION, SCALE, TypeVariables,
 };
 use super::{
-    CePointPhysics, CeRandom, CeSecondaryMap, CeSpriteSheet, FramebufferBlend, ViewFrame, cross,
+    CeRandom, CeSecondaryMap, CeSpriteSheet, FramebufferBlend, PointPhysics, ViewFrame, cross,
     posed_on,
 };
 use std::collections::VecDeque;
@@ -48,7 +48,7 @@ pub(super) struct CeParticleState {
     /// Alpha, red, green, blue, lower and upper.
     pub(super) colors: [[f32; 4]; 2],
     pub(super) radius: f32,
-    pub(super) physics: Option<CePointPhysics>,
+    pub(super) physics: Option<PointPhysics>,
     pub(super) blend: FramebufferBlend,
     pub(super) map_flags: i128,
     pub(super) nonlinear_tint: bool,

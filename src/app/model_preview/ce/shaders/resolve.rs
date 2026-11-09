@@ -127,11 +127,11 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
     let mut bitmap = |path: &str, kind: SamplerKind| {
         let image = ce_image_index(reader, path, permutation, &mut caches.ce.image_counts);
         let key = (path.to_owned(), kind, image);
-        if let Some(cached) = caches.h2_images.get(&key) {
+        if let Some(cached) = caches.dx9_images.get(&key) {
             return cached.clone();
         }
         let decoded = decode_image(reader, path, kind, image).map(Arc::new);
-        caches.h2_images.insert(key, decoded.clone());
+        caches.dx9_images.insert(key, decoded.clone());
         decoded
     };
     textures.dx9_layers[Dx9Layer::Lightmap as usize] =
@@ -198,7 +198,7 @@ fn expand_ce_digits(
         for digit in 0..count {
             let key = (numeric.map.clone(), SamplerKind::Texture2D, digit);
             let image = caches
-                .h2_images
+                .dx9_images
                 .entry(key)
                 .or_insert_with(|| {
                     decode_image(reader, &numeric.map, SamplerKind::Texture2D, digit).map(Arc::new)

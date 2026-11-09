@@ -7,8 +7,8 @@ use super::place::{
     second_field_int,
 };
 use super::{
-    Dx9Layer, Dx9Light, FunctionValues, H2EffectLight, Image, SamplerKind, UNSET, attached,
-    ce_color_interpolate, ce_color_interpolation, cross, decode_image, has_flag, posed_on,
+    Dx9Layer, Dx9Light, FunctionValues, H2EffectLight, Image, SamplerKind, UNSET, attached, cross,
+    decode_image, has_flag, posed_on, rgb_colors_interpolate, rgb_interpolation_flags,
 };
 use blam_tags::{TagFunction, TagStruct};
 use std::sync::Arc;
@@ -150,7 +150,7 @@ pub(super) fn read_h2_light(
         .filter(|radius| *radius != 0.0);
     let saturate = |colors: [[f32; 3]; 2]| colors.map(|color| color.map(|c| c.clamp(0.0, 1.0)));
     let light = H2Light {
-        interpolation: ce_color_interpolation(
+        interpolation: rgb_interpolation_flags(
             has_flag(root, "interpolation flags", "blend in hsv"),
             has_flag(root, "interpolation flags", "...more colors"),
         ),
@@ -234,7 +234,7 @@ impl H2Light {
     /// bounds' alphas are 1 here, so a change color adds nothing.
     pub(super) fn diffuse_at(&self, value: f32, time: f32) -> Option<[f32; 3]> {
         let at = |[lower, upper]: [[f32; 3]; 2]| {
-            ce_color_interpolate(self.interpolation, lower, upper, value)
+            rgb_colors_interpolate(self.interpolation, lower, upper, value)
         };
         let (mut diffuse, specular) = (at(self.diffuse), at(self.specular));
         if let Some(function) = &self.color_animation {
@@ -298,7 +298,7 @@ impl H2PointLight {
         )?;
         let light = &self.light;
         let diffuse = light.diffuse_at(value, time)?;
-        let specular = ce_color_interpolate(
+        let specular = rgb_colors_interpolate(
             light.interpolation,
             light.specular[0],
             light.specular[1],
@@ -395,7 +395,7 @@ impl H2GelLight {
         let (_, up) = posed_on(self.node, self.position, self.up, bones);
         let rows = self.frustum.rows(position, forward, up, size);
         let color = diffuse.map(|channel| (channel * brightness).min(BRIGHTEST));
-        let specular = ce_color_interpolate(
+        let specular = rgb_colors_interpolate(
             light.interpolation,
             light.specular[0],
             light.specular[1],
