@@ -1,8 +1,16 @@
 //! The egui widget over the GL picture: input, the camera it moves, and the
 //! overlays drawn on top (error reports, markers, the armature).
 
+use super::super::ui_kit::style::foundation_input_edge;
 use super::ce::draw::ce_events_running;
-use super::*;
+use super::{
+    MAX_PREVIEW_SCALE, ModelPreviewData, ModelPreviewState, PreviewCamera, armature_node_positions,
+    build_frame, ce, min_preview_scale, model_gl_failure, paint_model_gl, preview_background,
+    preview_center_radius, preview_clock, unrotate_view_vector, viewport_wheel_zoom,
+};
+use eframe::egui;
+use eframe::egui::{Align2, Color32, FontId, Sense, Stroke, Ui, Vec2};
+use std::sync::Arc;
 
 mod errors;
 pub(in crate::app::model_preview) use errors::*;

@@ -1,6 +1,7 @@
 //! Screen-space helpers for the overlays: polygons, segment distance and the hover label.
 
-use super::*;
+use eframe::egui;
+use eframe::egui::{Align2, Color32, FontId, Vec2};
 
 pub(in crate::app::model_preview) fn polygon_edges(
     polygon: &[egui::Pos2],

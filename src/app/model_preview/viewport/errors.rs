@@ -1,6 +1,15 @@
 //! The import-tool error overlay: each primitive drawn in its colour, and the hover that names it.
 
-use super::*;
+use super::super::{
+    ModelErrorPoint, ModelErrorPrimitive, ModelErrorShape, ModelPreviewState, PreviewCamera,
+    model_layer_visible,
+};
+use super::screen::{
+    draw_preview_hover_label, point_in_polygon, point_segment_distance, polygon_area_twice,
+    polygon_edges, screen_edge_length,
+};
+use eframe::egui;
+use eframe::egui::{Color32, Stroke, Ui, Vec2};
 
 fn model_error_color(error: &ModelErrorPrimitive) -> Color32 {
     Color32::from_rgba_unmultiplied(
@@ -291,7 +300,13 @@ fn animated_error_point(point: &ModelErrorPoint, skinning_rows: Option<&[[f32; 4
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::{
+        ModelErrorPoint, ModelErrorPrimitive, ModelErrorShape, ModelPreviewLayer,
+    };
+    use super::super::screen::{point_in_polygon, polygon_area_twice};
     use super::*;
+    use eframe::egui;
+    use eframe::egui::Color32;
 
     #[test]
     fn error_face_hover_detects_inside_and_outside_points() {

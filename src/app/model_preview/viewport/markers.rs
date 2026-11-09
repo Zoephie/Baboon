@@ -1,6 +1,9 @@
 //! Marker axes and the armature, drawn where the animated pose puts them.
 
-use super::*;
+use super::super::{PreviewCamera, RenderModelPreviewMarker};
+use super::screen::{point_segment_distance, screen_edge_length};
+use eframe::egui;
+use eframe::egui::{Color32, Stroke, Vec2};
 
 pub(in crate::app::model_preview) const ARMATURE_COLOR: Color32 = Color32::from_rgb(255, 204, 0);
 
@@ -100,6 +103,7 @@ pub(in crate::app::model_preview) fn marker_axes_hovered(
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::RenderModelPreviewMarker;
     use super::*;
 
     #[test]
