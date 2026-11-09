@@ -13,6 +13,7 @@ use super::slot::H3Slot;
 use super::super::gen3::effects::screen::H3ScreenSettings;
 use super::super::gen3::render::Gen3Cx;
 use super::bloom::H3Bloom;
+use super::super::gen3::shadow::h3_shadow_style;
 
 /// Halo 3's and ODST's hooks: the pipeline's defaults, the self shadow, and
 /// their bloom and composite.
@@ -82,7 +83,7 @@ impl Gen3Game for H3Game {
         // Generated from the light, for the apply pass after the opaque one.
         unsafe {
             cx.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
-            let drawn = cx.core.draw_h2_shadow(cx.gl, cx.frame, cx.slot, order);
+            let drawn = cx.core.draw_h2_shadow(cx.gl, cx.frame, cx.slot, order, h3_shadow_style(cx.frame));
             cx.core.bind_slot_vertices(cx.gl, cx.slot);
             drawn
         }

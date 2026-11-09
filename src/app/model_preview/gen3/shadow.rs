@@ -6,6 +6,32 @@ use eframe::glow::{self, HasContext as _};
 use super::state::Gen3State;
 use super::super::*;
 use super::shaders::{H3Material, H3Pass};
+use super::super::dx9::shadow::ShadowStyle;
+
+/// Where Halo 3's and ODST's shadow apply reads the albedo pass's normals.
+pub(in crate::app::model_preview) const H3_NORMAL_TARGET_UNIT: u32 = 9;
+
+/// `c_rasterizer::render_globals.k_shadow_resolution`.
+pub(in crate::app::model_preview) const H3_SHADOW_MAP_SIZE: i32 = 512;
+
+/// `set_shadow_generate_mode`'s bias, the second in depth units.
+pub(in crate::app::model_preview) const H3_SHADOW_SLOPE_BIAS: f32 = 1.414;
+
+pub(in crate::app::model_preview) const H3_SHADOW_DEPTH_BIAS: f32 = 0.003;
+
+/// Halo 3's and ODST's self shadow through the dx9 passes: a smaller map,
+/// biased, from the dominant probe light, and applied after the opaque pass
+/// rather than masked in the stencil.
+pub(in crate::app::model_preview) fn h3_shadow_style(frame: &ModelGpuFrame) -> ShadowStyle {
+    let (toward, alpha) = gen3::pipeline::h3_shadow_light(frame);
+    ShadowStyle {
+        map_size: H3_SHADOW_MAP_SIZE,
+        bias: Some((H3_SHADOW_SLOPE_BIAS, H3_SHADOW_DEPTH_BIAS * (1 << 24) as f32)),
+        stencil_mask: false,
+        toward,
+        alpha,
+    }
+}
 
 /// A batch that casts, its material, and that material's `shadow_generate`.
 pub(in crate::app::model_preview) type ShadowCaster<'a> = (&'a RenderModelPreviewBatch, &'a Arc<H3Material>, Arc<H3Pass>);

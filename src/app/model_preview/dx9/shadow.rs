@@ -4,7 +4,7 @@
 use super::super::*;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::{Made, Sampling, Texels};
-use super::super::dx9::passes::H2Layer;
+use super::super::dx9::passes::{H2Layer, h2_prt_lights};
 use eframe::glow::{self, HasContext as _};
 
 pub(in crate::app::model_preview) const H2_SHADOW_MAP_SIZE: i32 = 2048;
@@ -12,15 +12,40 @@ pub(in crate::app::model_preview) const H2_SHADOW_MAP_SIZE: i32 = 2048;
 /// Past the units a pass's own samplers take.
 pub(in crate::app::model_preview) const H2_SHADOW_MAP_UNIT: u32 = 8;
 
-pub(in crate::app::model_preview) const H3_NORMAL_TARGET_UNIT: u32 = 9;
+/// How a game draws the self shadow through these passes: Halo 2's own, or
+/// Halo 3's and ODST's (`gen3::shadow::h3_shadow_style`).
+#[derive(Clone, Copy)]
+pub(in crate::app::model_preview) struct ShadowStyle {
+    /// The square of the map the caster draws into.
+    pub(in crate::app::model_preview) map_size: i32,
+    /// The caster's polygon offset, slope then depth units; none draws it
+    /// without.
+    pub(in crate::app::model_preview) bias: Option<(f32, f32)>,
+    /// Whether the model in view then marks the stencil against the map, as
+    /// Halo 2 does. Without it the caller applies the map itself.
+    pub(in crate::app::model_preview) stencil_mask: bool,
+    /// The direction the shadow falls from, and the apply's strength.
+    pub(in crate::app::model_preview) toward: [f32; 3],
+    pub(in crate::app::model_preview) alpha: f32,
+}
 
-/// `c_rasterizer::render_globals.k_shadow_resolution`.
-pub(in crate::app::model_preview) const H3_SHADOW_MAP_SIZE: i32 = 512;
+impl ShadowStyle {
+    /// Halo 2's: the whole map, unbiased, masked in the stencil, from the
+    /// key light.
+    pub(in crate::app::model_preview) fn h2(frame: &ModelGpuFrame) -> Self {
+        let toward = if frame.default_lights { h2_prt_lights()[0].direction } else { frame.h2_object_light() };
+        Self { map_size: H2_SHADOW_MAP_SIZE, bias: None, stencil_mask: true, toward, alpha: 1.0 }
+    }
+}
 
-/// `set_shadow_generate_mode`'s bias, the second in depth units.
-pub(in crate::app::model_preview) const H3_SHADOW_SLOPE_BIAS: f32 = 1.414;
-
-pub(in crate::app::model_preview) const H3_SHADOW_DEPTH_BIAS: f32 = 0.003;
+/// The normals a gen3 albedo pass laid down, which a shadow apply reads, with
+/// the unit to bind them on and the map size the apply samples by.
+#[derive(Clone, Copy)]
+pub(in crate::app::model_preview) struct ShadowNormalTarget {
+    pub(in crate::app::model_preview) texture: glow::NativeTexture,
+    pub(in crate::app::model_preview) unit: u32,
+    pub(in crate::app::model_preview) map_size: i32,
+}
 
 /// A depth texture and the framebuffer to fill it through.
 pub(in crate::app::model_preview) unsafe fn h2_shadow_map(gl: &glow::Context) -> Option<(glow::NativeFramebuffer, glow::NativeTexture)> {
@@ -81,13 +106,15 @@ impl RenderCore {
         frame: &ModelGpuFrame,
         slot: usize,
         order: &[usize],
+        style: ShadowStyle,
     ) -> bool {
         unsafe {
             let Some((framebuffer, _)) = *self.dx9.h2_shadow_map.get_or_insert_with(|| h2_shadow_map(gl)) else {
                 return false;
             };
-            let h3 = self.h3_draws(frame);
-            let size = if h3 { H3_SHADOW_MAP_SIZE } else { H2_SHADOW_MAP_SIZE };
+            // The passes bind the light from it, here and in a later apply.
+            self.dx9.shadow = Some(style);
+            let size = style.map_size;
             let state = PostScope::capture(gl);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             gl.disable(glow::SCISSOR_TEST);
@@ -95,14 +122,14 @@ impl RenderCore {
             gl.clear_depth_f32(1.0);
             gl.clear(glow::DEPTH_BUFFER_BIT);
             gl.viewport(0, 0, size, size);
-            if h3 {
+            if let Some((slope, depth)) = style.bias {
                 gl.enable(glow::POLYGON_OFFSET_FILL);
-                gl.polygon_offset(H3_SHADOW_SLOPE_BIAS, H3_SHADOW_DEPTH_BIAS * (1 << 24) as f32);
+                gl.polygon_offset(slope, depth);
             }
             self.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowCaster, None);
             gl.disable(glow::POLYGON_OFFSET_FILL);
             state.restore(gl);
-            if h3 {
+            if !style.stencil_mask {
                 return true;
             }
             gl.clear_stencil(0);

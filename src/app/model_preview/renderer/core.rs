@@ -20,7 +20,7 @@ use eframe::glow;
 pub(in crate::app::model_preview) struct RenderCore {
     /// The normals the gen3 albedo pass laid down, which Halo 3's dx9
     /// shadow apply reads: the gen3 targets' own, kept as they are remade.
-    pub(in crate::app::model_preview) h3_normal_target: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) h3_normal_target: Option<super::super::dx9::shadow::ShadowNormalTarget>,
     /// What a gen3 array sampler reads with nothing of its own.
     pub(in crate::app::model_preview) black_array: Option<glow::NativeTexture>,
     /// As `Dx9Gl::h2_bloom`.

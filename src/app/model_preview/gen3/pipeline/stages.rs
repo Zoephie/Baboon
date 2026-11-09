@@ -1,6 +1,8 @@
 //! The pipeline's stages: the frame begun, the albedo and transparent passes, camo and the shield.
 
 use super::*;
+use super::super::shadow::{H3_NORMAL_TARGET_UNIT, H3_SHADOW_MAP_SIZE};
+use super::super::super::dx9::shadow::ShadowNormalTarget;
 
 /// The object function values behind the shield's two quantities.
 pub(in crate::app::model_preview) const H3_SHIELD_DAMAGE: &str = "current_shield_damage";
@@ -351,7 +353,11 @@ impl Gen3State {
                     old.delete(gl);
                 }
                 self.targets = H3Targets::new(gl, size, depth);
-                core.h3_normal_target = self.targets.as_ref().map(|targets| targets.normal);
+                core.h3_normal_target = self.targets.as_ref().map(|targets| ShadowNormalTarget {
+                    texture: targets.normal,
+                    unit: H3_NORMAL_TARGET_UNIT,
+                    map_size: H3_SHADOW_MAP_SIZE,
+                });
             }
             let Some(targets) = self.targets.as_ref() else {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));

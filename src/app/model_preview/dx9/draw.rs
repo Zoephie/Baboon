@@ -13,7 +13,7 @@ use super::super::dx9::passes::{
     h2_normalization_face,
 };
 use super::super::h2::bloom::H2Bloom;
-use super::super::dx9::passes::{H2Clock, h2_prt_lights};
+use super::super::dx9::passes::H2Clock;
 use super::super::dx9::stage::H2VertexStage;
 use crate::core::h2_pixel_shader::SamplerKind;
 use eframe::glow::{self, HasContext as _};
@@ -37,6 +37,9 @@ pub(in crate::app::model_preview) struct Dx9Gl {
     pub(in crate::app::model_preview) h2_shadow_map: Option<Option<(glow::NativeFramebuffer, glow::NativeTexture)>>,
     /// The frame's CE point lights with those its effects have made, which
     /// only the drawing knows; none while effects make no lights.
+    /// The style of the self shadow drawn last, which its passes and a later
+    /// apply bind the light from.
+    pub(in crate::app::model_preview) shadow: Option<ShadowStyle>,
     pub(in crate::app::model_preview) ce_points_now: Option<Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>>,
 }
 
@@ -51,6 +54,7 @@ impl Dx9Gl {
             h2_bloom: None,
             h2_shadow_map: None,
             ce_points_now: None,
+            shadow: None,
         }
     }
 }
@@ -594,13 +598,9 @@ impl RenderCore {
             }
             if matches!(pass.stage, H2VertexStage::ShadowCaster | H2VertexStage::ShadowMask) {
                 let location = program.location(gl, "u_shadow_matrix");
-                let (toward, shadow_alpha) = if self.h3_draws(frame) {
-                    gen3::pipeline::h3_shadow_light(frame)
-                } else if frame.default_lights {
-                    (h2_prt_lights()[0].direction, 1.0)
-                } else {
-                    (frame.h2_object_light(), 1.0)
-                };
+                // Set by the shadow pass these stages draw within or after.
+                let style = self.dx9.shadow.unwrap_or_else(|| ShadowStyle::h2(frame));
+                let (toward, shadow_alpha) = (style.toward, style.alpha);
                 let matrix = h2_shadow_matrix(&frame.preview, toward);
                 gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
                 // A caster draws into the map: bound then, it would be read
@@ -614,14 +614,14 @@ impl RenderCore {
                     gl.uniform_1_i32(location.as_ref(), H2_SHADOW_MAP_UNIT as i32);
                 }
                 if let Some(normal) = self.h3_normal_target {
-                    gl.active_texture(glow::TEXTURE0 + H3_NORMAL_TARGET_UNIT);
-                    gl.bind_texture(glow::TEXTURE_2D, Some(normal));
+                    gl.active_texture(glow::TEXTURE0 + normal.unit);
+                    gl.bind_texture(glow::TEXTURE_2D, Some(normal.texture));
                     let location = program.location(gl, "u_normal_target");
-                    gl.uniform_1_i32(location.as_ref(), H3_NORMAL_TARGET_UNIT as i32);
+                    gl.uniform_1_i32(location.as_ref(), normal.unit as i32);
                     let location = program.location(gl, "u_shadow_toward");
                     gl.uniform_3_f32_slice(location.as_ref(), &toward);
                     let location = program.location(gl, "u_shadow_size");
-                    gl.uniform_1_f32(location.as_ref(), H3_SHADOW_MAP_SIZE as f32);
+                    gl.uniform_1_f32(location.as_ref(), normal.map_size as f32);
                     let location = program.location(gl, "u_shadow_alpha");
                     gl.uniform_1_f32(location.as_ref(), shadow_alpha);
                 }
