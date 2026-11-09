@@ -124,6 +124,18 @@ pub(in crate::app::model_preview) fn h4_turned_vmf(to_camera: [f32; 3]) -> [[f32
 }
 
 /// A Halo 4 engine constant's value for an object here, by name.
+/// Halo 4's [`FrameValues`](super::super::gen3::pipeline::FrameValues):
+/// its engine constants have names of their own, and none fall back to
+/// Halo 3's.
+pub(in crate::app::model_preview) fn h4_frame_values(frame: &ModelGpuFrame, name: &str, _size: [i32; 2], _stops: f32) -> Option<H3Value> {
+    if name == "ps_lighting_constants" && frame.light_follows_camera {
+        let camera = super::super::gen3::pipeline::camera_to_world(frame);
+        let backward = [camera[2], camera[6], camera[10]];
+        return Some(H3Value::FloatArray(h4_turned_vmf(backward).to_vec()));
+    }
+    h4_frame_value(name)
+}
+
 pub(in crate::app::model_preview) fn h4_frame_value(name: &str) -> Option<H3Value> {
     let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
     match name {

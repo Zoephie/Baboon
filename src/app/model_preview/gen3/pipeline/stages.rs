@@ -175,7 +175,7 @@ impl Gen3State {
                         (material.dialect() == H3Dialect::Reach).then(|| state.reach_simple_light(name)).flatten();
                     let mut value = change_color
                         .or(reach_light)
-                        .or_else(|| frame_value(frame, material.dialect(), name, size, state.stops))
+                        .or_else(|| (state.frame_values)(frame, name, size, state.stops))
                         .or_else(|| h4_values.as_ref().and_then(|values| values.get(name)).cloned())
                         .or_else(|| material.values.get(name).cloned());
                     let object = batch.material_index as usize;

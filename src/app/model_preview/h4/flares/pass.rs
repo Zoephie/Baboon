@@ -245,13 +245,7 @@ impl H4Game {
                                 "tintColor" => floats(draw.tint),
                                 // `c_surface::get_alpha_multiplier`: 1 here.
                                 "ps_scale" => floats([1.0; 4]),
-                                other => super::super::super::gen3::pipeline::frame_value(
-                                    frame,
-                                    super::super::super::gen3::shaders::H3Dialect::Halo4,
-                                    other,
-                                    size,
-                                    0.0,
-                                ),
+                                other => super::super::lighting::h4_frame_values(frame, other, size, 0.0),
                             };
                             if let Some(value) = value {
                                 super::super::super::gen3::pipeline::set_value(gl, location.as_ref(), ty, &value);

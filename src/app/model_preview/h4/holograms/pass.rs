@@ -1,5 +1,6 @@
 //! The hologram pass: the screen maps uploaded and the hologram drawn.
 
+use super::super::lighting::h4_frame_values;
 use super::*;
 
 impl H4Game {
@@ -242,7 +243,7 @@ impl H4Game {
                         .iter()
                         .find(|(known, _)| known == name)
                         .map(|(_, value)| value.clone())
-                        .or_else(|| frame_value(frame, H3Dialect::Halo4, name, size, 0.0))
+                        .or_else(|| h4_frame_values(frame, name, size, 0.0))
                         .or_else(|| functions.get(name).cloned())
                         .or_else(|| material.values.get(name).cloned());
                     if let Some(value) = value {

@@ -2,6 +2,8 @@
 //! mask, its lights inline and on the screen, its camo, shield, bloom and
 //! composite.
 
+use super::super::gen3::pipeline::FrameValues;
+use super::lighting::reach_frame_values;
 use eframe::glow::{self, HasContext};
 
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
@@ -31,6 +33,10 @@ impl Gen3Game for ReachGame {
     /// `setup_camera_fx_parameters` before anything draws.
     fn stops(&self, screen: &H3ScreenSettings) -> f32 {
         screen.stops()
+    }
+
+    fn frame_values(&self) -> FrameValues {
+        reach_frame_values
     }
 
     /// `render_fullscreen_shadow_buffer`: the mask, between the albedo and

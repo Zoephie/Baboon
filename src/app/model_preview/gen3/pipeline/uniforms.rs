@@ -72,29 +72,20 @@ pub(super) fn h4_hologram_node(frame: &ModelGpuFrame) -> [[f32; 4]; 3] {
     })
 }
 
-/// What the rasterizer's globals hold for an object here, by uniform name.
-/// `stops` is what Reach's area screen effects come to this frame.
-pub(in crate::app::model_preview) fn frame_value(frame: &ModelGpuFrame, dialect: H3Dialect, name: &str, size: [i32; 2], stops: f32) -> Option<H3Value> {
+/// What the engine's globals hold for an object of a gen3 game, by uniform
+/// name, at `size` and the frame's exposure `stops`. Each game gives its own.
+pub(in crate::app::model_preview) type FrameValues = fn(&ModelGpuFrame, &str, [i32; 2], f32) -> Option<H3Value>;
+
+/// Halo 3's and ODST's [`FrameValues`], which read no stops.
+pub(in crate::app::model_preview) fn halo3_frame_values(frame: &ModelGpuFrame, name: &str, size: [i32; 2], _stops: f32) -> Option<H3Value> {
+    frame_value(frame, name, size)
+}
+
+/// What the rasterizer's globals hold for an object here, by uniform name:
+/// Halo 3's, which Reach's fall back to.
+pub(in crate::app::model_preview) fn frame_value(frame: &ModelGpuFrame, name: &str, size: [i32; 2]) -> Option<H3Value> {
     let [width, height] = size.map(|side| side as f32);
     let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
-    // Halo 4's engine constants have names of their own.
-    if dialect == H3Dialect::Halo4 {
-        if name == "ps_lighting_constants" && frame.light_follows_camera {
-            let camera = camera_to_world(frame);
-            let backward = [camera[2], camera[6], camera[10]];
-            return Some(H3Value::FloatArray(super::super::super::h4::lighting::h4_turned_vmf(backward).to_vec()));
-        }
-        return super::super::super::h4::lighting::h4_frame_value(name);
-    }
-    if dialect == H3Dialect::Reach {
-        if let Some(value) = reach_frame_value(frame, name, stops) {
-            return Some(value);
-        }
-        // Reach's lighting constants past its four vMF are not an object's.
-        if name.starts_with("p_lighting_constant_") || name.starts_with("v_lighting_constant_") {
-            return None;
-        }
-    }
     if let Some(index) = name
         .strip_prefix("p_lighting_constant_")
         .or_else(|| name.strip_prefix("v_lighting_constant_"))

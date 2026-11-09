@@ -345,7 +345,7 @@ fn shared_value(
             eye,
         ]),
         super::super::shield::WORLD_SCALE => floats([camera.scale; 4]),
-        other => super::super::super::gen3::pipeline::frame_value(frame, gen3::shaders::H3Dialect::Halo4, other, size, 0.0)
+        other => super::super::lighting::h4_frame_values(frame, other, size, 0.0)
             .or_else(|| functions.get(other).cloned())
             .or_else(|| material.values.get(other).cloned()),
     }

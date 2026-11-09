@@ -1,6 +1,8 @@
 //! Halo 4's place in the gen3 pipeline: its holograms, full camo, self
 //! shadow mask, screen lights, shield, flares, bloom and composite.
 
+use super::super::gen3::pipeline::FrameValues;
+use super::lighting::h4_frame_values;
 use eframe::glow::{self, HasContext};
 
 use super::super::common::slots::GameSlots;
@@ -75,6 +77,10 @@ impl Gen3Game for H4Game {
                 picture
             }
         };
+    }
+
+    fn frame_values(&self) -> FrameValues {
+        h4_frame_values
     }
 
     /// `render_fullscreen_shadow_buffer`: the mask, between the albedo and

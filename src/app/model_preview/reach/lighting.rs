@@ -232,6 +232,19 @@ fn reach_vmf_index(name: &str) -> Option<usize> {
     index.parse().ok()
 }
 
+/// Reach's [`FrameValues`](super::super::gen3::pipeline::FrameValues):
+/// its own, then Halo 3's, but for the lighting constants past its four
+/// vMF, which are not an object's.
+pub(in crate::app::model_preview) fn reach_frame_values(frame: &ModelGpuFrame, name: &str, size: [i32; 2], stops: f32) -> Option<H3Value> {
+    if let Some(value) = reach_frame_value(frame, name, stops) {
+        return Some(value);
+    }
+    if name.starts_with("p_lighting_constant_") || name.starts_with("v_lighting_constant_") {
+        return None;
+    }
+    super::super::gen3::pipeline::frame_value(frame, name, size)
+}
+
 /// What Reach's rasterizer globals hold for an object here, by uniform name,
 /// at the area screen effects' exposure `stops`. Anything not named falls to
 /// what Reach shares with Halo 3.

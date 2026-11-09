@@ -20,8 +20,9 @@ pub(in crate::app::model_preview) struct PassLight {
 
 /// What the gen3 pipeline keeps between and within frames. `Gen3Pipeline`
 /// owns it, and the pipeline's stages are its methods, each handed the core.
-#[derive(Default)]
 pub(in crate::app::model_preview) struct Gen3State {
+    /// The game's engine globals, which its passes read.
+    pub(in crate::app::model_preview) frame_values: super::pipeline::FrameValues,
     /// The frame's targets: albedo and normals, the lit scene, what lies
     /// behind camo, the depth copy and the distortion.
     pub(in crate::app::model_preview) targets: Option<super::super::gen3::pipeline::H3Targets>,
@@ -65,4 +66,29 @@ pub(in crate::app::model_preview) struct Gen3State {
     /// Which draw of a Halo 4 material is under way, when not its albedo or
     /// own pass (a hologram's or `opaque_alpha_blend`'s fringe).
     pub(in crate::app::model_preview) submit_draw: Option<super::super::h4::materials::submit::H4Draw>,
+}
+
+impl Default for Gen3State {
+    fn default() -> Self {
+        Self {
+            frame_values: super::pipeline::halo3_frame_values,
+            targets: Default::default(),
+            programs: Default::default(),
+            light: Default::default(),
+            distorted: Default::default(),
+            distortion_program: Default::default(),
+            depth_copy: Default::default(),
+            blur_program: Default::default(),
+            screen_alpha: Default::default(),
+            empty_vertex_array: Default::default(),
+            inline_lights: Default::default(),
+            pass_values: Default::default(),
+            shadow_mask: Default::default(),
+            stops: Default::default(),
+            sprite_queue: Default::default(),
+            shadow_view_projection: Default::default(),
+            camo_scene: Default::default(),
+            submit_draw: Default::default(),
+        }
+    }
 }

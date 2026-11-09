@@ -11,7 +11,7 @@ use super::super::common::plain::PlainRender;
 use super::super::frame::ModelGpuFrame;
 use super::super::renderer::{FrameCx, GameRender, RenderCore};
 use super::effects::screen::H3ScreenSettings;
-use super::pipeline::PictureCopies;
+use super::pipeline::{FrameValues, PictureCopies, halo3_frame_values};
 use super::shaders::H3Material;
 use super::sprites::{Gen3Sprite, Gen3Sprites};
 use super::state::Gen3State;
@@ -35,6 +35,11 @@ pub(in crate::app::model_preview) struct Gen3Cx<'a> {
 pub(in crate::app::model_preview) trait Gen3Game {
     /// Take out of `batches` what draws apart from the scene.
     fn split(&mut self, _frame: &ModelGpuFrame, _batches: &mut Vec<Gen3Batch>) {}
+
+    /// What the engine's globals hold for the game's passes.
+    fn frame_values(&self) -> FrameValues {
+        halo3_frame_values
+    }
 
     /// The exposure stops the scene draws at, from the screen effects.
     fn stops(&self, _screen: &H3ScreenSettings) -> f32 {
@@ -168,6 +173,7 @@ impl<G: Gen3Game> GameRender for Gen3Pipeline<G> {
         if !cx.core.h3_draws(cx.frame) {
             return unsafe { PlainRender.shade(cx) };
         }
+        self.state.frame_values = self.game.frame_values();
         unsafe {
             // Halo 3's and ODST's self shadow draws through dx9 shadow passes.
             cx.core.prepare_h2_programs(cx.gl, cx.frame);

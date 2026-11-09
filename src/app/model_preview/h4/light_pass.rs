@@ -2,11 +2,12 @@
 //! X360 0x82A0A3F0): each attached light and cheap light, added through
 //! explicit shader 187 or 204. See `docs/h4-preview-research/lights.md`.
 
+use super::lighting::h4_frame_values;
 use eframe::glow::{self, HasContext};
 
-use super::super::gen3::shaders::{H3Dialect, H3Value};
+use super::super::gen3::shaders::H3Value;
 use super::super::gen3::screen_lights::screen_to_relative_world;
-use super::super::gen3::pipeline::{frame_value, h4_matrix, set_value, view_projection};
+use super::super::gen3::pipeline::{h4_matrix, set_value, view_projection};
 use super::super::frame::ModelGpuFrame;
 use crate::app::model_preview::common::camera::h2_eye_position;
 use super::super::gen3::render::Gen3Cx;
@@ -126,7 +127,7 @@ impl H4Game {
                                 super::materials::submit::blend_constant(1),
                             ))
                         } else {
-                            frame_value(frame, H3Dialect::Halo4, name, size, 0.0)
+                            h4_frame_values(frame, name, size, 0.0)
                         };
                         if let Some(value) = value {
                             set_value(gl, location.as_ref(), ty, &value);
