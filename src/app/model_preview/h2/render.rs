@@ -6,6 +6,7 @@ use super::super::cloth::ClothGame;
 use super::super::common::features::paths;
 use super::super::common::slots::GameSlots;
 use super::super::common::sprites::draw_sprite_quad;
+use super::super::dx9::binds::Dx9Binds;
 use super::super::dx9::passes::Dx9Layer;
 use super::super::dx9::pipeline::Dx9Game;
 use super::super::dx9::sprites::Dx9Sprites;
@@ -13,6 +14,7 @@ use super::super::gen3::pipeline::gen3_set_blend;
 use super::super::gen3::shaders::Gen3Blend;
 use super::super::gl::pass_state::PassState;
 use super::super::renderer::FrameCx;
+use super::prt::H2Binds;
 use super::slot::H2Slot;
 use crate::app::model_preview::common::sprite_gl::{draw_flare_sprites, sprite_occlusion};
 
@@ -27,6 +29,10 @@ pub(in crate::app::model_preview) struct H2Game {
 }
 
 impl Dx9Game for H2Game {
+    fn binds(&self) -> &dyn Dx9Binds {
+        &H2Binds
+    }
+
     /// `cloth_update`, before anything draws the cloth's vertices; then the
     /// sprites' maps.
     unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
@@ -66,7 +72,7 @@ impl Dx9Game for H2Game {
             if value(name) > 0.0 {
                 unsafe {
                     cx.core
-                        .draw_dx9_layer(cx.gl, frame, cx.slot, order, layer, None)
+                        .draw_dx9_layer(cx.gl, frame, cx.slot, order, layer, None, &H2Binds)
                 };
             }
         }

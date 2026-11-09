@@ -3,6 +3,7 @@
 
 use super::super::super::common::sprite_gl::link_sprite_gl;
 use super::super::super::common::view::camera_view_frame;
+use super::super::super::dx9::binds::Dx9Binds;
 use super::super::super::dx9::passes::Dx9Layer;
 use super::super::super::{ModelGpuFrame, RenderCore, common};
 use super::effect_gl::CeEffectGl;
@@ -20,6 +21,7 @@ pub(in crate::app::model_preview) unsafe fn draw_ce_transparents(
     slot: usize,
     ce: &mut ce::slot::CeSlot,
     effect_gl: &mut Option<Option<CeEffectGl>>,
+    own: &dyn Dx9Binds,
 ) {
     enum Transparent {
         Part(usize),
@@ -65,7 +67,15 @@ pub(in crate::app::model_preview) unsafe fn draw_ce_transparents(
                     } else {
                         gl.enable(glow::CULL_FACE);
                     }
-                    core.draw_dx9_layer(gl, frame, slot, &[index], Dx9Layer::Transparent, None);
+                    core.draw_dx9_layer(
+                        gl,
+                        frame,
+                        slot,
+                        &[index],
+                        Dx9Layer::Transparent,
+                        None,
+                        own,
+                    );
                 }
                 Transparent::Group(group) => {
                     let Some(flares) = core.sprite_gl.as_ref().and_then(Option::as_ref) else {

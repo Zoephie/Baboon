@@ -7,6 +7,7 @@ use eframe::glow::{self, HasContext};
 
 use super::super::common::slots::GameSlots;
 use super::super::common::sprites::layered_distance;
+use super::super::dx9::binds::NoOwnBinds;
 use super::super::dx9::passes::Dx9Layer;
 use super::super::frame::ModelGpuFrame;
 use super::super::gen3::effects::screen::Gen3ScreenSettings;
@@ -166,6 +167,7 @@ impl Gen3Game for H3Game {
                     cx.slot,
                     order,
                     h3_shadow_style(cx.frame, cx.state.targets.as_ref()),
+                    &NoOwnBinds,
                 );
                 cx.core.bind_slot_vertices(cx.gl, cx.slot);
                 drawn
@@ -180,8 +182,15 @@ impl Gen3Game for H3Game {
         }
         let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
         unsafe {
-            cx.core
-                .draw_dx9_layer(gl, frame, slot, order, Dx9Layer::ShadowApply, None);
+            cx.core.draw_dx9_layer(
+                gl,
+                frame,
+                slot,
+                order,
+                Dx9Layer::ShadowApply,
+                None,
+                &NoOwnBinds,
+            );
             gl.bind_vertex_array(Some(cx.core.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);

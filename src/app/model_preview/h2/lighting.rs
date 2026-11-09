@@ -6,6 +6,7 @@ use eframe::glow::{self, HasContext as _};
 use super::super::common::features::paths;
 use super::super::dx9::passes::{Dx9Layer, Dx9Light};
 use super::super::{ModelGpuFrame, RenderCore};
+use super::prt::H2Binds;
 
 /// Draw the object's sphere lights over `order`, each over its diffuse and
 /// specular layers.
@@ -39,7 +40,7 @@ pub(in crate::app::model_preview) unsafe fn draw_h2_point_lights(
                     (point.diffuse_layer(), &light),
                     (Dx9Layer::LightSpecular, &specular),
                 ] {
-                    core.draw_dx9_layer(gl, frame, slot, order, layer, Some(light));
+                    core.draw_dx9_layer(gl, frame, slot, order, layer, Some(light), &H2Binds);
                 }
             }
         }
@@ -73,7 +74,15 @@ pub(in crate::app::model_preview) unsafe fn draw_h2_gel_lights(
             let (light, draws) = super::lights::overbrighten(&light);
             core.dx9.h2_gel = Some((gels.get(index).copied().flatten(), rows.rows));
             if specular {
-                core.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::GelMask, Some(&light));
+                core.draw_dx9_layer(
+                    gl,
+                    frame,
+                    slot,
+                    order,
+                    Dx9Layer::GelMask,
+                    Some(&light),
+                    &H2Binds,
+                );
                 masked = true;
             }
             let layer = if specular {
@@ -82,7 +91,7 @@ pub(in crate::app::model_preview) unsafe fn draw_h2_gel_lights(
                 Dx9Layer::LightGel
             };
             for _ in 0..draws {
-                core.draw_dx9_layer(gl, frame, slot, order, layer, Some(&light));
+                core.draw_dx9_layer(gl, frame, slot, order, layer, Some(&light), &H2Binds);
             }
             core.dx9.h2_gel = None;
         }

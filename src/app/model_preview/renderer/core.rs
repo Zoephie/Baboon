@@ -224,7 +224,6 @@ impl RenderCore {
                 self.slots[slot].upload_geometry(gl, frame);
             }
             self.slots[slot].sync_textures(gl, frame);
-            self.dx9.ce_points_now = None;
             Some(slot)
         }
     }

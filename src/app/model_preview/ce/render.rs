@@ -2,6 +2,7 @@
 
 use super::super::common::slots::GameSlots;
 use super::super::common::view::ViewFrame;
+use super::super::dx9::binds::Dx9Binds;
 use super::super::dx9::passes::Dx9Layer;
 use super::super::dx9::pipeline::Dx9Game;
 use super::super::dx9::sprites::Dx9Sprites;
@@ -11,6 +12,7 @@ use super::draw::{
     CE_EVENTS_RUNNING, CeEffectGl, advance_ce_effects, ce_groups, ce_has_groups,
     ce_sorts_transparents, draw_ce_group, draw_ce_transparents,
 };
+use super::lights::CePointBinds;
 use super::slot::CeSlot;
 use crate::app::model_preview::common::sprite_gl::{draw_flare_sprites, sprite_occlusion};
 use eframe::glow::{self, HasContext as _};
@@ -23,9 +25,15 @@ pub(in crate::app::model_preview) struct CeGame {
     slots: GameSlots<CeSlot>,
     /// The `effect` shader's program, made on first use.
     effect_gl: Option<Option<CeEffectGl>>,
+    /// Its passes' point lights.
+    points: CePointBinds,
 }
 
 impl Dx9Game for CeGame {
+    fn binds(&self) -> &dyn Dx9Binds {
+        &self.points
+    }
+
     fn begin(&mut self, frame: &ModelGpuFrame) {
         // Set again if this frame steps the effects and something runs on,
         // so a frame that finds no slot leaves nothing asking for frames.
@@ -35,6 +43,7 @@ impl Dx9Game for CeGame {
     unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
         unsafe {
             let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
+            self.points.now = None;
             let ce = self.slots.of(slot, cx.core.slot_uploads(slot));
             if !frame.preview.ce.flags.is_empty() {
                 move_ce_flags(cx.core, gl, frame, slot, ce);
@@ -52,7 +61,7 @@ impl Dx9Game for CeGame {
                     .map(|(_, _, light)| light)
                     .collect();
                 if !made.is_empty() {
-                    cx.core.dx9.ce_points_now = Some(frame.ce_point_lights_with(&made));
+                    self.points.now = Some(frame.ce_point_lights_with(&made));
                 }
             }
             // Before anything draws: the transparents and the sprites both
@@ -72,7 +81,15 @@ impl Dx9Game for CeGame {
         unsafe {
             if ce_sorts_transparents(cx.frame) {
                 let ce = self.slots.of(cx.slot, cx.core.slot_uploads(cx.slot));
-                draw_ce_transparents(cx.core, cx.gl, cx.frame, cx.slot, ce, &mut self.effect_gl);
+                draw_ce_transparents(
+                    cx.core,
+                    cx.gl,
+                    cx.frame,
+                    cx.slot,
+                    ce,
+                    &mut self.effect_gl,
+                    &self.points,
+                );
             } else {
                 cx.core.draw_dx9_layer(
                     cx.gl,
@@ -81,6 +98,7 @@ impl Dx9Game for CeGame {
                     order,
                     Dx9Layer::Transparent,
                     None,
+                    &self.points,
                 );
             }
         }

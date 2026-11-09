@@ -6,6 +6,7 @@ use super::super::gl::pass_state::PassState;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::{Made, Sampling, Texels};
 use super::super::{ModelGpuFrame, RenderCore, RenderModelPreview};
+use super::binds::Dx9Binds;
 use eframe::glow::{self, HasContext as _};
 
 pub(in crate::app::model_preview) const SHADOW_MAP_SIZE: i32 = 2048;
@@ -140,6 +141,7 @@ impl RenderCore {
         slot: usize,
         order: &[usize],
         style: ShadowStyle,
+        own: &dyn Dx9Binds,
     ) -> bool {
         unsafe {
             let Some((framebuffer, _)) = *self
@@ -167,7 +169,7 @@ impl RenderCore {
                     .polygon_offset(slope, depth)
                     .apply(gl);
             }
-            self.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::ShadowCaster, None);
+            self.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::ShadowCaster, None, own);
             PassState::new()
                 .disable(glow::POLYGON_OFFSET_FILL)
                 .apply(gl);
@@ -180,7 +182,7 @@ impl RenderCore {
             gl.enable(glow::STENCIL_TEST);
             gl.stencil_func(glow::ALWAYS, 1, 0xFF);
             gl.stencil_op(glow::KEEP, glow::KEEP, glow::REPLACE);
-            self.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::ShadowMask, None);
+            self.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::ShadowMask, None, own);
             gl.disable(glow::STENCIL_TEST);
             true
         }

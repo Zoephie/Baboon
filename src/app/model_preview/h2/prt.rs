@@ -7,11 +7,15 @@ use std::collections::HashMap;
 
 use blam_tags::{RenderMesh, RenderModel, TagFile, TagStruct};
 
+use super::super::ModelGpuFrame;
+use super::super::dx9::binds::Dx9Binds;
 use super::super::dx9::passes::{
     DEFAULT_AMBIENT, DEFAULT_DIRECT_COLOR, DEFAULT_INDIRECT_COLOR, DEFAULT_INDIRECT_VECTOR,
-    DEFAULT_LIGHTS, light_direction,
+    DEFAULT_LIGHTS, Dx9Light, light_direction,
 };
+use super::super::gl::program::Linked;
 use super::super::load::preview_mesh_order;
+use eframe::glow::{self, HasContext as _};
 
 /// `info->m_sh_order` is asserted to be 3 in the game.
 const SH_ORDER: i128 = 3;
@@ -263,6 +267,47 @@ pub(crate) fn h2_prt_lights() -> [H2PrtLight; 2] {
         direction: light_direction(&light),
         color: light.color,
     })
+}
+
+/// Halo 2's own part of a dx9 pass's uniforms: the PRT clusters and the light
+/// they were projected for, where the model has them.
+pub(in crate::app::model_preview) struct H2Binds;
+
+impl Dx9Binds for H2Binds {
+    unsafe fn bind_own_vertex_lighting(
+        &self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        program: &Linked,
+        light: Option<&Dx9Light>,
+    ) {
+        let Some(prt) = &frame.preview.h2.prt else {
+            return;
+        };
+        unsafe {
+            let location = program.location(gl, "u_prt");
+            if location.is_some() {
+                let clusters = match &frame.h2.prt_clusters {
+                    Some([lit, shadowed]) => {
+                        if light.is_some() {
+                            shadowed
+                        } else {
+                            lit
+                        }
+                    }
+                    None => &prt.clusters,
+                };
+                gl.uniform_4_f32_slice(location.as_ref(), clusters.as_flattened());
+                let direction = if frame.h2.prt_clusters.is_some() {
+                    frame.dx9_object_light()
+                } else {
+                    prt.light
+                };
+                let location = program.location(gl, "u_prt_light");
+                gl.uniform_3_f32_slice(location.as_ref(), &direction);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

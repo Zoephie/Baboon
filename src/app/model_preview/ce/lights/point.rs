@@ -1,9 +1,15 @@
 //! Point lights, baked to the register rows the shader passes read.
 
+use super::super::super::ModelGpuFrame;
 use super::super::super::TagReader;
+use super::super::super::dx9::binds::Dx9Binds;
+use super::super::super::dx9::passes::Dx9DrawPass;
+use super::super::super::dx9::stage::Dx9VertexStage;
+use super::super::super::gl::program::Linked;
 use super::flare::read_flare;
 use super::light::CeLight;
 use super::{UNSET, argb, ce_color_interpolation, dot, has_flag};
+use eframe::glow::{self, HasContext as _};
 use std::sync::Arc;
 
 pub(crate) use super::super::super::dx9::stage::CE_POINT_LIGHT_ROWS;
@@ -120,4 +126,51 @@ pub(super) fn read_light_tag(reader: &TagReader, path: &str) -> Option<CeLight> 
         flare,
         fixed: None,
     })
+}
+
+/// Halo CE's own part of a dx9 pass's uniforms: the two point lights on each
+/// object, and the key light that follows the camera.
+#[derive(Default)]
+pub(in crate::app::model_preview) struct CePointBinds {
+    /// The frame's point lights with those its effects have made, which
+    /// only the drawing knows; none while effects make no lights.
+    pub(in crate::app::model_preview) now: Option<Vec<[[f32; 4]; CE_POINT_LIGHT_ROWS]>>,
+}
+
+/// Whether `pass` is lit through Halo CE's model stages.
+fn is_ce_lit(pass: &Dx9DrawPass) -> bool {
+    matches!(
+        pass.stage,
+        Dx9VertexStage::CeModel | Dx9VertexStage::CeGlassLit
+    )
+}
+
+impl Dx9Binds for CePointBinds {
+    unsafe fn bind_own_lights(
+        &self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        material: usize,
+        program: &Linked,
+        pass: &Dx9DrawPass,
+    ) {
+        if !is_ce_lit(pass) {
+            return;
+        }
+        let object = frame
+            .preview
+            .materials
+            .get(material)
+            .map_or(0, |material| material.object);
+        unsafe {
+            let location = program.location(gl, "u_ce_point");
+            let points = self.now.as_ref().unwrap_or(&frame.ce.points);
+            let rows = points.get(usize::from(object)).copied().unwrap_or_default();
+            gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
+        }
+    }
+
+    fn light_follows_camera(&self, frame: &ModelGpuFrame, pass: &Dx9DrawPass) -> bool {
+        is_ce_lit(pass) && frame.light_follows_camera
+    }
 }

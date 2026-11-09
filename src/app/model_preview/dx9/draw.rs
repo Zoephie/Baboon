@@ -16,6 +16,7 @@ use super::super::{
     DEPTH_UNITS, ModelGpuFrame, RenderCore, RenderModelPreview, TextureSlot, eye_position,
     link_pass_program, rotate_view_vector, unrotate_view_vector,
 };
+use super::binds::Dx9Binds;
 use super::shadow::{H2_SHADOW_MAP_UNIT, ShadowStyle, h2_shadow_matrix};
 use crate::core::h2_pixel_shader::SamplerKind;
 use eframe::glow::{self, HasContext as _};
@@ -39,13 +40,9 @@ pub(in crate::app::model_preview) struct Dx9Gl {
     /// that cannot is not asked again (and nothing leaks) every frame.
     pub(in crate::app::model_preview) h2_shadow_map:
         Option<Option<(glow::NativeFramebuffer, glow::NativeTexture)>>,
-    /// The frame's CE point lights with those its effects have made, which
-    /// only the drawing knows; none while effects make no lights.
     /// The style of the self shadow drawn last, which its passes and a later
     /// apply bind the light from.
     pub(in crate::app::model_preview) shadow: Option<ShadowStyle>,
-    pub(in crate::app::model_preview) ce_points_now:
-        Option<Vec<[[f32; 4]; super::stage::CE_POINT_LIGHT_ROWS]>>,
 }
 
 impl Dx9Gl {
@@ -57,7 +54,6 @@ impl Dx9Gl {
             h2_frame_copy: None,
             h2_gel: None,
             h2_shadow_map: None,
-            ce_points_now: None,
             shadow: None,
         }
     }
@@ -373,6 +369,7 @@ impl RenderCore {
         frame: &ModelGpuFrame,
         slot: usize,
         order: &[usize],
+        own: &dyn Dx9Binds,
     ) {
         let needed = order.iter().any(|&index| {
             frame.preview.batches.get(index).is_some_and(|batch| {
@@ -419,8 +416,8 @@ impl RenderCore {
                 } else {
                     glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT
                 });
-                self.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::Texaccum, None);
-                self.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::LightAlbedo, None);
+                self.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::Texaccum, None, own);
+                self.draw_dx9_layer(gl, frame, slot, order, Dx9Layer::LightAlbedo, None, own);
             }
             state.restore(gl);
         }
@@ -491,6 +488,7 @@ impl RenderCore {
         order: &[usize],
         layer: Dx9Layer,
         light: Option<&Dx9Light>,
+        own: &dyn Dx9Binds,
     ) {
         let eye = eye_position(&frame.camera);
         let mut drew = false;
@@ -530,7 +528,7 @@ impl RenderCore {
                 drew = true;
                 unsafe {
                     PassState::new().use_program(program.program).apply(gl);
-                    self.bind_h2_uniforms(gl, frame, material, &program, pass, eye, light);
+                    self.bind_h2_uniforms(gl, frame, material, &program, pass, eye, light, own);
                     let textures = self.slots[slot]
                         .materials
                         .get(material)
@@ -608,22 +606,10 @@ impl RenderCore {
         pass: &Dx9DrawPass,
         eye: [f32; 3],
         light: Option<&Dx9Light>,
+        own: &dyn Dx9Binds,
     ) {
         unsafe {
-            if matches!(
-                pass.stage,
-                Dx9VertexStage::CeModel | Dx9VertexStage::CeGlassLit
-            ) {
-                let object = frame
-                    .preview
-                    .materials
-                    .get(material)
-                    .map_or(0, |material| material.object);
-                let location = program.location(gl, "u_ce_point");
-                let points = self.dx9.ce_points_now.as_ref().unwrap_or(&frame.ce.points);
-                let rows = points.get(usize::from(object)).copied().unwrap_or_default();
-                gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
-            }
+            own.bind_own_lights(gl, frame, material, program, pass);
             if matches!(
                 pass.stage,
                 Dx9VertexStage::ShadowCaster | Dx9VertexStage::ShadowMask
@@ -673,29 +659,7 @@ impl RenderCore {
                     gl.uniform_3_f32_slice(location.as_ref(), &vector);
                 }
             }
-            if let Some(prt) = &frame.preview.h2.prt {
-                let location = program.location(gl, "u_prt");
-                if location.is_some() {
-                    let clusters = match &frame.h2.prt_clusters {
-                        Some([lit, shadowed]) => {
-                            if light.is_some() {
-                                shadowed
-                            } else {
-                                lit
-                            }
-                        }
-                        None => &prt.clusters,
-                    };
-                    gl.uniform_4_f32_slice(location.as_ref(), clusters.as_flattened());
-                    let direction = if frame.h2.prt_clusters.is_some() {
-                        frame.dx9_object_light()
-                    } else {
-                        prt.light
-                    };
-                    let location = program.location(gl, "u_prt_light");
-                    gl.uniform_3_f32_slice(location.as_ref(), &direction);
-                }
-            }
+            own.bind_own_vertex_lighting(gl, frame, program, light);
             let camera = &frame.camera;
             let set_1 = |gl: &glow::Context, program: &Linked, name: &str, value: f32| {
                 let location = program.location(gl, name);
@@ -712,10 +676,7 @@ impl RenderCore {
                 if frame.bones.is_some() { 1.0 } else { 0.0 },
             );
             let location = program.location(gl, "u_light_direct");
-            let follows = matches!(
-                pass.stage,
-                Dx9VertexStage::CeModel | Dx9VertexStage::CeGlassLit
-            ) && frame.light_follows_camera;
+            let follows = own.light_follows_camera(frame, pass);
             let direct = if !follows && (frame.default_lights || !pass.stage.is_lightmap()) {
                 pass.light_direct
             } else {
