@@ -7,6 +7,7 @@ pub(super) mod bloom;
 pub(super) mod contrails;
 pub(super) mod effect_part;
 mod features;
+pub(in crate::app::model_preview) mod function_exports;
 pub(super) mod light_volumes;
 pub(super) mod lighting;
 pub(super) mod lights;

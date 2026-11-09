@@ -34,6 +34,7 @@ mod render_model;
 pub(in crate::app) use render_model::build_render_preview;
 pub(in crate::app::model_preview) use render_model::*;
 mod games;
+pub(in crate::app::model_preview) use games::type_exports;
 use games::{add_overlay_shaders, load_ce_object};
 mod object;
 pub(in crate::app::model_preview) use object::*;

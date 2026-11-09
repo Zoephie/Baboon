@@ -15,7 +15,6 @@ mod read;
 pub(in crate::app::model_preview) use read::*;
 mod controls;
 mod evaluate;
-mod outputs;
 pub(in crate::app::model_preview) use controls::*;
 #[cfg(test)]
 mod tests;

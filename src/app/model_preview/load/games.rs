@@ -1,12 +1,23 @@
 //! The one place the loader names a game: what each game reads of an
 //! object, a model and a Halo CE object of its own.
 
+use super::super::functions::TypeExporter;
 use super::super::particles::{OwnParticleSystem, ParticleMaterialReader, ParticleRules};
 use super::super::{GameId, ModelPreviewData, RenderModelPreview, TagEntry, TagFile, TagSource};
 use super::jobs::PreviewLoadSettings;
 use super::object::ObjectLoad;
 use super::{TagReader, feature_into};
 use std::sync::Arc;
+
+/// What `object`'s type exports to its functions, where its game's
+/// exporters are known: Halo 2's.
+pub(in crate::app::model_preview) fn type_exports(
+    object: &TagFile,
+    model: Option<&TagFile>,
+) -> Option<Arc<dyn TypeExporter>> {
+    let exports = super::super::h2::function_exports::TypeExports::of(object, model)?;
+    Some(Arc::new(exports))
+}
 
 /// The object's change colors, functions and its game's own features, each
 /// noted if its reader crashes, by the kit's game.

@@ -1,4 +1,4 @@
-use super::outputs::{DEVICE_EXPORTS, OBJECT_EXPORTS, TypeExports};
+use super::super::h2::function_exports::{DEVICE_EXPORTS, OBJECT_EXPORTS, TypeExports};
 use super::*;
 use crate::app::model_preview::harness::kit::kit_root;
 use crate::core::game::GameId;
@@ -288,7 +288,7 @@ fn device(functions: Vec<ObjectFunction>) -> ObjectFunctions {
     };
     ObjectFunctions {
         functions,
-        exports: Some(exports),
+        exports: Some(std::sync::Arc::new(exports)),
         ..Default::default()
     }
 }

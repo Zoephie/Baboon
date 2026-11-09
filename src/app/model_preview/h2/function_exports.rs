@@ -1,19 +1,21 @@
-//! The exports each object type publishes to its functions.
+//! Halo 2's function exporters: the exports each object type publishes to
+//! its functions.
 
-use super::elements;
+use super::super::common::fields::elements;
+use super::super::functions::TypeExporter;
 use blam_tags::TagFile;
 
 /// One of Halo 2's function exporters: the names it claims, with what an idle
 /// object, just placed, gives each. MCC `halo2_tag_test`; the object one is
 /// `sub_86A360`, and every type asks it first.
-type ExportTable = &'static [(&'static str, f32)];
+pub(in crate::app::model_preview) type ExportTable = &'static [(&'static str, f32)];
 
 /// Every object's exporter. `body_vitality`, `shield_vitality`,
 /// `shield_depleted` and `variant` depend on the model; see
 /// [`TypeExports::idle`]. `compass`, `random_constant`, the clock and the
 /// team, medic and holiday names depend on a game the preview has not got,
 /// and stay 0.
-pub(super) const OBJECT_EXPORTS: ExportTable = &[
+pub(in crate::app::model_preview) const OBJECT_EXPORTS: ExportTable = &[
     ("one", 1.0),
     ("zero", 0.0),
     ("morse_code", 1.0),
@@ -168,7 +170,7 @@ const PROJECTILE_EXPORTS: ExportTable = &[
 
 /// A device's (machine, control, light fixture), `sub_8A83F0`, as one placed
 /// with neither `initially off` nor `initially open` would be.
-pub(super) const DEVICE_EXPORTS: ExportTable = &[
+pub(in crate::app::model_preview) const DEVICE_EXPORTS: ExportTable = &[
     ("power", 1.0),
     ("position", 0.0),
     ("change_in_power", 0.0),
@@ -182,16 +184,19 @@ pub(super) const DEVICE_EXPORTS: ExportTable = &[
 /// the order `sub_8D8EC0` asks them, and what of its model decides the
 /// vitality and variant names.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct TypeExports {
-    pub(super) tables: &'static [ExportTable],
-    pub(super) has_body: bool,
-    pub(super) has_shield: bool,
-    pub(super) variants: usize,
+pub(in crate::app::model_preview) struct TypeExports {
+    pub(in crate::app::model_preview) tables: &'static [ExportTable],
+    pub(in crate::app::model_preview) has_body: bool,
+    pub(in crate::app::model_preview) has_shield: bool,
+    pub(in crate::app::model_preview) variants: usize,
 }
 
 impl TypeExports {
     /// For a Halo 2 `object` previewing `model`; none for another game.
-    pub(super) fn of(object: &TagFile, model: Option<&TagFile>) -> Option<Self> {
+    pub(in crate::app::model_preview) fn of(
+        object: &TagFile,
+        model: Option<&TagFile>,
+    ) -> Option<Self> {
         if blam_tags::game::Game::of(object) != blam_tags::game::Game::Halo2 {
             return None;
         }
@@ -217,11 +222,13 @@ impl TypeExports {
             variants: model.map_or(0, |model| elements(model.root(), "variants").len()),
         })
     }
+}
 
+impl TypeExporter for TypeExports {
     /// What an idle object of this type gives `name`, if an exporter claims it.
     /// The vitalities are full where the model has them; the variant is its
     /// first of `variants`, `(index + 1) / count`.
-    pub(super) fn idle(&self, name: &str) -> Option<f32> {
+    fn idle(&self, name: &str) -> Option<f32> {
         let model_says = match name {
             "body_vitality" => Some(f32::from(u8::from(self.has_body))),
             "shield_vitality" => Some(f32::from(u8::from(self.has_shield))),

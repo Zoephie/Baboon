@@ -1,6 +1,5 @@
 //! Reading an object's functions: their flags, clocks, switches and inputs.
 
-use super::outputs::TypeExports;
 use super::{elements, has_flag, high16_over_65535, lcg_step, object_block, tag_function_at};
 use blam_tags::{TagFile, TagFunction, TagStruct};
 use std::collections::HashMap;
@@ -11,6 +10,15 @@ pub(crate) type FunctionInputs = HashMap<(u64, String), f32>;
 
 /// Every name an object answers to this frame.
 pub(crate) type FunctionValues = HashMap<String, f32>;
+
+/// What an object's type exports to its functions, where its game says
+/// (only Halo 2's are known).
+pub(in crate::app::model_preview) trait TypeExporter:
+    std::fmt::Debug + Send + Sync
+{
+    /// What an idle object of this type gives `name`, if an exporter claims it.
+    fn idle(&self, name: &str) -> Option<f32>;
+}
 
 /// A function's `flags`, by option name.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -138,7 +146,7 @@ pub(crate) struct ObjectFunctions {
     pub(super) rules: FunctionRules,
     /// None for an object whose exporters are not known (Halo 3 and ODST),
     /// which reads [`object_input`] instead.
-    pub(super) exports: Option<TypeExports>,
+    pub(super) exports: Option<Arc<dyn TypeExporter>>,
 }
 
 /// An object's functions, or none on a tag with no such block. An empty block
@@ -177,7 +185,7 @@ pub(crate) fn read_object_functions(
         functions,
         switches,
         rules,
-        exports: TypeExports::of(object, model),
+        exports: super::super::load::type_exports(object, model),
     })
 }
 
