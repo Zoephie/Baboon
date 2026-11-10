@@ -474,10 +474,10 @@ fn collision_toggle_is_available_only_with_collision_geometry() {
 }
 
 #[test]
-fn variant_buttons_wrap_without_widening_a_narrow_setup_card() {
+fn permutation_rows_fit_a_narrow_setup_card() {
     let preview = RenderModelPreview {
         regions: vec![RenderModelPreviewRegion {
-            name: "helmet".into(),
+            name: "helmet_with_a_name_longer_than_any_sidebar_column".into(),
             permutations: vec![
                 "minor".into(),
                 "chiefweapon".into(),
@@ -488,7 +488,7 @@ fn variant_buttons_wrap_without_widening_a_narrow_setup_card() {
         ..Default::default()
     };
     let data = model_preview_data(String::new(), String::new(), preview, Vec::new());
-    for width in [280.0, 360.0, 520.0] {
+    for width in [240.0, 280.0, 360.0, 520.0] {
         let context = egui::Context::default();
         context.set_fonts(foundation_fonts());
         let mut state = ModelPreviewState::default();
@@ -1459,4 +1459,53 @@ fn effects_and_functions_reset_their_own_inputs() {
     release_inputs(&mut state, 7, &events, false);
     assert!(!held_inputs(&state, 7, &events, false));
     assert_eq!(state.function_inputs.len(), 1);
+}
+
+/// A region's permutations are a dropdown: it opens on a search field that
+/// narrows the list, and picking one sets and turns on the region.
+#[test]
+fn permutation_dropdown_filters_and_picks() {
+    let data = sectioned_object();
+    let mut state = ModelPreviewState::default();
+    reset_model_preview_selection(&mut state, &data, None);
+    state.region_selections.get_mut("body").unwrap().enabled = false;
+    let mut body = SetupBody::new();
+    body.frame(&data, &mut state, Vec::new());
+    let texts = body.frame(&data, &mut state, Vec::new());
+    let count = |texts: &[(String, egui::Rect)], needle: &str| {
+        texts.iter().filter(|(text, _)| text == needle).count()
+    };
+    assert_eq!(
+        count(&texts, "alt"),
+        0,
+        "a closed dropdown lists nothing: {texts:?}"
+    );
+    let button = texts
+        .iter()
+        .find(|(text, _)| text == "base")
+        .expect("the dropdown")
+        .1;
+    body.click(&data, &mut state, button.center());
+    let texts = body.frame(&data, &mut state, Vec::new());
+    assert_eq!(count(&texts, "alt"), 1, "the open list: {texts:?}");
+    assert_eq!(
+        count(&texts, "base"),
+        2,
+        "the button and the list: {texts:?}"
+    );
+    body.frame(&data, &mut state, vec![egui::Event::Text("al".into())]);
+    let texts = body.frame(&data, &mut state, Vec::new());
+    assert_eq!(count(&texts, "base"), 1, "the filter kept base: {texts:?}");
+    let alt = texts
+        .iter()
+        .find(|(text, _)| text == "alt")
+        .expect("alt listed")
+        .1;
+    body.click(&data, &mut state, alt.center());
+    let selection = &state.region_selections["body"];
+    assert_eq!(selection.permutation, "alt");
+    assert!(
+        selection.enabled,
+        "picking a permutation turns its region on"
+    );
 }

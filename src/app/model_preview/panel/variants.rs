@@ -4,7 +4,6 @@
 use super::super::super::super::core::document::ops::{BlockOpKind, ModelVariantOp};
 use super::super::super::ui_kit::button_icons::{
     ButtonIcon, close_menu, icon_button, icon_text_button, icon_text_dropdown_button,
-    selectable_text_button,
 };
 use super::super::super::ui_kit::style::{BUTTON_HEIGHT, bold_font, subtle_dark, text_dark};
 use super::super::{
@@ -18,11 +17,16 @@ use crate::app::ui_kit::checkbox::CheckboxUi as _;
 use eframe::egui;
 use eframe::egui::{RichText, Ui, Vec2};
 
+/// A row per region: whether it draws, its name, and a dropdown of its
+/// permutations.
 pub(in crate::app::model_preview) fn draw_variant_controls(
     ui: &mut Ui,
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
 ) {
+    let row_width = ui.available_width().max(1.0);
+    // The names share a column, but never take more than two fifths of the
+    // row from the dropdowns.
     let region_name_width = data
         .preview
         .regions
@@ -34,19 +38,14 @@ pub(in crate::app::model_preview) fn draw_variant_controls(
                 .size()
                 .x
         })
-        .fold(90.0_f32, f32::max)
-        .min(180.0);
-    let row_width = ui.available_width().max(1.0);
+        .fold(60.0_f32, f32::max)
+        .min(180.0)
+        .min(row_width * 0.4);
     ui.set_max_width(row_width);
-    let mut visible_rows = 0;
     for region in &data.preview.regions {
         if is_model_physics_overlay_region(data, state, region) {
             continue;
         }
-        if visible_rows > 0 {
-            ui.separator();
-        }
-        visible_rows += 1;
         let selection = state
             .region_selections
             .entry(region.name.clone())
@@ -54,7 +53,8 @@ pub(in crate::app::model_preview) fn draw_variant_controls(
                 enabled: !region.permutations.is_empty(),
                 permutation: default_permutation(region),
             });
-        ui.horizontal_wrapped(|ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
             ui.baboon_checkbox(&mut selection.enabled, "");
             ui.add_sized(
                 Vec2::new(region_name_width, BUTTON_HEIGHT),
@@ -62,18 +62,99 @@ pub(in crate::app::model_preview) fn draw_variant_controls(
                     RichText::new(&region.name)
                         .color(text_dark())
                         .font(bold_font(13.0)),
-                ),
+                )
+                .truncate(),
+            )
+            .on_hover_text(&region.name);
+            let width = ui.available_width().max(60.0);
+            let salt = (data.source_key.as_str(), region.name.as_str());
+            let (choice, wheel_delta) = draw_permutation_picker(
+                ui,
+                salt,
+                &selection.permutation,
+                &region.permutations,
+                width,
             );
-            for permutation in &region.permutations {
-                let selected = selection.permutation == *permutation;
-                let response = selectable_text_button(ui, permutation, selected);
-                if response.clicked() {
-                    selection.permutation = permutation.clone();
-                    selection.enabled = true;
-                }
+            let wheeled = wheel_delta.and_then(|delta| {
+                let current = region
+                    .permutations
+                    .iter()
+                    .position(|permutation| *permutation == selection.permutation)
+                    .unwrap_or(0);
+                combo_scroll_next_index(current, region.permutations.len(), delta)
+                    .map(|next| region.permutations[next].clone())
+            });
+            if let Some(permutation) = choice.or(wheeled) {
+                selection.permutation = permutation;
+                selection.enabled = true;
             }
         });
     }
+}
+
+/// A region's permutations as the app's searchable dropdown: the chosen
+/// permutation, if one was picked, and a wheel turn over the closed button.
+pub(in crate::app::model_preview) fn draw_permutation_picker(
+    ui: &mut Ui,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+    selected: &str,
+    permutations: &[String],
+    width: f32,
+) -> (Option<String>, Option<i32>) {
+    let popup_id = ui.make_persistent_id(("model_preview_permutation", salt));
+    let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+    let response = picker_button(
+        ui,
+        popup_id,
+        selected,
+        permutations.len(),
+        width,
+        text_dark(),
+        !permutations.is_empty(),
+    );
+    let just_opened = response.clicked() && !open;
+    if response.clicked() {
+        egui::Popup::toggle_id(ui.ctx(), popup_id);
+    }
+    let popup_open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+    let mut choice = None;
+    egui::Popup::from_response(&response)
+        .id(popup_id)
+        .open_memory(None)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            picker_popup_width(ui, &response);
+            let filter_id = popup_id.with("entry_search");
+            let mut filter = ui
+                .data(|data| data.get_temp::<String>(filter_id))
+                .unwrap_or_default();
+            let changed = picker_search_field(ui, &mut filter, "search permutations…", just_opened);
+            ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
+            ui.separator();
+            let query = filter.trim().to_lowercase();
+            picker_results(ui, 300.0, changed, |ui| {
+                let mut shown = 0;
+                for permutation in permutations {
+                    if !query.is_empty() && !permutation.to_lowercase().contains(&query) {
+                        continue;
+                    }
+                    shown += 1;
+                    let current = permutation == selected;
+                    let row = ui.selectable_label(current, permutation);
+                    if just_opened && query.is_empty() && current {
+                        row.scroll_to_me(Some(egui::Align::Center));
+                    }
+                    if row.clicked() {
+                        choice = Some(permutation.clone());
+                        egui::Popup::close_id(ui.ctx(), popup_id);
+                    }
+                }
+                if shown == 0 {
+                    ui.label(RichText::new("No permutations match.").color(subtle_dark()));
+                }
+            });
+        });
+    (choice, dropdown_wheel_delta(ui, &response, popup_open))
 }
 
 /// Search variants without losing the `<None>` reset or wheel navigation.
