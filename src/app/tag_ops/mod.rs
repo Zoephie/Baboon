@@ -36,6 +36,8 @@ pub(in crate::app) mod container_folder_window;
 pub(in crate::app) mod loose_folder_rename_window;
 pub(in crate::app) mod new_tag;
 pub(in crate::app) use new_tag::*;
+pub(in crate::app) mod folder_merge_review;
+pub(in crate::app) mod folder_merge_ops;
 pub(in crate::app) mod refactor;
 pub(in crate::app) use refactor::*;
 pub(in crate::app) mod group_report;
@@ -60,12 +62,15 @@ pub(in crate::app) struct TagOpsFeature {
     /// otherwise indistinguishable from a tag the game shipped.
     pub(in crate::app) created_tags: CreatedTagLedger,
     pub(in crate::app) folder_refactor: Option<FolderRefactorUiState>,
+    pub(in crate::app) folder_merge: Option<folder_merge_review::MergeUi>,
 }
 
 /// What the tag operation windows commit to. Each acts on the state its
 /// window holds, which stays put until the handler has used it.
 pub(in crate::app) enum TagOpsCommand {
     /// Delete the tag the delete confirmation names.
+    SaveBeforeFolderOperation,
+    CancelFolderOperationSave,
     Delete,
     DeleteFolder,
     /// Make or rename the folder in the container folder dialog. The dialog
@@ -91,6 +96,8 @@ pub(in crate::app) enum TagOpsCommand {
 impl Baboon {
     pub(in crate::app) fn apply_tag_ops_command(&mut self, command: TagOpsCommand, ctx: &egui::Context) {
         match command {
+            TagOpsCommand::SaveBeforeFolderOperation => self.save_before_folder_operation(),
+            TagOpsCommand::CancelFolderOperationSave => { self.dialogs.close::<folder_merge_review::SaveBeforeFolderOperation>(); },
             TagOpsCommand::Delete => self.begin_delete_tag(ctx.clone()),
             TagOpsCommand::DeleteFolder => self.begin_delete_folder(ctx.clone()),
             TagOpsCommand::ApplyContainerFolder => {

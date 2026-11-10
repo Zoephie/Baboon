@@ -385,7 +385,7 @@ pub(in crate::app) fn draw_tag_pane(
             .and_then(|source| tag_reference_catalog_for_source(source, expert_mode)),
         tag_reference_picker: &mut tag_reference_picker,
         status: Some(&mut status),
-        editable: !kit_read_only && is_editable_tag(entry, &doc.tag),
+        editable: !kit_read_only && !cx.model.kits[kit_index].loading_tags.contains(&key) && is_editable_tag(entry, &doc.tag),
         structure_locked: doc.tag.is_halo5(),
         index_targets: Some(crate::core::index_targets::load(source.and_then(|source| match &source.source {
             TagSource::LooseFolder { definitions_root, .. } => Some(definitions_root.as_path()),

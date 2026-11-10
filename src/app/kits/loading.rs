@@ -313,6 +313,17 @@ impl Baboon {
         if self.model.resolve_stamp(stamp).is_none() {
             return true;
         }
+        if self.tag_ops.folder_refactor.is_some() {
+            // A refactor owns both the catalog and the old-to-new tab map.
+            // Installing a scan here advances generation and makes its pending
+            // completion look stale, leaving open panes at deleted paths.
+            let jobs = &mut self.model.kits[kit_index].index_jobs;
+            jobs.refresh_browser = true;
+            jobs.next_refresh_at = 0.0;
+            // The scan may already have persisted its rows. Force a browser
+            // refresh on retry even if the next scan reports no disk changes.
+            return false;
+        }
         self.schedule_next_entry_index_refresh(kit_index, ctx);
         let refresh_browser = std::mem::take(&mut self.model.kits[kit_index].index_jobs.refresh_browser);
         match result {
@@ -969,7 +980,8 @@ impl Baboon {
     /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
     /// Captured source identity prevents stale results from replacing newer state.
     pub(in crate::app) fn maybe_refresh_entry_index(&mut self, ctx: egui::Context) {
-        if self.model.kits[self.model.active].scanning_entries
+        if self.tag_ops.folder_refactor.is_some()
+            || self.model.kits[self.model.active].scanning_entries
             || self.model.kits[self.model.active].index_jobs.refreshing
             || self.model.kits[self.model.active].index_jobs.building_references
         {
@@ -992,7 +1004,8 @@ impl Baboon {
     }
 
     pub(in crate::app) fn begin_refresh_entry_index(&mut self, ctx: egui::Context) {
-        if self.model.kits[self.model.active].scanning_entries || self.model.kits[self.model.active].index_jobs.refreshing {
+        if self.tag_ops.folder_refactor.is_some()
+            || self.model.kits[self.model.active].scanning_entries || self.model.kits[self.model.active].index_jobs.refreshing {
             return;
         }
         let Some(source) = self.model.source() else {

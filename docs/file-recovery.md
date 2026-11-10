@@ -61,5 +61,5 @@ interrupted migration can resume. Legacy batches have no kit-origin information
 and retain their original internal layout rather than gaining a `files` wrapper.
 
 Campaign Evolved's container backups and deletion restrictions are unchanged.
-Monolithic cache sources remain read-only. Folder merging and merge-conflict
-recovery are a separate implementation stage.
+Monolithic cache sources remain read-only. Folder merges preserve overwritten
+destination files in the same recovery location; see [Folder merging](folder-merging.md).

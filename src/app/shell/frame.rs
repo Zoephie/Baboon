@@ -4144,6 +4144,35 @@ mod tests {
                 &["Indexing"],
             ),
             case(
+                "save_before_folder_operation",
+                &["dialog:SaveBeforeFolderOperation"],
+                &["tag_ops/folder_merge_review.rs"],
+                loose_kit,
+                |h| {
+                    h.app.dialogs.open(crate::app::tag_ops::folder_merge_review::SaveBeforeFolderOperation {
+                        kit: h.app.model.kit_stamp(), rel_path: "objects/props".into(), label: "props".into(), moving: true, error: None,
+                    });
+                },
+                &["Save Before Moving or Copying", "Save All and Continue"],
+            ),
+            case(
+                "folder_merge_review",
+                &["tag_ops.folder_merge"],
+                &[],
+                loose_kit,
+                |h| {
+                    use crate::app::tag_ops::folder_merge_review::{MergeControl, MergeUi, MergeReview, ReviewKind};
+                    let (answer, _rx) = mpsc::channel();
+                    h.app.tag_ops.folder_merge = Some(MergeUi {
+                        control: std::sync::Arc::new(MergeControl::default()),
+                        review: Some(MergeReview { kind: ReviewKind::Summary {
+                            source: "objects/props".into(), destination: "levels/props".into(), files: 3, conflicts: 1,
+                        }, answer, apply_remaining: false }),
+                    });
+                },
+                &["Merge Folders", "3 incoming file(s), 1 conflict(s)"],
+            ),
+            case(
                 "folder_refactor_lock",
                 &["tag_ops.folder_refactor"],
                 &[],

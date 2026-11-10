@@ -143,6 +143,7 @@ pub(in crate::app) enum WorkerMessage {
     },
     TagLoaded {
         kit: KitId,
+        epoch: u64,
         key: String,
         result: Result<TagFile, String>,
     },
@@ -326,6 +327,7 @@ pub(in crate::app) enum WorkerMessage {
         result: Result<(), String>,
     },
     FolderRefactorProgress(FolderRefactorProgress),
+    FolderMergeReview(crate::app::tag_ops::folder_merge_review::MergeReview),
     /// Stamped because the finish rewrites its kit's whole browser tree and
     /// drops that kit's open documents: unrouted, a refactor that outlived a
     /// workspace switch applied all of that to whichever kit was focused.
@@ -803,6 +805,7 @@ mod tests {
             || panic!("decoder fell over"),
             |error| WorkerMessage::TagLoaded {
                 kit: KitId(0),
+                epoch: 0,
                 key: "k".to_owned(),
                 result: Err(error),
             },
@@ -812,6 +815,7 @@ mod tests {
             &ctx,
             || WorkerMessage::TagLoaded {
                 kit: KitId(0),
+                epoch: 0,
                 key: "fine".to_owned(),
                 result: Err("not a panic".to_owned()),
             },

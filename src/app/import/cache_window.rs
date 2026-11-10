@@ -279,25 +279,6 @@ fn draw_cache_import_body(
         }
     }
 
-    ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        if dialog.running {
-            if ui.button("Cancel").clicked() {
-                action = Some(CacheImportAction::Cancel);
-            }
-            ui.label(RichText::new("Importing...").color(subtle_dark()));
-        } else {
-            if ui
-                .add_enabled(dialog.target().is_some(), egui::Button::new("Import"))
-                .clicked()
-            {
-                action = Some(CacheImportAction::Start);
-            }
-            if dialog.report.is_some() && ui.button("Close").clicked() {
-                action = Some(CacheImportAction::Close);
-            }
-        }
-    });
     ui.label(
         RichText::new(
             "Existing tags at the same paths are replaced. Nothing is written for a \
@@ -519,6 +500,28 @@ fn draw_cache_import_body(
         }
         draw_folder_import_report(ui, report);
     }
+    ui.add_space(10.0);
+    popup_footer(ui, |ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if dialog.running {
+                if ui.button("Cancel").clicked() {
+                    action = Some(CacheImportAction::Cancel);
+                }
+                ui.label(RichText::new("Importing...").color(subtle_dark()));
+            } else {
+                if ui
+                    .add_enabled(dialog.target().is_some(), egui::Button::new("Import"))
+                    .clicked()
+                {
+                    action = Some(CacheImportAction::Start);
+                }
+                if dialog.report.is_some() && ui.button("Close").clicked() {
+                    action = Some(CacheImportAction::Close);
+                }
+            }
+        });
+    });
+
     action
 }
 
@@ -537,10 +540,13 @@ impl Dialog for CacheImportDialog {
         egui::Window::new("Import Cache Folder")
             .constrain_to(window_work_area(ctx))
             .id(egui::Id::unique("cache_import"))
-            .open(&mut open)
+            .title_bar(false)
+            .frame(egui::Frame::window(&ctx.global_style()))
             .resizable(true)
             .default_width(window_width(ctx, 560.0))
             .show(ctx, |ui| {
+                crate::app::search::draw_icon_window_header(ui, "Import Cache Folder", ButtonIcon::Import, &mut open);
+                ui.add_space(12.0);
                 action = draw_cache_import_body(ui, ctx, self);
             });
 

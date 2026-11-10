@@ -438,6 +438,7 @@ impl Baboon {
                 container_delete_running: HashSet::new(),
                 created_tags: CreatedTagLedger::load(),
                 folder_refactor: None,
+                folder_merge: None,
             },
             mods: ModsFeature {
                 container_write_leases: HashMap::new(),

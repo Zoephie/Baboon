@@ -121,8 +121,10 @@ impl Baboon {
         &mut self,
         stamp: KitStamp,
         result: Result<FolderRefactorFinished, String>,
+        ctx: &egui::Context,
     ) -> bool {
         self.tag_ops.folder_refactor = None;
+        self.tag_ops.folder_merge = None;
         let done = match result {
             Ok(done) => done,
             Err(error) => {
@@ -166,8 +168,16 @@ impl Baboon {
         }
         let kit = &mut self.model.kits[kit_index];
         let view = &mut self.views[kit.id];
-        kit.parsed_tags.clear();
+        // Keep the last rendered documents until replacement reads finish.
+        // Clearing them first collapses every pane to a one-line placeholder,
+        // clamps its scroll offset, and never starts a new load.
+        let parsed = std::mem::take(&mut kit.parsed_tags);
+        kit.parsed_tags = parsed.into_iter().map(|(key, document)| {
+            let key = done.old_to_new_keys.get(&key).cloned().unwrap_or(key);
+            (key, document)
+        }).filter(|(key, _)| kit.open_tabs.contains(key)).collect();
         kit.loading_tags.clear();
+        kit.tag_load_epoch = kit.tag_load_epoch.wrapping_add(1);
         view.caches.bitmap_previews.clear();
         view.caches.model_previews.clear();
         view.edit_buffers.clear();
@@ -184,6 +194,8 @@ impl Baboon {
             pane.filter_cache = FilterCache::default();
             pane.date_cache = FolderDateCache::default();
         }
+        let open_tags: Vec<_> = kit.open_tabs.iter().filter(|key| kit.source.as_ref().is_some_and(|source| source.entry_for_key(key).is_some())).cloned().collect();
+        for key in open_tags { self.load_tag_in(kit_index, key, ctx.clone(), true); }
         self.kit_tools.terminal
             .lines
             .extend(done.lines.into_iter().map(TerminalLineEntry::new));
@@ -498,6 +510,7 @@ mod tests {
                 moved: true,
                 moved_folder: Some(("objects/brute".into(), "objects/elite".into())),
             }),
+            &egui::Context::default(),
         );
         assert_eq!(app.model.active, 1);
         let kit = &app.model.kits[0];

@@ -456,7 +456,7 @@ pub(in crate::app) fn table_order_folders(ui: &Ui, nodes: &[TagTreeNode]) -> Opt
     Some(rows.into_iter().map(|row| row.0).collect())
 }
 
-fn local_date(time: SystemTime) -> Option<String> {
+pub(in crate::app) fn local_date(time: SystemTime) -> Option<String> {
     let seconds: libc::time_t = time
         .duration_since(UNIX_EPOCH)
         .ok()?

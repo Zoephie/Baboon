@@ -334,7 +334,12 @@ impl Baboon {
         // window reads them.
         self.refresh_ref_jump_occurrences(ctx);
         self.dialogs.draw(&cx!(self, ctx), &app_reads!(self));
-        draw_folder_refactor_lock(ctx, self.tag_ops.folder_refactor.as_ref());
+        draw_folder_refactor_lock(ctx, self.tag_ops.folder_refactor.as_ref(), self.tag_ops.folder_merge.as_ref().map(|merge| merge.control.as_ref()));
+        if let Some(merge) = &mut self.tag_ops.folder_merge {
+            if merge.review.is_some() {
+                crate::app::tag_ops::folder_merge_review::draw(ctx, merge);
+            }
+        }
         end_wheel_gesture(ctx);
     }
 
@@ -646,9 +651,12 @@ impl Dialog for IndexingNotice {
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-                .open(&mut open)
+                .title_bar(false)
+                .frame(Frame::window(&ctx.global_style()))
                 .show(ctx, |ui| {
-                    ui.set_min_width(360.0);
+                    ui.set_width(window_width(ctx, 420.0));
+                    crate::app::search::draw_icon_window_header(ui, "Indexing", ButtonIcon::Search, &mut open);
+                    ui.add_space(12.0);
                     ui.label("Please wait until indexing is completed for best compatibility.");
                     ui.add_space(8.0);
                     if cx.model.kits[cx.model.active].scanning_entries {
@@ -703,9 +711,11 @@ impl Dialog for IndexingNotice {
                         }
                     }
                     ui.add_space(8.0);
-                    if ui.button("Hide").clicked() {
-                        hide_notice = true;
-                    }
+                    popup_footer(ui, |ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if icon_text_button(ui, ButtonIcon::Closed, "Hide", true).clicked() { hide_notice = true; }
+                        });
+                    });
                 });
             return open && !hide_notice;
         }
@@ -894,7 +904,7 @@ pub(in crate::app) fn draw_terminal_panel(
 /// edit, save or second refactor in the meantime would be overwritten or
 /// would race it. Drawn last and in the foreground so no window or panel
 /// sits above it.
-pub(in crate::app) fn draw_folder_refactor_lock(ctx: &egui::Context, folder_refactor: Option<&FolderRefactorUiState>) {
+pub(in crate::app) fn draw_folder_refactor_lock(ctx: &egui::Context, folder_refactor: Option<&FolderRefactorUiState>, control: Option<&crate::app::tag_ops::folder_merge_review::MergeControl>) {
     let Some(progress) = folder_refactor else {
         return;
     };
@@ -907,11 +917,16 @@ pub(in crate::app) fn draw_folder_refactor_lock(ctx: &egui::Context, folder_refa
                 ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
             ui.painter()
                 .rect_filled(rect, 0.0, Color32::from_black_alpha(140));
-            let panel = egui::Rect::from_center_size(rect.center(), egui::vec2(360.0, 96.0));
+            let panel = egui::Rect::from_center_size(rect.center(), egui::vec2(window_width(ctx, 460.0), if control.is_some_and(|control| !control.is_applying()) { 210.0 } else { 160.0 }));
             ui.scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| {
-                Frame::popup(ui.style()).show(ui, |ui| {
+                Frame::window(&ctx.global_style()).show(ui, |ui| {
                     ui.set_width(panel.width());
-                    ui.label(RichText::new(&progress.label).strong().color(text_dark()));
+                    let title = match progress.label.as_str() {
+                        "Moving tag" => "Moving Tag",
+                        "Renaming tag" => "Renaming Tag",
+                        label => label,
+                    };
+                    crate::app::search::draw_icon_window_header_without_close(ui, title, ButtonIcon::FolderClosed);
                     ui.add_space(4.0);
                     let bar = match progress.progress {
                         Some(value) => egui::ProgressBar::new(value.clamp(0.0, 1.0)),
@@ -924,6 +939,14 @@ pub(in crate::app) fn draw_folder_refactor_lock(ctx: &egui::Context, folder_refa
                             .color(subtle_dark())
                             .small(),
                     );
+                    if let Some(control) = control.filter(|control| !control.is_applying()) {
+                        ui.add_space(12.0);
+                        popup_footer(ui, |ui| {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if icon_text_button(ui, ButtonIcon::Clear, if control.cancelled() { "Cancelling…" } else { "Cancel" }, !control.cancelled()).clicked() { control.cancel(); }
+                            });
+                        });
+                    }
                 });
             });
         });
@@ -1089,7 +1112,7 @@ pub(in crate::app) mod tests {
                     rect.set(response.rect);
                     clicked.set(clicked.get() | response.clicked());
                 });
-                draw_folder_refactor_lock(&ctx, app.tag_ops.folder_refactor.as_ref());
+                draw_folder_refactor_lock(&ctx, app.tag_ops.folder_refactor.as_ref(), None);
             });
         };
         frame(Vec::new(), &mut app);

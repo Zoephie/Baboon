@@ -65,9 +65,12 @@ impl Dialog for TagImportDialog {
             egui::Window::new("Import Tags")
                 .constrain_to(window_work_area(ctx))
                 .id(egui::Id::unique("tag_import"))
-                .open(&mut open)
+                .title_bar(false)
+                .frame(egui::Frame::window(&ctx.global_style()))
                 .default_width(window_width(ctx, 720.0))
                 .show(ctx, |ui| {
+                    crate::app::search::draw_icon_window_header(ui, "Import Tags", ButtonIcon::Import, &mut open);
+                    ui.add_space(12.0);
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Into").color(subtle_dark()));
                         ui.label(RichText::new(&dialog.target_game).color(text_dark()).strong());
@@ -262,25 +265,6 @@ impl Dialog for TagImportDialog {
                             .facts
                             .as_ref()
                             .is_some_and(|facts| facts.tag_files > 0);
-                    ui.horizontal(|ui| {
-                        // One button. Converting and writing are one intention,
-                        // and the report below appears once it has run rather
-                        // than behind a preview step nothing depends on.
-                        if ui
-                            .add_enabled(ready && !busy, egui::Button::new("Import"))
-                            .on_disabled_hover_text(
-                                "Choose a tag or a folder that holds tags first",
-                            )
-                            .clicked()
-                        {
-                            action = Some(ImportDialogAction::Import);
-                        }
-                        if dialog.analyzing {
-                            ui.spinner();
-                            ui.label(RichText::new("Converting...").color(subtle_dark()).small());
-                            ctx.request_repaint();
-                        }
-                    });
 
                     // The question. Nothing has been written at this point --
                     // the tag is converted and sitting here, and the user is
@@ -487,6 +471,28 @@ impl Dialog for TagImportDialog {
                         ui.add_space(6.0);
                         ui.label(RichText::new(error).color(material_delete_text()));
                     }
+                    ui.add_space(12.0);
+                    popup_footer(ui, |ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // One button. Converting and writing are one intention,
+                            // and the report below appears once it has run rather
+                            // than behind a preview step nothing depends on.
+                            if ui
+                                .add_enabled(ready && !busy, egui::Button::new("Import"))
+                                .on_disabled_hover_text(
+                                    "Choose a tag or a folder that holds tags first",
+                                )
+                                .clicked()
+                            {
+                                action = Some(ImportDialogAction::Import);
+                            }
+                            if dialog.analyzing {
+                                ui.spinner();
+                                ui.label(RichText::new("Converting...").color(subtle_dark()).small());
+                                ctx.request_repaint();
+                            }
+                        });
+                    });
                 });
         }
 

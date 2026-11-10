@@ -134,8 +134,10 @@ impl Baboon {
                     package,
                     result,
                 } => self.handle_chimp_package_loaded(stamp, package, result),
-                WorkerMessage::TagLoaded { kit, key, result } => {
-                    self.handle_tag_loaded(kit, key, result)
+                WorkerMessage::TagLoaded { kit, epoch, key, result } => {
+                    if self.model.resolve_kit(kit).is_some_and(|index| self.model.kits[index].tag_load_epoch == epoch) {
+                        self.handle_tag_loaded(kit, key, result)
+                    } else { true }
                 }
                 WorkerMessage::RefJumpOccurrences {
                     kit,
@@ -215,11 +217,15 @@ impl Baboon {
                     fingerprint,
                     result,
                 } => self.handle_campaign_project_saved(revision, path, fingerprint, result),
+                WorkerMessage::FolderMergeReview(review) => {
+                    if let Some(state) = &mut self.tag_ops.folder_merge { state.review = Some(review); }
+                    false
+                }
                 WorkerMessage::FolderRefactorProgress(progress) => {
                     self.handle_folder_refactor_progress(progress)
                 }
                 WorkerMessage::FolderRefactorFinished { stamp, result } => {
-                    self.handle_folder_refactor_finished(stamp, result)
+                    self.handle_folder_refactor_finished(stamp, result, ctx)
                 }
                 WorkerMessage::FolderDeleteFinished { stamp, result } => {
                     self.handle_folder_delete_finished(stamp, result, ctx);
