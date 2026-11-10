@@ -801,3 +801,53 @@ fn a_context_without_gen3_shaders_says_so() {
     let with = noted(true);
     assert!(with.is_empty(), "{with:?}");
 }
+
+/// Halo CE's and Halo 2's passes are the game's shaders, transparent ones
+/// too: without Game Shaders only the preview's own program draws, and with
+/// them the same objects draw through more. Each object has transparent
+/// passes, so the check cannot pass by having none.
+#[test]
+fn without_game_shaders_no_game_pass_draws() {
+    let cases = [
+        (GameId::HaloCe, "vehicles\\warthog\\warthog"),
+        (GameId::Halo2, "objects\\vehicles\\warthog\\warthog"),
+    ];
+    for (game, model) in cases {
+        let Some(source) = super::kit::kit_source(game) else {
+            continue;
+        };
+        let TagSource::LooseFolder { root, .. } = &source else {
+            unreachable!()
+        };
+        let data = super::kit::kit_preview(root, game, model, "vehicle", b"vehi");
+        let textures = materials::resolve_model_textures(&source, &data.preview.materials, true);
+        assert!(
+            textures.iter().any(|texture| {
+                !texture.dx9_layers[crate::app::model_preview::dx9::passes::Dx9Layer::Transparent
+                    as usize]
+                    .is_empty()
+            }),
+            "{game:?} {model}: no transparent pass to leave out"
+        );
+        let programs = |shaders| {
+            let shot = Shot {
+                model: model.to_owned(),
+                shaders,
+                lights: true,
+                yaw: 0.6,
+                pitch: 0.25,
+                kind: Some("vehicle".to_owned()),
+            };
+            let shown = shoot(&source, &[(shot, ShotOptions::new(game))]).remove(0);
+            shown
+                .gl_calls
+                .iter()
+                .filter_map(|line| line.strip_prefix("glUseProgram "))
+                .filter(|program| *program != "0")
+                .map(str::to_owned)
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        assert_eq!(programs(false).len(), 1, "{game:?} {model}: off");
+        assert!(programs(true).len() > 1, "{game:?} {model}: on");
+    }
+}

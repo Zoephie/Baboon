@@ -76,8 +76,9 @@ pub(in crate::app::model_preview) trait Dx9Game {
 }
 
 impl RenderCore {
-    /// The dx9 passes over the slot's own draw, with `game`'s hooks. What the
-    /// finished frame blooms over, if it does.
+    /// The dx9 passes over the slot's own draw, with `game`'s hooks: the
+    /// game's shaders, so none without Game Shaders. What the finished frame
+    /// blooms over, if it does.
     pub(in crate::app::model_preview) unsafe fn draw_dx9_passes(
         &mut self,
         game: &mut dyn Dx9Game,
@@ -85,8 +86,11 @@ impl RenderCore {
         frame: &ModelGpuFrame,
         slot: usize,
     ) -> Option<Vec<usize>> {
+        if !frame.game_shaders {
+            return None;
+        }
         unsafe {
-            if frame.game_shaders && self.dx9_camo_on(frame) {
+            if self.dx9_camo_on(frame) {
                 let order = frame.visible_batches.clone();
                 self.copy_dx9_frame(gl, frame, &order);
                 self.draw_dx9_layer(
@@ -98,7 +102,7 @@ impl RenderCore {
                     None,
                     game.binds(),
                 );
-            } else if frame.game_shaders {
+            } else {
                 // The lit layers, the self shadow, then every light.
                 let order = frame.visible_batches.clone();
                 self.copy_dx9_frame(gl, frame, &order);
@@ -211,7 +215,7 @@ impl RenderCore {
             );
             // `rasterizer_postprocess_scene` blooms the finished frame,
             // after every transparent and effect.
-            if frame.game_shaders && frame.bloom {
+            if frame.bloom {
                 return Some(order.clone());
             }
             None

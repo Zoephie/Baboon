@@ -22,8 +22,9 @@ use std::sync::Arc;
 /// Reach and Halo 4 materials keep their slot maps only: translating their
 /// passes and decoding the maps those read at full size was most of a
 /// resolve's time, for a look only Game Shaders draws. Halo CE's and Halo 2's
-/// DX9 passes resolve either way, as their transparent and camo passes draw
-/// with Game Shaders off.
+/// DX9 passes, which Game Shaders alone draws too, still resolve: they cost a
+/// few milliseconds, and whether a material has any decides what the footer
+/// says of it drawn without them.
 pub(crate) fn resolve_model_textures(
     source: &TagSource,
     materials: &[RenderModelPreviewMaterial],

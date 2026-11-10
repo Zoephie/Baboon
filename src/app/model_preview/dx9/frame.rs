@@ -6,10 +6,10 @@ use super::super::frame::ModelGpuFrame;
 use super::passes::{Dx9Layer, object_light_direction};
 
 impl ModelGpuFrame {
-    /// Transparent passes draw whether or not game shaders are on.
+    /// The passes are the game's shaders, so they draw with Game Shaders on
+    /// alone, the transparent ones too; the camo layer with camo on.
     pub(in crate::app::model_preview) fn dx9_draws(&self, layer: Dx9Layer) -> bool {
         match layer {
-            Dx9Layer::Transparent => true,
             Dx9Layer::ActiveCamo => self.active_camo,
             _ => self.game_shaders,
         }

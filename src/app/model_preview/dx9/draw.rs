@@ -286,14 +286,14 @@ impl RenderCore {
     }
 
     /// Whether a material's passes stand in for the slots. Transparent ones
-    /// always do. Opaque ones need game shaders on, and a template with a
-    /// lightmap layer needs that layer to have prepared.
+    /// do with game shaders on. Opaque ones need them on too, and a template
+    /// with a lightmap layer needs that layer to have prepared.
     pub(in crate::app::model_preview) fn dx9_replaces_slots(
         &self,
         frame: &ModelGpuFrame,
         material: usize,
     ) -> bool {
-        if self.dx9_material_ready(frame, material, Dx9Layer::Transparent) {
+        if frame.game_shaders && self.dx9_material_ready(frame, material, Dx9Layer::Transparent) {
             return true;
         }
         if self.dx9_camo_on(frame) {
