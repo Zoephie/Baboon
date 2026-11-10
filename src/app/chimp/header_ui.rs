@@ -233,7 +233,7 @@ fn draw_chimp_header_sections(
                             );
                             let response = ui.add(
                                 singleline_text_edit_with_error(ui, &mut edit.text, pane.header_error.is_some())
-                                    .id(egui::Id::new(("chimp_name_edit", edit.index)))
+                                    .id(egui::Id::unique(("chimp_name_edit", edit.index)))
                                     .desired_width(320.0)
                                     .font(egui::TextStyle::Monospace),
                             );

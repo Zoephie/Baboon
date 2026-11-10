@@ -424,7 +424,7 @@ fn draw_chimp_document_pane(
             None
         }
         ChimpDocumentView::Properties => {
-            egui::Panel::left(egui::Id::new((
+            egui::Panel::left(egui::Id::unique((
                 "chimp_exports",
                 scope.to_owned(),
                 package.clone(),

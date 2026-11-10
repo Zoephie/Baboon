@@ -265,7 +265,7 @@ pub(in crate::app) fn layout_notice_text(diff: &LayoutDiff) -> String {
 }
 
 fn open_id(tag_key: &str) -> egui::Id {
-    egui::Id::new(("layout_diff_window", tag_key))
+    egui::Id::unique(("layout_diff_window", tag_key))
 }
 
 /// Draw the notice as a warning badge over the bottom right of the header's

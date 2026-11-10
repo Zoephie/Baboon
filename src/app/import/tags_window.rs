@@ -64,7 +64,7 @@ impl Dialog for TagImportDialog {
             let busy = dialog.running || dialog.analyzing;
             egui::Window::new("Import Tags")
                 .constrain_to(window_work_area(ctx))
-                .id(egui::Id::new("tag_import"))
+                .id(egui::Id::unique("tag_import"))
                 .open(&mut open)
                 .default_width(window_width(ctx, 720.0))
                 .show(ctx, |ui| {

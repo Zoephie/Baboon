@@ -20,6 +20,7 @@ use crate::app::export::string_lists::StringStoragePresentation;
 use crate::app::search::{StringFindContext, FindOccurrence, FindMatchingCells, string_find_context_id, string_find_jump_id, string_find_ranges};
 
 use egui_extras::{Column, TableBuilder};
+use crate::app::ui_kit::autoscroll::AutoscrollTable;
 
 use super::*;
 use super::string_list_layout::{self as display, Row as DisplayRow, Sort as StringSort};
@@ -173,7 +174,7 @@ struct StringTableFocus {
 }
 
 pub(in crate::app) fn select_pasted_rows(ctx: &egui::Context, scope: &str, key: &str, selected: BTreeSet<usize>) {
-    let id = egui::Id::new(("field_edit", scope, key, "string list view"));
+    let id = egui::Id::unique(("field_edit", scope, key, "string list view"));
     let mut view = ctx.data(|data| data.get_temp::<StringListView>(id)).unwrap_or_default();
     view.selected = selected;
     view.anchor = view.selected.first().copied();
@@ -185,7 +186,7 @@ pub(in crate::app) fn select_pasted_rows(ctx: &egui::Context, scope: &str, key: 
 /// Notify every pane showing this document that row indices were restored by
 /// history. Presentation choices remain pane-local and survive the step.
 pub(in crate::app) fn clear_selection_after_history(ctx: &egui::Context, document: u64) {
-    let id=egui::Id::new(("string list history epoch",document));
+    let id=egui::Id::unique(("string list history epoch",document));
     ctx.data_mut(|data| {
         let epoch=data.get_temp::<u64>(id).unwrap_or_default().wrapping_add(1);
         data.insert_temp(id,epoch);
@@ -299,7 +300,7 @@ pub(super) fn draw_string_list_tag(
             ..Default::default()
         };
     }
-    let history_epoch=ui.data(|data|data.get_temp::<u64>(egui::Id::new((
+    let history_epoch=ui.data(|data|data.get_temp::<u64>(egui::Id::unique((
         "string list history epoch",document_revision.0)))).unwrap_or_default();
     if view.history_epoch != history_epoch {
         view.history_epoch=history_epoch;
@@ -644,7 +645,7 @@ fn draw_strings_frame(
 
     // Route row shortcuts to the active pane, regardless of pointer position.
     // A focused text field continues to own its standard text shortcuts.
-    let focus_id = egui::Id::new("active string table");
+    let focus_id = egui::Id::unique("active string table");
     let pane = edit.widget_id("string table focus");
     if edit.string_list_has_focus {
         let previous = ui.data(|data| data.get_temp::<StringTableFocus>(focus_id));
@@ -763,6 +764,8 @@ fn draw_table_contents(
     let index_label_width = ui.painter().layout_no_wrap("Index".to_owned(), TextStyle::Body.resolve(ui.style()), text_dark()).size().x;
     let index_value_width = ui.painter().layout_no_wrap(list.entries.len().saturating_sub(1).to_string(), TextStyle::Monospace.resolve(ui.style()), text_dark()).size().x;
     let index_width = index_label_width.max(index_value_width).ceil() + 16.0;
+    let site = ui.make_persistent_id(table_id);
+    let autoscroll_offset = crate::app::ui_kit::autoscroll::offset(ui, site);
     let mut table = TableBuilder::new(ui)
         .id_salt(table_id)
         .striped(true)
@@ -789,6 +792,7 @@ fn draw_table_contents(
         table = table.vertical_scroll_offset((view.scroll_offset + page as f32 * view.page_height * 0.9).max(0.0));
     }
     let scroll = table
+        .autoscroll(autoscroll_offset)
         .header(HEADER_HEIGHT, |mut header| {
             if handles { header.col(|_| {}); }
             header.col(|ui| {
@@ -1281,7 +1285,7 @@ fn draw_table_contents(
                 ctx.request_repaint();
             }
         });
-    crate::app::ui_kit::autoscroll::register(ui, &scroll, egui::Vec2b::new(false, true));
+    crate::app::ui_kit::autoscroll::register(ui, site, &scroll, egui::Vec2b::new(false, true));
     let header_rect = egui::Rect::from_min_max(top, egui::pos2(scroll.inner_rect.right(), header_bottom));
     painter.set(header_background, table_header_background(header_rect));
     if let Some(rect) = id_header_rect {
@@ -1296,10 +1300,10 @@ fn draw_table_contents(
     }
     paint_table_header_rule(ui, header_rect);
     let max_offset = (scroll.content_size.y - scroll.inner_rect.height()).max(0.0);
-    view.scroll_offset = scroll.state.offset.y;
+    view.scroll_offset = scroll.state.clamped_offset().y;
     view.page_height = scroll.inner_rect.height();
-    let can_scroll_up = scroll.state.offset.y > 0.5;
-    let can_scroll_down = scroll.state.offset.y < max_offset - 0.5;
+    let can_scroll_up = scroll.state.clamped_offset().y > 0.5;
+    let can_scroll_down = scroll.state.clamped_offset().y < max_offset - 0.5;
     if (view.can_scroll_up, view.can_scroll_down) != (can_scroll_up, can_scroll_down) {
         view.can_scroll_up = can_scroll_up;
         view.can_scroll_down = can_scroll_down;
@@ -3114,7 +3118,7 @@ mod tests {
         }]).unwrap();
         panel.frame(Vec::new());
         let key = "strings.multilingual_unicode_string_list";
-        let view_id = egui::Id::new(("field_edit", "test", key, "string list view"));
+        let view_id = egui::Id::unique(("field_edit", "test", key, "string list view"));
         let mut view = panel.ctx.data(|data| data.get_temp::<StringListView>(view_id)).unwrap();
         view.selected = BTreeSet::from([0, 1]);
         panel.ctx.data_mut(|data| data.insert_temp(view_id, view));
@@ -3193,7 +3197,7 @@ mod tests {
     }
 
     fn set_display(panel: &Panel, grouped: bool, sort: StringSort, descending: bool, expanded: &[&str]) {
-        let id = egui::Id::new(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list view"));
+        let id = egui::Id::unique(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list view"));
         let mut view = panel.ctx.data(|data| data.get_temp::<StringListView>(id)).unwrap();
         view.grouped = Some(grouped); view.sort = sort; view.descending = descending;
         view.expanded = expanded.iter().map(|prefix| (*prefix).to_owned()).collect();
@@ -3371,7 +3375,7 @@ mod tests {
                     assert!(dropped.edits.is_empty());
                     assert_eq!(dropped.orders,vec![if descending {vec![4,0,2,1,3,5,6,7,8]}else{vec![4,7,8,0,2,1,3,5,6]}]);
                 }
-                let view=panel.ctx.data(|data|data.get_temp::<StringListView>(egui::Id::new((
+                let view=panel.ctx.data(|data|data.get_temp::<StringListView>(egui::Id::unique((
                     "field_edit","test","strings.multilingual_unicode_string_list","string list view")))).unwrap();
                 for prefix in if copy {["A(1)","C(1)"]}else{["A","C"]} {assert!(view.expanded.contains(prefix));}
                 assert!(!view.expanded.contains(if copy {"B(1)"}else{"B"}));
@@ -3416,7 +3420,7 @@ mod tests {
             clear_selection_after_history(&panel.ctx,original_doc);
             let frame=panel.frame(vec![]);
             assert!(frame.selected.is_empty(),"history must not select unrelated rows at restored indices");
-            let view=panel.ctx.data(|data|data.get_temp::<StringListView>(egui::Id::new((
+            let view=panel.ctx.data(|data|data.get_temp::<StringListView>(egui::Id::unique((
                 "field_edit","test","strings.multilingual_unicode_string_list","string list view")))).unwrap();
             assert!(view.anchor.is_none() && view.scroll_to.is_none() && view.focus_new.is_none());
             assert_eq!(view.grouped,Some(true));
@@ -3437,7 +3441,7 @@ mod tests {
             begin_group_rename(&mut panel,"A");
             panel.frame(vec![text("Draft")]);
             let focused=panel.ctx.memory(|memory|memory.focused()).unwrap();
-            let view_id=egui::Id::new(("field_edit","test","strings.multilingual_unicode_string_list","string list view"));
+            let view_id=egui::Id::unique(("field_edit","test","strings.multilingual_unicode_string_list","string list view"));
             // Periodic entry-index installation advances kit.generation without
             // replacing or editing this open document. Render metadata is also unrelated.
             for epoch in 2..=4 {
@@ -3506,7 +3510,7 @@ mod tests {
         assert_eq!(snapshot.as_slice(),original.as_slice());
         assert!(!doc.journal.can_undo());
         panel.tag=doc.tag;
-        let cache_id=egui::Id::new(("field_edit","test","strings.multilingual_unicode_string_list","string list cache"));
+        let cache_id=egui::Id::unique(("field_edit","test","strings.multilingual_unicode_string_list","string list cache"));
         panel.ctx.data_mut(|data|data.remove::<Arc<ListCache>>(cache_id));
         panel.frame(vec![]);
         let renamed=panel.frame(vec![]);
@@ -3620,7 +3624,7 @@ mod tests {
         let mut edits=Vec::new();
         for _ in 0..3 {
             let frame=panel.frame(vec![egui::Event::PointerMoved(egui::pos2(850.0,400.0)),
-                egui::Event::MouseWheel {unit:egui::MouseWheelUnit::Point,delta:Vec2::new(0.0,-800.0),
+                egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown,unit:egui::MouseWheelUnit::Point,delta:Vec2::new(0.0,-800.0),
                     phase:egui::TouchPhase::Move,modifiers:Default::default()}]);
             edits.extend(frame.edits);
         }
@@ -3773,7 +3777,7 @@ mod tests {
         let deleted=click_at(&mut panel,text_position(&menu,"Delete Group"));
         assert_eq!(deleted.edits,vec![StringListEdit::Remove {indices:vec![0,1]}]);
         strings::apply_string_list_edits(&mut panel.tag,None,&deleted.edits).unwrap();
-        panel.ctx.data_mut(|data|data.remove::<Arc<ListCache>>(egui::Id::new((
+        panel.ctx.data_mut(|data|data.remove::<Arc<ListCache>>(egui::Id::unique((
             "field_edit","test","strings.multilingual_unicode_string_list","string list cache"))));
         panel.frame(vec![]);
         let remaining=panel.frame(vec![]);
@@ -3817,7 +3821,7 @@ mod tests {
             let divider=frame.lines.iter().find(|(points,_)|points[0].x==points[1].x
                 && points[0].x>heading.x && points[0].y<heading.y && points[1].y>heading.y).unwrap().0;
             assert!(divider[1].y<text_position(&frame,"A_one").y,"divider must stop at the header");
-            let view_id=egui::Id::new(("field_edit","test","strings.multilingual_unicode_string_list","string list view"));
+            let view_id=egui::Id::unique(("field_edit","test","strings.multilingual_unicode_string_list","string list view"));
             let initial=panel.ctx.data(|data|data.get_temp::<StringListView>(view_id)).unwrap().wrapped_rows.unwrap().layout.widths.clone();
             let at=egui::pos2(divider[0].x,heading.y);
             let pointer=|pos,pressed|egui::Event::PointerButton {pos,button:egui::PointerButton::Primary,pressed,modifiers:Default::default()};
@@ -3883,7 +3887,7 @@ mod tests {
         let mut seen = BTreeSet::new();
         for step in 0..16 {
             let frame = panel.frame(vec![egui::Event::PointerMoved(egui::pos2(850.0,320.0)),
-                egui::Event::MouseWheel { unit:egui::MouseWheelUnit::Point,delta:Vec2::new(0.0,if step<10 {-53.0}else{53.0}),
+                egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown, unit:egui::MouseWheelUnit::Point,delta:Vec2::new(0.0,if step<10 {-53.0}else{53.0}),
                     phase:egui::TouchPhase::Move,modifiers:Default::default() }]);
             for (label,rect) in &frame.text_rects {
                 if !label.starts_with("group") || label.contains('_') || rect.center().y < 150.0 || rect.center().y > 650.0 { continue; }
@@ -3975,7 +3979,7 @@ mod tests {
             let added = click_at(&mut panel, text_position(&frame, "Add String"));
             assert!(matches!(&added.edits[..], [StringListEdit::Insert { at: 3, .. }]));
             strings::apply_string_list_edits(&mut panel.tag, None, &added.edits).unwrap();
-            let cache_id = egui::Id::new(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list cache"));
+            let cache_id = egui::Id::unique(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list cache"));
             panel.ctx.data_mut(|data| data.remove::<Arc<ListCache>>(cache_id));
             panel.frame(vec![]);
             let frame = panel.frame(vec![]);
@@ -4001,7 +4005,7 @@ mod tests {
                     let mut panel=named_panel(&["A_pickup","B_hint","A_swap","B_other"]);
                     strings::apply_string_list_edits(&mut panel.tag,None,&[StringListEdit::SetText {
                         index:0,language:1,text:"Another language".into()}]).unwrap();
-                    panel.ctx.data_mut(|data|data.remove::<Arc<ListCache>>(egui::Id::new((
+                    panel.ctx.data_mut(|data|data.remove::<Arc<ListCache>>(egui::Id::unique((
                         "field_edit","test","strings.multilingual_unicode_string_list","string list cache"))));
                     let original=panel.tag.write_to_bytes().unwrap();
                     set_display(&panel,true,StringSort::Index,descending,if expanded {&["A","B"]}else{&["A"]});
@@ -4061,7 +4065,7 @@ mod tests {
                     let mut panel=named_panel(&["A_zulu","B_two","A_alpha","B_one","plain"]);
                     strings::apply_string_list_edits(&mut panel.tag,None,&(0..5).map(|index|
                         StringListEdit::SetText {index,language:1,text:format!("Japanese {index}")}).collect::<Vec<_>>()).unwrap();
-                    panel.ctx.data_mut(|data|data.remove::<Arc<ListCache>>(egui::Id::new((
+                    panel.ctx.data_mut(|data|data.remove::<Arc<ListCache>>(egui::Id::unique((
                         "field_edit","test","strings.multilingual_unicode_string_list","string list cache"))));
                     let original=panel.tag.write_to_bytes().unwrap();
                     set_display(&panel,true,StringSort::Index,descending,if expanded {&["A"]}else{&[]});
@@ -4096,7 +4100,7 @@ mod tests {
                         assert_eq!(entries[1].id.as_deref(),Some("A(1)_alpha"));
                         assert_eq!(entries[1].texts[1].as_deref(),Some("Japanese 2"));
                         let view=panel.ctx.data(|data|data.get_temp::<StringListView>(
-                            egui::Id::new(("field_edit","test","strings.multilingual_unicode_string_list","string list view")))).unwrap();
+                            egui::Id::unique(("field_edit","test","strings.multilingual_unicode_string_list","string list view")))).unwrap();
                         assert_eq!(view.expanded.contains("A(1)"),expanded);
                     }
                     let mut doc=crate::core::document::TagDocument::clean(panel.tag);
@@ -4253,7 +4257,7 @@ mod tests {
             let mut panel=named_panel(&["A_one","A_two","plain"]);
             let saved=panel.tag.write_to_bytes().unwrap();
             set_display(&panel,grouped,StringSort::StringId,true,&["A",""]);
-            let id=egui::Id::new(("field_edit","test","strings.multilingual_unicode_string_list","string list view"));
+            let id=egui::Id::unique(("field_edit","test","strings.multilingual_unicode_string_list","string list view"));
             let mut view=panel.ctx.data(|data|data.get_temp::<StringListView>(id)).unwrap();
             view.collect_ungrouped=true;
             let width=if grouped {210.0}else{view.id_column_width};
@@ -4291,7 +4295,7 @@ mod tests {
             panel.scope="reopened tile";
             panel.document_revision=3;
             panel.frame(vec![]);
-            let reopened=panel.ctx.data(|data|data.get_temp::<StringListView>(egui::Id::new((
+            let reopened=panel.ctx.data(|data|data.get_temp::<StringListView>(egui::Id::unique((
                 "field_edit","reopened tile","strings.multilingual_unicode_string_list","string list view")))).unwrap();
             assert_eq!(reopened.grouped,Some(false));
             assert!(!reopened.collect_ungrouped && !reopened.descending && reopened.expanded.is_empty());
@@ -4444,7 +4448,7 @@ mod tests {
                 assert_eq!(snapshot.as_slice(),original.as_slice());
                 assert!(!doc.journal.can_undo(),"the group move must be one atomic operation");
                 panel.tag = doc.tag;
-                let cache_id = egui::Id::new(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list cache"));
+                let cache_id = egui::Id::unique(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list cache"));
                 panel.ctx.data_mut(|data| data.remove::<Arc<ListCache>>(cache_id));
                 panel.frame(vec![]);
                 let moved = panel.frame(vec![]);
@@ -4456,7 +4460,7 @@ mod tests {
     }
 
     fn set_selection(panel: &Panel, selected: &[usize]) {
-        let id = egui::Id::new(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list view"));
+        let id = egui::Id::unique(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list view"));
         let mut view = panel.ctx.data(|data| data.get_temp::<StringListView>(id)).unwrap();
         view.selected = selected.iter().copied().collect();
         view.anchor = selected.first().copied();
@@ -4526,7 +4530,7 @@ mod tests {
         assert_eq!(click_field_with_modifiers(&mut panel, at("Two"), egui::Modifiers::CTRL).selected, BTreeSet::from([0, 2]));
         assert!(panel.ctx.memory(|memory| memory.focused()).is_none(), "Ctrl-click selects rows rather than entering a field");
         assert_eq!(click_at(&mut panel, at("Two")).selected, BTreeSet::from([1]));
-        let second = egui::Id::new(("field_edit", "test", "strings.multilingual_unicode_string_list", ("string text", "strings.multilingual_unicode_string_list|strings|1|0")));
+        let second = egui::Id::unique(("field_edit", "test", "strings.multilingual_unicode_string_list", ("string text", "strings.multilingual_unicode_string_list|strings|1|0")));
         assert_eq!(panel.ctx.memory(|memory| memory.focused()), Some(second));
         let edited = panel.frame(vec![text("!")]);
         assert!(edited.texts.iter().any(|text| text.contains('!')), "a normal field click still enters editing");
@@ -4666,7 +4670,7 @@ mod tests {
         set_selection(&panel, &[0]);
         panel.frame(vec![]);
         panel.frame(vec![]);
-        panel.ctx.data_mut(|data| data.insert_temp(egui::Id::new("test string row clipboard"), "new\tPasted".to_owned()));
+        panel.ctx.data_mut(|data| data.insert_temp(egui::Id::unique("test string row clipboard"), "new\tPasted".to_owned()));
         let duplicate = egui::Event::Key {key:egui::Key::D,physical_key:None,pressed:true,repeat:false,modifiers:egui::Modifiers::COMMAND};
         for event in [egui::Event::Copy,egui::Event::Cut,egui::Event::Paste("new\tPasted".into())] {
             let frame = panel.frame(vec![event]);
@@ -4709,7 +4713,7 @@ mod tests {
             let frame = panel.frame(vec![egui::Event::PointerMoved(egui::pos2(999.0, 799.0)), if cut { egui::Event::Cut } else { egui::Event::Copy }]);
             assert!(matches!(frame.row_request.as_ref().map(|request| &request.action), Some(RowAction::Copy { cut: actual }) if *actual == cut));
         }
-        panel.ctx.data_mut(|data| data.insert_temp(egui::Id::new("test string row clipboard"), "new\tPasted".to_owned()));
+        panel.ctx.data_mut(|data| data.insert_temp(egui::Id::unique("test string row clipboard"), "new\tPasted".to_owned()));
         let pasted = panel.frame(vec![egui::Event::Paste("new\tPasted".to_owned())]);
         assert!(matches!(pasted.row_request.as_ref().map(|request| &request.action), Some(RowAction::Paste { .. })));
         let deleted = panel.frame(vec![key(egui::Key::Delete)]);
@@ -4733,7 +4737,7 @@ mod tests {
             let mut panel = Panel::new(&["One"]);
             panel.editable = editable;
             if let Some(text) = clipboard {
-                panel.ctx.data_mut(|data| data.insert_temp(egui::Id::new("test string row clipboard"), text.to_owned()));
+                panel.ctx.data_mut(|data| data.insert_temp(egui::Id::unique("test string row clipboard"), text.to_owned()));
             }
             panel.frame(Vec::new());
             let frame = panel.frame(Vec::new());
@@ -4822,11 +4826,11 @@ mod tests {
         let added = click_at(&mut panel, at);
         assert!(matches!(added.edits.as_slice(), [StringListEdit::Insert { at: 0, entries }] if entries.len() == 1));
         strings::apply_string_list_edits(&mut panel.tag, Some(GameId::Halo3), &added.edits).unwrap();
-        let cache_id = egui::Id::new(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list cache"));
+        let cache_id = egui::Id::unique(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list cache"));
         panel.ctx.data_mut(|data| data.remove::<Arc<ListCache>>(cache_id));
         panel.frame(Vec::new());
         let key = "strings.multilingual_unicode_string_list|strings|0|id";
-        let id = egui::Id::new(("field_edit", "test", "strings.multilingual_unicode_string_list", ("string id", key)));
+        let id = egui::Id::unique(("field_edit", "test", "strings.multilingual_unicode_string_list", ("string id", key)));
         assert_eq!(panel.ctx.memory(|memory| memory.focused()), Some(id));
     }
 
@@ -4855,7 +4859,7 @@ mod tests {
         let range = egui::TextEdit::load_state(&panel.ctx, panel.text_id.unwrap()).unwrap().cursor.char_range().unwrap();
         assert_eq!(range.slice_str("One"), "One", "Select All Text restores field focus and selection after closing the menu");
         let menu = right_click_at(&mut panel, at);
-        let table_id = egui::Id::new(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list table"));
+        let table_id = egui::Id::unique(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list table"));
         let target = panel.ctx.data(|data| data.get_temp::<Option<StringTextMenu>>(table_id.with(("context text", 0usize)))).flatten().unwrap();
         assert_eq!(target.selection.unwrap().slice_str("One"), "One", "right-click preserves the selection for clipboard commands");
         let copy = menu.text_rects.iter().find(|(text, _)| text == "Copy Text").unwrap().1.center();
@@ -4870,7 +4874,7 @@ mod tests {
         panel.frame(Vec::new());
         panel.frame(Vec::new());
         let offset = |panel: &Panel| {
-            let id = egui::Id::new(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list view"));
+            let id = egui::Id::unique(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list view"));
             panel.ctx.data(|data| data.get_temp::<StringListView>(id)).unwrap().scroll_offset
         };
         panel.frame(vec![key(egui::Key::End)]);
@@ -4899,7 +4903,7 @@ mod tests {
     #[test]
     fn header_and_footer_buttons_scroll_to_both_ends_of_a_long_list() {
         let edges = |panel: &Panel| {
-            let id = egui::Id::new(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list view"));
+            let id = egui::Id::unique(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list view"));
             let view = panel.ctx.data(|data| data.get_temp::<StringListView>(id)).unwrap();
             (view.can_scroll_up, view.can_scroll_down)
         };

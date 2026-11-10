@@ -9,7 +9,7 @@ struct WindowFocus {
     return_focus: HashMap<egui::LayerId, Option<egui::LayerId>>,
 }
 
-fn state_id() -> egui::Id { egui::Id::new("baboon_window_focus") }
+fn state_id() -> egui::Id { egui::Id::unique("baboon_window_focus") }
 
 pub(in crate::app) fn workspace_has_focus(ctx: &egui::Context) -> bool {
     ctx.data(|data| data.get_temp::<WindowFocus>(state_id()))
@@ -99,13 +99,13 @@ mod tests {
             focused: true, events, ..Default::default()
         }, |ui| {
             for (title, x) in [("Find", 20.0), ("Compare Tags", 400.0)] {
-                egui::Window::new(title).id(egui::Id::new(title))
+                egui::Window::new(title).id(egui::Id::unique(title))
                     .title_bar(false).resizable(false).movable(false).fade_in(false)
                     .fixed_pos(egui::pos2(x, 20.0)).fixed_size(Vec2::new(250.0, 180.0))
                     .show(ui.ctx(), |ui| { ui.label(title); });
             }
             if modal {
-                egui::Modal::new(egui::Id::new("Confirm"))
+                egui::Modal::new(egui::Id::unique("Confirm"))
                     .frame(egui::Frame::window(ui.style()))
                     .show(ui.ctx(), |ui| { ui.set_width(200.0); ui.label("Confirm"); });
             }
@@ -124,15 +124,15 @@ mod tests {
             ctx.set_theme(theme);
             let mut output = frame(&ctx, vec![], false);
             for _ in 0..3 { output = frame(&ctx, vec![], false); }
-            assert_eq!(focused(&ctx), Some(egui::Id::new("Compare Tags")));
+            assert_eq!(focused(&ctx), Some(egui::Id::unique("Compare Tags")));
             let border = focused_tab_border(theme == egui::Theme::Dark);
             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                 egui::Shape::Rect(rect) if rect.stroke.color == border)), "the focused window has an emphasized border");
-            let find_center = ctx.read_response(egui::Id::new("Find")).unwrap().rect.center();
+            let find_center = ctx.read_response(egui::Id::unique("Find")).unwrap().rect.center();
             frame(&ctx, vec![egui::Event::PointerMoved(find_center)], false);
-            assert_eq!(focused(&ctx), Some(egui::Id::new("Compare Tags")), "hovering never changes focus");
+            assert_eq!(focused(&ctx), Some(egui::Id::unique("Compare Tags")), "hovering never changes focus");
             for (position, expected) in [
-                (find_center, Some(egui::Id::new("Find"))),
+                (find_center, Some(egui::Id::unique("Find"))),
                 (egui::pos2(900.0, 600.0), None),
             ] {
                 frame(&ctx, vec![egui::Event::PointerMoved(position)], false);
@@ -146,7 +146,7 @@ mod tests {
                 assert_eq!(workspace_has_focus(&ctx), expected.is_none());
             }
             for _ in 0..3 { frame(&ctx, vec![], true); }
-            assert_eq!(focused(&ctx), Some(egui::Id::new("Confirm")), "a modal owns the focus outline");
+            assert_eq!(focused(&ctx), Some(egui::Id::unique("Confirm")), "a modal owns the focus outline");
             for _ in 0..3 { frame(&ctx, vec![], false); }
             assert!(workspace_has_focus(&ctx), "closing the modal returns focus to its workspace caller");
         }

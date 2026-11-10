@@ -22,7 +22,7 @@ impl Dialog for DeleteConfirm {
         };
         let mut delete = false;
         let mut cancel = false;
-        let response = egui::Modal::new(egui::Id::new("delete_tag_confirm"))
+        let response = egui::Modal::new(egui::Id::unique("delete_tag_confirm"))
             .frame(egui::Frame::window(&ctx.global_style()))
             .show(ctx, |ui| {
                 ui.set_width(window_width(ctx, 560.0));

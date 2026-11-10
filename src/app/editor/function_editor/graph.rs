@@ -573,7 +573,7 @@ pub(super) fn draw_foundation_graph_with_preview(
     }
     let menu_position = response.interact_pointer_pos().unwrap_or(plot.center());
     context_menu(&response, |ui| {
-        let clipboard_id = egui::Id::new("function_graph_shape_clipboard");
+        let clipboard_id = egui::Id::unique("function_graph_shape_clipboard");
         if ui.button("Copy").clicked() {
             ui.data_mut(|data| data.insert_temp(clipboard_id, editor.function().clone()));
             close_menu(ui);
@@ -1235,7 +1235,7 @@ mod tests {
                 ..Default::default()
             },
             |_| {
-                egui::Area::new(egui::Id::new("interactive_graph_controls_test"))
+                egui::Area::new(egui::Id::unique("interactive_graph_controls_test"))
                     .fixed_pos(egui::Pos2::ZERO)
                     .show(ctx, |ui| {
                         draw_foundation_graph_with_view(ui, editor, true, &mut 0, &mut 0, view);
@@ -1295,7 +1295,7 @@ mod tests {
             &mut view,
             vec![egui::Event::PointerMoved(inside)],
         );
-        let wheel = || egui::Event::MouseWheel {
+        let wheel = || egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown,
             phase: egui::TouchPhase::Move,
             unit: egui::MouseWheelUnit::Point,
             delta: Vec2::new(0.0, -100.0),
@@ -1875,7 +1875,7 @@ mod tests {
             click(pos, egui::PointerButton::Primary);
             if action == "Copy" {
                 assert!(!changed.get());
-                let copied = ctx.data(|data| data.get_temp::<TagFunction>(egui::Id::new("function_graph_shape_clipboard"))).unwrap();
+                let copied = ctx.data(|data| data.get_temp::<TagFunction>(egui::Id::unique("function_graph_shape_clipboard"))).unwrap();
                 assert_eq!(copied.to_bytes(), source_function.to_bytes());
                 let mut target = scalar_editor(FunctionEncoding::H2);
                 target.set_color_graph_type(ColorGraphType::TwoColor).unwrap();

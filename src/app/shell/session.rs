@@ -895,7 +895,7 @@ pub(in crate::app) fn render_last_opened_windows_prompt(
 
     let mut action = LastOpenedWindowsAction::None;
     egui::Window::new("Restore Last Opened Windows")
-        .id(egui::Id::new("last_opened_windows"))
+        .id(egui::Id::unique("last_opened_windows"))
         .collapsible(false)
         .resizable([true, false])
         .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
@@ -1603,7 +1603,7 @@ mod tests {
             );
             ctx.memory(|memory| {
                 memory
-                    .area_rect(egui::Id::new("last_opened_windows"))
+                    .area_rect(egui::Id::unique("last_opened_windows"))
                     .unwrap()
             })
         };
@@ -1680,7 +1680,7 @@ mod tests {
             }));
         }
         let window = ctx.memory(|memory| {
-            memory.area_rect(egui::Id::new("last_opened_windows")).unwrap()
+            memory.area_rect(egui::Id::unique("last_opened_windows")).unwrap()
         });
         let output = output.unwrap();
         let (clip, footer) = output.shapes.iter().find_map(|clipped| {

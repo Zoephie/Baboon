@@ -125,7 +125,7 @@ impl Dialog for FirstRunWizardState {
         };
 
         egui::Window::new("Welcome to Baboon")
-            .id(egui::Id::new("first_run_wizard"))
+            .id(egui::Id::unique("first_run_wizard"))
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .collapsible(false)
             .resizable(false)

@@ -28,7 +28,7 @@ impl Dialog for StringTransferWindow {
         let action_icon = if self.import { ButtonIcon::Import } else { ButtonIcon::Export };
         let mut open = true;
         if document.is_none() {
-            egui::Window::new(title).id(egui::Id::new("string_list_transfer")).open(&mut open).show(cx.egui, |ui| {
+            egui::Window::new(title).id(egui::Id::unique("string_list_transfer")).open(&mut open).show(cx.egui, |ui| {
                 ui.label("The source or tag is no longer available. Close this window and reopen it from the intended tag.");
             });
             return open;
@@ -62,7 +62,7 @@ impl Dialog for StringTransferWindow {
         let mut changed = false;
         let mut can_refresh = false;
         let mut browse = false;
-        egui::Window::new(title).id(egui::Id::new("string_list_transfer"))
+        egui::Window::new(title).id(egui::Id::unique("string_list_transfer"))
             .collapsible(false).resizable([true, false]).title_bar(false)
             .frame(egui::Frame::window(&cx.egui.global_style()).inner_margin(egui::Margin {
                 left: 20, right: 20, top: 0, bottom: 0,

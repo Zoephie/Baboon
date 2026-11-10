@@ -27,7 +27,7 @@ impl Dialog for ExportedMod {
         let mut close = false;
         let mut reveal = false;
         egui::Window::new("Mod exported")
-            .id(egui::Id::new("exported_mod"))
+            .id(egui::Id::unique("exported_mod"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)

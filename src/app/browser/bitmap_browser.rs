@@ -28,7 +28,7 @@ struct BitmapHoverContext {
 }
 
 fn bitmap_hover_context_id() -> egui::Id {
-    egui::Id::new("bitmap_hover_context")
+    egui::Id::unique("bitmap_hover_context")
 }
 
 /// Start collecting hover-preview requests for the kit about to be drawn.

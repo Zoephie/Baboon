@@ -350,7 +350,7 @@ impl Baboon {
             "kit_tool_drop_cursor",
             Arc::new(|ctx| {
                 let cursor = ctx.data(|data| {
-                    data.get_temp::<egui::CursorIcon>(egui::Id::new(
+                    data.get_temp::<egui::CursorIcon>(egui::Id::unique(
                         kits::tool_drop::KIT_TOOL_DROP_CURSOR,
                     ))
                 });
@@ -403,7 +403,7 @@ impl Baboon {
             tx,
             rx,
             egui_ctx: ctx.clone(),
-            kit_tree: egui_tiles::Tree::empty(egui::Id::new("kit_tree")),
+            kit_tree: egui_tiles::Tree::empty(egui::Id::unique("kit_tree")),
             saved_prefs: prefs.clone(),
             status_shown: String::new(),
             status_changed_at: 0.0,

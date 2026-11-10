@@ -498,7 +498,7 @@ pub(in crate::app) fn editing_kit_menu_row_with_read_only(
         egui::Button::new("").min_size(Vec2::new(EDITING_KIT_MENU_MIN_WIDTH, row_height)),
     );
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label)
     });
     let layout = editing_kit_menu_row_layout(response.rect);
     let text_color = text_dark();
@@ -733,7 +733,7 @@ pub(in crate::app) fn recheck_cached<T: Clone + Send + Sync + 'static>(
     probe: impl FnOnce() -> T,
 ) -> T {
     const RECHECK_SECONDS: f64 = 1.0;
-    let key = egui::Id::new(("recheck_cached", key));
+    let key = egui::Id::unique(("recheck_cached", key));
     let now = ctx.input(|input| input.time);
     if let Some((value, checked_at)) = ctx.data(|data| data.get_temp::<(T, f64)>(key))
         && (0.0..RECHECK_SECONDS).contains(&(now - checked_at))
@@ -2132,7 +2132,7 @@ mod tests {
     }
 
     fn wheel(dy: f32) -> egui::Event {
-        egui::Event::MouseWheel {
+        egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: egui::vec2(0.0, dy),
             modifiers: egui::Modifiers::NONE,
@@ -3639,7 +3639,7 @@ mod tests {
                         .collect();
                     fixture::install_kit_for_game(&mut h.app, entries, "haloreach_mcc");
                     let ids: Vec<KitId> = h.app.model.kits.iter().map(|kit| kit.id).collect();
-                    let mut tree = egui_tiles::Tree::empty("smoke_kit_tree");
+                    let mut tree = egui_tiles::Tree::empty(egui::Id::unique("smoke_kit_tree"));
                     let panes = ids.iter().map(|id| tree.tiles.insert_pane(*id)).collect();
                     tree.root = Some(tree.tiles.insert_horizontal_tile(panes));
                     h.app.kit_tree = tree;
@@ -5906,12 +5906,13 @@ mod tests {
         drag(&mut h, divider, divider + egui::vec2(40.0, 0.0));
         assert!(page(&h, &keys[0]).width() > left.width() + 25.0);
 
-        let browser_id = egui::Id::new(("kit_browser_panel", kit.0));
-        let before = egui::containers::panel::PanelState::load(&h.ctx, browser_id).unwrap().outer_rect;
-        let edge = egui::pos2(before.right(), before.center().y);
+        // The browser sits left of the pages with a 5 point gap, its edge in
+        // the middle; dragging that edge moves the pages over.
+        let before = page(&h, &keys[0]);
+        let edge = egui::pos2(before.left() - 2.5, before.center().y);
         drag(&mut h, edge, edge + egui::vec2(40.0, 0.0));
-        let after = egui::containers::panel::PanelState::load(&h.ctx, browser_id).unwrap().outer_rect;
-        assert!(after.width() > before.width() + 25.0, "the browser edge resizes alongside its scroll area");
+        let after = page(&h, &keys[0]);
+        assert!(after.left() > before.left() + 25.0, "the browser edge resizes alongside its scroll area");
     }
 
     #[test]
@@ -5981,7 +5982,7 @@ mod tests {
         let right = h.app.add_kit();
         fixture::install_kit(&mut h.app, fixture::synthetic_entries(1, 1, 4));
         fixture::open_document(&mut h.app, "folder_00\\sub_00\\tag_003.biped", fixture::new_tag("biped"));
-        h.app.kit_tree = egui_tiles::Tree::new_horizontal("home_split_regression", vec![left, right]);
+        h.app.kit_tree = egui_tiles::Tree::new_horizontal(egui::Id::unique("home_split_regression"), vec![left, right]);
         idle(&mut h);
         let pane_id = |h: &Harness, kit| h.app.kit_tree.tiles.iter().find_map(|(id, tile)| {
             matches!(tile, egui_tiles::Tile::Pane(open) if *open == kit).then_some(*id)
@@ -5992,8 +5993,8 @@ mod tests {
         let right_group = h.app.kit_tree.tiles.parent_of(right_pane).unwrap();
         let left_rect = h.app.kit_tree.tiles.rect(left_group).unwrap();
         let right_rect = h.app.kit_tree.tiles.rect(right_group).unwrap();
-        assert!(h.ctx.read_response(egui::Id::new("workspace_home_tab").with(left_group)).is_some());
-        assert!(h.ctx.read_response(egui::Id::new("workspace_home_tab").with(right_group)).is_none(),
+        assert!(h.ctx.read_response(egui::Id::unique("workspace_home_tab").with(left_group)).is_some());
+        assert!(h.ctx.read_response(egui::Id::unique("workspace_home_tab").with(right_group)).is_none(),
             "only the top-left Editing Kit split has a Home tab");
         click_point(&mut h, left_rect.min + egui::vec2(16.0, 13.0));
         idle(&mut h);
@@ -6017,7 +6018,7 @@ mod tests {
         }).collect::<HashMap<_, _>>();
         let before = layout(&h);
         let root = h.app.views[kit].tag_tree.root();
-        let home = h.ctx.read_response(egui::Id::new("workspace_home_tab").with(home_group(&h))).unwrap().rect.center();
+        let home = h.ctx.read_response(egui::Id::unique("workspace_home_tab").with(home_group(&h))).unwrap().rect.center();
         click_point(&mut h, home);
         idle(&mut h);
         assert!(h.app.shell.home_open);
@@ -6061,7 +6062,7 @@ mod tests {
             ..Default::default()
         }, |ui| h.app.run_frame(ui));
         let group = home_group(&h);
-        let add = h.ctx.read_response(egui::Id::new("workspace_add_tab").with(group)).unwrap().rect;
+        let add = h.ctx.read_response(egui::Id::unique("workspace_add_tab").with(group)).unwrap().rect;
         let tree = &h.app.kit_tree;
         let last = match tree.tiles.get(group).unwrap() {
             egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs)) => *tabs.children.last().unwrap(),
@@ -6098,7 +6099,7 @@ mod tests {
                 focused: true,
                 ..Default::default()
             }, |ui| h.app.run_frame(ui));
-            let home = h.ctx.read_response(egui::Id::new("workspace_home_tab").with(home_group(&h))).unwrap().rect;
+            let home = h.ctx.read_response(egui::Id::unique("workspace_home_tab").with(home_group(&h))).unwrap().rect;
             let kit = h.app.model.active_kit_id();
             let tree = &h.app.kit_tree;
             let pane = tree.tiles.iter().find_map(|(id, tile)|
@@ -6116,7 +6117,7 @@ mod tests {
     fn the_empty_workspace_has_only_the_icon_home_tab() {
         let mut h = Harness::new();
         idle(&mut h);
-        assert!(h.ctx.read_response(egui::Id::new("workspace_home_tab").with(home_group(&h))).is_some());
+        assert!(h.ctx.read_response(egui::Id::unique("workspace_home_tab").with(home_group(&h))).is_some());
         assert!(!h.painted.iter().any(|text| text == "New workspace"));
         assert!(h.painted.iter().any(|text| text.contains("Open a tags folder")));
         assert_eq!(h.app.model.kits.len(), 1);
@@ -6489,7 +6490,7 @@ mod tests {
         kit.install(&mut h.app);
         let key = kit.open(&mut h.app, "objects/collision.model_collision_geometry");
         settle(&mut h, 12);
-        let jump = h.ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new((
+        let jump = h.ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::unique((
             "block_index_jump_test", key.as_str(), "indirect damage material",
         )))).unwrap();
         click_point(&mut h, jump.center());
@@ -6526,7 +6527,7 @@ mod tests {
             kit.install(&mut h.app);
             let key = kit.open(&mut h.app, "objects/collision.model_collision_geometry");
             settle(&mut h, 12);
-            let jump = h.ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new((
+            let jump = h.ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::unique((
                 "block_index_jump_test", key.as_str(), "indirect damage material",
             )))).expect("the index reference's Jump To button is visible");
             click_point(&mut h, jump.center());

@@ -41,7 +41,7 @@ pub(in crate::app) fn draw_material_tag(
                 // definition and options into rows. A failed build is kept
                 // too, so a definition that does not load is not retried
                 // every frame.
-                let memo = egui::Id::new(("shader_editor_model", document_revision.0));
+                let memo = egui::Id::unique(("shader_editor_model", document_revision.0));
                 let cached = ui.ctx().data(|data| {
                     data.get_temp::<((u64, u64, u64, u64), Option<Arc<ShaderEditorModel>>)>(memo)
                 });
@@ -1012,7 +1012,7 @@ mod tests {
         }
         assert_eq!(SHADER_MODELS_BUILT.with(std::cell::Cell::get), 1);
         let memo = ctx.data(|data| {
-            data.get_temp::<((u64, u64, u64, u64), Option<Arc<ShaderEditorModel>>)>(egui::Id::new((
+            data.get_temp::<((u64, u64, u64, u64), Option<Arc<ShaderEditorModel>>)>(egui::Id::unique((
                 "shader_editor_model",
                 7u64,
             )))

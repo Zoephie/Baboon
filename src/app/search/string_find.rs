@@ -4,11 +4,11 @@ use super::*;
 use blam_tags::string_list::{self as strings, StringList, TextSyntax};
 
 pub(in crate::app) fn string_find_context_id(kit: KitId, key: &str) -> egui::Id {
-    egui::Id::new(("string find context", kit, key))
+    egui::Id::unique(("string find context", kit, key))
 }
 
 pub(in crate::app) fn string_find_jump_id(scope: &str, key: &str) -> egui::Id {
-    egui::Id::new(("string find jump", scope, key))
+    egui::Id::unique(("string find jump", scope, key))
 }
 
 /// Match editor notation directly. A literal game glyph also searches both

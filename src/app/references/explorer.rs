@@ -22,7 +22,7 @@ impl Dialog for ContentExplorer {
             let explorer = &*self;
             egui::Window::new("Content Explorer")
                 .constrain_to(window_work_area(ctx))
-                .id(egui::Id::new("content_explorer"))
+                .id(egui::Id::unique("content_explorer"))
                 .open(&mut open)
                 .default_width(window_width(ctx, 720.0))
                 .show(ctx, |ui| {

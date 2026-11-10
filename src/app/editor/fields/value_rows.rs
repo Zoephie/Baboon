@@ -32,7 +32,7 @@ fn foundation_field_row_inner<R>(
     // Container bodies already position nested fields; row padding is local.
     // Controls retain one identity even when the label moves to another row.
     let controls_id = ui.next_auto_id().with("foundation_field_controls");
-    let controls = |ui: &mut Ui| ui.scope_builder(egui::UiBuilder::new().id(controls_id), controls).inner;
+    let controls = |ui: &mut Ui| ui.scope_builder(egui::UiBuilder::new().scope_id(controls_id), controls).inner;
     if ui.available_width() < breakpoint {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
@@ -295,7 +295,7 @@ pub(in crate::app) fn draw_foundation_value_row(
             draft.keep_commit(|| single_field_commit(edit.tag_key, &buffer_key, path));
             // Culling offscreen rows changes automatic UI IDs. Anchor the
             // popup to this field so focusing its search cannot replace it.
-            let picked = function_lookup && ui.scope_builder(egui::UiBuilder::new().id(function_menu_id), |ui| {
+            let picked = function_lookup && ui.scope_builder(egui::UiBuilder::new().scope_id(function_menu_id), |ui| {
                 function_name_suggestions(ui, &buffer_key, &mut draft.text, enabled, function_menu.as_ref())
             }).inner;
             if picked {
@@ -2066,7 +2066,7 @@ mod tests {
                             modifiers: egui::Modifiers::NONE,
                         }], edit); }
                         "blur" => {
-                            ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("another field")));
+                            ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("another field")));
                             frame(&tag, vec![], edit);
                         }
                         _ => {

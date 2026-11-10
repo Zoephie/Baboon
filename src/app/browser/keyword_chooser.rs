@@ -15,7 +15,7 @@ impl Dialog for KeywordChooser {
         let all = cx.model.kits[cx.model.active].keywords.all_keywords();
         egui::Window::new("Keywords")
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("keyword_chooser"))
+            .id(egui::Id::unique("keyword_chooser"))
             .open(&mut open)
             .default_width(window_width(ctx, 280.0))
             .show(ctx, |ui| {

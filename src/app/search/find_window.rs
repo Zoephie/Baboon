@@ -47,7 +47,7 @@ impl Dialog for FindWindow {
         let mut query_escape = false;
         let default_pos = ctx.content_rect().right_top() + egui::vec2(-618.0, 72.0);
         egui::Window::new("Find")
-            .id(egui::Id::new("find_in_tag"))
+            .id(egui::Id::unique("find_in_tag"))
             .title_bar(false)
             .collapsible(false)
             .movable(true)
@@ -61,7 +61,7 @@ impl Dialog for FindWindow {
                 ui.spacing_mut().window_margin = egui::Margin { left: 12, right: 12, top: 0, bottom: 0 };
                 let mut selected = usize::from(replace_mode);
                 if draw_tabbed_window_header(ui, &[("Find", ButtonIcon::Find), ("Replace", ButtonIcon::Replace)],
-                    &mut selected, &mut open, Some(("Open Find and Replace documentation", egui::Id::new("find_replace_help")))) {
+                    &mut selected, &mut open, Some(("Open Find and Replace documentation", egui::Id::unique("find_replace_help")))) {
                     cx.send(crate::app::help::HelpCommand::ShowDocSection(crate::app::help::FIND_REPLACE_HELP_SECTION));
                 }
                 replace_mode = selected == 1;
@@ -75,7 +75,7 @@ impl Dialog for FindWindow {
                         let response = ui.add_sized(
                             [ui.available_width(), 25.0],
                             crate::app::ui_kit::singleline_text_edit(&mut query.text)
-                                .id(egui::Id::new("find_query"))
+                                .id(egui::Id::unique("find_query"))
                                 .vertical_align(egui::Align::Center),
                         );
                         if self.focus_query {
@@ -120,7 +120,7 @@ impl Dialog for FindWindow {
                         find_row_label(ui, "Replace With:");
                         let response = ui.add_sized([ui.available_width(), 25.0],
                             crate::app::ui_kit::singleline_text_edit(&mut replacement)
-                                .id(egui::Id::new("find_replacement")).vertical_align(egui::Align::Center));
+                                .id(egui::Id::unique("find_replacement")).vertical_align(egui::Align::Center));
                         replacement_changed = response.changed();
                         let focused = response.has_focus() || lost_focus_once(&response);
                         query_escape |= focused && ui.input(|input| input.key_pressed(egui::Key::Escape));
@@ -439,8 +439,8 @@ pub(in crate::app) fn draw_tabbed_window_header(
         let color = text_dark();
         let galley = painter.layout_no_wrap((*label).to_owned(), TextStyle::Button.resolve(ui.style()), color);
         let tab = egui::Rect::from_min_size(egui::pos2(left, rect.top()), egui::vec2(PADDING * 2.0 + ICON_SIZE + GAP + galley.size().x, rect.height()));
-        let response = ui.interact(tab, ui.id().with(("window_header_tab", index)), Sense::click());
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, *selected == index, *label));
+        let response = ui.interact(tab, ui.scope_id().with(("window_header_tab", index)), Sense::click());
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, *selected == index, *label));
         let mut rounding = egui::CornerRadius::same(4);
         if index == 0 { rounding.nw = ui.visuals().window_corner_radius.nw.saturating_sub(ui.visuals().window_stroke.width.ceil() as u8); }
         if *selected == index {
@@ -458,12 +458,12 @@ pub(in crate::app) fn draw_tabbed_window_header(
     if let Some((tooltip, id)) = help {
         let help_rect = egui::Rect::from_center_size(egui::pos2(close_rect.left() - 14.0, background.center().y), Vec2::splat(20.0));
         let response = ui.interact(help_rect, id, Sense::click()).on_hover_text(tooltip);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tooltip));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tooltip));
         paint_button_icon_at(ui, ButtonIcon::About, help_rect.shrink(2.0),
             if response.hovered() { text_dark() } else { subtle_dark() });
         help_clicked = response.clicked();
     }
-    let close = ui.interact(close_rect, ui.id().with("window_header_close"), Sense::click()).on_hover_text("Close window");
+    let close = ui.interact(close_rect, ui.scope_id().with("window_header_close"), Sense::click()).on_hover_text("Close window");
     let cross = close_rect.shrink(5.0);
     let stroke = Stroke::new(1.5_f32, ui.style().interact(&close).fg_stroke.color);
     painter.line_segment([cross.left_top(), cross.right_bottom()], stroke);
@@ -542,7 +542,7 @@ fn draw_icon_window_header_impl(
         let close = ui
             .interact(
                 close_rect,
-                ui.id().with("window_header_close"),
+                ui.scope_id().with("window_header_close"),
                 Sense::click(),
             )
             .on_hover_text(format!("Close {title}"));
@@ -573,7 +573,7 @@ mod tests {
                 if strings { app.search.find.strings = Some(StringFindOptions::default()); }
                 driver.frame(&mut app, Vec::new());
                 driver.frame(&mut app, Vec::new());
-                let pos = driver.ctx.read_response(egui::Id::new("find_replace_help")).unwrap().rect.center();
+                let pos = driver.ctx.read_response(egui::Id::unique("find_replace_help")).unwrap().rect.center();
                 driver.frame(&mut app, vec![egui::Event::PointerMoved(pos)]);
                 for pressed in [true, false] {
                     driver.frame(&mut app, vec![egui::Event::PointerButton {
@@ -674,7 +674,7 @@ mod tests {
             }
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut text = String::from("12");
-                ui.add(crate::app::ui_kit::singleline_text_edit(&mut text).id(egui::Id::new("a_field")));
+                ui.add(crate::app::ui_kit::singleline_text_edit(&mut text).id(egui::Id::unique("a_field")));
             });
             app.dialogs.draw(&cx!(app, ctx), &app_reads!(app));
         });
@@ -703,8 +703,8 @@ mod tests {
         app.dialogs.open(FindWindow { focus_query: false });
         app.search.find.occurrences = vec![occurrence("a"), occurrence("b")];
         app.search.find.active = Some(0);
-        let field = Some(egui::Id::new("a_field"));
-        let query = Some(egui::Id::new("find_query"));
+        let field = Some(egui::Id::unique("a_field"));
+        let query = Some(egui::Id::unique("find_query"));
 
         // Lay both out once, then put focus in the field.
         frame(&mut app, &ctx, Vec::new(), None);
@@ -743,7 +743,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut app = Baboon::for_test();
         app.open_find();
-        let query = Some(egui::Id::new("find_query"));
+        let query = Some(egui::Id::unique("find_query"));
         frame(&mut app, &ctx, Vec::new(), None);
         frame(&mut app, &ctx, Vec::new(), query);
         for letter in ["s", "k", "y"] {
@@ -764,7 +764,7 @@ mod tests {
         app.open_find();
         app.set_find_mode(true, &ctx);
         app.search.find.query = "needle".into();
-        frame(&mut app, &ctx, Vec::new(), Some(egui::Id::new("find_query")));
+        frame(&mut app, &ctx, Vec::new(), Some(egui::Id::unique("find_query")));
         assert!(app.search.find.replace_run.is_none());
         frame(&mut app, &ctx, vec![key(egui::Key::Enter)], None);
         assert!(app.search.find.replace_run.is_some(), "Enter executes Find rather than advancing stale results");

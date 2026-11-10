@@ -16,7 +16,7 @@ impl Dialog for LooseFolderRenameState {
             let state = &mut *self;
             egui::Window::new("Rename Folder")
                 .constrain_to(window_work_area(ctx))
-                .id(egui::Id::new("loose_folder_rename"))
+                .id(egui::Id::unique("loose_folder_rename"))
                 .open(&mut open)
                 .default_width(window_width(ctx, 520.0))
                 .resizable(false)
@@ -33,7 +33,7 @@ impl Dialog for LooseFolderRenameState {
                     ui.label(RichText::new("Folder name").color(subtle_dark()).small());
                     let response = ui.add(
                         crate::app::ui_kit::singleline_text_edit(&mut state.name_input)
-                            .id(egui::Id::new("loose_folder_rename_name"))
+                            .id(egui::Id::unique("loose_folder_rename_name"))
                             .desired_width(480.0)
                             .font(egui::TextStyle::Monospace),
                     );

@@ -1,14 +1,24 @@
 //! Middle-click autoscroll, shared by ordinary scroll areas and table bodies.
 use super::*;
 
+/// A scroll area that can be autoscrolled, known by its site: an id its
+/// caller can work out before building it, so the offset can go in then.
 #[derive(Clone)]
 struct Target {
-    id: egui::Id,
+    site: egui::Id,
     rect: egui::Rect,
     axes: egui::Vec2b,
     limit: Vec2,
-    state: egui::scroll_area::State,
+    offset: Vec2,
     hovered: bool,
+}
+
+/// Where the autoscrolled area goes next frame. egui keeps a scroll area's
+/// offset private, so it is handed over as the area is built: [`offset`].
+#[derive(Clone, Copy)]
+struct Pending {
+    site: egui::Id,
+    offset: Vec2,
 }
 
 #[derive(Clone)]
@@ -19,10 +29,34 @@ struct Session {
     time: f64,
 }
 
-fn targets_id() -> egui::Id { egui::Id::new("autoscroll_targets") }
-fn session_id() -> egui::Id { egui::Id::new("autoscroll_session") }
+fn targets_id() -> egui::Id { egui::Id::unique("autoscroll_targets") }
+fn session_id() -> egui::Id { egui::Id::unique("autoscroll_session") }
 fn cancelled_id() -> egui::Id { session_id().with("cancelled_pass") }
 fn middle_drag_id() -> egui::Id { session_id().with("middle_drag_reserved") }
+fn pending_id() -> egui::Id { session_id().with("pending") }
+
+/// The offset autoscroll moves `site`'s scroll area to this frame, for
+/// `ScrollArea::scroll_offset` or [`AutoscrollTable::autoscroll`] as it is
+/// built; `site` is the id later passed to [`register`].
+pub(in crate::app) fn offset(ui: &Ui, site: egui::Id) -> Option<Vec2> {
+    ui.data(|data| data.get_temp::<Pending>(pending_id()))
+        .filter(|pending| pending.site == site)
+        .map(|pending| pending.offset)
+}
+
+/// A table builds its own scroll area, so takes [`offset`] through this.
+pub(in crate::app) trait AutoscrollTable {
+    fn autoscroll(self, offset: Option<Vec2>) -> Self;
+}
+
+impl AutoscrollTable for egui_extras::TableBuilder<'_> {
+    fn autoscroll(self, offset: Option<Vec2>) -> Self {
+        match offset {
+            Some(offset) => self.vertical_scroll_offset(offset.y),
+            None => self,
+        }
+    }
+}
 
 /// A canvas which already uses the middle button owns that press, including
 /// clicks which never cross the drag threshold. Do not also scroll its page.
@@ -33,13 +67,15 @@ pub(in crate::app) fn reserve_middle_drag(ui: &Ui, response: &egui::Response) {
     }
 }
 
-pub(in crate::app) fn register<R>(ui: &Ui, output: &egui::scroll_area::ScrollAreaOutput<R>, axes: egui::Vec2b) {
+/// Offer a scroll area drawn this frame to autoscroll, under `site`: the id
+/// it was built with [`offset`] for.
+pub(in crate::app) fn register<R>(ui: &Ui, site: egui::Id, output: &egui::scroll_area::ScrollAreaOutput<R>, axes: egui::Vec2b) {
     if !ui.is_enabled() || !ui.is_visible() { return; }
     let rect = output.inner_rect.intersect(ui.clip_rect());
     let limit = (output.content_size - output.inner_rect.size()).max(Vec2::ZERO);
     let axes = egui::Vec2b::new(axes.x && limit.x > 0.5, axes.y && limit.y > 0.5);
     if !rect.is_positive() || !axes.any() { return; }
-    let target = Target { id: output.id, rect, axes, limit, state: output.state,
+    let target = Target { site, rect, axes, limit, offset: output.state.clamped_offset(),
         hovered: ui.rect_contains_pointer(rect) };
     ui.data_mut(|data| {
         let mut targets = data.get_temp::<Vec<Target>>(targets_id()).unwrap_or_default();
@@ -60,6 +96,7 @@ pub(in crate::app) fn install(ctx: &egui::Context) {
         if cancel {
             let pass = ctx.cumulative_pass_nr();
             ctx.data_mut(|data| data.remove::<Session>(session_id()));
+            ctx.data_mut(|data| data.remove::<Pending>(pending_id()));
             ctx.data_mut(|data| data.insert_temp(cancelled_id(), pass));
             // A click which stops scrolling must not also activate a control.
             ctx.input_mut(|input| {
@@ -77,6 +114,8 @@ fn speed(distance: f32) -> f32 {
 }
 
 fn update(ctx: &egui::Context) {
+    // What last frame asked for has been built; only a live session asks again.
+    ctx.data_mut(|data| data.remove::<Pending>(pending_id()));
     if ctx.data(|data| data.get_temp::<u64>(cancelled_id())) == Some(ctx.cumulative_pass_nr()) { return; }
     let targets = ctx.data(|data| data.get_temp::<Vec<Target>>(targets_id())).unwrap_or_default();
     let mut session = ctx.data(|data| data.get_temp::<Session>(session_id()));
@@ -91,10 +130,10 @@ fn update(ctx: &egui::Context) {
         && let Some(target) = targets.iter().filter(|target| target.hovered)
             .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
     {
-        session = Some(Session { owner: target.id, origin, moved: false, time });
+        session = Some(Session { owner: target.site, origin, moved: false, time });
     }
     let Some(mut session) = session else { return; };
-    let target = targets.iter().find(|target| target.id == session.owner);
+    let target = targets.iter().find(|target| target.site == session.owner);
     let Some((target, position)) = target.zip(position).filter(|_| focused) else {
         ctx.data_mut(|data| data.remove::<Session>(session_id()));
         return;
@@ -110,9 +149,8 @@ fn update(ctx: &egui::Context) {
     session.time = time;
     let velocity = Vec2::new(if target.axes.x { speed(distance.x) } else { 0.0 },
         if target.axes.y { speed(distance.y) } else { 0.0 });
-    let mut state = target.state;
-    state.offset = (state.offset + velocity * dt).clamp(Vec2::ZERO, target.limit);
-    state.store(ctx, target.id);
+    let offset = (target.offset + velocity * dt).clamp(Vec2::ZERO, target.limit);
+    ctx.data_mut(|data| data.insert_temp(pending_id(), Pending { site: target.site, offset }));
     paint_anchor(ctx, session.origin, target.axes);
     ctx.set_cursor_icon(match (target.axes.x, target.axes.y) {
         (true, true) => egui::CursorIcon::AllScroll,
@@ -192,16 +230,18 @@ mod tests {
                     ui.columns(2, |columns| {
                         for (index, ui) in columns.iter_mut().enumerate() {
                             if self.table {
-                                let output = egui_extras::TableBuilder::new(ui).id_salt(index)
+                                let site = ui.make_persistent_id(index);
+                                let offset = offset(ui, site);
+                                let output = egui_extras::TableBuilder::new(ui).id_salt(index).autoscroll(offset)
                                     .max_scroll_height(250.0).column(egui_extras::Column::remainder())
                                     .header(24.0, |mut header| { header.col(|ui| { ui.label("Header"); }); })
                                     .body(|body| body.rows(24.0, 1000, |mut row| {
                                         let index = row.index();
                                         row.col(|ui| { ui.label(format!("Row {index}")); });
                                     }));
-                                register(ui, &output, egui::Vec2b::new(false, true));
+                                register(ui, site, &output, egui::Vec2b::new(false, true));
                                 self.rects.push(output.inner_rect);
-                                self.offsets.push(output.state.offset);
+                                self.offsets.push(output.state.clamped_offset());
                                 continue;
                             }
                             let area = if self.axes == egui::Vec2b::TRUE {
@@ -216,12 +256,12 @@ mod tests {
                                                 for index in rows { ui.label(format!("Row {index}")); }
                                             });
                                         self.rects.push(inner.inner_rect);
-                                        self.offsets.push(inner.state.offset);
+                                        self.offsets.push(inner.state.clamped_offset());
                                     }
                                     ui.allocate_space(Vec2::new(if self.axes.x { 2000.0 } else { 100.0 }, 3000.0));
                                 });
                             self.rects.push(output.inner_rect);
-                            self.offsets.push(output.state.offset);
+                            self.offsets.push(output.state.clamped_offset());
                         }
                     });
                 });

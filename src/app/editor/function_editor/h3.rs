@@ -401,7 +401,7 @@ fn draw_function_editor_contents(
 ) -> bool {
     let mut changed = false;
     let mut editor = TagFunctionEditor::from_function(view.function.clone());
-    let graph_view_id = ui.id().with("function_graph_view");
+    let graph_view_id = ui.scope_id().with("function_graph_view");
     let mut graph_view = ui
         .data(|data| data.get_temp::<FunctionGraphView>(graph_view_id))
         .unwrap_or_default();
@@ -975,7 +975,7 @@ fn function_bound_stepper(ui: &mut Ui, id: egui::Id, editable: bool) -> f32 {
                 center + Vec2::new(3.5, -2.0 * direction),
                 center + Vec2::new(0.0, 2.0 * direction),
             ], visuals.fg_stroke.color, Stroke::NONE));
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tooltip));
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tooltip));
             if response.clicked() { step = delta; }
         }
         step
@@ -1908,7 +1908,7 @@ mod tests {
                 ..Default::default()
             },
             |_| {
-                egui::Area::new(egui::Id::new("function_graph_test"))
+                egui::Area::new(egui::Id::unique("function_graph_test"))
                     .fixed_pos(egui::Pos2::ZERO)
                     .show(ctx, |ui| {
                         draw_foundation_graph(ui, editor, true, &mut selected.0, &mut selected.1);

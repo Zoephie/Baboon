@@ -13,7 +13,7 @@ impl Dialog for OperationNotice {
         let mut open = true;
         let mut dismiss = false;
         egui::Window::new(title)
-            .id(egui::Id::new("operation_notice"))
+            .id(egui::Id::unique("operation_notice"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)

@@ -202,7 +202,7 @@ pub(super) fn submenu(
     caption: egui::text::LayoutJob,
     contents: impl FnOnce(&mut Ui),
 ) {
-    ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
+    ui.scope_builder(egui::UiBuilder::new().scope_id(id), |ui| {
         let text = caption.text.clone();
         let button = egui::Button::new(caption)
             .right_text("    ")

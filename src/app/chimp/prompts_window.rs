@@ -18,7 +18,7 @@ impl Dialog for ChimpMeshTexturePrompt {
         let mut with_textures: Option<ChimpTextureScope> = None;
         let mut cancel = false;
         egui::Window::new("Export textures with this mesh?")
-            .id(egui::Id::new("chimp_mesh_texture_prompt"))
+            .id(egui::Id::unique("chimp_mesh_texture_prompt"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -149,7 +149,7 @@ impl Dialog for ChimpTextureExportPrompt {
         let mut cancel = false;
 
         egui::Window::new("Extract texture")
-            .id(egui::Id::new("chimp_texture_export_prompt"))
+            .id(egui::Id::unique("chimp_texture_export_prompt"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -231,7 +231,7 @@ impl Dialog for ChimpLevelExportPrompt {
         let mut cancel = false;
 
         egui::Window::new("Export level")
-            .id(egui::Id::new("chimp_level_export_prompt"))
+            .id(egui::Id::unique("chimp_level_export_prompt"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)

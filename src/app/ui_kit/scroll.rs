@@ -15,7 +15,7 @@ pub(in crate::app) fn scroll_key(ui: &Ui) -> Option<egui::Key> {
 fn keyboard_scroll(ui: &Ui, id: egui::Id, viewport: egui::Rect, content_height: f32, rect: egui::Rect) {
     let limit = (content_height - viewport.height()).max(0.0);
     if limit < 0.5 { return; }
-    let owner_id = egui::Id::new("keyboard_scroll_owner");
+    let owner_id = egui::Id::unique("keyboard_scroll_owner");
     let pass = ui.ctx().cumulative_pass_nr();
     if ui.input(|input| input.pointer.any_pressed()) && ui.rect_contains_pointer(rect) {
         ui.data_mut(|data| {
@@ -39,6 +39,15 @@ fn keyboard_scroll(ui: &Ui, id: egui::Id, viewport: egui::Rect, content_height: 
     };
     ui.scroll_with_delta(Vec2::new(0.0, offset - next));
     ui.ctx().request_repaint();
+}
+
+/// egui's scroll area `inner`, at the offset middle-click autoscroll moves
+/// the one with `id` to this frame.
+fn autoscrolled(inner: egui::ScrollArea, ui: &Ui, id: egui::Id) -> egui::ScrollArea {
+    match super::autoscroll::offset(ui, id) {
+        Some(offset) => inner.scroll_offset(offset),
+        None => inner,
+    }
 }
 
 /// Keep egui's sizing and virtualization, adding scoped keyboard scrolling
@@ -65,14 +74,14 @@ impl KeyboardScrollArea {
     pub fn show_viewport<R>(self, ui: &mut Ui, contents: impl FnOnce(&mut Ui, egui::Rect) -> R) -> egui::scroll_area::ScrollAreaOutput<R> {
         let id = ui.make_persistent_id(self.salt);
         let area_bounds = ui.available_rect_before_wrap();
-        let output = self.inner.show_viewport(ui, |ui, viewport| {
+        let output = autoscrolled(self.inner, ui, id).show_viewport(ui, |ui, viewport| {
             let mut bounds = egui::Rect::from_min_size(ui.max_rect().min + viewport.min.to_vec2(), viewport.size()).intersect(ui.clip_rect());
             bounds.max.x = (bounds.max.x + ui.spacing().scroll.allocated_width()).min(area_bounds.right());
             let result = contents(ui, viewport);
             if self.axes.y { keyboard_scroll(ui, id, viewport, ui.min_size().y, bounds); }
             result
         });
-        super::autoscroll::register(ui, &output, self.axes);
+        super::autoscroll::register(ui, id, &output, self.axes);
         output
     }
 
@@ -82,7 +91,7 @@ impl KeyboardScrollArea {
         let id = ui.make_persistent_id(self.salt);
         let area_bounds = ui.available_rect_before_wrap();
         let stride = row_height + spacing;
-        let output = self.inner.show_rows(ui, row_height, total, |ui, rows| {
+        let output = autoscrolled(self.inner, ui, id).show_rows(ui, row_height, total, |ui, rows| {
             let origin = ui.cursor().top() - rows.start as f32 * stride;
             let clip = ui.clip_rect();
             let viewport = egui::Rect::from_min_size(egui::pos2(0.0, clip.top() - origin), clip.size());
@@ -90,7 +99,7 @@ impl KeyboardScrollArea {
             if self.axes.y { keyboard_scroll(ui, id, viewport, (total as f32 * stride - spacing).max(0.0), clip.intersect(area_bounds)); }
             result
         });
-        super::autoscroll::register(ui, &output, self.axes);
+        super::autoscroll::register(ui, id, &output, self.axes);
         output
     }
 }
@@ -118,7 +127,7 @@ mod tests {
                                 .show_rows(ui, 20.0, 1000, |ui, rows| {
                                     for row in rows { visible.push(row); ui.label(format!("Row {row}")); }
                                 });
-                            panes.push((output.inner_rect, output.state.offset.y, visible));
+                            panes.push((output.inner_rect, output.state.clamped_offset().y, visible));
                         }
                     });
                 });
@@ -172,11 +181,11 @@ mod tests {
                             field = ui.text_edit_singleline(&mut text).rect;
                             for index in 0..100 { ui.label(format!("Inner {index}")); }
                         });
-                        inner_offset = inner.state.offset.y;
+                        inner_offset = inner.state.clamped_offset().y;
                         inner_rect = inner.inner_rect;
                         for index in 0..100 { ui.label(format!("Outer {index}")); }
                     });
-                    outer_offset = outer.state.offset.y;
+                    outer_offset = outer.state.clamped_offset().y;
                 });
             });
             (field, inner_rect, inner_offset, outer_offset)

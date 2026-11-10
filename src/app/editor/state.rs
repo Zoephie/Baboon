@@ -876,7 +876,7 @@ impl FieldEditContext<'_> {
         &self,
         salt: impl std::hash::Hash + std::fmt::Debug,
     ) -> egui::Id {
-        egui::Id::new(("field_edit", self.view_scope, self.tag_key, salt))
+        egui::Id::unique(("field_edit", self.view_scope, self.tag_key, salt))
     }
 
     /// Decide the forced open-state for a collapsible node at `node_path`,

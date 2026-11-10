@@ -1685,7 +1685,7 @@ mod tests {
                 loading.requested_path = Some(PathBuf::from("second.model"));
                 loading.loading_label = Some("Loading kit".to_owned());
                 app.push_kit(loading);
-                app.kit_tree = egui_tiles::Tree::new_tabs("background_load_focus", vec![first, second]);
+                app.kit_tree = egui_tiles::Tree::new_tabs(egui::Id::unique("background_load_focus"), vec![first, second]);
                 app.focus_kit(0);
                 app.shell.home_open = home;
                 let selected_tab = |app: &Baboon| match app.kit_tree.tiles.get(app.kit_tree.root().unwrap()) {
@@ -2064,7 +2064,7 @@ mod tests {
                             "", true, false, false, false, None, crate::app::browser::BrowserSort::Natural,
                             false, None, false, None);
                     });
-                    scroll = shown.state.offset.y;
+                    scroll = shown.state.clamped_offset().y;
                 });
             });
             scroll

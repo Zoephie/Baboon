@@ -128,7 +128,7 @@ impl Dialog for NewTagDialog {
         let tags_root = self.tags_root(cx.model);
         egui::Window::new("New Tag")
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("new_tag_dialog"))
+            .id(egui::Id::unique("new_tag_dialog"))
             .collapsible(false)
             .resizable([true, false])
             .min_width(window_width(ctx, 460.0))

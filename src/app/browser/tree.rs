@@ -62,7 +62,7 @@ impl<'a> Reveal<'a> {
 }
 
 fn reveal_align_id() -> egui::Id {
-    egui::Id::new("browser_reveal_align")
+    egui::Id::unique("browser_reveal_align")
 }
 
 /// How this frame's reveal scrolls its target into view: centred for an
@@ -131,7 +131,7 @@ pub(in crate::app) fn hover_popup_due(ui: &Ui) -> bool {
     if since_click < since_move + 0.1 {
         return false;
     }
-    let shown_id = egui::Id::new("baboon_hover_popup_shown");
+    let shown_id = egui::Id::unique("baboon_hover_popup_shown");
     let recently_shown = ctx
         .data(|data| data.get_temp::<f64>(shown_id))
         .is_some_and(|shown| now - shown < f64::from(interaction.tooltip_grace_time));
@@ -196,7 +196,7 @@ pub(in crate::app) fn context_menu_button(ui: &mut Ui, label: &str) -> egui::Res
     let size = Vec2::new(ui.available_width().max(1.0), 28.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label)
     });
 
     if ui.is_rect_visible(rect) {
@@ -276,7 +276,7 @@ fn context_menu_primary_button(
         let size = Vec2::new(width, button_height);
         let (rect, response) = ui.allocate_exact_size(size, Sense::click());
         response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+            egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label)
         });
 
         if ui.is_rect_visible(rect) {
@@ -695,7 +695,7 @@ fn ordered_child_indices(ui: &Ui, children: &[TagTreeNode], sort: BrowserSort) -
 type FolderChevronCutouts = std::sync::Arc<std::sync::Mutex<Vec<egui::Rect>>>;
 
 fn folder_chevron_cutouts_id() -> egui::Id {
-    egui::Id::new("browser_folder_chevron_cutouts")
+    egui::Id::unique("browser_folder_chevron_cutouts")
 }
 
 /// Start a fresh collection for this tree. Descendant chevrons register their
@@ -963,7 +963,7 @@ impl FolderLayoutKey<'_> {
 }
 
 fn folder_animation_counter_id() -> egui::Id {
-    egui::Id::new("browser_folder_animations")
+    egui::Id::unique("browser_folder_animations")
 }
 
 /// Count a folder whose open/close animation is mid-way. A block whose
@@ -5261,7 +5261,7 @@ mod tests {
                         );
                     });
                     viewport = output.inner_rect;
-                    shown_offset = output.state.offset.y;
+                    shown_offset = output.state.clamped_offset().y;
                     content_height = output.content_size.y;
                 });
             });

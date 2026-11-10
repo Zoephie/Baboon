@@ -65,7 +65,7 @@ pub(in crate::app) fn draw_chimp_workspace(
     draw_chimp_level_progress(ui, chimp, kit);
     ui.add_space(4.0);
     let ready = matches!(cx.model.kits[kit_index].chimp.mount, ChimpMount::Ready(_));
-    egui::Panel::left(egui::Id::new(("chimp_package_browser", kit.0)))
+    egui::Panel::left(egui::Id::unique(("chimp_package_browser", kit.0)))
         .resizable(true)
         .default_size(360.0)
         .frame(

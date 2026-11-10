@@ -565,7 +565,7 @@ impl AddShortcutDialog {
         let margin = egui::Margin {
             left: 20, right: 20, top: 0, bottom: 0,
         };
-        egui::Modal::new(egui::Id::new("global_shortcut_confirmation"))
+        egui::Modal::new(egui::Id::unique("global_shortcut_confirmation"))
             .frame(egui::Frame::window(&cx.egui.global_style()).inner_margin(margin))
             .show(cx.egui, |ui| {
                 // The custom header extends through the frame's actual padding.
@@ -684,7 +684,7 @@ impl Dialog for AddShortcutDialog {
             bottom: 0,
         };
         let _window = egui::Window::new(title)
-            .id(egui::Id::new("add_shortcut_dialog"))
+            .id(egui::Id::unique("add_shortcut_dialog"))
             .constrain_to(window_work_area(ctx))
             .title_bar(false)
             .collapsible(false)
@@ -834,7 +834,7 @@ impl Dialog for AddShortcutDialog {
             if let Some((banner, footer)) = window.inner {
                 ctx.data_mut(|data| {
                     data.insert_temp(
-                        egui::Id::new("shortcut_dialog_geometry"),
+                        egui::Id::unique("shortcut_dialog_geometry"),
                         (window.response.rect, banner, footer),
                     )
                 });
@@ -980,7 +980,7 @@ pub(in crate::app) fn app_icon(ctx: &egui::Context, path: &Path) -> Option<egui:
     if path.as_os_str().is_empty() {
         return None;
     }
-    let id = egui::Id::new(("app_shortcut_icon", path));
+    let id = egui::Id::unique(("app_shortcut_icon", path));
     if let Some(cached) = ctx.data_mut(|data| data.get_temp::<Option<egui::TextureHandle>>(id)) {
         return cached;
     }
@@ -1162,7 +1162,7 @@ mod tests {
             shortcut_frame(&mut app, &ctx, Vec::new());
             let texts = ctx
                 .data(|data| {
-                    data.get_temp::<Vec<(String, egui::Rect)>>(egui::Id::new("shortcut_test_texts"))
+                    data.get_temp::<Vec<(String, egui::Rect)>>(egui::Id::unique("shortcut_test_texts"))
                 })
                 .unwrap();
             let editable = row != 0;
@@ -1621,7 +1621,7 @@ mod tests {
                     );
                     let geometry = ctx
                         .data(|data| {
-                            data.get_temp::<(egui::Rect, egui::Rect, egui::Rect)>(egui::Id::new(
+                            data.get_temp::<(egui::Rect, egui::Rect, egui::Rect)>(egui::Id::unique(
                                 "shortcut_dialog_geometry",
                             ))
                         })
@@ -1853,7 +1853,7 @@ mod tests {
             |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
                     let cx = Ctx::new(&app.model, ctx, &app.commands, &jobs);
-                    let area = ui.id();
+                    let area = ui.scope_id();
                     for key in shortcut_keys(&app.model.prefs, "workspace:0") {
                         ui.push_id(&key, |ui| {
                             let response = ui.add_sized(
@@ -1881,7 +1881,7 @@ mod tests {
                 }
             })
             .collect();
-        ctx.data_mut(|data| data.insert_temp(egui::Id::new("shortcut_test_texts"), text_rects));
+        ctx.data_mut(|data| data.insert_temp(egui::Id::unique("shortcut_test_texts"), text_rects));
         app.apply_commands(ctx);
         rects
     }
@@ -1959,7 +1959,7 @@ mod tests {
         shortcut_frame(&mut app, &ctx, Vec::new());
         let label_pos = |label: &str| {
             ctx.data(|data| {
-                data.get_temp::<Vec<(String, egui::Rect)>>(egui::Id::new("shortcut_test_texts"))
+                data.get_temp::<Vec<(String, egui::Rect)>>(egui::Id::unique("shortcut_test_texts"))
             })
             .unwrap()
             .into_iter()

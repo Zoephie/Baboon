@@ -663,7 +663,7 @@ impl Dialog for ModExportDialog {
         } else {
             "Export Mod"
         })
-            .id(egui::Id::new("mod_export"))
+            .id(egui::Id::unique("mod_export"))
             .open(&mut open)
             .collapsible(false)
             .resizable(true)

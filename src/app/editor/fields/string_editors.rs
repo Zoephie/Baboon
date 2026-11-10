@@ -227,7 +227,7 @@ pub(in crate::app) fn draw_string_editor_row(
     let mut popup_drawn = false;
     let filter_id = menu_id.with("filter");
     let was_open_id = menu_id.with("was open");
-    let grouping_id = egui::Id::new("model variant picker prefix grouping");
+    let grouping_id = egui::Id::unique("model variant picker prefix grouping");
     let can_group = matches!(editor, "default_model_variant" | "child_model_variant" | "object_variant" | "cinematic_object_variant");
     let mut grouped = can_group && ui.data(|data| data.get_temp::<bool>(grouping_id)).unwrap_or(false);
     let mut filter = ui.data(|data| data.get_temp::<String>(filter_id)).unwrap_or_default();
@@ -240,7 +240,7 @@ pub(in crate::app) fn draw_string_editor_row(
             edit.pending.extend(field_edit_ops(path, &draft.text).pending);
         }
         draft.keep_commit(|| single_field_commit(edit.tag_key, &buffer_key, path));
-        ui.scope_builder(egui::UiBuilder::new().id(menu_id), |ui| {
+        ui.scope_builder(egui::UiBuilder::new().scope_id(menu_id), |ui| {
             ui.add_enabled_ui(enabled, |ui| {
                 let image = string_picker::image(ui, editor);
                 crate::app::ui_kit::button_icons::text_dropdown_button(ui, &caption, image, |ui| {

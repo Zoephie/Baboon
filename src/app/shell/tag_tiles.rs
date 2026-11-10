@@ -427,7 +427,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
                 let close_response = ui
                     .interact(close_rect, close_id, Sense::click_and_drag())
                     .on_hover_cursor(egui::CursorIcon::Default);
-                close_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Close"));
+                close_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Close"));
                 paint_close_control(ui, &close_response);
                 if close_response.clicked() && self.on_tab_close(tiles, tile_id) {
                     tiles.remove(tile_id);

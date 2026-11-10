@@ -4,6 +4,7 @@ use super::*;
 use egui_extras::{Column, TableBuilder};
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
+use crate::app::ui_kit::autoscroll::AutoscrollTable;
 
 /// `text`, cut from the start with an ellipsis until `measure` says it fits.
 pub(in crate::app) fn truncate_start(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> String {
@@ -693,8 +694,11 @@ pub(in crate::app) fn draw_tag_diff_list(
         let width = ui.available_width();
         let height = ui.available_height().max(120.0);
         let mut header_rect: Option<egui::Rect> = None;
+        let site = ui.make_persistent_id(id_salt);
+        let offset = crate::app::ui_kit::autoscroll::offset(ui, site);
         let scroll = TableBuilder::new(ui)
             .id_salt(id_salt)
+            .autoscroll(offset)
             .striped(true)
             .resizable(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
@@ -787,7 +791,7 @@ pub(in crate::app) fn draw_tag_diff_list(
                     });
                 });
             });
-        crate::app::ui_kit::autoscroll::register(ui, &scroll, egui::Vec2b::new(false, true));
+        crate::app::ui_kit::autoscroll::register(ui, site, &scroll, egui::Vec2b::new(false, true));
         if let Some(rect) = header_rect {
             ui.painter().line_segment(
                 [rect.left_bottom(), rect.right_bottom()],
@@ -1043,7 +1047,7 @@ impl Dialog for TagDiffState {
         let mut selection_changed = false;
         egui::Window::new("Compare Tags")
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("tag_diff_window"))
+            .id(egui::Id::unique("tag_diff_window"))
             .title_bar(false)
             .collapsible(false)
             .default_width(window_width(ctx, 620.0))
@@ -1562,8 +1566,11 @@ impl Dialog for TagDiffState {
                                 Stroke::new(1.0_f32, foundation_group_edge());
                             let width = ui.available_width();
                             let mut header_rect: Option<egui::Rect> = None;
+                            let site = ui.make_persistent_id("tag_diff_table");
+                            let offset = crate::app::ui_kit::autoscroll::offset(ui, site);
                             let scroll = TableBuilder::new(ui)
                                 .id_salt("tag_diff_table")
+                                .autoscroll(offset)
                                 .striped(true)
                                 .resizable(true)
                                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
@@ -1659,7 +1666,7 @@ impl Dialog for TagDiffState {
                                                 );
                                                 ui.interact(
                                                     rect,
-                                                    ui.id().with("delta"),
+                                                    ui.scope_id().with("delta"),
                                                     egui::Sense::hover(),
                                                 )
                                                 .on_hover_text(format!(
@@ -1691,7 +1698,7 @@ impl Dialog for TagDiffState {
                                                 );
                                                 ui.interact(
                                                     rect,
-                                                    ui.id().with("delta"),
+                                                    ui.scope_id().with("delta"),
                                                     egui::Sense::hover(),
                                                 )
                                                 .on_hover_text(format!(
@@ -1711,7 +1718,7 @@ impl Dialog for TagDiffState {
                                         });
                                     });
                                 });
-                            crate::app::ui_kit::autoscroll::register(ui, &scroll, egui::Vec2b::new(false, true));
+                            crate::app::ui_kit::autoscroll::register(ui, site, &scroll, egui::Vec2b::new(false, true));
                             if let Some(rect) = header_rect {
                                 ui.painter().line_segment(
                                     [rect.left_bottom(), rect.right_bottom()],

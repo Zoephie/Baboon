@@ -12,7 +12,7 @@ impl Dialog for PendingImport {
         let mut discard = false;
         let mut cancel = false;
         egui::Window::new("Discard unsaved changes?")
-            .id(egui::Id::new("import_discard_confirm"))
+            .id(egui::Id::unique("import_discard_confirm"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -64,7 +64,7 @@ impl Dialog for ImportTagDialog {
         let mut show_compat: Option<String> = None;
         egui::Window::new("Import Tag")
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("import_tag_dialog"))
+            .id(egui::Id::unique("import_tag_dialog"))
             .collapsible(false)
             .resizable(false)
             .open(&mut open)

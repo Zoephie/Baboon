@@ -16,7 +16,7 @@ fn recent_folder_path_button(ui: &mut Ui, label: &str, width: f32) -> egui::Resp
     let size = Vec2::new(width, ui.spacing().interact_size.y);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label)
     });
 
     if ui.is_rect_visible(rect) {

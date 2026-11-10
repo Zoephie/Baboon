@@ -131,7 +131,7 @@ struct FolderTable {
     dates: FolderDateCache,
 }
 fn table_id() -> egui::Id {
-    egui::Id::new("folder_browser_table_columns")
+    egui::Id::unique("folder_browser_table_columns")
 }
 
 pub(in crate::app) fn begin_folder_table(

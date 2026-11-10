@@ -83,7 +83,7 @@ pub(in crate::app) fn singleline_text_edit(
 ) -> SinglelineTextEdit<'_> {
     let read_only = !text.is_mutable();
     SinglelineTextEdit {
-        edit: egui::TextEdit::singleline(text).vertical_align(egui::Align::Center),
+        edit: egui::TextEdit::singleline(text).align(egui::Align2::LEFT_CENTER),
         state: InputState::Normal,
         read_only,
         custom_frame: false,
@@ -121,9 +121,15 @@ impl<'a> SinglelineTextEdit<'a> {
     builder!(font, font: impl Into<egui::FontSelection>);
     builder!(hint_text, text: impl Into<egui::WidgetText>);
     builder!(text_color, color: Color32);
-    builder!(vertical_align, align: egui::Align);
     builder!(clip_text, clip: bool);
     builder!(prefix, prefix: impl egui::IntoAtoms<'static>);
+
+    /// Where the text sits vertically. It stays at the left: nothing here
+    /// aligns it otherwise.
+    pub(in crate::app) fn vertical_align(mut self, align: egui::Align) -> Self {
+        self.edit = self.edit.align(egui::Align2([egui::Align::Min, align]));
+        self
+    }
 
     pub(in crate::app) fn layouter(
         mut self,

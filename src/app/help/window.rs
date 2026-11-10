@@ -42,7 +42,7 @@ impl Dialog for HelpWindow {
         let mut open = true;
         egui::Window::new("Baboon Help")
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("baboon_help"))
+            .id(egui::Id::unique("baboon_help"))
             .collapsible(false)
             .resizable(true)
             .constrain(true)

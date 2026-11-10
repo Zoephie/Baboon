@@ -335,7 +335,7 @@ pub(super) fn draw_row(
     let popup_id = edit.widget_id(("string references", path));
     let filter_id = popup_id.with("filter");
     let was_open_id = popup_id.with("was open");
-    let grouping_id = egui::Id::new("HUD message picker prefix grouping");
+    let grouping_id = egui::Id::unique("HUD message picker prefix grouping");
     let can_group = editor == "hud_message";
     let mut grouped = can_group
         && ui
@@ -382,7 +382,7 @@ pub(super) fn draw_row(
 
         // Row culling changes preceding widget counts, especially inside blocks.
         // An explicit UI ID keeps the trigger's interaction and popup IDs stable.
-        ui.scope_builder(egui::UiBuilder::new().id(popup_id), |ui| {
+        ui.scope_builder(egui::UiBuilder::new().scope_id(popup_id), |ui| {
             let image = tag_icon_image(
                 ui.ctx(), tag_icon(Some(u32::from_be_bytes(*b"unic")), edit.game), 16.0,
             );
@@ -443,7 +443,7 @@ pub(super) fn draw_row(
         });
         // Navigation remains available for read-only fields, just like tag references.
         open = ui
-            .scope_builder(egui::UiBuilder::new().id(popup_id.with("open")), |ui| {
+            .scope_builder(egui::UiBuilder::new().scope_id(popup_id.with("open")), |ui| {
                 if list.groups.len() > 1 {
                     let image = button_icon_image(ui, ButtonIcon::Open, text_dark(), 16.0);
                     crate::app::ui_kit::button_icons::text_dropdown_button(ui, "Open", Some(image), |ui| {
@@ -952,7 +952,7 @@ mod tests {
             }
             texts = frame(vec![
                 egui::Event::PointerMoved(egui::pos2(1300.0, 650.0)),
-                egui::Event::MouseWheel {
+                egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown,
                     unit: egui::MouseWheelUnit::Point,
                     phase: egui::TouchPhase::Move,
                     delta: egui::vec2(0.0, -240.0),

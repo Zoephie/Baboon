@@ -18,7 +18,7 @@ impl Dialog for ClearStashConfirm {
         let mut do_clear = false;
         let mut cancel = false;
         egui::Window::new("Clear unsaved modifications?")
-            .id(egui::Id::new("clear_stash_confirm"))
+            .id(egui::Id::unique("clear_stash_confirm"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)

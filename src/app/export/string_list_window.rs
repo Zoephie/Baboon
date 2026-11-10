@@ -193,7 +193,7 @@ mod tests {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(3000.0, 1600.0))),
                     time: Some(frame as f64 / 60.0), ..Default::default()
                 }, |_| app.dialogs.draw(&cx!(app, &ctx), &app_reads!(app)));
-                widths.push(ctx.memory(|memory| memory.area_rect(egui::Id::new("string_list_transfer"))).unwrap().width());
+                widths.push(ctx.memory(|memory| memory.area_rect(egui::Id::unique("string_list_transfer"))).unwrap().width());
                 if frame == 34 {
                     texts = output.shapes.iter().filter_map(|shape| match &shape.shape {
                         egui::Shape::Text(text) => Some((text.galley.text().to_owned(), egui::Rect::from_min_size(text.pos, text.galley.size()))),

@@ -706,7 +706,7 @@ impl Dialog for ChimpDiscardPrompt {
         let mut cancel = false;
 
         egui::Window::new("Discard Chimp changes?")
-            .id(egui::Id::new("chimp_discard_changes"))
+            .id(egui::Id::unique("chimp_discard_changes"))
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
@@ -816,7 +816,7 @@ impl Dialog for ChimpSaveDialog {
             dialog.overwrite_acknowledged = false;
         }
         egui::Window::new("Save Chimp changes")
-            .id(egui::Id::new("chimp_save_changes"))
+            .id(egui::Id::unique("chimp_save_changes"))
             .collapsible(false)
             .resizable(true)
             .default_width(window_width(ctx, 620.0))

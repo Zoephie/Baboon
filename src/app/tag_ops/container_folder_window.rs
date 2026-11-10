@@ -91,7 +91,7 @@ impl Dialog for ContainerFolderDialog {
             };
             egui::Window::new(title)
                 .constrain_to(window_work_area(ctx))
-                .id(egui::Id::new("container_folder"))
+                .id(egui::Id::unique("container_folder"))
                 .collapsible(false)
                 .title_bar(false)
                 .frame(egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin {
@@ -122,7 +122,7 @@ impl Dialog for ContainerFolderDialog {
                     ui.label(RichText::new("Folder Name").strong());
                     let response = ui.add(
                         crate::app::ui_kit::singleline_text_edit(&mut state.name_input)
-                            .id(egui::Id::new("container_folder_name"))
+                            .id(egui::Id::unique("container_folder_name"))
                             .desired_width(ui.available_width())
                             .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
                             .vertical_align(egui::Align::Center)

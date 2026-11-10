@@ -56,7 +56,7 @@ mod tests {
                 let other = tiles.insert_pane(5);
                 let destination = tiles.insert_tab_tile(vec![other]);
                 let root = tiles.insert_horizontal_tile(vec![source, destination]);
-                let mut tree = Tree::new("neighbour_move", root, tiles);
+                let mut tree = Tree::new(eframe::egui::Id::unique("neighbour_move"), root, tiles);
                 tree.make_active(|id, _| id == panes[moved_index]);
                 with_tab_neighbour_selection(&mut tree, |tree| {
                     tree.move_tile_to_container(panes[moved_index], if split { root } else { destination }, 1, false);
@@ -77,7 +77,7 @@ mod tests {
         let source = tiles.insert_tab_tile(panes[..4].to_vec());
         let destination = tiles.insert_tab_tile(vec![panes[4]]);
         let root = tiles.insert_horizontal_tile(vec![source, destination]);
-        let mut tree = Tree::new("neighbour_reorder", root, tiles);
+        let mut tree = Tree::new(eframe::egui::Id::unique("neighbour_reorder"), root, tiles);
         tree.make_active(|id, _| id == panes[2]);
         with_tab_neighbour_selection(&mut tree, |tree| tree.move_tile_to_container(panes[0], destination, 1, false));
         assert_eq!(active(&tree, source), Some(panes[2]));

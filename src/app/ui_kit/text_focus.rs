@@ -5,8 +5,8 @@ use super::*;
 struct TabNavigation { pass: u64, origin: Option<egui::Id> }
 
 type Fields = HashMap<egui::Id, (usize, u64)>;
-fn fields_id() -> egui::Id { egui::Id::new("singleline_focus_fields") }
-fn navigation_id() -> egui::Id { egui::Id::new("singleline_tab_navigation") }
+fn fields_id() -> egui::Id { egui::Id::unique("singleline_focus_fields") }
+fn navigation_id() -> egui::Id { egui::Id::unique("singleline_tab_navigation") }
 
 pub(in crate::app) fn install_text_focus(ctx: &egui::Context) {
     ctx.on_begin_pass("baboon_text_tab_focus", Arc::new(|ui| {
@@ -87,7 +87,7 @@ mod tests {
             demo.frame(vec![]);
             demo
         }
-        fn id(index: usize) -> egui::Id { egui::Id::new(("tab_value", index)) }
+        fn id(index: usize) -> egui::Id { egui::Id::unique(("tab_value", index)) }
         fn frame(&mut self, events: Vec<egui::Event>) {
             let _ = crate::app::run_ui_test(&self.ctx, egui::RawInput { events, focused: true, ..Default::default() }, |ui| {
                 for index in 0..3 {

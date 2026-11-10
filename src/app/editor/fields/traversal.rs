@@ -194,7 +194,7 @@ impl FindFilterWalk<'_> {
 /// the field-edit scope so split views of the same tag cannot consume each
 /// other's jump.
 pub(in crate::app) fn find_filter_block_jump_id(view_scope: &str, tag_key: &str) -> egui::Id {
-    egui::Id::new(("field_edit", view_scope, tag_key, "find_filter_block_jump"))
+    egui::Id::unique(("field_edit", view_scope, tag_key, "find_filter_block_jump"))
 }
 
 #[cfg(test)]

@@ -49,7 +49,7 @@ pub(in crate::app) fn draw_blam_pane(cx: &Ctx, ui: &mut Ui, kit_index: usize, bl
         }
     }
 
-    egui::Panel::bottom(egui::Id::new(("blam_status_bar", kit_id.0)))
+    egui::Panel::bottom(egui::Id::unique(("blam_status_bar", kit_id.0)))
         .frame(Frame::NONE.fill(menu_bar()).inner_margin(egui::Margin {
             left: 10,
             right: 10,
@@ -71,7 +71,7 @@ pub(in crate::app) fn draw_blam_pane(cx: &Ctx, ui: &mut Ui, kit_index: usize, bl
         });
     // The log window sits between the content and the status bar: always
     // visible while an import narrates itself, resizable by its top edge.
-    egui::Panel::bottom(egui::Id::new(("blam_log", kit_id.0)))
+    egui::Panel::bottom(egui::Id::unique(("blam_log", kit_id.0)))
         .resizable(true)
         .default_size(150.0)
         .min_size(60.0)

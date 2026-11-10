@@ -61,7 +61,7 @@ impl Dialog for ContainerDuplicateConfirm {
                 )
             });
         egui::Window::new("Duplicate in Campaign Evolved container?")
-            .id(egui::Id::new("container_duplicate_confirm"))
+            .id(egui::Id::unique("container_duplicate_confirm"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)

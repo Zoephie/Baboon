@@ -21,7 +21,7 @@ impl Dialog for LanguageWarning {
         let mut open = true;
         let mut proceed = false;
         let mut cancel = false;
-        egui::Window::new("Move String Rows Between Languages").id(egui::Id::new("string row language warning"))
+        egui::Window::new("Move String Rows Between Languages").id(egui::Id::unique("string row language warning"))
             .open(&mut open).collapsible(false).resizable(false).default_width(440.0).show(cx.egui, |ui| {
                 if !self.unsupported.is_empty() {
                     ui.label("These source languages cannot be retained in the destination:");
@@ -337,12 +337,12 @@ mod tests {
         for mode in [PasteMode::Overwrite, PasteMode::Above, PasteMode::Below] {
             let (mut app, _kit, ctx, a, b) = fixture();
             copy(&mut app, &ctx, &a, &[0], true);
-            let snapshot = ctx.data(|memory| memory.get_temp::<(String, String)>(egui::Id::new(CLIPBOARD_ID))).unwrap();
+            let snapshot = ctx.data(|memory| memory.get_temp::<(String, String)>(egui::Id::unique(CLIPBOARD_ID))).unwrap();
             paste(&mut app, &ctx, &b, &[1], mode);
             assert!(active(&ctx).is_none(), "a completed move must not become Copy mode");
             assert!(clipboard(&ctx, &list(&app, &b), 0, &app.row_syntax(0)).is_none());
             // A busy OS clipboard must not make the consumed cut reusable.
-            ctx.data_mut(|memory| memory.insert_temp(egui::Id::new(CLIPBOARD_ID), snapshot));
+            ctx.data_mut(|memory| memory.insert_temp(egui::Id::unique(CLIPBOARD_ID), snapshot));
             assert!(clipboard(&ctx, &list(&app, &b), 0, &app.row_syntax(0)).is_none());
             copy(&mut app, &ctx, &b, &[0], false);
             assert!(clipboard(&ctx, &list(&app, &b), 0, &app.row_syntax(0)).is_some(), "an explicit new Copy works normally");
