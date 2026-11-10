@@ -5148,6 +5148,33 @@ mod tests {
             (setup.center().y - title.center().y).abs() < 1.0,
             "first card {setup:?}, viewport title {title:?}"
         );
+        // Its cards stop short of the sidebar's right edge by the scroll
+        // bar's width: the rightmost control on the card's title row is its
+        // Reset. The sidebar starts 36 points left of the card's title (8 of
+        // padding, a 24-point toggle and a 4-point gap).
+        let sidebar_right = setup.left() - 36.0 + h.app.model.prefs.model_setup_width;
+        let scroll = h.ctx.global_style().spacing.scroll;
+        let gutter = scroll.bar_width + scroll.bar_inner_margin;
+        let reset = h.ctx.viewport(|viewport| {
+            viewport
+                .prev_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, widgets)| widgets.iter())
+                .filter(|widget| {
+                    widget.sense.senses_click()
+                        && widget.rect.left() > setup.right()
+                        && widget.rect.top() < setup.center().y
+                        && widget.rect.bottom() > setup.center().y
+                })
+                .map(|widget| widget.rect)
+                .max_by(|a, b| a.right().total_cmp(&b.right()))
+                .expect("the card's Reset")
+        });
+        assert!(
+            reset.right() <= sidebar_right - gutter - 7.0,
+            "Reset {reset:?} under the scroll bar of a sidebar ending at {sidebar_right}"
+        );
         assert!((refresh.center().y - title.center().y).abs() < 4.0, "not on the header row");
         let id = h.app.model.kits[h.app.model.active].id;
         let loaded = |h: &Harness| {

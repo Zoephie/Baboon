@@ -269,7 +269,8 @@ pub(in crate::app::model_preview) fn draw_preview_card(
 /// The Model Preview card's header height: one row.
 pub(in crate::app::model_preview) const PREVIEW_HEADER_HEIGHT: f32 = 40.0;
 
-/// The Model Setup sidebar: its cards, scrolling together.
+/// The Model Setup sidebar: its cards, scrolling together, clear of the
+/// scroll bar that floats over its right edge.
 pub(in crate::app::model_preview) fn draw_setup_cards(
     ui: &mut Ui,
     panel: &PreviewPanel<'_>,
@@ -277,18 +278,33 @@ pub(in crate::app::model_preview) fn draw_setup_cards(
     edit: &mut FieldEditContext<'_>,
     requests: &mut SetupRequests,
 ) {
+    let gutter = setup_scroll_gutter(ui);
     crate::app::ScrollArea::vertical()
         .id_salt("model_setup_body")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            // A card leaves 8 points above it for what came before; the
-            // first has nothing before it, and starts level with the
-            // viewport's card.
-            ui.add_space(-(8.0 - ui.spacing().item_spacing.y).max(0.0));
-            draw_setup_body(ui, panel.data, state, &mut |ui, state| {
-                draw_setup_header_actions(ui, panel, state, edit, requests)
-            })
+            egui::Frame::NONE
+                .inner_margin(egui::Margin {
+                    right: gutter as i8,
+                    ..Default::default()
+                })
+                .show(ui, |ui| {
+                    // A card leaves 8 points above it for what came before;
+                    // the first has nothing before it, and starts level with
+                    // the viewport's card.
+                    ui.add_space(-(8.0 - ui.spacing().item_spacing.y).max(0.0));
+                    draw_setup_body(ui, panel.data, state, &mut |ui, state| {
+                        draw_setup_header_actions(ui, panel, state, edit, requests)
+                    })
+                });
         });
+}
+
+/// The room the sidebar's cards leave at their right: the scroll bar at its
+/// widest, and its margin from the cards.
+pub(in crate::app::model_preview) fn setup_scroll_gutter(ui: &Ui) -> f32 {
+    let scroll = ui.spacing().scroll;
+    (scroll.bar_width + scroll.bar_inner_margin).ceil()
 }
 
 /// The Model Preview card's header, right to left: the view settings menu,
