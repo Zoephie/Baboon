@@ -6539,6 +6539,118 @@ mod tests {
         }
     }
 
+    /// A block index's dropdown opens on a click, lists the target block's
+    /// elements, and picking one writes its index into the tag: a field of
+    /// the tag itself (a Halo CE collision model's `indirect damage
+    /// material`), and one inside a block element behind a `filt` field (a
+    /// Halo 3 scenario's effect scenery `type`).
+    #[test]
+    fn a_block_index_dropdown_picks_another_element() {
+        for nested in [false, true] {
+            block_index_pick(nested);
+        }
+    }
+
+    /// [`a_block_index_dropdown_picks_another_element`]'s case.
+    fn block_index_pick(nested: bool) {
+        let (game, rel, group, field) = if nested {
+            ("halo3_mcc", "levels/docks", "scenario", "effect scenery[0]/type")
+        } else {
+            ("haloce_mcc", "objects/collision", "model_collision_geometry", "indirect damage material")
+        };
+        let kit = LooseKit::new("block-index-pick", game);
+        let (block, names) = if nested {
+            ("effect scenery palette", "effect scenery palette[{}]/name")
+        } else {
+            ("materials", "materials[{}]/name")
+        };
+        let edit = |tag: &mut blam_tags::TagFile| {
+            for _ in 0..2 {
+                crate::core::document::apply::add_block_element(tag, block).unwrap();
+            }
+            if nested {
+                crate::core::document::apply::add_block_element(tag, "effect scenery").unwrap();
+            }
+            // Halo 3's palette names a tag.
+            let named = |name: &str| if nested { format!("objects\\{name}.effect_scenery") } else { name.to_owned() };
+            for (path, value) in [
+                (names.replace("{}", "0"), named("Alpha")),
+                (names.replace("{}", "1"), named("Bravo")),
+                (field.to_owned(), "1".to_owned()),
+            ] {
+                crate::core::document::apply::apply_field_edit(tag, &path, &value)
+                    .unwrap_or_else(|error| panic!("{path}: {error}"));
+            }
+        };
+        if nested {
+            kit.write_mcc(rel, group, edit);
+        } else {
+            let path = kit.write_classic_ce(rel, group);
+            let source = kit.source();
+            let mut tag = read_entry(&source.source, &source.entries[0]).unwrap();
+            edit(&mut tag);
+            tag.write(&path).unwrap();
+        }
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        let key = kit.open(&mut h.app, &format!("{rel}.{group}"));
+        settle(&mut h, 12);
+        let value = |h: &Harness| {
+            let doc = &h.app.model.kits[h.app.model.active].parsed_tags[&key];
+            doc.tag.root().field_path(field).and_then(|field| field.value()).map(|value| format!("{value:?}"))
+        };
+        let before = value(&h);
+        // The field's row: its label, and the dropdown showing Bravo beside it.
+        let label = field.rsplit('/').next().unwrap();
+        let mut button = None;
+        for _ in 0..200 {
+            let row = h.painted_rects.iter().find(|(text, rect)| text == label && rect.top() > 200.0 && rect.bottom() < SCREEN.y - 80.0);
+            button = row.and_then(|(_, row)| {
+                h.painted_rects
+                    .iter()
+                    .find(|(text, rect)| text.contains("Bravo") && (rect.center().y - row.center().y).abs() < 6.0)
+                    .map(|(_, rect)| *rect)
+            });
+            if button.is_some() {
+                break;
+            }
+            h.frame(vec![pointer_at(PANE_POINT), wheel(-200.0)]);
+            settle(&mut h, 2);
+        }
+        button.unwrap_or_else(|| panic!("nested {nested}: the dropdown shows Bravo: {:?}", h.painted));
+        // Where it comes to rest once the scroll has eased out.
+        settle(&mut h, 60);
+        let row = h.painted_rects.iter().find(|(text, _)| text == label).map(|(_, rect)| *rect).unwrap();
+        let button = h
+            .painted_rects
+            .iter()
+            .find(|(text, rect)| text.contains("Bravo") && (rect.center().y - row.center().y).abs() < 6.0)
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("nested {nested}: the dropdown shows Bravo at rest: {:?}", h.painted));
+        assert_eq!(before.as_deref(), Some("ShortBlockIndex(1)"));
+        click_point(&mut h, button.center());
+        // Held open as the pointer moves down over it.
+        for step in 1..=6 {
+            h.frame(vec![pointer_at(button.center() + egui::vec2(0.0, 6.0 * step as f32))]);
+        }
+        let search = h
+            .painted_rects
+            .iter()
+            .find(|(text, _)| text == "Search Entries")
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("nested {nested}: the dropdown opened: {:?}", h.painted));
+        let row = h
+            .painted_rects
+            .iter()
+            .filter(|(text, rect)| text.contains("Alpha") && rect.top() > search.bottom())
+            .map(|(_, rect)| *rect)
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+            .unwrap_or_else(|| panic!("nested {nested}: the dropdown lists Alpha: {:?}", h.painted));
+        click_point(&mut h, row.center());
+        settle(&mut h, 4);
+        assert_eq!(value(&h).as_deref(), Some("ShortBlockIndex(0)"), "nested {nested}: picking Alpha writes its index");
+    }
+
     /// Rows out of view are not built, and what shows is what drawing every
     /// row shows, scrolled anywhere. Painted text alone can't tell: egui
     /// skips painting text out of view by itself, so rows built are counted.

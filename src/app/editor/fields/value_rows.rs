@@ -31,7 +31,7 @@ fn foundation_field_row_inner<R>(
 ) -> egui::InnerResponse<R> {
     // Container bodies already position nested fields; row padding is local.
     // Controls retain one identity even when the label moves to another row.
-    let controls_id = ui.next_auto_id().with("foundation_field_controls");
+    let controls_id = foundation_controls_id(ui, &meta.label);
     let controls = |ui: &mut Ui| ui.scope_builder(egui::UiBuilder::new().scope_id(controls_id), controls).inner;
     if ui.available_width() < breakpoint {
         ui.vertical(|ui| {
@@ -52,6 +52,25 @@ fn foundation_field_row_inner<R>(
             controls(ui)
         })
     }
+}
+
+/// A row's controls' id, the same from frame to frame: the parent's, the
+/// row's label, and which row of that label in the parent this is this
+/// pass. The parent's next auto id moved whenever a widget before the row
+/// came or went, as a block element's hovered and pressed controls do, and
+/// egui finds a press on the last frame's widgets: the press landed on one
+/// id and the release on another, so nothing in a nested row clicked (a
+/// block index's dropdown never opened).
+fn foundation_controls_id(ui: &Ui, label: &str) -> egui::Id {
+    let base = ui.scope_id().with(("foundation_field_controls", label));
+    // One past the pass, so the stored default matches no pass.
+    let pass = ui.ctx().cumulative_pass_nr() + 1;
+    let occurrence = ui.data_mut(|data| {
+        let seen = data.get_temp_mut_or_default::<(u64, u32)>(base);
+        *seen = if seen.0 == pass { (pass, seen.1 + 1) } else { (pass, 0) };
+        seen.1
+    });
+    base.with(occurrence)
 }
 
 pub(super) fn foundation_caption_space(ui: &Ui, caption: &str) -> f32 {
