@@ -2021,22 +2021,6 @@ fn draw_settings_interface_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
     );
     draw_settings_expansion_behavior(ui, s);
     settings_section(ui, "Viewport");
-    settings_row(ui, "Window Scale", "", 220.0, |ui| {
-        ui.spacing_mut().slider_width = 100.0;
-        ui.spacing_mut().interact_size.x = 48.0;
-        if ui.button("Reset").clicked() {
-            s.prefs.model_preview_size = DEFAULT_MODEL_PREVIEW_SIZE;
-        }
-        draw_model_viewport_size_input(ui, &mut s.prefs.model_preview_size);
-        ui.add(
-            egui::Slider::new(
-                &mut s.prefs.model_preview_size,
-                MIN_MODEL_PREVIEW_SIZE..=MAX_MODEL_PREVIEW_SIZE,
-            )
-            .show_value(false)
-            .clamping(egui::SliderClamping::Always),
-        );
-    });
     draw_speed_row(
         ui,
         "Zoom Speed",

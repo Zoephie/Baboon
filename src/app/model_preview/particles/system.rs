@@ -1,0 +1,316 @@
+//! Particle systems: their parts, the strips they carry, and reading them off an effect.
+
+use super::super::{RenderModelPreviewMarker, TagReader};
+use super::emitter::{Emitter, ParticleTrigger, read_emitter};
+use super::look::{ParticleLook, read_look};
+use super::rules::{ParticleRules, baked_lod, later_baked_lod, near_fade_range};
+use super::sim::location;
+use super::{
+    EffectTimes, Gen3StripAt, MarkerFrame, ObjectEffect, ViewFrame, attached, dot, elements,
+    has_flag, has_flag_labelled, object_effects, part_runs_by, read_carried_strips,
+};
+use blam_tags::{TagFile, TagStruct};
+use std::sync::Arc;
+
+/// A system in an event of an attached effect, at a marker.
+#[derive(Debug)]
+pub(crate) struct ParticleSystem {
+    pub(super) node: usize,
+    pub(super) position: [f32; 3],
+    pub(super) axes: [[f32; 3]; 3],
+    only_under: Option<(String, String)>,
+    pub(crate) object: u8,
+    pub(super) scale_by: String,
+    pub(super) secondary_by: String,
+    pub(super) sort_bias: f32,
+    /// `coordinate system`: particles left where they were made.
+    pub(super) world: bool,
+    pub(super) location_seed: f32,
+    pub(super) near_range: f32,
+    pub(super) near_cutoff: f32,
+    pub(super) times: Arc<EffectTimes>,
+    pub(super) event: usize,
+    pub(crate) look: Arc<ParticleLook>,
+    pub(super) emitters: Vec<Arc<Emitter>>,
+    /// What its particles start: how far along the list each system lies.
+    pub(super) attached: Vec<(ParticleTrigger, usize)>,
+    /// Started by a particle, at the particle: nothing of its own runs it.
+    pub(super) child: bool,
+    /// `use parent position but world orientation`: its axes do not turn.
+    pub(super) world_oriented: bool,
+    /// Contrails its particles start, each following the particle.
+    pub(super) carried: Vec<Arc<Gen3StripAt>>,
+    pub(super) hidden: bool,
+    pub(super) die_with_effect: bool,
+    pub(super) lod: Option<[f32; 4]>,
+}
+
+/// What a tag's `particle system` holds, wherever it ends up.
+#[derive(Clone)]
+pub(super) struct ParticleSystemParts {
+    /// `don't render system`: it still runs, for what its particles start.
+    hidden: bool,
+    /// `particles die when effect ends`.
+    die_with_effect: bool,
+    lod: Option<[f32; 4]>,
+    sort_bias: f32,
+    world: bool,
+    near_range: f32,
+    near_cutoff: f32,
+    look: Arc<ParticleLook>,
+    pub(super) emitters: Vec<Arc<Emitter>>,
+}
+
+/// A system's `lod always 1.0`, and what older layouts label it.
+const LOD_ALWAYS_ONE: [&str; 3] = [
+    "lod always 1.0",
+    "ignore lod (render always)",
+    "lod always 1",
+];
+
+/// A system's `particles die when effect ends`, and its older label.
+const DIE_WITH_EFFECT: [&str; 2] = ["particles die when effect ends", "die when orphaned"];
+
+pub(super) fn read_system_parts(
+    reader: &TagReader,
+    system: TagStruct<'_>,
+) -> Option<ParticleSystemParts> {
+    let flagged = |wanted: &str| has_flag(system, "flags", wanted);
+    if !part_runs_by(system, "environment", "disposition") {
+        return None;
+    }
+    let path = system
+        .read_tag_ref_path("particle")
+        .filter(|path| !path.is_empty())?;
+    let own = ParticleRules::of(reader.source.game()).own_system;
+    let (look, emitters): (Arc<ParticleLook>, Vec<_>) = if let Some(own) = own {
+        (own.read)(reader, system, &path)?
+    } else {
+        let look = read_look(reader, &path).map(Arc::new)?;
+        let size_scale = system.read_real("size scale").unwrap_or(1.0);
+        let read = |emitter: &TagStruct<'_>| {
+            read_emitter(reader, *emitter, flagged, &look, size_scale).map(Arc::new)
+        };
+        let emitters = elements(system, "emitters")
+            .iter()
+            .filter_map(read)
+            .collect();
+        (look, emitters)
+    };
+    if emitters.is_empty() {
+        return None;
+    }
+    let real = |field: &str| system.read_real(field).unwrap_or(0.0);
+    let cutoff = if flagged("override near fade (use with caution)") {
+        real("near fade override")
+    } else {
+        real("near fade cutoff")
+    };
+    Some(ParticleSystemParts {
+        hidden: flagged("don't render system"),
+        die_with_effect: has_flag_labelled(system, "flags", &DIE_WITH_EFFECT),
+        lod: {
+            let raw = [
+                real("LOD in distance"),
+                real("LOD out distance"),
+                real("LOD feather in delta"),
+                real("LOD feather out delta"),
+            ];
+            let any_camera = system
+                .field("camera mode")
+                .is_some_and(|field| field.enum_is("independent of camera mode"));
+            let mut rates = emitters.iter().map(|emitter| emitter.rate.most());
+            if let Some(own) = own {
+                Some((own.baked_lod)(raw, any_camera, &mut rates))
+            } else if !has_flag_labelled(system, "flags", &LOD_ALWAYS_ONE) {
+                Some(if look.later_look {
+                    later_baked_lod(raw)
+                } else {
+                    baked_lod(raw, any_camera, rates)
+                })
+            } else {
+                None
+            }
+        },
+        sort_bias: system.read_int_any("sort bias").unwrap_or(0) as f32,
+        world: system.read_enum_option("coordinate system").as_deref() == Some("world"),
+        near_range: near_fade_range(look.later_look, real("near fade range")),
+        near_cutoff: cutoff,
+        look,
+        emitters,
+    })
+}
+
+/// The systems of the effects a look's particles start, and their events.
+fn read_attached_parts(
+    reader: &TagReader,
+    look: &ParticleLook,
+) -> Vec<(
+    ParticleTrigger,
+    ParticleSystemParts,
+    Arc<EffectTimes>,
+    usize,
+)> {
+    let mut parts = Vec::new();
+    for (trigger, path) in &look.attachments {
+        let Ok(effect) = reader.load(path, "effect", b"effe") else {
+            continue;
+        };
+        let times = Arc::new(EffectTimes::read(effect.root()));
+        for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
+            for system in elements(event, "particle systems") {
+                if let Some(read) = read_system_parts(reader, system) {
+                    parts.push((*trigger, read, Arc::clone(&times), at));
+                }
+            }
+        }
+    }
+    let carried = look.carried_systems.as_ref();
+    if let Some(tag) = carried.and_then(|path| reader.load(path, "particle", b"prt3").ok()) {
+        let lasting = Arc::new(EffectTimes::lasting());
+        for system in elements(tag.root(), "attached particle systems") {
+            if let Some(read) = read_system_parts(reader, system) {
+                parts.push((ParticleTrigger::Carried, read, Arc::clone(&lasting), 0));
+            }
+        }
+    }
+    parts
+}
+
+/// The contrails these systems' particles start, each once: a system at many
+/// markers shares its own.
+pub(in crate::app::model_preview) fn carried_strips(
+    systems: &[Arc<ParticleSystem>],
+) -> Vec<Arc<Gen3StripAt>> {
+    let mut strips: Vec<Arc<Gen3StripAt>> = Vec::new();
+    for strip in systems.iter().flat_map(|system| &system.carried) {
+        if !strips.iter().any(|known| Arc::ptr_eq(known, strip)) {
+            strips.push(Arc::clone(strip));
+        }
+    }
+    strips
+}
+
+impl ParticleSystem {
+    pub(crate) fn scale_name(&self) -> &str {
+        &self.scale_by
+    }
+
+    pub(crate) fn scale_names(&self) -> [&str; 2] {
+        [&self.scale_by, &self.secondary_by]
+    }
+}
+
+/// The systems of an object's attached effects, one at each marker of a location.
+pub(in crate::app::model_preview) fn read_particles(
+    reader: &TagReader,
+    object: &TagFile,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+    frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
+) -> Vec<ParticleSystem> {
+    let mut systems = Vec::new();
+    for object_effect in object_effects(reader, object) {
+        let Ok(effect) = reader.load(&object_effect.path, "effect", b"effe") else {
+            continue;
+        };
+        let locations = elements(effect.root(), "locations");
+        let times = Arc::new(object_effect.times_of(effect.root()));
+        let world_oriented = ObjectEffect::world_oriented(effect.root());
+        for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
+            for system in elements(event, "particle systems") {
+                let location = usize::try_from(system.read_block_index("location")).ok();
+                let Some(location) = location.and_then(|location| locations.get(location)) else {
+                    continue;
+                };
+                let name = object_effect.marker_of(*location);
+                let Some(parts) = read_system_parts(reader, system) else {
+                    continue;
+                };
+                let children = read_attached_parts(reader, &parts.look);
+                let carried: Vec<_> = parts
+                    .look
+                    .attachments
+                    .iter()
+                    .filter(|(trigger, _)| *trigger == ParticleTrigger::Birth)
+                    .flat_map(|(_, path)| read_carried_strips(reader, path))
+                    .map(Arc::new)
+                    .collect();
+                for marker in &object_effect.locations(markers, &name, &frame) {
+                    let (place, node) = frame(marker);
+                    let attached = children
+                        .iter()
+                        .enumerate()
+                        .map(|(at, child)| (child.0, at + 1))
+                        .collect();
+                    let parts = parts.clone();
+                    systems.push(ParticleSystem {
+                        node,
+                        position: place.position,
+                        axes: place.axes,
+                        only_under: marker.only_under.clone(),
+                        object: owner,
+                        scale_by: object_effect.scale_by.clone(),
+                        secondary_by: object_effect.secondary_by.clone(),
+                        sort_bias: parts.sort_bias,
+                        world: parts.world,
+                        location_seed: (systems.len() as f32 * 0.618_034).fract(),
+                        near_range: parts.near_range,
+                        near_cutoff: parts.near_cutoff,
+                        times: Arc::clone(&times),
+                        event: at,
+                        look: parts.look,
+                        emitters: parts.emitters,
+                        attached,
+                        child: false,
+                        world_oriented,
+                        carried: carried.clone(),
+                        hidden: parts.hidden,
+                        die_with_effect: parts.die_with_effect,
+                        lod: parts.lod,
+                    });
+                    for (_, parts, times, event) in &children {
+                        let parts = parts.clone();
+                        systems.push(ParticleSystem {
+                            node,
+                            position: place.position,
+                            axes: place.axes,
+                            only_under: marker.only_under.clone(),
+                            object: owner,
+                            scale_by: String::new(),
+                            secondary_by: String::new(),
+                            sort_bias: parts.sort_bias,
+                            world: parts.world,
+                            location_seed: (systems.len() as f32 * 0.618_034).fract(),
+                            near_range: parts.near_range,
+                            near_cutoff: parts.near_cutoff,
+                            times: Arc::clone(times),
+                            event: *event,
+                            look: parts.look,
+                            emitters: parts.emitters,
+                            attached: Vec::new(),
+                            child: true,
+                            world_oriented: false,
+                            carried: Vec::new(),
+                            hidden: parts.hidden,
+                            die_with_effect: parts.die_with_effect,
+                            lod: parts.lod,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    systems
+}
+
+impl ParticleSystem {
+    /// Its sort position, nudged by its tag: `add_element`'s `sort_bias`.
+    pub(crate) fn distance(&self, bones: Option<&[[f32; 4]]>, view: &ViewFrame) -> f32 {
+        let (origin, _) = location(self, bones);
+        let eye: [f32; 3] = std::array::from_fn(|axis| origin[axis] - view.eye[axis]);
+        dot(view.forward, eye) - self.sort_bias * 0.05
+    }
+}
+
+attached!(ParticleSystem);

@@ -923,7 +923,7 @@ pub(in crate::app) fn draw_foundation_collapsing_header(
     add_foundation_header_spacing(ui);
     let header = ui.scope(|ui| {
         draw_foundation_collapsing_header_inner(ui, title, id_salt, depth, default_open, open_override,
-            bar_fill, find_kind, collapsible, leading_icon, false, add_contents)
+            bar_fill, find_kind, collapsible, leading_icon, false, None, add_contents)
     });
     if find_kind != FindTargetKind::Documentation {
         finish_foundation_container_spacing(ui, header.response.rect);
@@ -937,7 +937,45 @@ pub(in crate::app) fn draw_foundation_clipped_shader_header(
 ) -> bool {
     add_foundation_header_spacing(ui);
     draw_foundation_collapsing_header_inner(ui, title, id_salt, 0, true, None,
-        foundation_block_bar(), FindTargetKind::Block, true, None, true, contents)
+        foundation_block_bar(), FindTargetKind::Block, true, None, true, None, contents)
+}
+
+/// Which part of a [`draw_foundation_box`] its contents draw.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::app) enum BoxPart {
+    /// Header controls after the title, moving to a row of their own under
+    /// it when the two no longer fit side by side.
+    Controls,
+    /// Header controls kept at the right end of the title row.
+    Trailing,
+    /// The box's body.
+    Body,
+}
+
+/// A collapsible box styled like a tag block, open by default, with header
+/// controls beside its title. Whether it is open.
+pub(in crate::app) fn draw_foundation_box(
+    ui: &mut Ui,
+    title: String,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    contents: impl FnMut(&mut Ui, BoxPart),
+) -> bool {
+    let contents = std::cell::RefCell::new(contents);
+    add_foundation_header_spacing(ui);
+    let header = ui.scope(|ui| {
+        draw_foundation_collapsing_header_inner(ui, title, id_salt, 0, true, None,
+            foundation_block_bar(), FindTargetKind::Label, true, None, false,
+            Some(&mut |ui: &mut Ui, part: BoxPart| (contents.borrow_mut())(ui, part)),
+            |ui| {
+                Frame::NONE
+                    .fill(foundation_group_bg())
+                    .corner_radius(foundation_body_rounding())
+                    .inner_margin(foundation_body_margin())
+                    .show(ui, |ui| (contents.borrow_mut())(ui, BoxPart::Body));
+            })
+    });
+    finish_foundation_container_spacing(ui, header.response.rect);
+    header.inner
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -953,6 +991,7 @@ fn draw_foundation_collapsing_header_inner(
     collapsible: bool,
     leading_icon: Option<ButtonIcon>,
     clip_body: bool,
+    header_controls: Option<&mut dyn FnMut(&mut Ui, BoxPart)>,
     add_contents: impl FnOnce(&mut Ui),
 ) -> bool {
     let documentation = find_kind == FindTargetKind::Documentation;
@@ -967,14 +1006,70 @@ fn draw_foundation_collapsing_header_inner(
     }
 
     let row_width = ui.available_width();
-    let header_height = if documentation { 32.0 } else { 40.0 };
+    let mut header_height = if documentation { 32.0 } else { 40.0 };
+    let header_inset = Vec2::new(8.0, (header_height - ICON_BUTTON_SIZE.y) * 0.5);
+    // Header controls follow the title, or take rows of their own under it,
+    // wrapping between them, once the two no longer fit; trailing controls
+    // keep the title row's right end. Their sizes are last frame's, as the
+    // row is reserved before they are drawn: the controls' width laid out
+    // in one line, and their height when wrapped.
+    let sizes_id = id.with("header_control_sizes");
+    let (trailing_width, controls_width, wrapped_height) =
+        ui.data(|data| data.get_temp::<(f32, f32, f32)>(sizes_id)).unwrap_or_default();
+    let title_width = ICON_BUTTON_SIZE.x + 4.0
+        + ui.painter().layout_no_wrap(title.clone(), bold_font(12.5), foundation_block_text()).size().x;
+    let inner_width = row_width - 2.0 * header_inset.x;
+    let wrapped = header_controls.is_some() && controls_width > 0.0
+        && title_width + 16.0 + controls_width + 8.0 + trailing_width > inner_width;
+    if wrapped {
+        header_height += wrapped_height.max(ICON_BUTTON_SIZE.y) + 8.0;
+    }
     let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, header_height), Sense::hover());
     let header_background = ui.painter().add(egui::Shape::Noop);
     // This child paints into the reserved row without advancing the parent
     // cursor. `allocate_new_ui` would advance it to the child's 24pt content
     // boundary, effectively discarding the row's bottom padding.
-    let header_inset = Vec2::new(8.0, (header_height - ICON_BUTTON_SIZE.y) * 0.5);
-    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(row_rect.shrink2(header_inset)));
+    let mut title_rect = egui::Rect::from_min_size(row_rect.min + header_inset,
+        Vec2::new(inner_width, ICON_BUTTON_SIZE.y));
+    if let Some(controls) = header_controls {
+        let first_row = title_rect;
+        let mut trailing_ui = ui.new_child(egui::UiBuilder::new().id_salt(id.with("trailing"))
+            .max_rect(first_row).layout(egui::Layout::right_to_left(egui::Align::Center)));
+        trailing_ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
+        controls(&mut trailing_ui, BoxPart::Trailing);
+        let trailing = trailing_ui.min_rect().width();
+        let trailing_left = first_row.right() - if trailing > 0.0 { trailing + 8.0 } else { 0.0 };
+        let controls_rect = if wrapped {
+            egui::Rect::from_min_max(first_row.left_bottom() + Vec2::new(0.0, 8.0),
+                egui::pos2(first_row.right(), row_rect.bottom() - header_inset.y))
+        } else {
+            let left = (trailing_left - controls_width).max(first_row.left() + title_width + 16.0);
+            egui::Rect::from_min_max(egui::pos2(left.min(trailing_left), first_row.top()),
+                egui::pos2(trailing_left, first_row.bottom()))
+        };
+        let mut controls_ui = ui.new_child(egui::UiBuilder::new().id_salt(id.with("controls"))
+            .max_rect(controls_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(wrapped)));
+        controls_ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+        controls(&mut controls_ui, BoxPart::Controls);
+        let drawn = controls_ui.min_rect();
+        // A wrapped layout's width is not its one-line width: keep that.
+        let measured = if wrapped {
+            (trailing, controls_width, drawn.height())
+        } else {
+            (trailing, drawn.width(), wrapped_height)
+        };
+        let moved = |a: f32, b: f32| (a - b).abs() > 0.5;
+        if moved(measured.0, trailing_width) || moved(measured.1, controls_width)
+            || moved(measured.2, wrapped_height)
+        {
+            ui.data_mut(|data| data.insert_temp(sizes_id, measured));
+            ui.ctx().request_repaint();
+        }
+        title_rect.max.x = if wrapped { trailing_left } else { controls_rect.left() - 8.0 }
+            .max(title_rect.left());
+    }
+    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(title_rect));
     header_ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
     header_ui.horizontal_centered(|ui| {
         if collapsible {

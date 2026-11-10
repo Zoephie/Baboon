@@ -347,6 +347,16 @@ impl ContainerPackageIndex {
 }
 
 impl TagSource {
+    /// The game its tags are for, where it says. Mounted containers only ever
+    /// hold Campaign Evolved's; a single file and a cache do not know.
+    pub fn game(&self) -> Option<GameId> {
+        match self {
+            TagSource::LooseFolder { game, .. } => *game,
+            TagSource::IoStoreContainerSet { .. } => Some(GameId::CampaignEvolved),
+            _ => None,
+        }
+    }
+
     pub fn origin_label(&self) -> String {
         match self {
             TagSource::SingleFile { path } => format!("File: {}", path.display()),

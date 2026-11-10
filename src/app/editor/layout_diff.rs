@@ -39,7 +39,8 @@ pub(in crate::app) struct LayoutReport {
 /// How a loaded document's layout differs from the definitions, worked out
 /// once per load (`document`, the document's id, changes when it's reloaded;
 /// its layout doesn't change while it's open). `None` when it has the
-/// current layout, or there are no definitions to compare it with.
+/// current layout, has none of its own, or there are no definitions to
+/// compare it with.
 pub(in crate::app) fn document_layout_diff(
     document: u64,
     tag: &TagFile,
@@ -56,6 +57,11 @@ pub(in crate::app) fn document_layout_diff(
     cache
         .entry(document)
         .or_insert_with(|| {
+            // A classic tag embeds no layout: it is read through the
+            // definitions, so there is nothing of its own to differ.
+            if tag.classic_engine().is_some() {
+                return None;
+            }
             let current = current_layout(definitions_root, game, group_name)?;
             let diff = diff_layouts(tag, &current);
             if diff.is_empty() {
@@ -501,6 +507,23 @@ mod tests {
                 .collect();
         }
         texts
+    }
+
+    /// A classic tag is read through the definitions, so even a real version
+    /// disagreement leaves nothing of its own to differ. Without the check
+    /// this reports the version, as every Halo 2 and Halo CE tag once did.
+    #[test]
+    fn a_classic_tag_has_no_layout_of_its_own_to_differ() {
+        let definitions = crate::core::bundled::locate_definitions_root();
+        let schema = definitions.join("halo2_mcc").join("biped.json");
+        let mut classic =
+            TagFile::new_classic(&schema, blam_tags::classic::ClassicEngine::Halo2V4).unwrap();
+        classic.header.group_version += 1;
+        let current = TagFile::new(&schema).unwrap();
+        assert!(!diff_layouts(&classic, &current).is_empty());
+        assert!(
+            document_layout_diff(u64::MAX - 3, &classic, &definitions, GameId::Halo2, "biped").is_none()
+        );
     }
 
     fn sound_mix_like() -> LayoutDiff {

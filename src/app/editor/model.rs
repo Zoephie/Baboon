@@ -3,38 +3,44 @@
 
 use super::*;
 
-pub(in crate::app) fn is_object_family_group(group_tag: u32) -> bool {
-    matches!(
-        &group_tag.to_be_bytes(),
-        b"bipd" // biped
-            | b"vehi" // vehicle
-            | b"weap" // weapon
-            | b"eqip" // equipment
-            | b"garb" // garbage
-            | b"scen" // scenery
-            | b"mach" // device_machine
-            | b"ctrl" // device_control
-            | b"lifi" // device_light_fixture
-            | b"crat" // crate
-            | b"bloc" // crate-like block
-            | b"ssce" // sound_scenery
-            | b"gint" // giant
-            | b"proj" // projectile
-            | b"plac" // placeholder
-            | b"obje" // object (base)
-    )
+/// Whether a group is a kind of object, by the ancestry in its game's
+/// definitions, so a subclass a game adds comes along without being listed.
+/// A single file or a monolithic cache has no game to ask, so any game's word
+/// is taken; no group code that means two things across games is an object.
+pub(in crate::app) fn is_object_family_group(group_tag: u32, game: Option<GameId>) -> bool {
+    let object = u32::from_be_bytes(*b"obje");
+    match game {
+        Some(_) => bundled_group_hierarchy(game).is_a(group_tag, object),
+        None => GameId::ALL.iter().any(|game| bundled_group_hierarchy(Some(*game)).is_a(group_tag, object)),
+    }
 }
 
-/// A Halo CE object tag's own reference (`model`, `animation graph`,
-/// `collision model`, …). A child group opens with its parent's struct, so
+/// Where a child group's opening parent struct leaves the object's fields.
+const OBJECT_PARENTS: [&str; 4] = ["unit/object", "item/object", "device/object", "object"];
+
+/// An object tag's own reference (Halo CE's `model`, `animation graph`,
+/// `collision model`, …; a `.model` after that). A child group opens with its parent's struct, so
 /// the object fields sit under `unit/object`, `item/object`, `device/object`
 /// or, for a direct child, `object`.
-pub(in crate::app) fn halo1_object_reference(tag: &TagFile, field: &str) -> Option<String> {
-    const PARENTS: [&str; 4] = ["unit/object", "item/object", "device/object", "object"];
+pub(in crate::app) fn object_reference(tag: &TagFile, field: &str) -> Option<String> {
     let root = tag.root();
-    PARENTS
+    OBJECT_PARENTS
         .iter()
         .find_map(|parent| tag_ref_path(&root, &format!("{parent}/{field}")))
+}
+
+/// The variant an object starts in, when it names one.
+pub(in crate::app) fn object_default_variant(tag: &TagFile) -> Option<String> {
+    let root = tag.root();
+    OBJECT_PARENTS.iter().find_map(|parent| {
+        let field = root.field_path(&format!("{parent}/default model variant"))?;
+        match field.value()? {
+            TagFieldData::StringId(id) | TagFieldData::OldStringId(id) if !id.string.is_empty() => {
+                Some(id.string)
+            }
+            _ => None,
+        }
+    })
 }
 
 /// Show the connected `.model` reference at the top of object-family tags
@@ -44,9 +50,10 @@ pub(in crate::app) fn draw_object_model_summary(
     tag: &TagFile,
     entry: &TagEntry,
     names: &TagNameIndex,
+    source_game: Option<GameId>,
     edit: &mut FieldEditContext<'_>,
 ) {
-    if !is_object_family_group(entry.group_tag) {
+    if !is_object_family_group(entry.group_tag, source_game) {
         return;
     }
     let Some(model) = find_model_reference(tag.root(), names, 0, "") else {
@@ -195,14 +202,15 @@ pub(in crate::app) fn is_previewable_geometry_group(group_tag: u32, names: &TagN
         )
 }
 
-/// Halo CE object tags own the references later engines moved into `.model`.
+/// An object previews what it references: its gbxmodel on Halo CE, its
+/// `.model` after that. Either way that takes a kit to read it from.
 pub(in crate::app) fn is_previewable_geometry_group_for_game(
     group_tag: u32,
     names: &TagNameIndex,
     source_game: Option<GameId>,
 ) -> bool {
     is_previewable_geometry_group(group_tag, names)
-        || (source_game == Some(GameId::HaloCe) && is_object_family_group(group_tag))
+        || (source_game.is_some() && is_object_family_group(group_tag, source_game))
 }
 
 pub(in crate::app) fn format_reference_path(
@@ -258,3 +266,37 @@ pub(in crate::app) fn draw_tag_metadata(
 /// Warning-coloured rather than error-coloured: nothing is wrong, and the tag
 /// is fully editable — the edits just do not outlive the session.
 pub(in crate::app) const READ_ONLY_BADGE_COLOR: Color32 = Color32::from_rgb(210, 145, 60);
+
+#[cfg(test)]
+mod object_family_tests {
+    use super::*;
+
+    fn group(code: &[u8; 4]) -> u32 {
+        u32::from_be_bytes(*code)
+    }
+
+    #[test]
+    fn a_group_is_an_object_by_its_games_ancestry() {
+        let game = Some(GameId::Halo3);
+        for code in [b"bipd", b"vehi", b"scen", b"bloc", b"proj", b"efsc", b"crea", b"term", b"obje"] {
+            assert!(is_object_family_group(group(code), game), "{code:?}");
+        }
+        for code in [b"hlmt", b"mode", b"effe", b"scnr", b"bitm"] {
+            assert!(!is_object_family_group(group(code), game), "{code:?}");
+        }
+    }
+
+    #[test]
+    fn a_group_only_another_game_has_is_not_an_object_here() {
+        assert!(is_object_family_group(group(b"argd"), Some(GameId::Halo3Odst)));
+        assert!(!is_object_family_group(group(b"argd"), Some(GameId::Halo3)));
+        assert!(!is_object_family_group(group(b"efsc"), Some(GameId::HaloCe)));
+    }
+
+    #[test]
+    fn with_no_game_any_games_word_will_do() {
+        assert!(is_object_family_group(group(b"argd"), None));
+        assert!(is_object_family_group(group(b"bipd"), None));
+        assert!(!is_object_family_group(group(b"bitm"), None));
+    }
+}
