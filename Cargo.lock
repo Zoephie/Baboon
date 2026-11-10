@@ -870,8 +870,7 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 [[package]]
 name = "ecolor"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31bcbef0d4263a63eb32c4834e5d711613035ce1333468e107d928923e21e6e2"
+source = "git+https://github.com/camden-smallwood/egui?rev=ce0307b68be258b1ff57e92163c7518b24408dc6#ce0307b68be258b1ff57e92163c7518b24408dc6"
 dependencies = [
  "bytemuck",
  "emath",
@@ -881,8 +880,7 @@ dependencies = [
 [[package]]
 name = "eframe"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c5642501a65ca657d05f00c643a5c14ff2346cb3818032bfe23d58e1f8e5f84"
+source = "git+https://github.com/camden-smallwood/egui?rev=ce0307b68be258b1ff57e92163c7518b24408dc6#ce0307b68be258b1ff57e92163c7518b24408dc6"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -916,8 +914,7 @@ dependencies = [
 [[package]]
 name = "egui"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bec9144f49b7a28b5f395d3147e325b4fe3e77ba686eac11d1bdf0a7da3f375f"
+source = "git+https://github.com/camden-smallwood/egui?rev=ce0307b68be258b1ff57e92163c7518b24408dc6#ce0307b68be258b1ff57e92163c7518b24408dc6"
 dependencies = [
  "accesskit",
  "ahash",
@@ -937,8 +934,7 @@ dependencies = [
 [[package]]
 name = "egui-wgpu"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0309cbe1febed48af5b974e4bcc424b35e9664863a4d402697147b57a488c864"
+source = "git+https://github.com/camden-smallwood/egui?rev=ce0307b68be258b1ff57e92163c7518b24408dc6#ce0307b68be258b1ff57e92163c7518b24408dc6"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -957,8 +953,7 @@ dependencies = [
 [[package]]
 name = "egui-winit"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4e449f4c4a2a60c7ccb4ba7fa4078417bfe1f9ddc03b5e05ce75748e33a70de"
+source = "git+https://github.com/camden-smallwood/egui?rev=ce0307b68be258b1ff57e92163c7518b24408dc6#ce0307b68be258b1ff57e92163c7518b24408dc6"
 dependencies = [
  "arboard",
  "block2 0.6.2",
@@ -981,8 +976,7 @@ dependencies = [
 [[package]]
 name = "egui_extras"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "def286cf47194f3fe45b8e37c503ada7a20a64b59a903b4bc704baec943b1827"
+source = "git+https://github.com/camden-smallwood/egui?rev=ce0307b68be258b1ff57e92163c7518b24408dc6#ce0307b68be258b1ff57e92163c7518b24408dc6"
 dependencies = [
  "ahash",
  "egui",
@@ -998,8 +992,7 @@ dependencies = [
 [[package]]
 name = "egui_glow"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9275ca5cc35a6b7c94e0e8cedf22542f66cb0cf45ed8ab2657c78ff49fec7268"
+source = "git+https://github.com/camden-smallwood/egui?rev=ce0307b68be258b1ff57e92163c7518b24408dc6#ce0307b68be258b1ff57e92163c7518b24408dc6"
 dependencies = [
  "bytemuck",
  "egui",
@@ -1031,8 +1024,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 [[package]]
 name = "emath"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e73ce90f54750be8672c02be0743fe47530e6f251e066f0ee2869b59eb297af5"
+source = "git+https://github.com/camden-smallwood/egui?rev=ce0307b68be258b1ff57e92163c7518b24408dc6#ce0307b68be258b1ff57e92163c7518b24408dc6"
 dependencies = [
  "bytemuck",
  "serde",
@@ -1094,8 +1086,7 @@ dependencies = [
 [[package]]
 name = "epaint"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97bac86ae3dde93fc3951e790951caea739ff39a6c89d909cdaf1d9278dbb1bd"
+source = "git+https://github.com/camden-smallwood/egui?rev=ce0307b68be258b1ff57e92163c7518b24408dc6#ce0307b68be258b1ff57e92163c7518b24408dc6"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1121,8 +1112,7 @@ dependencies = [
 [[package]]
 name = "epaint_default_fonts"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfc1cc505827f4c23eedc297975a0fd038268d41293f389dd8ff3b574aefab19"
+source = "git+https://github.com/camden-smallwood/egui?rev=ce0307b68be258b1ff57e92163c7518b24408dc6#ce0307b68be258b1ff57e92163c7518b24408dc6"
 
 [[package]]
 name = "equivalent"
