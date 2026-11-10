@@ -172,12 +172,14 @@ fn resolve_one_material(
     if blam_tags::game::Game::of(&shader) == blam_tags::game::Game::Halo3 {
         match prepare_gen3_material(reader, &values, caches) {
             Ok(material) => textures.gen3 = Some(Arc::new(material)),
-            // The general shader still draws it, so this is only worth saying
-            // when there is nothing else to show.
-            Err(error) if textures.slots.iter().all(Option::is_none) => {
-                textures.error = Some(format!("Halo 3 shader not translated: {error}"));
+            Err(error) => {
+                // The general shader still draws it, so it only goes untextured
+                // when there is nothing else to show.
+                if textures.slots.iter().all(Option::is_none) {
+                    textures.error = Some(format!("Halo 3 shader not translated: {error}"));
+                }
+                textures.gen3_error = Some(error);
             }
-            Err(_) => {}
         }
     }
     textures

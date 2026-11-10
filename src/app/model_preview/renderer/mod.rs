@@ -30,11 +30,46 @@ struct CachedModelGlRenderer {
     /// Geometry whose drawing panicked, with what the panic said: it is not
     /// drawn again, and the panel says why.
     failed: HashMap<u64, String>,
+    /// What each geometry's last frame left out, and why: [`RenderCore::note`].
+    notes: HashMap<u64, Vec<String>>,
 }
 
 /// Why drawing `geometry_id` stopped, if it panicked.
 pub(super) fn model_gl_failure(geometry_id: u64) -> Option<String> {
     MODEL_GL_RENDERER.with(|cell| cell.borrow().as_ref()?.failed.get(&geometry_id).cloned())
+}
+
+/// What `geometry_id`'s last frame left out and why, with the context it
+/// drew in; or why there is no renderer at all. Empty when nothing was.
+pub(super) fn model_gl_notes(geometry_id: u64) -> Option<(Vec<String>, String)> {
+    MODEL_GL_RENDERER.with(|cell| {
+        let cell = cell.borrow();
+        let cached = cell.as_ref()?;
+        match &cached.renderer {
+            Err(error) => Some((vec![error.clone()], String::new())),
+            Ok(renderer) => {
+                let notes = cached
+                    .notes
+                    .get(&geometry_id)
+                    .filter(|notes| !notes.is_empty())?;
+                Some((notes.clone(), renderer.core.context.clone()))
+            }
+        }
+    })
+}
+
+/// The errors GL has raised since it was last asked, as hex codes.
+unsafe fn drain_gl_errors(gl: &glow::Context) -> Vec<String> {
+    let mut errors = Vec::new();
+    // A lost context can return an error forever.
+    for _ in 0..8 {
+        let error = unsafe { gl.get_error() };
+        if error == glow::NO_ERROR {
+            break;
+        }
+        errors.push(format!("{error:#x}"));
+    }
+    errors
 }
 
 pub(in crate::app::model_preview) fn paint_model_gl(
@@ -80,11 +115,13 @@ pub(in crate::app::model_preview) fn paint_model_gl(
                 context_id,
                 renderer: created,
                 failed: HashMap::new(),
+                notes: HashMap::new(),
             });
         }
         let Some(CachedModelGlRenderer {
             renderer: Ok(renderer),
             failed,
+            notes,
             ..
         }) = cached.as_mut()
         else {
@@ -93,12 +130,28 @@ pub(in crate::app::model_preview) fn paint_model_gl(
         if failed.contains_key(&frame.geometry_id) {
             return;
         }
+        // What was raised before the preview drew is not the preview's.
+        unsafe { drain_gl_errors(gl) };
+        renderer.core.notes.clear();
         // A panic part way through leaves the scene target bound; what the
         // frame drew into goes back, so the rest of the window still draws.
         let state = unsafe { PostScope::capture(gl) };
         let painted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
             renderer.paint(gl, frame)
         }));
+        let errors = unsafe { drain_gl_errors(gl) };
+        if !errors.is_empty() {
+            renderer
+                .core
+                .note(format!("OpenGL raised {} while drawing", errors.join(", ")));
+        }
+        let frame_notes = std::mem::take(&mut renderer.core.notes);
+        if notes.get(&frame.geometry_id) != Some(&frame_notes) {
+            for note in &frame_notes {
+                eprintln!("model preview: {note}");
+            }
+        }
+        notes.insert(frame.geometry_id, frame_notes);
         if let Err(panic) = painted {
             unsafe {
                 state.restore(gl);
@@ -120,6 +173,13 @@ pub(super) struct ModelGlRenderer {
 }
 
 impl ModelGlRenderer {
+    /// The core, for a test that sets what the context can do and reads
+    /// what a frame noted.
+    #[cfg(test)]
+    pub(super) fn core_mut(&mut self) -> &mut RenderCore {
+        &mut self.core
+    }
+
     pub(super) fn new(gl: &glow::Context) -> Result<Self, String> {
         Ok(Self {
             core: RenderCore::new(gl)?,

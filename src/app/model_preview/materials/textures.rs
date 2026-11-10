@@ -86,6 +86,9 @@ pub(crate) struct MaterialTextures {
     pub dx9_layers: [Vec<Dx9DrawPass>; DX9_LAYER_COUNT],
     /// A gen3 game's own shader, translated from the kit's source.
     pub gen3: Option<Arc<Gen3Material>>,
+    /// Why `gen3` is missing for a gen3 shader: the material draws its slots
+    /// instead, which with Game Shaders on is worth saying.
+    pub gen3_error: Option<String>,
     /// Reach's `only render for shields`: `render_model_postprocess` (the
     /// 360's) makes its parts a shield's, which no ordinary pass draws.
     pub shield_only: bool,

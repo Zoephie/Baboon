@@ -64,7 +64,10 @@ impl Gen3State {
         let key = Arc::as_ptr(pass) as usize;
         match self.programs.get(&key) {
             Some(Ok(program)) => return Some(Rc::clone(program)),
-            Some(Err(_)) => return None,
+            Some(Err((_, error))) => {
+                core.note(format!("a pass did not link: {error}"));
+                return None;
+            }
             None => {}
         }
         unsafe {
@@ -90,7 +93,8 @@ impl Gen3State {
                 }
                 Err(error) => {
                     eprintln!("h3 program: {error}");
-                    self.programs.insert(key, Err(Arc::clone(pass)));
+                    core.note(format!("a pass did not link: {error}"));
+                    self.programs.insert(key, Err((Arc::clone(pass), error)));
                     None
                 }
             }

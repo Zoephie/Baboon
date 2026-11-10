@@ -325,13 +325,19 @@ impl SceneTarget {
         gl: &glow::Context,
         width: i32,
         height: i32,
-    ) -> Option<Self> {
+    ) -> Result<Self, String> {
         let size = [width, height];
         let mut made = Made::new(gl);
         unsafe {
-            let color = made.texture(size, Texels::RGBA8, Sampling::NEAREST_CLAMPED)?;
-            let depth = made.renderbuffer(size, glow::DEPTH24_STENCIL8)?;
-            let framebuffer = made.framebuffer(&[(glow::COLOR_ATTACHMENT0, color)])?;
+            let color = made
+                .texture(size, Texels::RGBA8, Sampling::NEAREST_CLAMPED)
+                .ok_or("no color texture")?;
+            let depth = made
+                .renderbuffer(size, glow::DEPTH24_STENCIL8)
+                .ok_or("no depth-stencil renderbuffer")?;
+            let framebuffer = made
+                .framebuffer(&[(glow::COLOR_ATTACHMENT0, color)])
+                .ok_or("no framebuffer")?;
             gl.framebuffer_renderbuffer(
                 glow::FRAMEBUFFER,
                 glow::DEPTH_STENCIL_ATTACHMENT,
@@ -340,11 +346,12 @@ impl SceneTarget {
             );
             let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
             if status != glow::FRAMEBUFFER_COMPLETE {
-                eprintln!("model preview: render target incomplete: {status:#x}");
-                return None;
+                return Err(format!(
+                    "{width}x{height} framebuffer incomplete: {status:#x}"
+                ));
             }
             made.keep();
-            Some(Self {
+            Ok(Self {
                 framebuffer,
                 color,
                 depth,

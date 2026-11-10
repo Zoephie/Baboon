@@ -760,3 +760,44 @@ fn gen3_games_share_one_set_of_targets() {
         "Reach drew through Halo 3's set"
     );
 }
+
+/// A context too old for the gen3 passes draws Reach's materials as with
+/// Game Shaders off, and says so; one that runs them says nothing. Needs
+/// `BLAM_TEST_HREK` set to the Reach kit's tags folder.
+#[test]
+fn a_context_without_gen3_shaders_says_so() {
+    let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+        eprintln!("skipping: BLAM_TEST_HREK is not set");
+        return;
+    };
+    let source = TagSource::LooseFolder {
+        root: root.into(),
+        game: Some(GameId::HaloReach),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let shot = Shot {
+        model: "objects\\characters\\elite\\elite".to_owned(),
+        shaders: true,
+        lights: false,
+        yaw: 0.0,
+        pitch: 0.0,
+        kind: None,
+    };
+    let options = ShotOptions::new(GameId::HaloReach);
+    let gl = Arc::new(headless_gl());
+    let noted = |gen3_supported: bool| {
+        let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+        renderer.core_mut().gen3_supported = gen3_supported;
+        render(&gl, &mut renderer, &source, &shot, &options);
+        std::mem::take(&mut renderer.core_mut().notes)
+    };
+    let without = noted(false);
+    assert!(
+        without
+            .iter()
+            .any(|note| note.contains("need desktop OpenGL 4.1")),
+        "{without:?}"
+    );
+    let with = noted(true);
+    assert!(with.is_empty(), "{with:?}");
+}

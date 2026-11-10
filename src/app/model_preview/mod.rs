@@ -113,7 +113,7 @@ use panel::texture_resolve_note;
 use renderer::ModelGlRenderer;
 use renderer::{
     FrameCx, MAX_PREVIEW_BONES, ModelGpuSlot, RenderCore, link_pass_program, model_gl_failure,
-    paint_model_gl, preview_background,
+    model_gl_notes, paint_model_gl, preview_background,
 };
 use selection::{
     compute_variant_selection, default_permutation, default_variant_index, detect_active_variant,

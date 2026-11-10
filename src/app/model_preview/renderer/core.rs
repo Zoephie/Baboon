@@ -85,6 +85,12 @@ pub(in crate::app::model_preview) struct RenderCore {
     pub(in crate::app::model_preview) samplers: [Option<glow::NativeUniformLocation>; SLOT_COUNT],
     /// Bound to every slot a material lacks; see [`Self::bind_material`].
     pub(in crate::app::model_preview) placeholder: Option<glow::NativeTexture>,
+    /// The driver's own words for this context, for the notes below.
+    pub(in crate::app::model_preview) context: String,
+    /// Why the frame being drawn left out something Game Shaders would draw,
+    /// for the panel to say: a fallback that is only logged is invisible in
+    /// a Windows release build, which has no console.
+    pub(in crate::app::model_preview) notes: Vec<String>,
 }
 
 impl RenderCore {
@@ -118,6 +124,14 @@ impl RenderCore {
         (index < self.slots.len()).then_some(index)
     }
 
+    /// Record why this frame left something out, once per frame.
+    pub(in crate::app::model_preview) fn note(&mut self, note: impl Into<String>) {
+        let note = note.into();
+        if !self.notes.contains(&note) {
+            self.notes.push(note);
+        }
+    }
+
     pub(super) fn new(gl: &glow::Context) -> Result<Self, String> {
         let shader_version = eframe::egui_glow::ShaderVersion::get(gl);
         let modern = shader_version.is_new_shader_interface();
@@ -142,6 +156,8 @@ impl RenderCore {
                     .ok_or_else(|| format!("model preview shader has no {name} uniform"))
             };
             let version = gl.version();
+            let context = gl_context_description(gl, version);
+            eprintln!("model preview: {context}");
             // Made in this order so every texture keeps the name it had.
             let black_array = upload_solid_volume(gl, glow::TEXTURE_2D_ARRAY, [0, 0, 0, 255]);
             let black_flat = upload_black_flat(gl);
@@ -191,6 +207,8 @@ impl RenderCore {
                 detail: gl.get_uniform_location(program, "u_detail"),
                 samplers: SAMPLER_UNIFORMS.map(|name| gl.get_uniform_location(program, name)),
                 placeholder: upload_placeholder_texture(gl),
+                context,
+                notes: Vec::new(),
             })
         }
     }
@@ -458,8 +476,26 @@ impl RenderCore {
         gl: &glow::Context,
         frame: &ModelGpuFrame,
     ) -> Option<PostScope> {
-        if !frame.game_shaders || !self.shaders_supported {
+        if !frame.game_shaders {
             return None;
+        }
+        if !self.shaders_supported {
+            self.note(format!(
+                "Game Shaders need desktop OpenGL 3.3 or later; this context is {}",
+                self.context
+            ));
+            return None;
+        }
+        if !self.gen3_supported
+            && frame
+                .textures
+                .iter()
+                .any(|textures| textures.iter().any(|texture| texture.gen3.is_some()))
+        {
+            self.note(format!(
+                "Halo 3, ODST and Reach shaders need desktop OpenGL 4.1 or later; this context is {}",
+                self.context
+            ));
         }
         unsafe {
             let state = PostScope::capture(gl);
@@ -468,7 +504,10 @@ impl RenderCore {
                 if let Some(old) = self.scene.take() {
                     old.delete(gl);
                 }
-                self.scene = SceneTarget::new(gl, size[0], size[1]);
+                match SceneTarget::new(gl, size[0], size[1]) {
+                    Ok(scene) => self.scene = Some(scene),
+                    Err(error) => self.note(format!("the scene target was not made: {error}")),
+                }
             }
             let Some(scene) = &self.scene else {
                 state.restore(gl);
@@ -639,4 +678,25 @@ impl RenderCore {
             }
         }
     }
+}
+
+/// The context's version, renderer and vendor as the driver names them, and
+/// its profile: what decides which of the games' shaders it can run.
+unsafe fn gl_context_description(gl: &glow::Context, version: &glow::Version) -> String {
+    let (renderer, vendor, glsl) = unsafe {
+        (
+            gl.get_parameter_string(glow::RENDERER),
+            gl.get_parameter_string(glow::VENDOR),
+            gl.get_parameter_string(glow::SHADING_LANGUAGE_VERSION),
+        )
+    };
+    let profile = if version.is_embedded {
+        "OpenGL ES"
+    } else {
+        "OpenGL"
+    };
+    format!(
+        "{profile} {}.{} ({}), GLSL {glsl}, {renderer} by {vendor}",
+        version.major, version.minor, version.vendor_info
+    )
 }

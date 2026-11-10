@@ -697,3 +697,51 @@ fn kit_an_arrays_layers_are_whole_chains_apart() {
         Some(pixels[21844 + 16384..].as_ptr())
     );
 }
+
+/// Game Shaders say what they left out: what the renderer noted, the
+/// materials not translated, and the context; and nothing when nothing was.
+#[test]
+fn game_shaders_say_what_they_left_out() {
+    use crate::app::model_preview::panel::game_shaders_note;
+    let materials = [
+        RenderModelPreviewMaterial {
+            shader_path: "shaders/a".to_owned(),
+            ..Default::default()
+        },
+        RenderModelPreviewMaterial {
+            shader_path: "shaders/b".to_owned(),
+            ..Default::default()
+        },
+    ];
+    let translated = [MaterialTextures::default(), MaterialTextures::default()];
+    assert_eq!(game_shaders_note(None, &translated, &materials), None);
+    assert_eq!(
+        game_shaders_note(
+            Some((Vec::new(), "OpenGL 4.6".to_owned())),
+            &translated,
+            &materials
+        ),
+        None,
+        "a context alone is not something left out"
+    );
+    let textures = [
+        MaterialTextures::default(),
+        MaterialTextures {
+            gen3_error: Some("no definition".to_owned()),
+            ..Default::default()
+        },
+    ];
+    let renderer = Some((
+        vec!["the scene target was not made: incomplete".to_owned()],
+        "OpenGL 3.3".to_owned(),
+    ));
+    let (summary, detail) = game_shaders_note(renderer, &textures, &materials).unwrap();
+    assert_eq!(summary, "Game Shaders incomplete — hover for why");
+    assert_eq!(
+        detail,
+        "the scene target was not made: incomplete\n\
+         1 of 2 materials not translated, drawn as with Game Shaders off:\n\
+         shaders/b: no definition\n\
+         Context: OpenGL 3.3"
+    );
+}

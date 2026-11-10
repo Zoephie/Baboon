@@ -29,10 +29,11 @@ use std::rc::Rc;
 /// the pass targets, the frame copy, the gel, bloom and the self shadow. The
 /// core owns it, not a `Dx9Pipeline`, because Halo 3's shadow draws through it.
 pub(in crate::app::model_preview) struct Dx9Gl {
-    /// Linked pass programs. `None` records a failure, so it is not retried
-    /// every frame and the material keeps drawing as it did.
+    /// Linked pass programs. An error records a failure, so it is not
+    /// retried every frame and the material keeps drawing as it did, and the
+    /// panel can say why.
     pub(in crate::app::model_preview) pass_programs:
-        HashMap<(Dx9VertexStage, String), Option<Rc<Linked>>>,
+        HashMap<(Dx9VertexStage, String), Result<Rc<Linked>, String>>,
     pub(in crate::app::model_preview) normalization_cube: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) texaccum_target: Option<SceneTarget>,
     pub(in crate::app::model_preview) frame_copy: Option<SceneTarget>,
@@ -326,7 +327,7 @@ impl RenderCore {
                 self.dx9
                     .pass_programs
                     .get(&(pass.stage, pass.fragment.clone()))
-                    .is_some_and(Option::is_some)
+                    .is_some_and(Result::is_ok)
             })
     }
 
@@ -348,19 +349,19 @@ impl RenderCore {
             .flat_map(|material| material.dx9_layers.iter().flatten());
         for pass in passes {
             let key = (pass.stage, pass.fragment.clone());
-            if self.dx9.pass_programs.contains_key(&key) {
-                continue;
+            if !self.dx9.pass_programs.contains_key(&key) {
+                let vertex = pass.stage.source(PASS_GLSL_VERSION);
+                let linked =
+                    unsafe { link_pass_program(gl, self.program, &vertex, &pass.fragment) };
+                let program = linked
+                    .map(|program| Rc::new(Linked::new(program)))
+                    .inspect_err(|error| eprintln!("model preview: {error}"));
+                self.dx9.pass_programs.insert(key.clone(), program);
             }
-            let vertex = pass.stage.source(PASS_GLSL_VERSION);
-            let linked = unsafe { link_pass_program(gl, self.program, &vertex, &pass.fragment) };
-            let program = match linked {
-                Ok(program) => Some(Rc::new(Linked::new(program))),
-                Err(error) => {
-                    eprintln!("model preview: {error}");
-                    None
-                }
-            };
-            self.dx9.pass_programs.insert(key, program);
+            if let Some(Err(error)) = self.dx9.pass_programs.get(&key) {
+                let note = format!("a pass did not link: {error}");
+                self.note(note);
+            }
         }
     }
 
@@ -396,7 +397,11 @@ impl RenderCore {
                 if let Some(old) = self.dx9.texaccum_target.take() {
                     old.delete(gl);
                 }
-                self.dx9.texaccum_target = SceneTarget::new(gl, size[0], size[1]);
+                self.dx9.texaccum_target = SceneTarget::new(gl, size[0], size[1])
+                    .map_err(|error| {
+                        self.note(format!("the texaccum target was not made: {error}"))
+                    })
+                    .ok();
             }
             if let Some(target) = &self.dx9.texaccum_target {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
@@ -458,7 +463,9 @@ impl RenderCore {
                 if let Some(old) = self.dx9.frame_copy.take() {
                     old.delete(gl);
                 }
-                self.dx9.frame_copy = SceneTarget::new(gl, width, height);
+                self.dx9.frame_copy = SceneTarget::new(gl, width, height)
+                    .map_err(|error| self.note(format!("the frame copy was not made: {error}")))
+                    .ok();
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             }
             if let Some(copy) = &self.dx9.frame_copy {
@@ -529,7 +536,7 @@ impl RenderCore {
                     continue;
                 }
                 let key = (pass.stage, pass.fragment.clone());
-                let Some(Some(program)) = self.dx9.pass_programs.get(&key).cloned() else {
+                let Some(Ok(program)) = self.dx9.pass_programs.get(&key).cloned() else {
                     continue;
                 };
                 drew = true;

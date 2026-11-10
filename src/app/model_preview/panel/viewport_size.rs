@@ -5,7 +5,7 @@ use super::super::super::ui_kit::style::{
 };
 use super::super::{
     MaterialTextures, ModelPreviewData, ModelPreviewState, RenderModelPreviewMaterial,
-    draw_model_viewport,
+    draw_model_viewport, model_gl_notes,
 };
 use super::section::MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
 use eframe::egui;
@@ -80,6 +80,68 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
             .label(RichText::new(summary).small().color(subtle_dark()))
             .on_hover_text(detail);
     }
+    // What Game Shaders left out, which otherwise only reaches a console a
+    // Windows release build does not have: the model just drew as with them
+    // off.
+    if state.game_shaders
+        && let Some((summary, detail)) = game_shaders_note(
+            model_gl_notes(data.geometry_id),
+            data.textures.as_deref().map_or(&[], Vec::as_slice),
+            &data.preview.materials,
+        )
+    {
+        footer
+            .label(
+                RichText::new(summary)
+                    .small()
+                    .color(footer.visuals().warn_fg_color),
+            )
+            .on_hover_text(detail);
+    }
+}
+
+/// A line saying Game Shaders left something out, and why, for hover: what
+/// the renderer noted while drawing (`renderer`, with the context it drew
+/// in) and the materials whose own shader was not translated. `None` when
+/// nothing was left out.
+pub(in crate::app::model_preview) fn game_shaders_note(
+    renderer: Option<(Vec<String>, String)>,
+    textures: &[MaterialTextures],
+    materials: &[RenderModelPreviewMaterial],
+) -> Option<(String, String)> {
+    let untranslated: Vec<String> = textures
+        .iter()
+        .enumerate()
+        .filter_map(|(index, texture)| {
+            let error = texture.gen3_error.as_ref()?;
+            let name = materials
+                .get(index)
+                .map(|material| material.shader_path.as_str())
+                .filter(|path| !path.is_empty())
+                .unwrap_or("(no shader)");
+            Some(format!("{name}: {error}"))
+        })
+        .collect();
+    let (notes, context) = renderer.unwrap_or_default();
+    if notes.is_empty() && untranslated.is_empty() {
+        return None;
+    }
+    let mut detail = notes;
+    if !untranslated.is_empty() {
+        detail.push(format!(
+            "{} of {} materials not translated, drawn as with Game Shaders off:",
+            untranslated.len(),
+            textures.len()
+        ));
+        detail.extend(untranslated);
+    }
+    if !context.is_empty() {
+        detail.push(format!("Context: {context}"));
+    }
+    Some((
+        "Game Shaders incomplete — hover for why".to_owned(),
+        detail.join("\n"),
+    ))
 }
 
 /// A line saying which materials resolved badly, and the reasons, for hover.
