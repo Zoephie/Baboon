@@ -27,6 +27,10 @@ pub(in crate::app::model_preview) const MODEL_SETUP_INLINE_HEADER_MIN_WIDTH: f32
 /// share the row under the title.
 pub(in crate::app::model_preview) const MODEL_SETUP_SHARED_CONTROLS_ROW_MIN_WIDTH: f32 = 400.0;
 
+/// The sidebar width from which its title and variant picker share one
+/// header row when there are no variant actions beside them.
+pub(in crate::app::model_preview) const MODEL_SETUP_INLINE_SELECTOR_MIN_WIDTH: f32 = 320.0;
+
 pub(in crate::app::model_preview) const MODEL_PREVIEW_SECTION_GAP: f32 = 8.0;
 
 pub(in crate::app::model_preview) fn draw_loading_section_body(ui: &mut Ui, height: f32) {
@@ -44,13 +48,16 @@ pub(in crate::app::model_preview) fn draw_loading_section_body(ui: &mut Ui, heig
 pub(in crate::app::model_preview) fn draw_model_preview_loading_shells(
     ui: &mut Ui,
     rects: &PanelRects,
+    setup_has_actions: bool,
 ) {
     let cards = [
         (rects.preview, "Model Preview", PREVIEW_HEADER_HEIGHT),
         (
             rects.setup,
             "Model Setup",
-            PREVIEW_HEADER_HEIGHT + model_setup_extra_header_height(rects.setup.width()) + 16.0,
+            PREVIEW_HEADER_HEIGHT
+                + model_setup_extra_header_height(rects.setup.width(), setup_has_actions)
+                + 16.0,
         ),
         (
             rects.animation,
@@ -61,11 +68,18 @@ pub(in crate::app::model_preview) fn draw_model_preview_loading_shells(
     for (rect, title, chrome) in cards {
         in_rect(ui, rect, title, |ui| {
             let body = (rect.height() - chrome).max(1.0);
-            draw_model_preview_section(ui, title, Some(body), |ui, part| {
-                if part == ModelPreviewSectionPart::Body {
-                    draw_loading_section_body(ui, body);
-                }
-            });
+            draw_section(
+                ui,
+                title,
+                Some(body),
+                None,
+                setup_has_actions,
+                |ui, part| {
+                    if part == ModelPreviewSectionPart::Body {
+                        draw_loading_section_body(ui, body);
+                    }
+                },
+            );
         });
     }
 }
@@ -102,6 +116,44 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
     title: &str,
     min_body_height: Option<f32>,
     header_wrap_width: Option<f32>,
+    add_contents: impl FnMut(&mut Ui, ModelPreviewSectionPart),
+) -> egui::Rect {
+    draw_section(
+        ui,
+        title,
+        min_body_height,
+        header_wrap_width,
+        true,
+        add_contents,
+    )
+}
+
+/// The Model Setup card, its header as tall as its controls need: the
+/// variant picker, with the variant actions when `has_actions`.
+pub(in crate::app::model_preview) fn draw_model_setup_section(
+    ui: &mut Ui,
+    has_actions: bool,
+    min_body_height: Option<f32>,
+    add_contents: impl FnMut(&mut Ui, ModelPreviewSectionPart),
+) -> egui::Rect {
+    draw_section(
+        ui,
+        "Model Setup",
+        min_body_height,
+        None,
+        has_actions,
+        add_contents,
+    )
+}
+
+/// A section card; a Model Setup card's header leaves room for the variant
+/// actions when `setup_has_actions`.
+fn draw_section(
+    ui: &mut Ui,
+    title: &str,
+    min_body_height: Option<f32>,
+    header_wrap_width: Option<f32>,
+    setup_has_actions: bool,
     mut add_contents: impl FnMut(&mut Ui, ModelPreviewSectionPart),
 ) -> egui::Rect {
     const RADIUS: f32 = 5.0;
@@ -122,7 +174,7 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
         let extra_header_height = if wrapped_bitmap_header {
             40.0
         } else if setup_header {
-            model_setup_extra_header_height(width)
+            model_setup_extra_header_height(width, setup_has_actions)
         } else if animation_header {
             animation_extra_header_height(width)
         } else {

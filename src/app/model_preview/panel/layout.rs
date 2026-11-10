@@ -14,10 +14,11 @@ use super::animation::{animation_card_height, draw_animation_player};
 use super::functions::draw_setup_body;
 use super::section::{
     MODEL_PREVIEW_SECTION_GAP, MODEL_PREVIEW_STATS_FOOTER_HEIGHT, ModelPreviewSectionPart,
-    draw_model_preview_loading_shells, draw_model_preview_section,
+    draw_model_preview_loading_shells, draw_model_preview_section, draw_model_setup_section,
 };
 use super::setup::{
     draw_model_setup_header_controls, draw_setup_header_actions, model_setup_extra_header_height,
+    setup_has_actions,
 };
 use super::view_menu::draw_model_view_settings_menu;
 use super::viewport_size::draw_model_viewport_with_stats;
@@ -69,7 +70,7 @@ pub(in crate::app) fn draw_model_preview_panel(
     let rects = panel_rects(page, *model_setup_width);
 
     if state.needs_preview_load(&entry.key) {
-        draw_model_preview_loading_shells(ui, &rects);
+        draw_model_preview_loading_shells(ui, &rects, setup_has_actions(entry.group_tag));
         return;
     }
 
@@ -282,12 +283,18 @@ pub(in crate::app::model_preview) fn draw_setup_card(
     rect: Rect,
 ) {
     let width = rect.width();
-    let body_height = setup_body_height(rect);
-    draw_model_preview_section(ui, "Model Setup", Some(body_height), |ui, part| {
+    let has_actions = setup_has_actions(panel.entry.group_tag);
+    let body_height = setup_body_height(rect, has_actions);
+    draw_model_setup_section(ui, has_actions, Some(body_height), |ui, part| {
         if part == ModelPreviewSectionPart::Header {
-            draw_model_setup_header_controls(ui, width, panel.data, state, |ui, state| {
-                draw_setup_header_actions(ui, panel, state, edit, requests)
-            });
+            draw_model_setup_header_controls(
+                ui,
+                width,
+                has_actions,
+                panel.data,
+                state,
+                |ui, state| draw_setup_header_actions(ui, panel, state, edit, requests),
+            );
         } else {
             crate::app::ScrollArea::vertical()
                 .id_salt("model_setup_body")
@@ -298,10 +305,10 @@ pub(in crate::app::model_preview) fn draw_setup_card(
     });
 }
 
-/// The sidebar body's inner height in `rect`: less its header and its
-/// 8-point margins.
-pub(in crate::app::model_preview) fn setup_body_height(rect: Rect) -> f32 {
-    let header = PREVIEW_HEADER_HEIGHT + model_setup_extra_header_height(rect.width());
+/// The sidebar body's inner height in `rect`: less its header, with the
+/// variant actions or without (`has_actions`), and its 8-point margins.
+pub(in crate::app::model_preview) fn setup_body_height(rect: Rect, has_actions: bool) -> f32 {
+    let header = PREVIEW_HEADER_HEIGHT + model_setup_extra_header_height(rect.width(), has_actions);
     (rect.height() - header - 16.0).max(1.0)
 }
 

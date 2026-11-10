@@ -169,13 +169,82 @@ fn bitmap_header_moves_actions_to_a_second_row_below_its_wrap_width() {
 
 #[test]
 fn model_setup_header_wraps_only_when_controls_need_room() {
-    assert_eq!(model_setup_extra_header_height(399.0), 64.0);
-    assert_eq!(model_setup_extra_header_height(400.0), 32.0);
+    assert_eq!(model_setup_extra_header_height(399.0, true), 64.0);
+    assert_eq!(model_setup_extra_header_height(400.0, true), 32.0);
     assert_eq!(
-        model_setup_extra_header_height(559.0),
+        model_setup_extra_header_height(559.0, true),
         MODEL_SETUP_EXTRA_HEADER_HEIGHT
     );
-    assert_eq!(model_setup_extra_header_height(560.0), 0.0);
+    assert_eq!(model_setup_extra_header_height(560.0, true), 0.0);
+    // Without the variant actions there is no third row to leave room for.
+    assert_eq!(model_setup_extra_header_height(319.0, false), 32.0);
+    assert_eq!(model_setup_extra_header_height(320.0, false), 0.0);
+}
+
+/// An object's Model Setup header holds the variant picker alone: at every
+/// sidebar width the picker fills the header's last row and fits beside or
+/// under the title, so no empty row sits under it.
+#[test]
+fn model_setup_header_without_actions_leaves_no_empty_row() {
+    let data = model_preview_data(
+        String::new(),
+        String::new(),
+        RenderModelPreview::default(),
+        Vec::new(),
+    );
+    for width in [
+        MIN_MODEL_SETUP_WIDTH,
+        300.0,
+        319.0,
+        320.0,
+        399.0,
+        400.0,
+        900.0,
+    ] {
+        let context = egui::Context::default();
+        context.set_fonts(foundation_fonts());
+        context.set_global_style(foundation_style());
+        let mut state = ModelPreviewState::default();
+        let mut controls = egui::Rect::NOTHING;
+        let mut area = egui::Rect::NOTHING;
+        let _ = crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(width + 16.0, 400.0),
+                )),
+                ..Default::default()
+            },
+            |context| {
+                egui::CentralPanel::default().show(context, |ui| {
+                    ui.set_width(width);
+                    draw_model_setup_section(ui, false, None, |ui, part| {
+                        if part == ModelPreviewSectionPart::Header {
+                            area = ui.max_rect();
+                            draw_model_setup_header_controls(
+                                ui,
+                                width,
+                                false,
+                                &data,
+                                &mut state,
+                                |_, _| {},
+                            );
+                            controls = ui.min_rect();
+                        }
+                    });
+                });
+            },
+        );
+        assert!(
+            controls.right() <= area.right() + 1.0,
+            "width {width}: picker {controls:?} overflows {area:?}"
+        );
+        assert!(
+            (area.bottom() - controls.bottom()).abs() <= 4.0,
+            "width {width}: picker {controls:?} leaves room under it in {area:?}"
+        );
+    }
 }
 
 #[test]
@@ -236,6 +305,7 @@ fn model_setup_header_groups_stay_inside_their_card() {
                             draw_model_setup_header_controls(
                                 ui,
                                 width,
+                                true,
                                 &data,
                                 &mut state,
                                 |ui, _| {
@@ -697,7 +767,7 @@ fn cards_fill_their_rects_at_the_header_breakpoints() {
                             },
                         )
                     });
-                    let setup_body = setup_body_height(rects.setup);
+                    let setup_body = setup_body_height(rects.setup, true);
                     drawn[1] = in_rect(ui, rects.setup, "setup", |ui| {
                         draw_model_preview_section(
                             ui,
