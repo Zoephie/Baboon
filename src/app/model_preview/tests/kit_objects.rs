@@ -846,3 +846,116 @@ fn a_reach_object_whose_screen_effect_adds_noise_reads_the_composite_noise_map()
         "the composite's noise map"
     );
 }
+
+/// Without Game Shaders an object reads no effect and no function: of its
+/// features only what the plain draw shows stays (Halo 2's and later cloth,
+/// Halo CE's flags), with its geometry, held weapons and IK as they were.
+/// Each kit that is set checks an object whose features and functions do
+/// read with Game Shaders on, so the check cannot pass by reading nothing
+/// either way, and each kept feature reads both ways.
+#[test]
+fn without_game_shaders_an_object_reads_no_effects_or_functions() {
+    // Each object as its game, path, extension and group, and the feature the
+    // plain draw keeps of it, if any.
+    type Case = (GameId, &'static str, &'static str, &'static [u8; 4], Option<&'static str>);
+    let cases: [Case; 9] = [
+        (GameId::HaloCe, "vehicles\\warthog\\warthog", "vehicle", b"vehi", None),
+        (GameId::HaloCe, "weapons\\flag\\flag", "weapon", b"weap", Some("ce.flags")),
+        (GameId::Halo2, "objects\\vehicles\\warthog\\warthog", "vehicle", b"vehi", None),
+        (
+            GameId::Halo2,
+            "objects\\weapons\\multiplayer\\flag\\flag",
+            "weapon",
+            b"weap",
+            Some("cloth"),
+        ),
+        (GameId::Halo3, "objects\\vehicles\\warthog\\warthog", "vehicle", b"vehi", None),
+        (GameId::Halo3Odst, "objects\\vehicles\\warthog\\warthog", "vehicle", b"vehi", None),
+        (
+            GameId::HaloReach,
+            "objects\\vehicles\\human\\warthog\\warthog",
+            "vehicle",
+            b"vehi",
+            None,
+        ),
+        (
+            GameId::HaloReach,
+            "objects\\characters\\spartans\\spartans",
+            "biped",
+            b"bipd",
+            None,
+        ),
+        (
+            GameId::Halo4,
+            "objects\\vehicles\\human\\storm_warthog\\storm_warthog",
+            "vehicle",
+            b"vehi",
+            None,
+        ),
+    ];
+    let filled = |data: &ModelPreviewData| {
+        let mut paths = Vec::new();
+        data.preview.each_feature(&mut |path, list| {
+            if !list.is_empty() {
+                paths.push(path);
+            }
+        });
+        paths
+    };
+    for (game, path, extension, group, kept) in cases {
+        let Some(root) = kit_root(game) else {
+            continue;
+        };
+        let load = |game_shaders| {
+            let settings = PreviewLoadSettings {
+                game_shaders,
+                ..Default::default()
+            };
+            kit_preview_with(&root, game, path, extension, group, &settings)
+        };
+        let (on, off) = (load(true), load(false));
+        let what = format!("{game:?} {path}");
+        let on_filled = filled(&on);
+        match kept {
+            // What the plain draw keeps reads both ways.
+            Some(kept) => assert!(on_filled.contains(&kept), "{what}: no {kept} to keep"),
+            // An object with effects and functions, which only Game Shaders read.
+            None => {
+                assert!(
+                    !on_filled.is_empty(),
+                    "{what}: no feature reads with Game Shaders on either, so this checks nothing"
+                );
+                assert!(
+                    on.object_functions.is_some() || on.ce.functions.is_some(),
+                    "{what}: no functions read with Game Shaders on either"
+                );
+            }
+        }
+        assert_eq!(
+            filled(&off),
+            kept.into_iter().collect::<Vec<_>>(),
+            "{what}: what reads without Game Shaders"
+        );
+        assert!(off.object_functions.is_none() && off.ce.functions.is_none(), "{what}");
+        let none = format!(
+            "{:?}",
+            crate::app::model_preview::functions::ObjectFunctions::default()
+        );
+        assert!(
+            off.attached
+                .iter()
+                .all(|held| format!("{:?}", held.functions) == none),
+            "{what}: a held object's functions"
+        );
+        assert!(off.ce.attached.iter().all(|held| held.functions.is_none()), "{what}");
+        assert_eq!(off.preview.vertices.len(), on.preview.vertices.len(), "{what}");
+        assert_eq!(off.preview.batches.len(), on.preview.batches.len(), "{what}");
+        assert_eq!(off.attached.len(), on.attached.len(), "{what}");
+        assert_eq!(
+            off.preview.gen3.ik_markers.len(),
+            on.preview.gen3.ik_markers.len(),
+            "{what}"
+        );
+        assert_eq!(off.preview.weapon_ik.len(), on.preview.weapon_ik.len(), "{what}");
+    }
+}

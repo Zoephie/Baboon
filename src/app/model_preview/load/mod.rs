@@ -53,7 +53,7 @@ pub(super) fn load_model_preview(
     settings: &PreviewLoadSettings,
 ) -> Result<ModelPreviewData, String> {
     // One load, one reader: what it reads is read once, and dropped with it.
-    let reader = source.map(TagReader::new);
+    let reader = source.map(|source| TagReader::with_game_shaders(source, settings.game_shaders));
     let reader = reader.as_ref();
     let mut data = load_tag_preview(model_tag, entry, names, reader, settings)?;
     let generation = blam_tags::game::Game::of(model_tag);

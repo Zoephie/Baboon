@@ -1,7 +1,7 @@
 //! The panel's controls for a Halo CE object's functions and effects.
 
 use super::super::load::{ObjectControls, SectionControls};
-use super::super::panel::{carry_through_weapon_change, weapon_dropdown};
+use super::super::panel::{carry_through_reload, weapon_dropdown};
 use super::super::{ModelPreviewData, ModelPreviewState, frame};
 use crate::app::model_preview::ce::functions::{
     CeEventCounts, CeFunctionInputs, CeObjectFunctions, CeObjectKey, OUTPUTS, object_time,
@@ -347,7 +347,7 @@ pub(in crate::app::model_preview) fn draw_ce_weapon_picker(
     let salt = ("ce_weapon_picker", data.render_model_path.as_str());
     let chosen = weapon_dropdown(ui, "Weapon", salt, &options, held);
     if let Some(choice) = chosen.filter(|choice| *choice != state.weapon) {
-        carry_through_weapon_change(data, state);
+        carry_through_reload(data, state);
         state.weapon = choice;
     }
 }

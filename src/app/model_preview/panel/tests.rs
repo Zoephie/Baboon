@@ -1358,6 +1358,26 @@ fn sectioned_object() -> ModelPreviewData {
     data
 }
 
+/// Without Game Shaders the object's functions get no card, though it has
+/// some: only Game Shaders read them.
+#[test]
+fn the_functions_card_shows_with_game_shaders_alone() {
+    let data = sectioned_object();
+    let shown = |game_shaders| {
+        let mut state = ModelPreviewState {
+            game_shaders,
+            ..Default::default()
+        };
+        reset_model_preview_selection(&mut state, &data, None);
+        let mut body = SetupBody::new();
+        body.frame(&data, &mut state, Vec::new());
+        let texts = body.frame(&data, &mut state, Vec::new());
+        texts.iter().any(|(text, _)| text == "Object Functions")
+    };
+    assert!(shown(true));
+    assert!(!shown(false));
+}
+
 /// Each section shows only with something in it, and its Reset is enabled
 /// only once something in it is changed, and puts that back.
 #[test]
@@ -1369,7 +1389,11 @@ fn setup_sections_reset_what_they_hold_and_only_once_it_changed() {
         "Object Functions",
     ];
     let data = sectioned_object();
-    let mut state = ModelPreviewState::default();
+    // The Effects and Object Functions cards show with Game Shaders alone.
+    let mut state = ModelPreviewState {
+        game_shaders: true,
+        ..Default::default()
+    };
     reset_model_preview_selection(&mut state, &data, None);
     let mut body = SetupBody::new();
     body.frame(&data, &mut state, Vec::new());
@@ -1412,7 +1436,7 @@ fn setup_sections_reset_what_they_hold_and_only_once_it_changed() {
     assert_eq!(state.region_selections["body"].permutation, "base");
     assert_eq!(state.weapon, None);
     assert!(
-        state.weapon_carry.is_some(),
+        state.reload_carry.is_some(),
         "the selection rides the weapon's reload"
     );
     assert!(state.ce.function_inputs.is_empty());

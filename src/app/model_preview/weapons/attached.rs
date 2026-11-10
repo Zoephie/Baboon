@@ -46,6 +46,16 @@ pub(in crate::app::model_preview) fn fold_attached(
         stream.append_attached(preview, &attached, attached.vertices.len());
     }
     merge_attached(preview, attached, parent, child, owner, name);
+    // Its functions and change colors are Game Shaders' alone
+    // (`TagReader::game_shaders`): without, it has none, as the opened
+    // object has none.
+    if !reader.game_shaders() {
+        return Some(AttachedObject {
+            owner,
+            functions: Default::default(),
+            change_colors: change_colors_for(&Default::default(), variant),
+        });
+    }
     let functions = super::super::functions::read_object_functions(object, Some(model))?;
     // `object_set_initial_change_colors`: each object its own, from its own tag.
     let change_colors = change_colors_for(&read_change_colors(object), variant);

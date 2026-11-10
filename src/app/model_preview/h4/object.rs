@@ -44,11 +44,14 @@ pub(in crate::app::model_preview) fn read_h4_object_features(
     notes: &mut Vec<String>,
 ) {
     let preview = std::sync::Arc::make_mut(&mut data.preview);
-    preview.h4.bounding_sphere = super::object::read_h4_bounding_sphere(model_tag);
-    preview.h4.change_color_count = super::object::read_h4_change_color_count(model_tag);
-    preview.h4.camo = super::camo::H4Camo::read(reader).map(std::sync::Arc::new);
-    preview.h4.shield = super::shield::read_h4_shield(reader, model);
-    preview.h4.shadow_caster = super::shadow::h4_shadow_caster(model_tag);
+    // Game Shaders' alone (`TagReader::game_shaders`).
+    if reader.game_shaders() {
+        preview.h4.bounding_sphere = super::object::read_h4_bounding_sphere(model_tag);
+        preview.h4.change_color_count = super::object::read_h4_change_color_count(model_tag);
+        preview.h4.camo = super::camo::H4Camo::read(reader).map(std::sync::Arc::new);
+        preview.h4.shield = super::shield::read_h4_shield(reader, model);
+        preview.h4.shadow_caster = super::shadow::h4_shadow_caster(model_tag);
+    }
     // The unit's markers its IK sets and chains place.
     let own = |frame: &crate::app::model_preview::common::marker::MarkerFrame| {
         (frame.axes, frame.position)

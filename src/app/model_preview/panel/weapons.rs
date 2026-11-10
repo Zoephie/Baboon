@@ -110,13 +110,14 @@ pub(in crate::app::model_preview) fn weapon_dropdown(
     chosen
 }
 
-/// Note what should outlive the reload a weapon change makes.
-pub(in crate::app::model_preview) fn carry_through_weapon_change(
+/// Note what should outlive the reload a weapon change or the Game Shaders
+/// toggle makes.
+pub(in crate::app::model_preview) fn carry_through_reload(
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
 ) {
     state.remember_selection();
-    state.weapon_carry = Some((data.geometry_id, state.region_selections.clone()));
+    state.reload_carry = Some((data.geometry_id, state.region_selections.clone()));
 }
 
 /// A Halo 2 unit's two hands. The left only opens for what can pair, and
@@ -141,7 +142,7 @@ pub(in crate::app::model_preview) fn draw_unit_weapon_pickers(
     if let Some(choice) = weapon_dropdown(ui, "Primary", salt, &primaries, held)
         .filter(|choice| *choice != state.weapon)
     {
-        carry_through_weapon_change(data, state);
+        carry_through_reload(data, state);
         let pairs = weapons.secondaries(choice.as_deref());
         if !pairs
             .iter()
@@ -162,7 +163,7 @@ pub(in crate::app::model_preview) fn draw_unit_weapon_pickers(
     if let Some(choice) = weapon_dropdown(ui, "Secondary", salt, &secondaries, held)
         .filter(|choice| *choice != state.secondary_weapon)
     {
-        carry_through_weapon_change(data, state);
+        carry_through_reload(data, state);
         state.secondary_weapon = choice;
     }
 }

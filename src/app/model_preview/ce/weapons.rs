@@ -400,8 +400,14 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
             attach_to,
         ));
     }
-    let lights = super::lights::read_attached_lights(reader, &weapon, 1, &attached, parent, child);
-    preview.ce.lights.extend(lights);
+    // Its lights, functions and change colors are Game Shaders' alone
+    // (`TagReader::game_shaders`).
+    let game_shaders = reader.game_shaders();
+    if game_shaders {
+        let lights =
+            super::lights::read_attached_lights(reader, &weapon, 1, &attached, parent, child);
+        preview.ce.lights.extend(lights);
+    }
     let markers = attached
         .markers
         .iter()
@@ -420,8 +426,14 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
         name,
         path: path.to_owned(),
         markers,
-        functions: read_ce_object_functions(&weapon),
-        change_colors: read_change_colors(&weapon),
+        functions: game_shaders
+            .then(|| read_ce_object_functions(&weapon))
+            .flatten(),
+        change_colors: if game_shaders {
+            read_change_colors(&weapon)
+        } else {
+            Default::default()
+        },
     })
 }
 

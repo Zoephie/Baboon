@@ -194,7 +194,7 @@ impl Baboon {
 
 /// The load-affecting slice of [`ModelPreviewState`], snapshotted before the
 /// parse so the loader never holds the mutable state alongside it.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(in crate::app::model_preview) struct PreviewLoadSettings {
     pub(in crate::app::model_preview) campaign_evolved:
         super::super::campaign_evolved::CampaignEvolvedLoad,
@@ -207,6 +207,23 @@ pub(in crate::app::model_preview) struct PreviewLoadSettings {
     pub(in crate::app::model_preview) secondary_weapon: Option<String>,
     /// Halo 2 and later units: their weapons, when an earlier load found them.
     pub(in crate::app::model_preview) equippable: Option<Vec<super::super::weapons::Equippable>>,
+    /// What the load reads for: [`super::TagReader::game_shaders`].
+    pub(in crate::app::model_preview) game_shaders: bool,
+}
+
+/// A load of everything, Game Shaders' share too, as a test reads it.
+impl Default for PreviewLoadSettings {
+    fn default() -> Self {
+        Self {
+            campaign_evolved: Default::default(),
+            scenario_selection: Default::default(),
+            weapon: None,
+            ce: Default::default(),
+            secondary_weapon: None,
+            equippable: None,
+            game_shaders: true,
+        }
+    }
 }
 
 impl PreviewLoadSettings {
@@ -226,6 +243,7 @@ impl PreviewLoadSettings {
                 _ => None,
             },
             ce: super::super::ce::weapons::CeLoadSettings::of(state.data.as_ref()),
+            game_shaders: state.game_shaders,
         }
     }
 }
@@ -256,7 +274,8 @@ impl Baboon {
             && state.campaign_evolved.loaded_as_set()
             && state.loaded_scenario_selection == state.scenario_bsp_selection
             && state.loaded_weapon == state.weapon
-            && state.loaded_secondary_weapon == state.secondary_weapon;
+            && state.loaded_secondary_weapon == state.secondary_weapon
+            && state.loaded_game_shaders == state.game_shaders;
         if desired_matches && (state.data.is_some() || state.preview_load_id.is_some()) {
             return false;
         }
@@ -289,6 +308,7 @@ impl Baboon {
         state.loaded_scenario_selection = settings.scenario_selection.clone();
         state.loaded_weapon = settings.weapon.clone();
         state.loaded_secondary_weapon = settings.secondary_weapon.clone();
+        state.loaded_game_shaders = settings.game_shaders;
         state.preview_load_id = Some(request_id);
         state.remember_selection();
         state.data = None;
@@ -379,8 +399,9 @@ impl Baboon {
             });
             let variant = remembered.or_else(|| default_variant_index(data));
             reset_model_preview_selection(state, data, variant);
-            // A weapon change only swaps what the unit holds.
-            if let Some((geometry_id, regions)) = state.weapon_carry.take() {
+            // A weapon change only swaps what the unit holds; Game Shaders
+            // only what it reads.
+            if let Some((geometry_id, regions)) = state.reload_carry.take() {
                 for (region, selection) in regions {
                     if let Some(kept) = state.region_selections.get_mut(&region) {
                         *kept = selection;

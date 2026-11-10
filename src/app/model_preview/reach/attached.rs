@@ -28,6 +28,11 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<
         frame,
         name,
     } = *cx;
+    // Without Game Shaders, the cloth alone (`TagReader::game_shaders`).
+    if !reader.game_shaders() {
+        super::super::cloth::read_cloth(cx, preview, ClothGame::Reach, center);
+        return;
+    }
     let flares =
         super::super::gen3::effects::flares::read_h3_flares(reader, object, owner, markers, frame);
     preview.gen3.flares.extend(named(flares, name));

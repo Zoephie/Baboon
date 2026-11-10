@@ -26,16 +26,36 @@ pub(in crate::app) struct TagReader {
     /// shader editor's own caches keep them.
     definitions: RefCell<HashMap<String, Option<Arc<RenderMethodDefinition>>>>,
     options: RefCell<HashMap<String, Option<Arc<RenderMethodOption>>>>,
+    /// See [`TagReader::game_shaders`].
+    game_shaders: bool,
 }
 
 impl TagReader {
+    /// A reader for everything a preview reads, Game Shaders' share too.
     pub(in crate::app::model_preview) fn new(source: &TagSource) -> Self {
+        Self::with_game_shaders(source, true)
+    }
+
+    /// A reader for a preview with Game Shaders as `game_shaders` says.
+    pub(in crate::app::model_preview) fn with_game_shaders(
+        source: &TagSource,
+        game_shaders: bool,
+    ) -> Self {
         Self {
             source: source.clone(),
             read: RefCell::new(HashMap::new()),
             definitions: RefCell::new(HashMap::new()),
             options: RefCell::new(HashMap::new()),
+            game_shaders,
         }
+    }
+
+    /// Whether the preview reads for Game Shaders. Off, the readers leave out
+    /// what only they draw or drive: every effect, light, flare and widget,
+    /// and the objects' functions and change colors. Cloth, Halo CE's flags,
+    /// held weapons and IK still read, as the plain draw shows them.
+    pub(in crate::app::model_preview) fn game_shaders(&self) -> bool {
+        self.game_shaders
     }
 
     /// The kit's game's load rules.

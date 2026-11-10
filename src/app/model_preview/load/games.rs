@@ -159,9 +159,11 @@ pub(in crate::app::model_preview) fn read_extension_weapon_features<
 }
 
 /// What a model's game reads of its own once its preview is built: Halo
-/// 4's colour grading.
+/// 4's colour grading, for Game Shaders.
 pub(super) fn read_model_features(reader: Option<&TagReader>, data: &mut ModelPreviewData) {
-    if let Some(reader) = reader.filter(|reader| reader.source.game() == Some(GameId::Halo4)) {
+    if let Some(reader) = reader.filter(|reader| {
+        reader.game_shaders() && reader.source.game() == Some(GameId::Halo4)
+    }) {
         // Just built: no other handle shares it, so this does not copy.
         Arc::make_mut(&mut data.preview).h4.color_grading =
             super::super::h4::lighting::read_h4_color_grading(reader);
@@ -415,6 +417,9 @@ pub(in crate::app::model_preview) fn pad_vertex_streams(
     }
 }
 
+/// A material whose game resolves its own shaders, as `resolve_model_textures`
+/// asks: Halo 4's materials, Halo CE's shaders and Halo 2's `shad`. None for a
+/// render method, which the shared path resolves.
 pub(in crate::app::model_preview) fn resolve_own_shader(
     reader: &TagReader,
     shader: &TagFile,

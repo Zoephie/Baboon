@@ -13,11 +13,14 @@ pub(in crate::app::model_preview) fn read_reach_object_features(
     model: &TagFile,
     preview: &mut RenderModelPreview,
 ) {
-    preview.reach.shield = super::super::reach::shield::read_reach_shield(reader, model);
-    preview.reach.camo =
-        super::super::reach::camo::ReachCamo::read(reader).map(std::sync::Arc::new);
-    preview.reach.shadow_caster =
-        super::super::reach::shadow::reach_shadow_caster(model_tag, model);
+    // Game Shaders' alone (`TagReader::game_shaders`).
+    if reader.game_shaders() {
+        preview.reach.shield = super::super::reach::shield::read_reach_shield(reader, model);
+        preview.reach.camo =
+            super::super::reach::camo::ReachCamo::read(reader).map(std::sync::Arc::new);
+        preview.reach.shadow_caster =
+            super::super::reach::shadow::reach_shadow_caster(model_tag, model);
+    }
     let own = |frame: &crate::app::model_preview::common::marker::MarkerFrame| {
         (frame.axes, frame.position)
     };

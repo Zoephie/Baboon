@@ -13,7 +13,7 @@ mod viewport_size;
 #[cfg(test)]
 pub(in crate::app::model_preview) use viewport_size::{game_shaders_note, texture_resolve_note};
 mod weapons;
-pub(in crate::app::model_preview) use weapons::{carry_through_weapon_change, weapon_dropdown};
+pub(in crate::app::model_preview) use weapons::{carry_through_reload, weapon_dropdown};
 mod standalone;
 pub(in crate::app) use standalone::*;
 #[cfg(test)]
