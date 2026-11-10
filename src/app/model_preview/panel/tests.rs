@@ -17,8 +17,7 @@ use super::animation::{
     advance_playback_clock, animation_header_group, draw_animation_combo, frame_tick_xs,
 };
 use super::model_preview_supports_textures;
-use super::setup::{draw_model_setup_header_controls, model_setup_extra_header_height};
-use super::variants::draw_variant_controls;
+use super::variants::{draw_variant_controls, draw_variant_selector};
 use super::view_menu::{
     ModelViewCheckboxIcon, draw_marker_filter_field, draw_model_view_settings_menu,
     model_view_icon_checkbox, overlay_layer_available,
@@ -167,86 +166,101 @@ fn bitmap_header_moves_actions_to_a_second_row_below_its_wrap_width() {
     assert!(narrow_right > narrow_left + BUTTON_HEIGHT);
 }
 
+/// A sidebar card's header keeps its Reset at the right end of the title
+/// row; the variant picker and actions follow the title where they fit and
+/// take a row of their own under it where they do not, inside the card at
+/// every width.
 #[test]
-fn model_setup_header_wraps_only_when_controls_need_room() {
-    assert_eq!(model_setup_extra_header_height(399.0, true), 64.0);
-    assert_eq!(model_setup_extra_header_height(400.0, true), 32.0);
-    assert_eq!(
-        model_setup_extra_header_height(559.0, true),
-        MODEL_SETUP_EXTRA_HEADER_HEIGHT
-    );
-    assert_eq!(model_setup_extra_header_height(560.0, true), 0.0);
-    // Without the variant actions there is no third row to leave room for.
-    assert_eq!(model_setup_extra_header_height(319.0, false), 32.0);
-    assert_eq!(model_setup_extra_header_height(320.0, false), 0.0);
-}
-
-/// An object's Model Setup header holds the variant picker alone: at every
-/// sidebar width the picker fills the header's last row and fits beside or
-/// under the title, so no empty row sits under it.
-#[test]
-fn model_setup_header_without_actions_leaves_no_empty_row() {
+fn setup_card_header_wraps_its_controls_under_the_title_when_narrow() {
+    use crate::app::editor::fields::{BoxPart, draw_foundation_box};
     let data = model_preview_data(
         String::new(),
         String::new(),
         RenderModelPreview::default(),
         Vec::new(),
     );
-    for width in [
-        MIN_MODEL_SETUP_WIDTH,
-        300.0,
-        319.0,
-        320.0,
-        399.0,
-        400.0,
-        900.0,
-    ] {
+    let mut wrapped_at = Vec::new();
+    for width in [MIN_MODEL_SETUP_WIDTH, 300.0, 360.0, 520.0, 900.0] {
         let context = egui::Context::default();
         context.set_fonts(foundation_fonts());
         context.set_global_style(foundation_style());
         let mut state = ModelPreviewState::default();
-        let mut controls = egui::Rect::NOTHING;
-        let mut area = egui::Rect::NOTHING;
-        let _ = crate::app::run_ui_test(
-            &context,
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    Vec2::new(width + 16.0, 400.0),
-                )),
-                ..Default::default()
-            },
-            |context| {
-                egui::CentralPanel::default().show(context, |ui| {
-                    ui.set_width(width);
-                    draw_model_setup_section(ui, false, None, |ui, part| {
-                        if part == ModelPreviewSectionPart::Header {
-                            area = ui.max_rect();
-                            draw_model_setup_header_controls(
-                                ui,
-                                width,
-                                false,
-                                &data,
-                                &mut state,
-                                |_, _| {},
+        let (mut card, mut controls, mut reset) = (
+            egui::Rect::NOTHING,
+            egui::Rect::NOTHING,
+            egui::Rect::NOTHING,
+        );
+        // The header sizes its rows from the widths its controls drew at
+        // the frame before.
+        for _ in 0..3 {
+            let _ = crate::app::run_ui_test(
+                &context,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(width, 400.0),
+                    )),
+                    ..Default::default()
+                },
+                |context| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(context, |ui| {
+                            let top = ui.cursor().top();
+                            draw_foundation_box(ui, "Permutations".into(), "card", |ui, part| {
+                                match part {
+                                    BoxPart::Controls => {
+                                        draw_variant_selector(ui, &data, &mut state);
+                                        icon_text_dropdown_button(
+                                            ui,
+                                            ButtonIcon::Save,
+                                            "Save",
+                                            |_| {},
+                                        );
+                                        icon_text_button(ui, ButtonIcon::Garbage, "Delete", true);
+                                        controls = ui.min_rect();
+                                    }
+                                    BoxPart::Trailing => {
+                                        reset = ui.button("R").rect;
+                                    }
+                                    BoxPart::Body => {}
+                                }
+                            });
+                            card = egui::Rect::from_min_max(
+                                egui::pos2(0.0, top),
+                                egui::pos2(width, ui.min_rect().bottom()),
                             );
-                            controls = ui.min_rect();
-                        }
-                    });
-                });
-            },
+                        });
+                },
+            );
+        }
+        let title_row = reset.center().y;
+        assert!(
+            reset.right() <= card.right() - 7.0,
+            "width {width}: Reset {reset:?} in {card:?}"
         );
         assert!(
-            controls.right() <= area.right() + 1.0,
-            "width {width}: picker {controls:?} overflows {area:?}"
+            controls.right() <= card.right() + 1.0,
+            "width {width}: controls {controls:?} overflow {card:?}"
         );
         assert!(
-            (area.bottom() - controls.bottom()).abs() <= 4.0,
-            "width {width}: picker {controls:?} leaves room under it in {area:?}"
+            controls.right() <= reset.left() || controls.top() > reset.bottom(),
+            "width {width}: controls {controls:?} under Reset {reset:?}"
         );
+        if controls.center().y > title_row + 8.0 {
+            wrapped_at.push(width);
+        } else {
+            assert!(
+                (controls.center().y - title_row).abs() < 2.0,
+                "width {width}: {controls:?}"
+            );
+        }
     }
+    assert!(
+        wrapped_at.contains(&MIN_MODEL_SETUP_WIDTH) && !wrapped_at.contains(&900.0),
+        "wrapped at {wrapped_at:?}"
+    );
 }
-
 #[test]
 fn marker_filter_field_matches_button_height() {
     let context = egui::Context::default();
@@ -270,65 +284,6 @@ fn marker_filter_field_matches_button_height() {
             });
         },
     );
-}
-
-#[test]
-fn model_setup_header_groups_stay_inside_their_card() {
-    let data = model_preview_data(
-        String::new(),
-        String::new(),
-        RenderModelPreview::default(),
-        Vec::new(),
-    );
-    for width in [240.0, 300.0, 399.0, 400.0, 559.0, 560.0, 900.0] {
-        let context = egui::Context::default();
-        context.set_fonts(foundation_fonts());
-        context.set_global_style(foundation_style());
-        let mut state = ModelPreviewState::default();
-        let _ = crate::app::run_ui_test(
-            &context,
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    Vec2::new(width + 16.0, 400.0),
-                )),
-                ..Default::default()
-            },
-            |context| {
-                egui::CentralPanel::default().show(context, |ui| {
-                    ui.set_width(width);
-                    let mut actions_bounds = egui::Rect::NOTHING;
-                    let mut actions_area = egui::Rect::NOTHING;
-                    let card = draw_model_preview_section(ui, "Model Setup", None, |ui, part| {
-                        if part == ModelPreviewSectionPart::Header {
-                            actions_area = ui.max_rect();
-                            draw_model_setup_header_controls(
-                                ui,
-                                width,
-                                true,
-                                &data,
-                                &mut state,
-                                |ui, _| {
-                                    icon_text_dropdown_button(ui, ButtonIcon::Save, "Save", |_| {});
-                                    icon_text_button(ui, ButtonIcon::Garbage, "Delete", true);
-                                },
-                            );
-                            actions_bounds = ui.min_rect();
-                        }
-                    });
-                    assert!(
-                        actions_bounds.right() <= actions_area.right() + 1.0,
-                        "width {width}: controls {actions_bounds:?}, area {actions_area:?}"
-                    );
-                    assert!(
-                        actions_bounds.bottom() <= actions_area.bottom() + 1.0,
-                        "width {width}: controls {actions_bounds:?}, area {actions_area:?}"
-                    );
-                    assert!(card.width() <= width + 1.0);
-                });
-            },
-        );
-    }
 }
 
 #[test]
@@ -734,7 +689,7 @@ fn cards_fill_their_rects_at_the_header_breakpoints() {
         context.set_global_style(foundation_style());
         let page = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(page_width, 800.0));
         let rects = panel_rects(page, setup_width);
-        let mut drawn = [egui::Rect::NOTHING; 3];
+        let mut drawn = [egui::Rect::NOTHING; 2];
         let _ = crate::app::run_ui_test(
             &context,
             egui::RawInput {
@@ -767,25 +722,7 @@ fn cards_fill_their_rects_at_the_header_breakpoints() {
                             },
                         )
                     });
-                    let setup_body = setup_body_height(rects.setup, true);
-                    drawn[1] = in_rect(ui, rects.setup, "setup", |ui| {
-                        draw_model_preview_section(
-                            ui,
-                            "Model Setup",
-                            Some(setup_body),
-                            |ui, part| {
-                                if part == ModelPreviewSectionPart::Body {
-                                    crate::app::ScrollArea::vertical()
-                                        .auto_shrink([false, false])
-                                        .max_height(setup_body)
-                                        .show(ui, |ui| {
-                                            ui.set_min_height(setup_body * 2.0);
-                                        });
-                                }
-                            },
-                        )
-                    });
-                    drawn[2] = in_rect(ui, rects.animation, "animation", |ui| {
+                    drawn[1] = in_rect(ui, rects.animation, "animation", |ui| {
                         draw_model_preview_section(
                             ui,
                             "Animation Player",
@@ -796,10 +733,7 @@ fn cards_fill_their_rects_at_the_header_breakpoints() {
                 });
             },
         );
-        for (card, rect) in drawn
-            .iter()
-            .zip([rects.preview, rects.setup, rects.animation])
-        {
+        for (card, rect) in drawn.iter().zip([rects.preview, rects.animation]) {
             assert!(
                 (card.height() - rect.height()).abs() < 1.0
                     && (card.top() - rect.top()).abs() < 1.0,
@@ -1306,7 +1240,7 @@ fn menu_checkbox_glyphs_align_with_option_icons() {
     assert_eq!(glyph_x("Textured"), glyph_x("Folders"), "radio row inset");
 }
 
-/// The sidebar body, 360 points wide, drawn frame after frame.
+/// The sidebar's cards, 360 points wide, drawn frame after frame.
 struct SetupBody {
     context: egui::Context,
     time: f64,
@@ -1345,7 +1279,7 @@ impl SetupBody {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(context, |ui| {
-                        super::functions::draw_setup_body(ui, data, state)
+                        super::functions::draw_setup_body(ui, data, state, &mut |_, _| {})
                     });
             },
         );
@@ -1369,7 +1303,8 @@ impl SetupBody {
             .find(|(text, _)| text == title)
             .unwrap_or_else(|| panic!("no {title} section: {texts:?}"))
             .1;
-        egui::pos2(Self::WIDTH - ICON_BUTTON_SIZE.x / 2.0, row.center().y)
+        // Past the card's 8-point header padding.
+        egui::pos2(Self::WIDTH - 8.0 - ICON_BUTTON_SIZE.x / 2.0, row.center().y)
     }
 
     /// Whether the widget at `at` in the last frame was enabled. A pass

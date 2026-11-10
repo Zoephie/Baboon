@@ -1,4 +1,4 @@
-//! The model preview side panel: its layout, the setup card, the
+//! The model preview side panel: its layout, the setup cards, the
 //! animation player, the view menu and the viewport footer.
 
 mod layout;

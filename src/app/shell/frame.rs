@@ -5135,7 +5135,7 @@ mod tests {
         assert_eq!(refresh.len(), 1, "{:?}", h.painted);
         let refresh = refresh[0];
         let camera = rect_of(&h, "Camera")[0];
-        let setup = rect_of(&h, "Model Setup")[0];
+        let setup = rect_of(&h, "Permutations")[0];
         // The card's title, under the page's tab of the same name.
         let title = rect_of(&h, "Model Preview")
             .into_iter()
@@ -5143,6 +5143,11 @@ mod tests {
             .unwrap();
         assert!(refresh.right() < camera.left(), "refresh {refresh:?}, camera {camera:?}");
         assert!(refresh.right() < setup.left(), "in the sidebar: {refresh:?}");
+        // The sidebar's first card starts level with the viewport's card.
+        assert!(
+            (setup.center().y - title.center().y).abs() < 1.0,
+            "first card {setup:?}, viewport title {title:?}"
+        );
         assert!((refresh.center().y - title.center().y).abs() < 4.0, "not on the header row");
         let id = h.app.model.kits[h.app.model.active].id;
         let loaded = |h: &Harness| {
@@ -5165,28 +5170,29 @@ mod tests {
         let setup_title = |h: &Harness| {
             h.painted_rects
                 .iter()
-                .find(|(text, _)| text == "Model Setup")
+                .find(|(text, _)| text == "Permutations")
                 .map(|(_, rect)| *rect)
-                .expect("the sidebar's title")
+                .expect("the sidebar's first card's title")
         };
         assert_eq!(h.app.model.prefs.model_setup_width, DEFAULT_MODEL_SETUP_WIDTH);
         // Inside the sidebar's header: nothing changes.
         let title = setup_title(&h);
         drag(&mut h, title.center(), egui::vec2(-100.0, 0.0));
         assert_eq!(h.app.model.prefs.model_setup_width, DEFAULT_MODEL_SETUP_WIDTH);
-        // The gap left of the card (8 points of header padding, then the
+        // The gap left of the card (the title sits past 8 points of header
+        // padding and a 24-point toggle with its 4-point gap; then the
         // 8-point gap): wider by what it moved.
-        let edge = egui::pos2(title.left() - 12.0, title.center().y + 100.0);
+        let edge = egui::pos2(title.left() - 40.0, title.center().y + 100.0);
         drag(&mut h, edge, egui::vec2(-100.0, 0.0));
         let widened = h.app.model.prefs.model_setup_width;
         assert!((widened - (DEFAULT_MODEL_SETUP_WIDTH + 100.0)).abs() < 1.0, "{widened}");
         assert!((setup_title(&h).left() - (title.left() - 100.0)).abs() < 1.0);
         // Far to the right: no narrower than its least.
-        let edge = egui::pos2(setup_title(&h).left() - 12.0, edge.y);
+        let edge = egui::pos2(setup_title(&h).left() - 40.0, edge.y);
         drag(&mut h, edge, egui::vec2(2_000.0, 0.0));
         assert_eq!(h.app.model.prefs.model_setup_width, MIN_MODEL_SETUP_WIDTH);
         // Far to the left: the viewport keeps its least width.
-        let edge = egui::pos2(setup_title(&h).left() - 12.0, edge.y);
+        let edge = egui::pos2(setup_title(&h).left() - 40.0, edge.y);
         drag(&mut h, edge, egui::vec2(-3_000.0, 0.0));
         let widest = h.app.model.prefs.model_setup_width;
         assert!(widest > DEFAULT_MODEL_SETUP_WIDTH + 400.0, "{widest}");

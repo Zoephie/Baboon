@@ -1,39 +1,48 @@
-//! The Model Setup sidebar's body: its sections, each collapsible with a
-//! Reset in its header, and each shown only when the object has something
-//! for it.
+//! The Model Setup sidebar: a card per part of the object's setup, each
+//! collapsible with a Reset in its header, and each shown only when the
+//! object has something for it.
 
+use super::super::super::editor::fields::{BoxPart, draw_foundation_box};
 use super::super::super::ui_kit::button_icons::{ButtonIcon, icon_button};
-use super::super::super::ui_kit::style::text_dark;
+use super::super::super::ui_kit::style::foundation_block_text;
 use super::super::{
     ModelPreviewData, ModelPreviewState, ModelRegionSelection, compute_variant_selection,
     default_permutation, frame, is_model_physics_overlay_region, reset_model_preview_selection,
 };
 use super::setup::draw_scenario_setup;
-use super::variants::draw_variant_controls;
+use super::variants::{draw_variant_controls, draw_variant_selector};
 use super::weapons::{carry_through_weapon_change, draw_unit_weapon_pickers};
-use eframe::egui;
-use eframe::egui::{RichText, Ui};
+use eframe::egui::Ui;
 
-/// The sidebar's body: a scenario's BSPs, the permutations, the weapons,
-/// the effects and the object's functions.
+/// The sidebar's cards: a scenario's BSPs, the permutations (with the
+/// variant picker and `variant_actions` in its header), the weapons, the
+/// effects and the object's functions.
 pub(in crate::app::model_preview) fn draw_setup_body(
     ui: &mut Ui,
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
+    variant_actions: &mut dyn FnMut(&mut Ui, &mut ModelPreviewState),
 ) {
     let own = super::super::load::rules(data.preview.game).object_controls;
     if !data.scenario_bsps.is_empty() {
         let changed = !state.scenario_bsp_selection.is_empty();
-        if setup_section(ui, "Structure BSPs", changed, |ui| {
-            draw_scenario_setup(ui, data, state)
+        if setup_section(ui, "Structure BSPs", changed, |ui, part| {
+            if part == BoxPart::Body {
+                draw_scenario_setup(ui, data, state);
+            }
         }) {
             state.scenario_bsp_selection.clear();
         }
     }
     if has_permutations(data, state) {
         let changed = permutations_changed(data, state);
-        if setup_section(ui, "Permutations", changed, |ui| {
-            draw_variant_controls(ui, data, state)
+        if setup_section(ui, "Permutations", changed, |ui, part| match part {
+            BoxPart::Controls => {
+                draw_variant_selector(ui, data, state);
+                variant_actions(ui, state);
+            }
+            BoxPart::Body => draw_variant_controls(ui, data, state),
+            BoxPart::Trailing => {}
         }) {
             reset_model_preview_selection(state, data, state.selected_variant);
         }
@@ -44,10 +53,12 @@ pub(in crate::app::model_preview) fn draw_setup_body(
         .is_some_and(|weapons| !weapons.equippable.is_empty());
     if shared_weapons || (own.weapons.has)(data) {
         let changed = weapons_changed(state) || (own.weapons.changed)(data, state);
-        if setup_section(ui, "Weapons", changed, |ui| {
-            draw_unit_weapon_pickers(ui, data, state);
-            if (own.weapons.has)(data) {
-                (own.weapons.draw)(ui, data, state);
+        if setup_section(ui, "Weapons", changed, |ui, part| {
+            if part == BoxPart::Body {
+                draw_unit_weapon_pickers(ui, data, state);
+                if (own.weapons.has)(data) {
+                    (own.weapons.draw)(ui, data, state);
+                }
             }
         }) {
             reset_weapons(data, state);
@@ -64,15 +75,17 @@ pub(in crate::app::model_preview) fn draw_setup_body(
     super::super::functions::settle_event_effects(&events, key, &mut state.function_inputs);
     if !events.is_empty() || (own.effects.has)(data) {
         let changed = held_inputs(state, key, &events, true) || (own.effects.changed)(data, state);
-        if setup_section(ui, "Effects", changed, |ui| {
-            super::super::functions::draw_event_effects(
-                ui,
-                &events,
-                key,
-                &mut state.function_inputs,
-            );
-            if (own.effects.has)(data) {
-                (own.effects.draw)(ui, data, state);
+        if setup_section(ui, "Effects", changed, |ui, part| {
+            if part == BoxPart::Body {
+                super::super::functions::draw_event_effects(
+                    ui,
+                    &events,
+                    key,
+                    &mut state.function_inputs,
+                );
+                if (own.effects.has)(data) {
+                    (own.effects.draw)(ui, data, state);
+                }
             }
         }) {
             release_inputs(state, key, &events, true);
@@ -82,7 +95,10 @@ pub(in crate::app::model_preview) fn draw_setup_body(
     if !sliders.is_empty() || (own.functions.has)(data) {
         let changed =
             held_inputs(state, key, &events, false) || (own.functions.changed)(data, state);
-        if setup_section(ui, "Object Functions", changed, |ui| {
+        if setup_section(ui, "Object Functions", changed, |ui, part| {
+            if part != BoxPart::Body {
+                return;
+            }
             if let Some(functions) = data
                 .object_functions
                 .as_ref()
@@ -110,25 +126,37 @@ pub(in crate::app::model_preview) fn draw_setup_body(
     }
 }
 
-/// A section titled `title`, open until collapsed, with a Reset in its
-/// header that is enabled when `changed`. Whether Reset was pressed.
+/// A card titled `title`, boxed like a tag block and open until collapsed,
+/// with a Reset at the right of its header that is enabled when `changed`;
+/// `contents` draws its other header controls and its body. Whether Reset
+/// was pressed.
 pub(in crate::app::model_preview) fn setup_section(
     ui: &mut Ui,
     title: &str,
     changed: bool,
-    body: impl FnOnce(&mut Ui),
+    mut contents: impl FnMut(&mut Ui, BoxPart),
 ) -> bool {
-    let id = ui.make_persistent_id(("model_setup_section", title));
     let mut reset = false;
-    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
-        .show_header(ui, |ui| {
-            ui.label(RichText::new(title).strong().color(text_dark()));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let tooltip = format!("Reset {title}");
-                reset = icon_button(ui, ButtonIcon::Undo, &tooltip, changed, text_dark()).clicked();
-            });
-        })
-        .body(body);
+    let tooltip = format!("Reset {title}");
+    draw_foundation_box(
+        ui,
+        title.to_owned(),
+        ("model_setup_section", title),
+        |ui, part| {
+            if part == BoxPart::Trailing {
+                reset = icon_button(
+                    ui,
+                    ButtonIcon::Undo,
+                    &tooltip,
+                    changed,
+                    foundation_block_text(),
+                )
+                .clicked();
+            } else {
+                contents(ui, part);
+            }
+        },
+    );
     reset
 }
 

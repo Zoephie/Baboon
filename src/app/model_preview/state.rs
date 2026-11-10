@@ -219,10 +219,18 @@ impl ModelPreviewState {
     /// A state showing an empty preview of `entry_key` as loaded, for a test
     /// that draws the panel around it.
     pub(in crate::app) fn loaded_empty_for_test(entry_key: &str) -> Self {
+        // One region, so the sidebar has its Permutations card.
+        let preview = super::RenderModelPreview {
+            regions: vec![super::RenderModelPreviewRegion {
+                name: "body".into(),
+                permutations: vec!["base".into()],
+            }],
+            ..Default::default()
+        };
         let data = super::model_preview_data(
             entry_key.to_owned(),
             entry_key.to_owned(),
-            super::RenderModelPreview::default(),
+            preview,
             Vec::new(),
         );
         let mut state = Self {

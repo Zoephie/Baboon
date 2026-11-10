@@ -5,7 +5,6 @@ use super::super::super::ui_kit::style::{
     foundation_section_bar,
 };
 use super::layout::{PREVIEW_HEADER_HEIGHT, PanelRects, in_rect};
-use super::setup::model_setup_extra_header_height;
 use eframe::egui;
 use eframe::egui::{RichText, Sense, Stroke, Ui, Vec2};
 
@@ -17,20 +16,6 @@ pub(in crate::app) enum ModelPreviewSectionPart {
 
 pub(in crate::app::model_preview) const MODEL_PREVIEW_STATS_FOOTER_HEIGHT: f32 = 28.0;
 
-pub(in crate::app::model_preview) const MODEL_SETUP_EXTRA_HEADER_HEIGHT: f32 = 32.0;
-
-/// The sidebar width from which its title, variant picker and variant
-/// actions share one header row.
-pub(in crate::app::model_preview) const MODEL_SETUP_INLINE_HEADER_MIN_WIDTH: f32 = 560.0;
-
-/// The sidebar width from which the variant picker and the variant actions
-/// share the row under the title.
-pub(in crate::app::model_preview) const MODEL_SETUP_SHARED_CONTROLS_ROW_MIN_WIDTH: f32 = 400.0;
-
-/// The sidebar width from which its title and variant picker share one
-/// header row when there are no variant actions beside them.
-pub(in crate::app::model_preview) const MODEL_SETUP_INLINE_SELECTOR_MIN_WIDTH: f32 = 320.0;
-
 pub(in crate::app::model_preview) const MODEL_PREVIEW_SECTION_GAP: f32 = 8.0;
 
 pub(in crate::app::model_preview) fn draw_loading_section_body(ui: &mut Ui, height: f32) {
@@ -41,24 +26,20 @@ pub(in crate::app::model_preview) fn draw_loading_section_body(ui: &mut Ui, heig
     crate::app::shell::loading::paint_loading_rings(ui, rect);
 }
 
-/// Draw the panel's cards where they will be before any model parsing
+/// Draw the panel's cards, and loading rings where the sidebar's will be,
+/// before any model parsing
 /// begins. The post-pane worker hook starts the actual build after this
 /// frame, so a tab switch never has to wait for a complex render model or BSP
 /// to be walked.
 pub(in crate::app::model_preview) fn draw_model_preview_loading_shells(
     ui: &mut Ui,
     rects: &PanelRects,
-    setup_has_actions: bool,
 ) {
+    in_rect(ui, rects.setup, "model_setup_loading", |ui| {
+        draw_loading_section_body(ui, rects.setup.height());
+    });
     let cards = [
         (rects.preview, "Model Preview", PREVIEW_HEADER_HEIGHT),
-        (
-            rects.setup,
-            "Model Setup",
-            PREVIEW_HEADER_HEIGHT
-                + model_setup_extra_header_height(rects.setup.width(), setup_has_actions)
-                + 16.0,
-        ),
         (
             rects.animation,
             "Animation Player",
@@ -68,18 +49,11 @@ pub(in crate::app::model_preview) fn draw_model_preview_loading_shells(
     for (rect, title, chrome) in cards {
         in_rect(ui, rect, title, |ui| {
             let body = (rect.height() - chrome).max(1.0);
-            draw_section(
-                ui,
-                title,
-                Some(body),
-                None,
-                setup_has_actions,
-                |ui, part| {
-                    if part == ModelPreviewSectionPart::Body {
-                        draw_loading_section_body(ui, body);
-                    }
-                },
-            );
+            draw_model_preview_section(ui, title, Some(body), |ui, part| {
+                if part == ModelPreviewSectionPart::Body {
+                    draw_loading_section_body(ui, body);
+                }
+            });
         });
     }
 }
@@ -116,44 +90,6 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
     title: &str,
     min_body_height: Option<f32>,
     header_wrap_width: Option<f32>,
-    add_contents: impl FnMut(&mut Ui, ModelPreviewSectionPart),
-) -> egui::Rect {
-    draw_section(
-        ui,
-        title,
-        min_body_height,
-        header_wrap_width,
-        true,
-        add_contents,
-    )
-}
-
-/// The Model Setup card, its header as tall as its controls need: the
-/// variant picker, with the variant actions when `has_actions`.
-pub(in crate::app::model_preview) fn draw_model_setup_section(
-    ui: &mut Ui,
-    has_actions: bool,
-    min_body_height: Option<f32>,
-    add_contents: impl FnMut(&mut Ui, ModelPreviewSectionPart),
-) -> egui::Rect {
-    draw_section(
-        ui,
-        "Model Setup",
-        min_body_height,
-        None,
-        has_actions,
-        add_contents,
-    )
-}
-
-/// A section card; a Model Setup card's header leaves room for the variant
-/// actions when `setup_has_actions`.
-fn draw_section(
-    ui: &mut Ui,
-    title: &str,
-    min_body_height: Option<f32>,
-    header_wrap_width: Option<f32>,
-    setup_has_actions: bool,
     mut add_contents: impl FnMut(&mut Ui, ModelPreviewSectionPart),
 ) -> egui::Rect {
     const RADIUS: f32 = 5.0;
@@ -163,7 +99,6 @@ fn draw_section(
     // siblings in that outer row.
     ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
         let width = ui.available_width().max(1.0);
-        let setup_header = title == "Model Setup";
         let animation_header = title == "Animation Player";
         let bitmap_header = title == "Bitmap Preview";
         let wrapped_bitmap_header = bitmap_header
@@ -173,8 +108,6 @@ fn draw_section(
         let edge_to_edge = matches!(title, "Model Preview" | "Bitmap Preview");
         let extra_header_height = if wrapped_bitmap_header {
             40.0
-        } else if setup_header {
-            model_setup_extra_header_height(width, setup_has_actions)
         } else if animation_header {
             animation_extra_header_height(width)
         } else {
@@ -223,7 +156,7 @@ fn draw_section(
                 ),
                 header_content_rect.max,
             )
-        } else if setup_header || animation_header {
+        } else if animation_header {
             let title_width = ui
                 .painter()
                 .layout_no_wrap(title.to_owned(), bold_font(12.5), foundation_block_text())
@@ -245,7 +178,7 @@ fn draw_section(
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
                 add_contents(ui, ModelPreviewSectionPart::Header);
             });
-        } else if setup_header || animation_header || bitmap_header {
+        } else if animation_header || bitmap_header {
             actions_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 add_contents(ui, ModelPreviewSectionPart::Header);

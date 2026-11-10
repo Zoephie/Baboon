@@ -14,12 +14,9 @@ use super::animation::{animation_card_height, draw_animation_player};
 use super::functions::draw_setup_body;
 use super::section::{
     MODEL_PREVIEW_SECTION_GAP, MODEL_PREVIEW_STATS_FOOTER_HEIGHT, ModelPreviewSectionPart,
-    draw_model_preview_loading_shells, draw_model_preview_section, draw_model_setup_section,
+    draw_model_preview_loading_shells, draw_model_preview_section,
 };
-use super::setup::{
-    draw_model_setup_header_controls, draw_setup_header_actions, model_setup_extra_header_height,
-    setup_has_actions,
-};
+use super::setup::draw_setup_header_actions;
 use super::view_menu::draw_model_view_settings_menu;
 use super::viewport_size::draw_model_viewport_with_stats;
 use blam_tags::TagFile;
@@ -70,7 +67,7 @@ pub(in crate::app) fn draw_model_preview_panel(
     let rects = panel_rects(page, *model_setup_width);
 
     if state.needs_preview_load(&entry.key) {
-        draw_model_preview_loading_shells(ui, &rects, setup_has_actions(entry.group_tag));
+        draw_model_preview_loading_shells(ui, &rects);
         return;
     }
 
@@ -107,8 +104,8 @@ pub(in crate::app) fn draw_model_preview_panel(
     in_rect(ui, rects.preview, "model_preview_viewport_card", |ui| {
         draw_preview_card(ui, &panel, state, &mut requests, rects.preview.height());
     });
-    in_rect(ui, rects.setup, "model_preview_setup_card", |ui| {
-        draw_setup_card(ui, &panel, state, edit, &mut requests, rects.setup);
+    in_rect(ui, rects.setup, "model_preview_setup_cards", |ui| {
+        draw_setup_cards(ui, &panel, state, edit, &mut requests);
     });
     in_rect(ui, rects.animation, "model_preview_animation_card", |ui| {
         draw_animation_player(ui, &panel, state);
@@ -272,44 +269,26 @@ pub(in crate::app::model_preview) fn draw_preview_card(
 /// The Model Preview card's header height: one row.
 pub(in crate::app::model_preview) const PREVIEW_HEADER_HEIGHT: f32 = 40.0;
 
-/// The Model Setup sidebar in `rect`: the variant controls in its header,
-/// and its sections in a body that scrolls on its own.
-pub(in crate::app::model_preview) fn draw_setup_card(
+/// The Model Setup sidebar: its cards, scrolling together.
+pub(in crate::app::model_preview) fn draw_setup_cards(
     ui: &mut Ui,
     panel: &PreviewPanel<'_>,
     state: &mut ModelPreviewState,
     edit: &mut FieldEditContext<'_>,
     requests: &mut SetupRequests,
-    rect: Rect,
 ) {
-    let width = rect.width();
-    let has_actions = setup_has_actions(panel.entry.group_tag);
-    let body_height = setup_body_height(rect, has_actions);
-    draw_model_setup_section(ui, has_actions, Some(body_height), |ui, part| {
-        if part == ModelPreviewSectionPart::Header {
-            draw_model_setup_header_controls(
-                ui,
-                width,
-                has_actions,
-                panel.data,
-                state,
-                |ui, state| draw_setup_header_actions(ui, panel, state, edit, requests),
-            );
-        } else {
-            crate::app::ScrollArea::vertical()
-                .id_salt("model_setup_body")
-                .auto_shrink([false, false])
-                .max_height(body_height)
-                .show(ui, |ui| draw_setup_body(ui, panel.data, state));
-        }
-    });
-}
-
-/// The sidebar body's inner height in `rect`: less its header, with the
-/// variant actions or without (`has_actions`), and its 8-point margins.
-pub(in crate::app::model_preview) fn setup_body_height(rect: Rect, has_actions: bool) -> f32 {
-    let header = PREVIEW_HEADER_HEIGHT + model_setup_extra_header_height(rect.width(), has_actions);
-    (rect.height() - header - 16.0).max(1.0)
+    crate::app::ScrollArea::vertical()
+        .id_salt("model_setup_body")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            // A card leaves 8 points above it for what came before; the
+            // first has nothing before it, and starts level with the
+            // viewport's card.
+            ui.add_space(-(8.0 - ui.spacing().item_spacing.y).max(0.0));
+            draw_setup_body(ui, panel.data, state, &mut |ui, state| {
+                draw_setup_header_actions(ui, panel, state, edit, requests)
+            })
+        });
 }
 
 /// The Model Preview card's header, right to left: the view settings menu,
