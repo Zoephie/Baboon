@@ -1132,7 +1132,7 @@ mod tests {
                     let mut style = foundation_style();
                     style.visuals = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
                     ctx.set_global_style(style);
-                    let id = egui::Id::new("shared_input");
+                    let id = egui::Id::unique("shared_input");
                     let mut standard_rect = egui::Rect::NOTHING;
                     let mut tag_rect = egui::Rect::NOTHING;
                     let mut expected_stroke = Stroke::NONE;
@@ -1143,7 +1143,7 @@ mod tests {
                             .desired_width(180.0).validation_state(state)).rect;
                         let (_, rect) = ui.allocate_space(standard_rect.size());
                         tag_rect = rect;
-                        let tag_id = egui::Id::new("shared_tag_input");
+                        let tag_id = egui::Id::unique("shared_tag_input");
                         if focused { ui.memory_mut(|memory| memory.request_focus(tag_id)); }
                         let fill = match state {
                             InputState::Normal => None,
@@ -1187,7 +1187,7 @@ mod tests {
             for (value, editable, opacity) in [("readonlyvalue", false, 1.0), ("editablevalue", true, 1.0), ("nestedreadonly", false, 0.5)] {
                 ui.set_opacity(opacity);
                 let mut text = value.to_owned();
-                foundation_value_cell(ui, &mut text, 120.0, egui::Id::new(value), editable);
+                foundation_value_cell(ui, &mut text, 120.0, egui::Id::unique(value), editable);
             }
             ui.set_opacity(1.0);
             foundation_input_cell(ui, "displayedvalue", 120.0);
@@ -1229,7 +1229,7 @@ mod tests {
                             ui,
                             &mut value,
                             320.0,
-                            egui::Id::new("reference"),
+                            egui::Id::unique("reference"),
                             icon,
                             false,
                             None,
@@ -1284,7 +1284,7 @@ mod tests {
                             ui,
                             &mut text,
                             120.0,
-                            egui::Id::new("read-only value"),
+                            egui::Id::unique("read-only value"),
                             false,
                         );
                         assert_eq!(text, value);
@@ -1694,7 +1694,7 @@ mod tests {
                         let text = texts.get_mut(name).unwrap();
                         let response = ui.add(
                             crate::app::ui_kit::singleline_text_edit(text)
-                                .id(egui::Id::new(name))
+                                .id(egui::Id::unique(name))
                                 .desired_width(200.0),
                         );
                         if name == "a" && lost_focus_once(&response) {
@@ -1799,7 +1799,7 @@ mod tests {
                             ui.label(format!("row {row}"));
                         }
                     });
-                    *offset = output.state.offset.y;
+                    *offset = output.state.clamped_offset().y;
                 });
             });
         };
@@ -1817,7 +1817,7 @@ mod tests {
         }
         for _ in 0..10 {
             frame(
-                if edge { Vec::new() } else { vec![egui::Event::MouseWheel {
+                if edge { Vec::new() } else { vec![egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown,
                     unit: egui::MouseWheelUnit::Point,
                     delta: egui::vec2(0.0, -40.0),
                     phase: egui::TouchPhase::Move,
@@ -1872,7 +1872,7 @@ pub(in crate::app) fn draw_flag_option(
     );
     let enabled = enabled && ui.is_enabled();
     let response = ui.interact(row, id, if enabled { Sense::click() } else { Sense::hover() });
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, checked, label));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, enabled, checked, label));
     if response.hovered() {
         ui.painter().rect_filled(row, 0.0, foundation_flag_hover());
         response.clone().on_hover_text(match help {

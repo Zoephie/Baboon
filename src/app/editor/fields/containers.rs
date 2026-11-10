@@ -1963,13 +1963,13 @@ pub(super) fn breadcrumb_for_path(path: &str) -> String {
 /// egui-memory key holding the block path that a pending "jump to parent" should
 /// scroll into view on the next frame.
 pub(in crate::app) fn jump_target_id() -> egui::Id {
-    egui::Id::new("foundation_jump_to_block")
+    egui::Id::unique("foundation_jump_to_block")
 }
 
 /// A parent or index-reference jump belongs to the exact tag pane that initiated it. Matching
 /// block paths in another pane or editing kit must never consume this request.
 pub(in crate::app) fn parent_block_jump_id(view_scope: &str, tag_key: &str) -> egui::Id {
-    egui::Id::new(("foundation_parent_block_jump", view_scope, tag_key))
+    egui::Id::unique(("foundation_parent_block_jump", view_scope, tag_key))
 }
 
 const BLOCK_JUMP_SCROLL_LEAD: f32 = 80.0;
@@ -2022,7 +2022,7 @@ fn block_jump_opens_path(target: &str, candidate: &str) -> bool {
 /// reference-jump should scroll into view and pulse on the next frame. Consumed
 /// by [`draw_field`] when it draws the matching leaf.
 pub(in crate::app) fn field_jump_target_id() -> egui::Id {
-    egui::Id::new("foundation_jump_to_field")
+    egui::Id::unique("foundation_jump_to_field")
 }
 
 /// Whether the block clipboard can paste into the block/array whose header is
@@ -2715,7 +2715,7 @@ pub(in crate::app) const COMBO_POPUP_MAX_HEIGHT: f32 = 420.0;
 /// That distinguishes "just opened" from "still open" without threading state
 /// through any of the call sites.
 pub(in crate::app) fn combo_popup_just_opened(ui: &Ui) -> bool {
-    let id = ui.id().with("combo_popup_last_pass");
+    let id = ui.scope_id().with("combo_popup_last_pass");
     let now = ui.ctx().cumulative_pass_nr();
     let last = ui.data(|data| data.get_temp::<u64>(id));
     ui.data_mut(|data| data.insert_temp(id, now));
@@ -2938,7 +2938,7 @@ struct WheelGesture {
 const WHEEL_GESTURE_GAP: f64 = 0.25;
 
 fn wheel_gesture_id() -> egui::Id {
-    egui::Id::new("wheel_gesture")
+    egui::Id::unique("wheel_gesture")
 }
 
 fn wheel_is_turning(ctx: &egui::Context) -> bool {
@@ -3023,7 +3023,7 @@ pub(in crate::app) fn set_zoom_speed(ctx: &egui::Context, zoom_speed: f32) {
 }
 
 fn zoom_speed_id() -> egui::Id {
-    egui::Id::new("viewport_zoom_speed")
+    egui::Id::unique("viewport_zoom_speed")
 }
 
 /// Whether `id` may act on this frame's wheel events.
@@ -3070,7 +3070,7 @@ fn wheel_event_delta_from_context(ctx: &egui::Context) -> i32 {
 }
 
 fn combo_scroll_cycle_enabled_id() -> egui::Id {
-    egui::Id::new("combo_scroll_cycle_enabled")
+    egui::Id::unique("combo_scroll_cycle_enabled")
 }
 
 pub(in crate::app) fn foundation_header_toggle_cell(
@@ -3383,7 +3383,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
             go_to.on_disabled_hover_text("No referenced element (index is <none>)")
         };
         #[cfg(test)]
-        ui.data_mut(|data| data.insert_temp(egui::Id::new((
+        ui.data_mut(|data| data.insert_temp(egui::Id::unique((
             "block_index_jump_test", edit.tag_key, strip_field_ordinals(path),
         )), go_to.rect));
         if go_to.clicked() {
@@ -3888,7 +3888,7 @@ mod tests {
             let ctx = egui::Context::default();
             ctx.set_fonts(foundation_fonts());
             ctx.set_global_style(foundation_style());
-            let popup_id = egui::Id::new("reference_picker_width");
+            let popup_id = egui::Id::unique("reference_picker_width");
             let mut button_rect = egui::Rect::NOTHING;
             egui::Popup::open_id(&ctx, popup_id);
             for query in ["", "missing", ""] {
@@ -3993,7 +3993,7 @@ mod tests {
         ctx.set_fonts(foundation_fonts());
         ctx.set_global_style(foundation_style());
         install_focus_outlines(&ctx);
-        let popup_id = egui::Id::new("test_block_search_resize");
+        let popup_id = egui::Id::unique("test_block_search_resize");
         let frame = |events| {
             let mut response = None;
             let _ = crate::app::run_ui_test(&ctx, 
@@ -4090,7 +4090,7 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.set_fonts(foundation_fonts());
         ctx.set_global_style(foundation_style());
-        let popup_id = egui::Id::new("test_block_search");
+        let popup_id = egui::Id::unique("test_block_search");
         let labels_built = std::cell::Cell::new(0);
         let labels = ["0. minor", "1. major", "2. minor veteran"];
         let frame = |events| {
@@ -4758,7 +4758,7 @@ mod tests {
         let _ = crate::app::run_ui_test(
             &ctx,
             egui::RawInput {
-                events: vec![egui::Event::MouseWheel {
+                events: vec![egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown,
                     phase: egui::TouchPhase::Move,
                     unit: egui::MouseWheelUnit::Point,
                     delta: egui::Vec2::new(0.0, -4.0),
@@ -4793,7 +4793,7 @@ mod tests {
             let mut total = 0.0;
             for frame in 0..240 {
                 let events = if frame == 0 {
-                    vec![egui::Event::MouseWheel {
+                    vec![egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown,
                         phase: egui::TouchPhase::Move,
                         unit: egui::MouseWheelUnit::Line,
                         delta: egui::Vec2::new(0.0, -1.0),
@@ -4886,7 +4886,7 @@ mod tests {
             let at = before.1.center();
             frame(vec![egui::Event::PointerMoved(at)]);
             assert_ne!(ctx.layer_id_at(at), Some(before.2), "the menu covers the other dropdown");
-            let wheel = || egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point,
+            let wheel = || egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown, unit: egui::MouseWheelUnit::Point,
                 delta: Vec2::new(0.0, -40.0), modifiers: Default::default(), phase: egui::TouchPhase::Move };
             for _ in 0..6 { frame(vec![wheel()]); }
             let after = frame(vec![]);
@@ -4909,7 +4909,7 @@ mod tests {
         if wheel {
             // Trackpad-sized, so egui applies it this frame rather than
             // smoothing it over the next ones.
-            events.push(egui::Event::MouseWheel {
+            events.push(egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown,
                 phase: egui::TouchPhase::Move,
                 unit: egui::MouseWheelUnit::Point,
                 delta: egui::Vec2::new(0.0, -4.0),
@@ -4948,7 +4948,7 @@ mod tests {
                                 egui::Sense::hover(),
                             );
                         });
-                        offset = output.state.offset.y;
+                        offset = output.state.clamped_offset().y;
                     });
                 end_wheel_gesture(ctx);
             },
@@ -5009,7 +5009,7 @@ mod tests {
     fn dropdown_frame(ctx: &egui::Context, wheel: bool, pointer: egui::Pos2, rect: egui::Rect) -> bool {
         let mut events = vec![egui::Event::PointerMoved(pointer)];
         if wheel {
-            events.push(egui::Event::MouseWheel {
+            events.push(egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown,
                 phase: egui::TouchPhase::Move,
                 unit: egui::MouseWheelUnit::Line,
                 delta: egui::Vec2::new(0.0, -1.0),
@@ -5295,7 +5295,7 @@ mod tests {
                                     draw_fields_with_docs(ui, &self.tag.root(), &TagNameIndex::default(), 0, false, "", edit, None);
                                 })
                                 .state
-                                .offset
+                                .clamped_offset()
                                 .y;
                             // Read in the pass: egui forgets widgets once it ends.
                             grip = ui.ctx().read_response(grip_id).map(|response| response.rect);
@@ -5431,7 +5431,7 @@ mod tests {
     /// over a box that shows all its text, it moves the pane.
     #[test]
     fn the_wheel_scrolls_a_text_box_or_the_pane_never_both() {
-        let wheel = |dy: f32| egui::Event::MouseWheel {
+        let wheel = |dy: f32| egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: egui::vec2(0.0, dy),
             modifiers: egui::Modifiers::NONE,

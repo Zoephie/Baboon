@@ -458,7 +458,7 @@ pub(in crate::app) fn draw_color_popup(
     let window_title = format!("Color Picker - {}", color.title);
     egui::Window::new("Color Picker")
         .constrain_to(window_work_area(ctx))
-        .id(egui::Id::new("material_color_picker"))
+        .id(egui::Id::unique("material_color_picker"))
         .title_bar(false)
         .collapsible(false)
         .movable(true)
@@ -1063,7 +1063,7 @@ pub(in crate::app) fn draw_custom_color_swatches(
         let rect = egui::Rect::from_min_size(min, Vec2::splat(COLOR_SWATCH_SIZE));
         let response = ui.interact(
             rect,
-            ui.id().with(("material_color_palette_swatch", index)),
+            ui.scope_id().with(("material_color_palette_swatch", index)),
             Sense::click(),
         );
         match custom_swatches[index].as_ref() {
@@ -1143,7 +1143,7 @@ fn draw_save_palette_format_dialog(
 ) {
     let mut open = true;
     egui::Window::new("Save Palette Format")
-        .id(egui::Id::new("save_palette_format_dialog"))
+        .id(egui::Id::unique("save_palette_format_dialog"))
         .title_bar(false)
         .collapsible(false)
         .movable(true)

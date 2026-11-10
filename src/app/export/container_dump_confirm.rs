@@ -28,7 +28,7 @@ impl Dialog for ContainerDumpConfirm {
             None => "Extract every shipped tag?",
         };
         egui::Window::new(title)
-            .id(egui::Id::new("container_dump_confirm"))
+            .id(egui::Id::unique("container_dump_confirm"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)

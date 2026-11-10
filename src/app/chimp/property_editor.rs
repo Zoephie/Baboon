@@ -2497,7 +2497,7 @@ mod tests {
             let mut draw = |ui: &mut egui::Ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
                     changed |=
-                        draw_chimp_value(ui, egui::Id::new("lone"), value, None, names, usmap, 0);
+                        draw_chimp_value(ui, egui::Id::unique("lone"), value, None, names, usmap, 0);
                 });
             };
             act(frames, &mut draw);

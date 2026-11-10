@@ -32,7 +32,7 @@ impl Dialog for TagReferencePickerWindow {
         let picker = &mut self.state;
         egui::Window::new("Select Tag Reference")
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new(
+            .id(egui::Id::unique(
                 "campaign_evolved_tag_reference_picker_window",
             ))
             .open(&mut open)
@@ -44,7 +44,7 @@ impl Dialog for TagReferencePickerWindow {
             .show(ctx, |ui| {
                 picked = draw_tag_reference_catalog_picker_contents(
                     ui,
-                    egui::Id::new("campaign_evolved_tag_reference_picker_contents"),
+                    egui::Id::unique("campaign_evolved_tag_reference_picker_contents"),
                     catalog,
                     &picker.allowed_groups,
                     &mut picker.search,

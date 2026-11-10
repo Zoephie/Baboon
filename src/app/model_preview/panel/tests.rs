@@ -73,7 +73,7 @@ fn middle_drag_pans_model_without_starting_page_autoscroll() {
                         );
                         ui.add_space(900.0);
                     });
-                    offset = scroll.state.offset.y;
+                    offset = scroll.state.clamped_offset().y;
                 });
                 crate::app::ui_kit::autoscroll::draw_blocker(ui);
             },

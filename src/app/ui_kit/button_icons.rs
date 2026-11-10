@@ -290,7 +290,7 @@ fn icon_texture(
     pixels: Vec2,
 ) -> Option<egui::TextureId> {
     let key = (icon, color, pixels.x as u32, pixels.y as u32);
-    let id = egui::Id::new("baboon_icon_textures");
+    let id = egui::Id::unique("baboon_icon_textures");
     let pass = ctx.cumulative_pass_nr();
     let cached = ctx.data_mut(|data| {
         let (texture, last_used) = data.get_temp_mut_or_default::<IconTextures>(id).0.get_mut(&key)?;
@@ -996,7 +996,7 @@ mod tests {
                 style.visuals.widgets.open.bg_fill = open_fill;
                 style.visuals.widgets.open.bg_stroke = Stroke::new(2.0, Color32::WHITE);
             });
-            let picker_id = egui::Id::new("block_picker_open_style");
+            let picker_id = egui::Id::unique("block_picker_open_style");
             let frame = || {
                 let mut trigger = None;
                 let output = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
@@ -1335,7 +1335,7 @@ mod tests {
             freed.extend(output.textures_delta.free.iter().copied());
             output.textures_delta.clear();
             let icon_textures = ctx.data(|data| {
-                data.get_temp::<IconTextures>(egui::Id::new("baboon_icon_textures")).unwrap_or_default()
+                data.get_temp::<IconTextures>(egui::Id::unique("baboon_icon_textures")).unwrap_or_default()
             });
             painted.extend(icon_textures.0.values().map(|(texture, _)| texture.id()));
         }

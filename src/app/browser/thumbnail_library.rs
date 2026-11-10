@@ -471,7 +471,7 @@ fn asset_grid_order(
             .hash(&mut hasher);
         hasher.finish()
     });
-    let id = egui::Id::new(("asset_grid_order", pane_key));
+    let id = egui::Id::unique(("asset_grid_order", pane_key));
     if let Some(key) = key
         && let Some((cached, order)) = ui.data(|data| data.get_temp::<(u64, std::sync::Arc<Vec<usize>>)>(id))
         && cached == key

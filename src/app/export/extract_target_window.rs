@@ -32,7 +32,7 @@ impl Dialog for ExtractTargetPrompt {
         let mut cancel = false;
         egui::Window::new(title)
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("extract_target"))
+            .id(egui::Id::unique("extract_target"))
             .open(&mut open)
             .default_width(window_width(ctx, 520.0))
             .resizable(false)

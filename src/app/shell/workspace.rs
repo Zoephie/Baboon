@@ -899,7 +899,7 @@ pub(in crate::app) fn draw_folder_refactor_lock(ctx: &egui::Context, folder_refa
         return;
     };
     let screen = ctx.content_rect();
-    egui::Area::new(egui::Id::new("folder_refactor_lock"))
+    egui::Area::new(egui::Id::unique("folder_refactor_lock"))
         .order(egui::Order::Foreground)
         .fixed_pos(screen.min)
         .show(ctx, |ui| {

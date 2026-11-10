@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::app::search::draw_icon_window_header_without_close;
+use crate::app::ui_kit::autoscroll::AutoscrollTable;
 
 #[derive(Clone)]
 struct BlockTableDrag(u64);
@@ -43,7 +44,7 @@ fn draw_block_table(ctx: &egui::Context, table: &mut BlockTableState) -> BlockTa
     ctx.set_global_style(window_style);
     let title = format!("Block Entry Table - {}", table.request.label);
     egui::Window::new(&title)
-        .id(egui::Id::new("block_table"))
+        .id(egui::Id::unique("block_table"))
         .title_bar(false)
         .collapsible(false)
         .resizable([true, false])
@@ -68,8 +69,11 @@ fn draw_block_table(ctx: &egui::Context, table: &mut BlockTableState) -> BlockTa
             let list_rect = egui::Rect::from_min_size(ui.cursor().min,
                 Vec2::new(ui.available_width(), list_height + 26.0 + ui.spacing().item_spacing.y));
             ui.scope_builder(egui::UiBuilder::new().max_rect(list_rect), |ui| {
+            let site = ui.make_persistent_id("block_entry_table");
+            let offset = crate::app::ui_kit::autoscroll::offset(ui, site);
             let scroll = egui_extras::TableBuilder::new(ui)
                 .id_salt("block_entry_table")
+                .autoscroll(offset)
                 .striped(false)
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .column(egui_extras::Column::exact(20.0))
@@ -136,7 +140,7 @@ fn draw_block_table(ctx: &egui::Context, table: &mut BlockTableState) -> BlockTa
                                     let row_height = editor.fonts_mut(|fonts| fonts.row_height(&font));
                                     editor.add_sized(Vec2::new(editor.available_width(), 24.0),
                                         crate::app::ui_kit::singleline_text_edit(&mut row.name)
-                                        .id(egui::Id::new(("block_table_name", row.id)))
+                                        .id(egui::Id::unique(("block_table_name", row.id)))
                                         .margin(egui::Margin::symmetric(4, ((24.0 - row_height) * 0.5).max(0.0) as i8))
                                         .desired_width(editor.available_width()).font(egui::TextStyle::Monospace));
                                 } else {
@@ -176,7 +180,7 @@ fn draw_block_table(ctx: &egui::Context, table: &mut BlockTableState) -> BlockTa
                         });
                     }
                 });
-                crate::app::ui_kit::autoscroll::register(ui, &scroll, egui::Vec2b::new(false, true));
+                crate::app::ui_kit::autoscroll::register(ui, site, &scroll, egui::Vec2b::new(false, true));
             });
             if count == 0 { ui.label(RichText::new("Empty block").color(subtle_dark())); }
             if let Some(status) = &table.status { ui.label(RichText::new(status).color(REFERENCE_MISSING_COLOR)); }
@@ -317,7 +321,7 @@ mod tests {
         for _ in 0..5 {
             frame(&mut table, Vec::new());
         }
-        let window_rect = || ctx.memory(|memory| memory.area_rect(egui::Id::new("block_table")).unwrap());
+        let window_rect = || ctx.memory(|memory| memory.area_rect(egui::Id::unique("block_table")).unwrap());
         let resize = |table: &mut BlockTableState, delta: f32| {
             let edge = window_rect().right_center() - Vec2::new(1.0, 0.0);
             let button = |pos, pressed| egui::Event::PointerButton {

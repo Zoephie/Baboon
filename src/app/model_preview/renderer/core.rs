@@ -85,7 +85,8 @@ pub(in crate::app::model_preview) struct RenderCore {
     pub(in crate::app::model_preview) samplers: [Option<glow::NativeUniformLocation>; SLOT_COUNT],
     /// Bound to every slot a material lacks; see [`Self::bind_material`].
     pub(in crate::app::model_preview) placeholder: Option<glow::NativeTexture>,
-    /// The driver's own words for this context, for the notes below.
+    /// The driver's own words for this context, which the footer shows
+    /// beside the notes below.
     pub(in crate::app::model_preview) context: String,
     /// Why the frame being drawn left out something Game Shaders would draw,
     /// for the panel to say: a fallback that is only logged is invisible in
@@ -480,10 +481,8 @@ impl RenderCore {
             return None;
         }
         if !self.shaders_supported {
-            self.note(format!(
-                "Game Shaders need desktop OpenGL 3.3 or later; this context is {}",
-                self.context
-            ));
+            // The footer and the console already give the context.
+            self.note("Game Shaders need desktop OpenGL 3.3 or later");
             return None;
         }
         if !self.gen3_supported
@@ -492,10 +491,7 @@ impl RenderCore {
                 .iter()
                 .any(|textures| textures.iter().any(|texture| texture.gen3.is_some()))
         {
-            self.note(format!(
-                "Halo 3, ODST and Reach shaders need desktop OpenGL 4.1 or later; this context is {}",
-                self.context
-            ));
+            self.note("Halo 3, ODST and Reach shaders need desktop OpenGL 4.1 or later");
         }
         unsafe {
             let state = PostScope::capture(gl);

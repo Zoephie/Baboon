@@ -540,7 +540,7 @@ fn active_after_removal(active: usize, removed: usize, new_len: usize) -> usize 
 /// egui id for a kit's tag layout tree. Distinct per kit so two trees rendered
 /// in the same frame keep separate drag state.
 pub(in crate::app) fn tag_tree_id(id: KitId) -> egui::Id {
-    egui::Id::new(("kit_tag_tree", id.0))
+    egui::Id::unique(("kit_tag_tree", id.0))
 }
 
 impl Kit {

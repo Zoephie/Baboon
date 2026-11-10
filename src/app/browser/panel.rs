@@ -190,7 +190,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
     };
     let generation = cx.model.kits[kit_index].generation;
     set_browser_selected_tag(ui, pane.selected_tag.clone());
-    begin_browser_navigation(ui, egui::Id::new(("folder_navigation", kit_id, pane_key)));
+    begin_browser_navigation(ui, egui::Id::unique(("folder_navigation", kit_id, pane_key)));
     let bitmap_hover_requests = begin_bitmap_hovers(ui, Arc::clone(&view.bitmap_browser.thumbnails));
 
     let is_loose = cx.model.kits[kit_index]
@@ -704,7 +704,7 @@ fn draw_kit_browser_inner(
     // is this kit's own set.
     set_browser_modified_tags(ui, std::sync::Arc::clone(&view.browser.modified_tags));
     set_browser_selected_tag(ui, view.browser.selected_tag.clone());
-    begin_browser_navigation(ui, egui::Id::new(("sidebar_navigation", kit_id)));
+    begin_browser_navigation(ui, egui::Id::unique(("sidebar_navigation", kit_id)));
     set_browser_favorite_folders(
         ui,
         cx.model.kits[kit_index]
@@ -902,7 +902,7 @@ fn draw_kit_browser_inner(
                     text_dark(),
                     true,
                     |ui| {
-                        let shortcut_area = ui.id();
+                        let shortcut_area = ui.scope_id();
                         let shortcut_kit = crate::app::shell::shortcuts::shortcut_kit_key(cx.model, kit_index);
                         use crate::app::shell::shortcuts::{shortcut_keys, shortcut_interactions};
                         for key in shortcut_keys(&cx.model.prefs, &shortcut_kit) {

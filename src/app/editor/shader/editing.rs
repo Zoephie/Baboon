@@ -372,7 +372,7 @@ fn shader_value_text_eq(a: &str, b: &str) -> bool {
 }
 
 fn shader_label_width_id() -> egui::Id {
-    egui::Id::new("shader_grid_label_width")
+    egui::Id::unique("shader_grid_label_width")
 }
 
 /// Preferred shader-column widths, compressed together in narrow panes.
@@ -382,7 +382,7 @@ const SHADER_FUNCTION_INPUT_MIN_WIDTH: f32 = 40.0;
 fn shader_column_widths(ui: &Ui) -> (f32, f32) {
     let (label, default, manually_sized) = ui.data(|data| {
         let label = data.get_temp::<f32>(shader_label_width_id());
-        let default = data.get_temp::<f32>(egui::Id::new("shader_grid_default_width"));
+        let default = data.get_temp::<f32>(egui::Id::unique("shader_grid_default_width"));
         (label.unwrap_or(230.0).clamp(120.0, 600.0),
          default.unwrap_or(150.0).clamp(60.0, 600.0), label.is_some() || default.is_some())
     });
@@ -444,12 +444,12 @@ pub(super) fn draw_shader_columns_header(ui: &mut Ui) {
         let x = rect.left() + x;
         let response = table_header_resize_divider(ui, rect, x,
             ui.make_persistent_id(("shader_column_resize", name)));
-        let start_id = egui::Id::new(("shader_column_drag_start", name));
+        let start_id = egui::Id::unique(("shader_column_drag_start", name));
         if response.drag_started() {
             ui.data_mut(|d| {
                 d.insert_temp(start_id, current);
                 if name == "shader_grid_label_width" {
-                    d.insert_temp(egui::Id::new("shader_grid_default_width"), default);
+                    d.insert_temp(egui::Id::unique("shader_grid_default_width"), default);
                 } else {
                     d.insert_temp(shader_label_width_id(), label);
                 }
@@ -458,10 +458,10 @@ pub(super) fn draw_shader_columns_header(ui: &mut Ui) {
         if response.dragged() {
             let start = ui.data(|d| d.get_temp::<f32>(start_id)).unwrap_or(current);
             let next = (start + response.total_drag_delta().unwrap_or_default().x).clamp(min, max);
-            ui.data_mut(|d| d.insert_temp(egui::Id::new(name), next));
+            ui.data_mut(|d| d.insert_temp(egui::Id::unique(name), next));
         }
         if response.double_clicked() {
-            ui.data_mut(|d| d.remove::<f32>(egui::Id::new(name)));
+            ui.data_mut(|d| d.remove::<f32>(egui::Id::unique(name)));
         }
     }
     paint_table_header_rule(ui, rect);
@@ -529,7 +529,7 @@ fn shader_action_button(
             paint_button_icon_at(ui, icon, icon_rect, color);
             if !label.is_empty() {
                 response.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+                    egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label)
                 });
                 ui.painter().text(
                     egui::pos2(
@@ -548,7 +548,7 @@ fn shader_action_button(
     #[cfg(test)]
     if icon == ButtonIcon::Clear {
         ui.data_mut(|d| {
-            let rects = d.get_temp_mut_or_default::<Vec<egui::Rect>>(egui::Id::new(
+            let rects = d.get_temp_mut_or_default::<Vec<egui::Rect>>(egui::Id::unique(
                 "shader_clear_test_rects",
             ));
             rects.push(response.rect);
@@ -1217,7 +1217,7 @@ fn draw_shader_grid_row_inner(
         );
         #[cfg(test)]
         ui.data_mut(|data| data.get_temp_mut_or_default::<Vec<(String, egui::Rect)>>(
-            egui::Id::new("shader_options_test_rects"),
+            egui::Id::unique("shader_options_test_rects"),
         ).push((row.label.clone(), menu_response.rect)));
         #[cfg(not(test))]
         let _ = menu_response;
@@ -1802,7 +1802,7 @@ fn shader_bitmap_thumbnail(
     // kit's tags root, and a relative tag path means different bitmaps in
     // different games. Without the root, whichever workspace decoded first won
     // and the other showed its thumbnail.
-    let cache_id = egui::Id::new(("shader_bitmap_thumb", edit.tags_root, group_tag, open_ref));
+    let cache_id = egui::Id::unique(("shader_bitmap_thumb", edit.tags_root, group_tag, open_ref));
     if let Some(cached) = ui.data(|d| d.get_temp::<Option<egui::TextureHandle>>(cache_id)) {
         return cached;
     }
@@ -3622,7 +3622,7 @@ mod tests {
     fn shader_override_column_fills_window_and_has_no_outer_resize_handle() {
         let ctx = egui::Context::default();
         ctx.set_global_style(foundation_style());
-        ctx.data_mut(|data| data.insert_temp(egui::Id::new("shader_grid_value_width"), 2000.0f32));
+        ctx.data_mut(|data| data.insert_temp(egui::Id::unique("shader_grid_value_width"), 2000.0f32));
         for width in [900.0, 1250.0, 1000.0] {
             let _ = crate::app::run_ui_test(&ctx, egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(width, 500.0))),
@@ -3749,7 +3749,7 @@ mod tests {
                 }],
                 column,
             );
-            let width = ctx.data(|d| d.get_temp::<f32>(egui::Id::new(key))).unwrap();
+            let width = ctx.data(|d| d.get_temp::<f32>(egui::Id::unique(key))).unwrap();
             assert!((width - initial - 40.0).abs() < 0.1, "{key}: {width}");
         }
     }

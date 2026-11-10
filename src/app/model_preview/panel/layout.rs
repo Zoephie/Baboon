@@ -197,7 +197,7 @@ fn draw_setup_resize_handle(
 ) {
     let response = ui.interact(
         rects.handle,
-        ui.id().with("model_setup_resize"),
+        ui.scope_id().with("model_setup_resize"),
         Sense::drag(),
     );
     if response.hovered() || response.dragged() {

@@ -32,7 +32,7 @@ struct Navigation {
     parent_stack: Vec<(egui::Id, bool)>,
 }
 
-fn state_id() -> egui::Id { egui::Id::new("browser_keyboard_navigation") }
+fn state_id() -> egui::Id { egui::Id::unique("browser_keyboard_navigation") }
 
 fn state<R>(ctx: &egui::Context, run: impl FnOnce(&mut Navigation) -> R) -> R {
     ctx.data_mut(|data| run(data.get_temp_mut_or_default::<Navigation>(state_id())))
@@ -113,7 +113,7 @@ pub(super) fn browser_navigation_arrived(ui: &Ui) {
 }
 
 pub(super) fn browser_asset_navigation_id(ui: &Ui, key: &str) -> egui::Id {
-    state(ui.ctx(), |nav| nav.scope.unwrap_or(ui.id()).with(("asset", key)))
+    state(ui.ctx(), |nav| nav.scope.unwrap_or(ui.scope_id()).with(("asset", key)))
 }
 
 pub(super) fn browser_navigation_columns(ui: &Ui, columns: usize, row_height: f32) {

@@ -272,7 +272,7 @@ impl Baboon {
                 .unwrap_or(0);
             ctx.data_mut(|data| {
                 data.insert_temp(
-                    egui::Id::new((
+                    egui::Id::unique((
                         "field_edit",
                         &table.request.view_scope,
                         &table.tag_key,

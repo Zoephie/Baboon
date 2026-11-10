@@ -9,9 +9,9 @@ use crate::app::shell::frame::wheel_scroll_tab_bar;
 fn navigation_pane_button(ui: &mut Ui, kit: KitId, view: &mut KitView, divider: bool) {
     let tooltip = if view.navigation_hidden { "Show navigation pane" } else { "Hide navigation pane" };
     let (_, rect) = ui.allocate_space(egui::vec2(32.0, 24.0));
-    let response = ui.interact(rect, egui::Id::new(("navigation_pane_toggle", kit.0)), Sense::click())
+    let response = ui.interact(rect, egui::Id::unique(("navigation_pane_toggle", kit.0)), Sense::click())
         .on_hover_text(tooltip);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tooltip));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tooltip));
     let fill = if response.hovered() || response.has_focus() || response.is_pointer_button_down_on() {
         context_menu_hover()
     } else { Color32::TRANSPARENT };
@@ -457,7 +457,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
                 let close_response = ui
                     .interact(close_rect, close_id, Sense::click_and_drag())
                     .on_hover_cursor(egui::CursorIcon::Default);
-                close_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Close"));
+                close_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Close"));
                 paint_close_control(ui, &close_response);
                 if close_response.clicked() && self.on_tab_close(tiles, tile_id) {
                     tiles.remove(tile_id);

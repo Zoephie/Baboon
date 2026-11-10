@@ -86,7 +86,7 @@ impl ModifiedTags {
 /// memory while a kit's tree is drawn is that kit's own — the same mechanism
 /// the Find highlighter uses to reach individual field cells.
 pub(in crate::app) fn modified_tags_id() -> egui::Id {
-    egui::Id::new("browser_modified_tags")
+    egui::Id::unique("browser_modified_tags")
 }
 
 pub(in crate::app) fn set_browser_modified_tags(ui: &Ui, modified: std::sync::Arc<ModifiedTags>) {
@@ -100,19 +100,19 @@ pub(in crate::app) fn browser_modified_tags(ui: &Ui) -> Option<std::sync::Arc<Mo
 // Each browser publishes its own selection while it draws, then saves it back
 // to its view state. This is independent of the active editor document.
 pub(in crate::app) fn set_browser_selected_tag(ui: &Ui, key: Option<String>) {
-    ui.data_mut(|data| data.insert_temp(egui::Id::new("browser_selected_tag"), key));
+    ui.data_mut(|data| data.insert_temp(egui::Id::unique("browser_selected_tag"), key));
 }
 
 pub(in crate::app) fn browser_selected_tag(ui: &Ui) -> Option<String> {
-    ui.data(|data| data.get_temp::<Option<String>>(egui::Id::new("browser_selected_tag"))).flatten()
+    ui.data(|data| data.get_temp::<Option<String>>(egui::Id::unique("browser_selected_tag"))).flatten()
 }
 
 fn browser_selection_owner_id() -> egui::Id {
-    egui::Id::new("browser_selection_owner")
+    egui::Id::unique("browser_selection_owner")
 }
 
 fn favorite_folders_id() -> egui::Id {
-    egui::Id::new("browser_favorite_folders")
+    egui::Id::unique("browser_favorite_folders")
 }
 
 pub(in crate::app) fn set_browser_favorite_folders(
@@ -128,7 +128,7 @@ pub(in crate::app) fn browser_favorite_folders(ui: &Ui) -> Option<std::sync::Arc
 }
 
 fn folder_pane_browser_id() -> egui::Id {
-    egui::Id::new("browser_is_folder_pane")
+    egui::Id::unique("browser_is_folder_pane")
 }
 
 pub(in crate::app) fn set_browser_is_folder_pane(ui: &Ui, is_folder_pane: bool) {
@@ -146,7 +146,7 @@ pub(in crate::app) fn browser_is_folder_pane(ui: &Ui) -> bool {
 /// from a tag the game shipped, so the enablement has to come from Baboon's own
 /// ledger rather than from anything in the container.
 fn deletable_keys_id() -> egui::Id {
-    egui::Id::new("browser_deletable_keys")
+    egui::Id::unique("browser_deletable_keys")
 }
 
 pub(in crate::app) fn set_browser_deletable_keys(ui: &Ui, keys: std::sync::Arc<HashSet<String>>) {
@@ -161,7 +161,7 @@ pub(in crate::app) fn browser_deletable_keys(ui: &Ui) -> Option<std::sync::Arc<H
 /// same reason as the modified set: menu items that only apply to one game need
 /// it, and the tree's drawing functions have no other route to it.
 fn browser_game_id() -> egui::Id {
-    egui::Id::new("browser_game_id")
+    egui::Id::unique("browser_game_id")
 }
 
 pub(in crate::app) fn set_browser_game(ui: &Ui, game: Option<GameId>) {
@@ -192,7 +192,7 @@ pub(in crate::app) fn browser_game_keeps_bitmap_sources(ui: &Ui) -> bool {
 }
 
 fn browser_sound_language_id() -> egui::Id {
-    egui::Id::new("browser_sound_language")
+    egui::Id::unique("browser_sound_language")
 }
 
 /// Publish the shared sound player's last-selected language for browser menus.
@@ -223,7 +223,7 @@ pub(in crate::app) fn browser_sound_language(ui: &Ui) -> String {
 }
 
 fn browser_sound_available_languages_id() -> egui::Id {
-    egui::Id::new("browser_sound_available_languages")
+    egui::Id::unique("browser_sound_available_languages")
 }
 
 /// Publish how many localized bank sets are actually installed. `None` means
@@ -251,7 +251,7 @@ pub(in crate::app) fn browser_sound_available_languages(ui: &Ui) -> Option<usize
 }
 
 fn browser_entries_scanning_id() -> egui::Id {
-    egui::Id::new("browser_entries_scanning")
+    egui::Id::unique("browser_entries_scanning")
 }
 
 pub(in crate::app) fn set_browser_entries_scanning(ui: &Ui, scanning: bool) {
@@ -266,7 +266,7 @@ pub(in crate::app) fn browser_entries_scanning(ui: &Ui) -> bool {
 }
 
 fn browser_loose_source_id() -> egui::Id {
-    egui::Id::new("browser_loose_source")
+    egui::Id::unique("browser_loose_source")
 }
 
 pub(in crate::app) fn set_browser_loose_source(ui: &Ui, loose: bool) {
@@ -282,7 +282,7 @@ pub(in crate::app) fn browser_loose_source(ui: &Ui) -> bool {
 /// Sapien and tag_test, and the tree's drawing functions have no other route to
 /// the executables on disk.
 fn scenario_launch_id() -> egui::Id {
-    egui::Id::new("browser_scenario_launch")
+    egui::Id::unique("browser_scenario_launch")
 }
 
 pub(in crate::app) fn set_browser_scenario_launch(

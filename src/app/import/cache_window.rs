@@ -536,7 +536,7 @@ impl Dialog for CacheImportDialog {
         let mut action = None;
         egui::Window::new("Import Cache Folder")
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("cache_import"))
+            .id(egui::Id::unique("cache_import"))
             .open(&mut open)
             .resizable(true)
             .default_width(window_width(ctx, 560.0))

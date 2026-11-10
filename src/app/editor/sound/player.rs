@@ -379,7 +379,7 @@ pub(super) fn draw_clip_player(
 /// Where a tab's player keeps the id of its selected clip. Not tied to the
 /// widget's place in the layout: the tab and the player are what it belongs to.
 pub(in crate::app::editor) fn clip_selection_id(id_salt: &str, tag_key: &str) -> egui::Id {
-    egui::Id::new(("clip_player_selection", id_salt, tag_key))
+    egui::Id::unique(("clip_player_selection", id_salt, tag_key))
 }
 
 /// Select clip `index` in the player `id_salt` of this tab and play it — for a
@@ -942,20 +942,20 @@ impl View {
 
 /// The clips of a tab's player that have nothing to preview.
 fn nothing_to_preview_id(tag_key: &str) -> egui::Id {
-    egui::Id::new(("clip_player_nothing_to_preview", tag_key))
+    egui::Id::unique(("clip_player_nothing_to_preview", tag_key))
 }
 
 fn was_playing_id(tag_key: &str) -> egui::Id {
-    egui::Id::new(("clip_player_was_playing", tag_key))
+    egui::Id::unique(("clip_player_was_playing", tag_key))
 }
 
 fn drag_anchor_id(tag_key: &str) -> egui::Id {
-    egui::Id::new(("clip_player_drag_anchor", tag_key))
+    egui::Id::unique(("clip_player_drag_anchor", tag_key))
 }
 
 /// Every player drawn, as (player, tab), so a closed tab's can be forgotten.
 fn players_id() -> egui::Id {
-    egui::Id::new("clip_players")
+    egui::Id::unique("clip_players")
 }
 
 fn register_player(ctx: &egui::Context, id_salt: &str, tag_key: &str) {
@@ -998,7 +998,7 @@ pub(in crate::app) fn forget_closed_players(ctx: &egui::Context, is_open: impl F
 }
 
 fn clip_view_id(tag_key: &str) -> egui::Id {
-    egui::Id::new(("clip_player_view", tag_key))
+    egui::Id::unique(("clip_player_view", tag_key))
 }
 
 /// The view a tab's player has on `clip`: the whole clip until zoomed.
@@ -1035,7 +1035,7 @@ fn min_view_span(sample_rate: Option<u32>, width: f32) -> f64 {
 /// Where a tab's player keeps its region: the clip it is on, and its start
 /// and end in seconds.
 fn clip_region_id(tag_key: &str) -> egui::Id {
-    egui::Id::new(("clip_player_region", tag_key))
+    egui::Id::unique(("clip_player_region", tag_key))
 }
 
 /// The region a tab's player has on `clip`, if any.
@@ -2219,7 +2219,7 @@ mod tests {
     }
 
     fn wheel(delta: egui::Vec2, modifiers: egui::Modifiers) -> egui::Event {
-        egui::Event::MouseWheel {
+        egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown,
             phase: egui::TouchPhase::Move,
             unit: egui::MouseWheelUnit::Point,
             delta,

@@ -58,7 +58,7 @@ impl ActiveRows {
 }
 
 pub(in crate::app) fn set_active(ctx: &egui::Context, active: ActiveRows) {
-    ctx.data_mut(|data| data.insert_temp(egui::Id::new(ROW_MODE_ID), Arc::new(active)));
+    ctx.data_mut(|data| data.insert_temp(egui::Id::unique(ROW_MODE_ID), Arc::new(active)));
     ctx.request_repaint();
 }
 
@@ -87,7 +87,7 @@ pub(in crate::app) struct LinkedMove {
 }
 
 pub(in crate::app) fn active(ctx: &egui::Context) -> Option<Arc<ActiveRows>> {
-    ctx.data(|data| data.get_temp(egui::Id::new(ROW_MODE_ID)))
+    ctx.data(|data| data.get_temp(egui::Id::unique(ROW_MODE_ID)))
 }
 
 pub(in crate::app) fn cut(ctx: &egui::Context) -> Option<Arc<ActiveRows>> {
@@ -104,7 +104,7 @@ pub(in crate::app) fn cancel_cut(ctx: &egui::Context) {
 }
 
 fn cancel_mode(ctx: &egui::Context) {
-    ctx.data_mut(|data| data.remove::<Arc<ActiveRows>>(egui::Id::new(ROW_MODE_ID)));
+    ctx.data_mut(|data| data.remove::<Arc<ActiveRows>>(egui::Id::unique(ROW_MODE_ID)));
     ctx.request_repaint();
 }
 
@@ -115,9 +115,9 @@ fn consume_cut(ctx: &egui::Context, rows: &RowData) -> Result<(), String> {
         .is_some_and(|(data, visible)| data == *rows && visible == *text));
     cancel_mode(ctx);
     ctx.data_mut(|memory| {
-        memory.remove::<(String, String)>(egui::Id::new(CLIPBOARD_ID));
+        memory.remove::<(String, String)>(egui::Id::unique(CLIPBOARD_ID));
         if let Some((text, html)) = &current {
-            memory.insert_temp(egui::Id::new(CONSUMED_ID), fingerprint(text, html.as_deref()));
+            memory.insert_temp(egui::Id::unique(CONSUMED_ID), fingerprint(text, html.as_deref()));
         }
     });
     #[cfg(not(test))]
@@ -141,15 +141,15 @@ fn fingerprint(text: &str, html: Option<&str>) -> [u8; 32] {
 /// Remember its identity so opening Insert does not reactivate the same copy.
 pub(in crate::app) fn dismiss(ctx: &egui::Context) {
     let identity = read(ctx).map(|(text, html)| fingerprint(&text, html.as_deref()))
-        .or_else(|| ctx.data(|data| data.get_temp::<[u8; 32]>(egui::Id::new(CURRENT_ID))));
-    if let Some(identity) = identity { ctx.data_mut(|data| data.insert_temp(egui::Id::new(DISMISSED_ID), identity)); }
+        .or_else(|| ctx.data(|data| data.get_temp::<[u8; 32]>(egui::Id::unique(CURRENT_ID))));
+    if let Some(identity) = identity { ctx.data_mut(|data| data.insert_temp(egui::Id::unique(DISMISSED_ID), identity)); }
     cancel_mode(ctx);
 }
 
 pub(in crate::app) fn insert_active(ctx: &egui::Context) -> bool {
     ctx.data(|data| {
-        let dismissed = data.get_temp::<[u8; 32]>(egui::Id::new(DISMISSED_ID));
-        dismissed.is_none() || dismissed != data.get_temp::<[u8; 32]>(egui::Id::new(CURRENT_ID))
+        let dismissed = data.get_temp::<[u8; 32]>(egui::Id::unique(DISMISSED_ID));
+        dismissed.is_none() || dismissed != data.get_temp::<[u8; 32]>(egui::Id::unique(CURRENT_ID))
     })
 }
 
@@ -160,7 +160,7 @@ pub(in crate::app) fn refresh_cut(model: &Model, ctx: &egui::Context) -> bool {
             .is_some_and(|doc| doc.id == active.source.id && doc.dirty.revision() == active.revision);
         if !valid && active.cutting { cancel_cut(ctx); return true; }
         let now = ctx.input(|input| input.time);
-        let check_id = egui::Id::new("string cut clipboard check");
+        let check_id = egui::Id::unique("string cut clipboard check");
         let next = ctx.data(|data| data.get_temp::<f64>(check_id)).unwrap_or_default();
         if now >= next {
             ctx.data_mut(|data| data.insert_temp(check_id, now + 0.25));
@@ -229,8 +229,8 @@ pub(in crate::app) fn write(ctx: &egui::Context, data: &RowData, syntax: &TextSy
     #[cfg(not(test))]
     arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_html(html.clone(), Some(text.clone())))
         .map_err(|error| format!("Could not write the clipboard: {error}"))?;
-    ctx.data_mut(|memory| memory.insert_temp(egui::Id::new(CLIPBOARD_ID), (text.clone(), html)));
-    ctx.data_mut(|memory| memory.remove::<[u8; 32]>(egui::Id::new(DISMISSED_ID)));
+    ctx.data_mut(|memory| memory.insert_temp(egui::Id::unique(CLIPBOARD_ID), (text.clone(), html)));
+    ctx.data_mut(|memory| memory.remove::<[u8; 32]>(egui::Id::unique(DISMISSED_ID)));
     #[cfg(test)]
     ctx.copy_text(text);
     Ok(())
@@ -239,10 +239,10 @@ pub(in crate::app) fn write(ctx: &egui::Context, data: &RowData, syntax: &TextSy
 fn read(_ctx: &egui::Context) -> Option<(String, Option<String>)> {
     #[cfg(test)]
     {
-        if let Some(text) = _ctx.data(|data| data.get_temp::<String>(egui::Id::new("test string row clipboard"))) {
+        if let Some(text) = _ctx.data(|data| data.get_temp::<String>(egui::Id::unique("test string row clipboard"))) {
             return Some((text, None));
         }
-        _ctx.data(|data| data.get_temp::<(String, String)>(egui::Id::new(CLIPBOARD_ID))).map(|(text, html)| (text, Some(html)))
+        _ctx.data(|data| data.get_temp::<(String, String)>(egui::Id::unique(CLIPBOARD_ID))).map(|(text, html)| (text, Some(html)))
     }
     #[cfg(not(test))]
     {
@@ -256,8 +256,8 @@ fn read(_ctx: &egui::Context) -> Option<(String, Option<String>)> {
 pub(in crate::app) fn clipboard(ctx: &egui::Context, list: &StringList, language: usize, syntax: &TextSyntax) -> Option<RowData> {
     let (text, html) = read(ctx)?;
     let identity = fingerprint(&text, html.as_deref());
-    if ctx.data(|memory| memory.get_temp::<[u8; 32]>(egui::Id::new(CONSUMED_ID))) == Some(identity) { return None; }
-    ctx.data_mut(|memory| memory.insert_temp(egui::Id::new(CURRENT_ID), identity));
+    if ctx.data(|memory| memory.get_temp::<[u8; 32]>(egui::Id::unique(CONSUMED_ID))) == Some(identity) { return None; }
+    ctx.data_mut(|memory| memory.insert_temp(egui::Id::unique(CURRENT_ID), identity));
     if text.len() > MAX_CLIPBOARD { return None; }
     if let Some((data, _)) = html.as_deref().and_then(decode).filter(|(_, visible)| *visible == text) {
         // External apps can preserve HTML while changing plain text. Do not use
@@ -491,9 +491,9 @@ mod tests {
         assert_eq!(decode(&other_html).unwrap().0, source);
         source.language = 0;
         let ctx = egui::Context::default();
-        ctx.data_mut(|memory| memory.insert_temp(egui::Id::new(CLIPBOARD_ID), (text, html.clone())));
+        ctx.data_mut(|memory| memory.insert_temp(egui::Id::unique(CLIPBOARD_ID), (text, html.clone())));
         assert_eq!(clipboard(&ctx, &list, 0, &syntax).unwrap(), source);
-        ctx.data_mut(|memory| memory.insert_temp(egui::Id::new(CLIPBOARD_ID), ("Changed\ttext".to_owned(), html)));
+        ctx.data_mut(|memory| memory.insert_temp(egui::Id::unique(CLIPBOARD_ID), ("Changed\ttext".to_owned(), html)));
         assert_eq!(clipboard(&ctx, &list, 0, &syntax).unwrap().rows[0].id.as_deref(), Some("Changed"));
         assert!(decode("<!--BABOON_STRING_ROWS_V1:invalid-->").is_none());
         let (text, html) = encode(&classic, &TextSyntax::unknown()).unwrap();

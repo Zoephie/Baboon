@@ -11,7 +11,7 @@ struct BitmapReimportConfirm {
 
 fn draw_bitmap_reimport_confirmation(ctx: &egui::Context, folder: &Path) -> Option<bool> {
     let mut choice = None;
-    let response = egui::Modal::new(egui::Id::new("halo2_bitmap_reimport_confirm"))
+    let response = egui::Modal::new(egui::Id::unique("halo2_bitmap_reimport_confirm"))
         .frame(egui::Frame::window(&ctx.global_style()))
         .show(ctx, |ui| {
             ui.set_width(460.0);

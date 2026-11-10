@@ -6,12 +6,12 @@ use std::fmt::Write as _;
 
 /// Temporary egui-memory key for the Find data shared with field widgets.
 pub(in crate::app) fn find_render_snapshot_id() -> egui::Id {
-    egui::Id::new("find_render_snapshot")
+    egui::Id::unique("find_render_snapshot")
 }
 
 /// Temporary egui-memory key identifying the Foundation cell being rendered.
 pub(in crate::app) fn find_render_cell_id() -> egui::Id {
-    egui::Id::new("find_render_cell")
+    egui::Id::unique("find_render_cell")
 }
 
 /// Record the field a row is about to draw, for its text to look up Find's

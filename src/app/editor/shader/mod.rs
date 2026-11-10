@@ -727,8 +727,8 @@ mod tests {
 
         /// Draw one frame of the grid with `events`, collecting what it raised.
         fn frame(&mut self, events: Vec<egui::Event>) -> &Painted {
-            self.ctx.data_mut(|d| d.remove::<Vec<egui::Rect>>(egui::Id::new("shader_clear_test_rects")));
-            self.ctx.data_mut(|d| d.remove::<Vec<(String, egui::Rect)>>(egui::Id::new("shader_options_test_rects")));
+            self.ctx.data_mut(|d| d.remove::<Vec<egui::Rect>>(egui::Id::unique("shader_clear_test_rects")));
+            self.ctx.data_mut(|d| d.remove::<Vec<(String, egui::Rect)>>(egui::Id::unique("shader_options_test_rects")));
             self.time += 1.0 / 60.0;
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -803,10 +803,10 @@ mod tests {
                     _ => None,
                 })
                 .collect();
-            let clear_rects = self.ctx.data(|d| d.get_temp::<Vec<egui::Rect>>(egui::Id::new("shader_clear_test_rects"))).unwrap_or_default();
+            let clear_rects = self.ctx.data(|d| d.get_temp::<Vec<egui::Rect>>(egui::Id::unique("shader_clear_test_rects"))).unwrap_or_default();
             self.painted.extend(clear_rects.into_iter().map(|rect| ("×".to_owned(), rect)));
             let menu_rects = self.ctx.data(|d| d.get_temp::<Vec<(String, egui::Rect)>>(
-                egui::Id::new("shader_options_test_rects"),
+                egui::Id::unique("shader_options_test_rects"),
             )).unwrap_or_default();
             self.painted.extend(menu_rects.into_iter().map(|(label, rect)| (format!("Options:{label}"), rect)));
             &self.painted

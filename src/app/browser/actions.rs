@@ -857,7 +857,7 @@ mod tests {
                     None => &mut browser.selected_tag,
                 };
                 set_browser_selected_tag(ui, selected.clone());
-                begin_browser_navigation(ui, egui::Id::new(("test_browser", pane)));
+                begin_browser_navigation(ui, egui::Id::unique(("test_browser", pane)));
                 row = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), ui.spacing().interact_size.y));
                 assert!(draw_entry(ui, entry, None, false, true, None, None, false, None).is_none());
                 finish_browser_navigation(ui);
@@ -887,7 +887,7 @@ mod tests {
                     app.handle_browser_selection_input(&context);
                     unconsumed = context.input(|input| (input.key_pressed(egui::Key::ArrowUp), input.key_pressed(egui::Key::F5)));
                     if modal {
-                        egui::Modal::new(egui::Id::new("shortcut_modal")).show(&context, |ui| { ui.label("Modal"); });
+                        egui::Modal::new(egui::Id::unique("shortcut_modal")).show(&context, |ui| { ui.label("Modal"); });
                     } else {
                         ui.text_edit_multiline(&mut text).request_focus();
                     }
@@ -919,7 +919,7 @@ mod tests {
         let pane_key = app.model.kits[0].current_pane.clone().unwrap();
         app.views[id].browser.folder_browsers.get_mut(&pane_key).unwrap().selected_tag = Some(fixture.key(MODEL));
         for (time, expected) in [(1.0, "objects"), (2.0, ""), (3.0, "")] {
-            let owner = egui::Id::new("browser_shortcut_owner");
+            let owner = egui::Id::unique("browser_shortcut_owner");
             context.data_mut(|data| data.insert_temp(browser_selection_owner_id(), (owner, egui::Rect::EVERYTHING)));
             context.memory_mut(|memory| memory.request_focus(owner));
             let _ = crate::app::run_ui_test(&context, screen(vec![egui::Event::Key {
@@ -964,7 +964,7 @@ mod tests {
                             None => &mut browser.selected_tag,
                         };
                         set_browser_selected_tag(ui, selected.clone());
-                        begin_browser_navigation(ui, egui::Id::new(("folder_keyboard_test", pane_key.as_deref())));
+                        begin_browser_navigation(ui, egui::Id::unique(("folder_keyboard_test", pane_key.as_deref())));
                         ScrollArea::vertical().show(ui, |ui| {
                             top = ui.cursor().top();
                             draw_tree(ui, &tree, &entries, None, "", false, false, true, false, None,
@@ -1063,7 +1063,7 @@ mod tests {
                             None => &mut browser.selected_tag,
                         };
                         set_browser_selected_tag(ui, selected.clone());
-                        begin_browser_navigation(ui, egui::Id::new(("navigation_test", pane.as_deref())));
+                        begin_browser_navigation(ui, egui::Id::unique(("navigation_test", pane.as_deref())));
                         TREE_ROW_TOPS.with(|tops| tops.borrow_mut().clear());
                         ScrollArea::vertical().id_salt("navigation_test_scroll").auto_shrink([false, false]).show(ui, |ui| {
                             row = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), ui.spacing().interact_size.y));

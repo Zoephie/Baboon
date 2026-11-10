@@ -33,7 +33,7 @@ impl Dialog for ToolCommandsUiState {
         let mut close_requested = false;
         let mut ran = false;
         let window = egui::Window::new("Tool Commands")
-            .id(egui::Id::new("tool_commands"))
+            .id(egui::Id::unique("tool_commands"))
             .collapsible(false)
             .title_bar(false)
             .movable(false)
@@ -65,7 +65,7 @@ impl Dialog for ToolCommandsUiState {
                 title_rect.min,
                 egui::pos2(close_rect.left() - 4.0, title_rect.bottom()),
             );
-            let title_response = ui.interact(drag_rect, ui.id().with("title_bar"), Sense::drag());
+            let title_response = ui.interact(drag_rect, ui.scope_id().with("title_bar"), Sense::drag());
             if title_response.dragged() {
                 window_pos += ui.input(|input| input.pointer.delta());
                 dragged_window_pos = Some(window_pos);

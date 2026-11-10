@@ -288,7 +288,7 @@ fn draw_function_row_unless_offscreen(
         }
     }
     let top = ui.cursor().top();
-    let current_row = egui::Id::new("drawing_function_row");
+    let current_row = egui::Id::unique("drawing_function_row");
     ui.data_mut(|data| data.insert_temp(current_row, id));
     draw(ui);
     ui.data_mut(|data| data.remove::<egui::Id>(current_row));
@@ -365,7 +365,7 @@ fn draw_editable_inline_field_function(
         ui, &mut view, editable, &mut graph, &mut point, &mut color,
     );
     let dragging = ui.input(|input| input.pointer.primary_down());
-    if let Some(row) = ui.data(|data| data.get_temp::<egui::Id>(egui::Id::new("drawing_function_row"))) {
+    if let Some(row) = ui.data(|data| data.get_temp::<egui::Id>(egui::Id::unique("drawing_function_row"))) {
         ui.data_mut(|data| data.insert_temp(row.with("gesture_active"), dragging));
     }
     if dragging {
@@ -451,7 +451,7 @@ pub(in crate::app) fn draw_foundation_enum_row(
             // culling. Anchor the popup to the field, not the auto IDs of the
             // surrounding layout, which change when those rows are restored.
             let enum_id = edit.widget_id((path, "enum_popup"));
-            let (_, wheel_delta) = ui.scope_builder(egui::UiBuilder::new().id(enum_id), |ui| combo_box_with_scroll(
+            let (_, wheel_delta) = ui.scope_builder(egui::UiBuilder::new().scope_id(enum_id), |ui| combo_box_with_scroll(
                 ui,
                 crate::app::ui_kit::ValueComboBox::from_id_salt((edit.view_scope, edit.tag_key, path, "enum"))
                     .width(240.0_f32.min(ui.available_size_before_wrap().x.max(1.0)))

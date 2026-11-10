@@ -21,7 +21,7 @@ impl Dialog for OverwriteConfirm {
             .resolve_kit(kit)
             .and_then(|index| cx.model.container_label_for_tag(index, &key));
         egui::Window::new("Overwrite game files?")
-            .id(egui::Id::new("overwrite_confirm"))
+            .id(egui::Id::unique("overwrite_confirm"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)

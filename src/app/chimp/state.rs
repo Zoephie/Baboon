@@ -484,7 +484,7 @@ impl ChimpView {
 }
 
 fn chimp_tree_id(kit: KitId) -> egui::Id {
-    egui::Id::new(("chimp_document_tree", kit.0))
+    egui::Id::unique(("chimp_document_tree", kit.0))
 }
 
 impl Baboon {

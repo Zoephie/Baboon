@@ -43,7 +43,7 @@ impl Dialog for QueryResultsWindow {
         let occurrences = &self.occurrences;
         egui::Window::new(&results.title)
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("tag_query_results"))
+            .id(egui::Id::unique("tag_query_results"))
             .open(&mut open)
             .default_width(window_width(ctx, 440.0))
             .show(ctx, |ui| {
@@ -287,7 +287,7 @@ impl Dialog for FieldValueSearchWindow {
         let mut do_build = false;
         egui::Window::new("Search Field Values")
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("field_value_search"))
+            .id(egui::Id::unique("field_value_search"))
             .open(&mut open)
             .default_width(window_width(ctx, 400.0))
             .show(ctx, |ui| {

@@ -222,7 +222,7 @@ fn editing_kit_card_with_read_only(
                 .is_some_and(|pos| pos.y > card.response.rect.center().y);
             ui.ctx().data_mut(|data| {
                 data.insert_temp(
-                    egui::Id::new("editing_kit_reorder_request"),
+                    egui::Id::unique("editing_kit_reorder_request"),
                     EditingKitReorderRequest {
                         source: drag.0.clone(),
                         target: target.to_owned(),
@@ -282,7 +282,7 @@ fn draft_editing_kit_icon_texture(
     ctx: &egui::Context,
     icon: &CustomEditingKitIconDraft,
 ) -> Option<egui::TextureHandle> {
-    let key = egui::Id::new("editing_kit_draft_icon_texture");
+    let key = egui::Id::unique("editing_kit_draft_icon_texture");
     let Some(path) = draft_icon_path(ctx, icon) else {
         ctx.data_mut(|data| data.remove::<DraftIconTexture>(key));
         return None;
@@ -507,7 +507,7 @@ fn draw_editing_kit_general(ui: &mut Ui, draft: &mut CustomEditingKitDraft) {
                         });
                     draft.error = None;
                     ui.ctx().data_mut(|data| {
-                        data.remove::<DraftIconTexture>(egui::Id::new(
+                        data.remove::<DraftIconTexture>(egui::Id::unique(
                             "editing_kit_draft_icon_texture",
                         ))
                     });
@@ -777,7 +777,7 @@ fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder:
     });
     // Listing the root on every frame would read the disk 60 times a second,
     // so the choices are kept per root and folder kind.
-    let cache_id = egui::Id::new(("editing_kit_folder_candidates", folder.name(), &root));
+    let cache_id = egui::Id::unique(("editing_kit_folder_candidates", folder.name(), &root));
     let candidates = ui
         .ctx()
         .data(|data| data.get_temp::<Arc<Vec<String>>>(cache_id))
@@ -998,7 +998,7 @@ fn settings_switch(ui: &mut Ui, value: &mut bool, label: &str) -> egui::Response
         response.mark_changed();
     }
     response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *value, label)
+        egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *value, label)
     });
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact_selectable(&response, *value);
@@ -1526,7 +1526,7 @@ impl Dialog for SettingsWindow {
         let mut open = true;
         egui::Window::new("Settings")
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("app_settings"))
+            .id(egui::Id::unique("app_settings"))
             .title_bar(false)
             .collapsible(false)
             .resizable(true)
@@ -1986,7 +1986,7 @@ fn draw_settings_editing_kits_contents(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDr
         }
     }
     let reorder = ui.ctx().data_mut(|data| {
-        let key = egui::Id::new("editing_kit_reorder_request");
+        let key = egui::Id::unique("editing_kit_reorder_request");
         let request = data.get_temp::<EditingKitReorderRequest>(key);
         data.remove::<EditingKitReorderRequest>(key);
         request
@@ -2017,7 +2017,7 @@ impl Dialog for CustomEditingKitDraft {
         let mut actions = EditingKitFormActions::default();
         egui::Window::new(title)
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("custom_editing_kit_dialog"))
+            .id(egui::Id::unique("custom_editing_kit_dialog"))
             .title_bar(false)
             .collapsible(false)
             .auto_sized()
@@ -2068,7 +2068,7 @@ impl Dialog for CustomEditingKitRemoval {
         let mut cancel = false;
         egui::Window::new("Remove Editing Kit?")
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("remove_custom_editing_kit"))
+            .id(egui::Id::unique("remove_custom_editing_kit"))
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
@@ -2869,7 +2869,7 @@ mod tests {
             },
             |_| {
                 rect = egui::Window::new("Settings")
-                    .id(egui::Id::new("settings_resize_test"))
+                    .id(egui::Id::unique("settings_resize_test"))
                     .title_bar(false)
                     .collapsible(false)
                     .resizable(true)
@@ -3129,7 +3129,7 @@ mod tests {
         }]);
         let request = ctx
             .data(|data| {
-                data.get_temp::<EditingKitReorderRequest>(egui::Id::new(
+                data.get_temp::<EditingKitReorderRequest>(egui::Id::unique(
                     "editing_kit_reorder_request",
                 ))
             })

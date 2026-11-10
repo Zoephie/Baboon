@@ -8,8 +8,8 @@ use crate::app::shell::frame::wheel_scroll_tab_bar;
 
 fn draw_home_tab(ui: &mut Ui, group: egui_tiles::TileId, active: bool) -> egui::Response {
     let (_, rect) = ui.allocate_space(Vec2::new(32.0, 26.0));
-    let response = ui.interact(rect, egui::Id::new("workspace_home_tab").with(group), Sense::click()).on_hover_text("Home");
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, "Home"));
+    let response = ui.interact(rect, egui::Id::unique("workspace_home_tab").with(group), Sense::click()).on_hover_text("Home");
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, active, "Home"));
     let fill = if active { left_panel() } else if response.hovered() { context_menu_hover() }
         else { Color32::TRANSPARENT };
     crate::app::shell::frame::paint_connected_tab(ui, rect, fill, active, active && workspace_has_focus(ui.ctx()));
@@ -179,7 +179,8 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         // Each workspace carries its own browser, so two games side by side can
         // be browsed independently rather than sharing one panel that
         // retargets as focus moves.
-        let browser_id = egui::Id::new(("kit_browser_panel", kit_id.0));
+        let browser_salt = ("kit_browser_panel", kit_id.0);
+        let browser_id = ui.scope_id().with(browser_salt);
         let has_tabs = !parts.views[kit_id].tag_tree.is_empty();
         let mut navigation_visible = !parts.views[kit_id].navigation_hidden || !has_tabs;
         // Empty workspaces always show navigation immediately. Seed the slide
@@ -189,7 +190,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
             cx.egui.animate_bool_with_time(browser_id.with("gutter_animation"), true, 0.0);
         }
         let openness = cx.egui.animate_bool_responsive(browser_id.with("gutter_animation"), navigation_visible);
-        let panel = egui::Panel::left(browser_id)
+        let panel = egui::Panel::left(browser_salt)
             .resizable(true)
             .drag_to_open(false)
             .show_separator_line(false)
@@ -283,7 +284,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         let (_, rect) = ui.allocate_space(egui::vec2(width, ui.available_height()));
         let response = ui.interact(rect, id, Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button,
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button,
             ui.is_enabled(), state.active, galley.text()));
         if ui.is_rect_visible(rect) && !state.is_being_dragged {
             let fill = if !state.active && response.hovered() { context_menu_hover() }
@@ -308,7 +309,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
                 }
                 let close = ui.interact(close_rect, id.with("close"), Sense::click_and_drag())
                     .on_hover_cursor(egui::CursorIcon::Default);
-                close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close"));
+                close.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Close"));
                 paint_close_control(ui, &close);
                 if (close.clicked() || response.middle_clicked()) && self.on_tab_close(tiles, tile_id) {
                     tiles.remove(tile_id);
@@ -378,10 +379,10 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         group: egui_tiles::TileId, tabs: &egui_tiles::Tabs,
     ) {
         let (_, rect) = ui.allocate_space(Vec2::new(32.0, 26.0));
-        let response = ui.interact(rect, egui::Id::new("workspace_add_tab").with(group), Sense::click())
+        let response = ui.interact(rect, egui::Id::unique("workspace_add_tab").with(group), Sense::click())
             .on_hover_cursor(egui::CursorIcon::Default)
             .on_hover_text("Add workspace");
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Add workspace"));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Add workspace"));
         let config = menu_config();
         let popup = egui::Popup::menu(&response)
             .close_behavior(config.close_behavior)
@@ -576,7 +577,7 @@ impl Baboon {
     pub(in crate::app) fn draw_workspace_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         self.sync_kit_tree();
         let inputs = self.prepare_tiles(ctx);
-        let placeholder = egui_tiles::Tree::empty(egui::Id::new("kit_tree_placeholder"));
+        let placeholder = egui_tiles::Tree::empty(egui::Id::unique("kit_tree_placeholder"));
         let mut tree = std::mem::replace(&mut self.kit_tree, placeholder);
         draw_kit_tiles(ui, &cx!(self, ctx), tile_parts!(self), &inputs, &mut tree);
         self.kit_tree = tree;
@@ -663,7 +664,7 @@ mod tests {
             for active_close in [false, true] {
                 let (mut app, kits) = tabbed_kits(4);
                 let order = [kits[2], kits[0], kits[3], kits[1]];
-                app.kit_tree = egui_tiles::Tree::new_tabs("workspace_close_neighbours", order.to_vec());
+                app.kit_tree = egui_tiles::Tree::new_tabs(egui::Id::unique("workspace_close_neighbours"), order.to_vec());
                 let active = if active_close { closing } else { (closing + 2) % 4 };
                 app.focus_kit(app.model.kit_index(order[active]).unwrap());
                 app.remove_kit(order[closing]);
@@ -679,7 +680,7 @@ mod tests {
         for wrapped in [false, true] {
             for focused in [0, 1] {
                 let (mut app, kits) = tabbed_kits(2);
-                app.kit_tree = egui_tiles::Tree::new_horizontal("kit_open_regression", kits.clone());
+                app.kit_tree = egui_tiles::Tree::new_horizontal(egui::Id::unique("kit_open_regression"), kits.clone());
                 let pane = |app: &Baboon, kit| app.kit_tree.tiles.iter().find_map(|(id, tile)|
                     matches!(tile, egui_tiles::Tile::Pane(open) if *open == kit).then_some(*id)).unwrap();
                 let root = app.kit_tree.root().unwrap();
@@ -724,7 +725,7 @@ mod tests {
         app.add_kit();
         assert_eq!(app.model.kits.len(), 2);
         let (left, right) = (app.model.kits[0].id, app.model.kits[1].id);
-        app.kit_tree = egui_tiles::Tree::new_horizontal("kit_activation_test", vec![left, right]);
+        app.kit_tree = egui_tiles::Tree::new_horizontal(egui::Id::unique("kit_activation_test"), vec![left, right]);
         app.model.active = 1;
 
         let ctx = egui::Context::default();

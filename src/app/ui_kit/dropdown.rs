@@ -66,7 +66,7 @@ impl ValueComboBox {
         let width = self.width.unwrap_or(ui.spacing().combo_width);
         let background = ui.painter().add(egui::Shape::Noop);
         let id = ui.make_persistent_id(self.salt);
-        let response = ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
+        let response = ui.scope_builder(egui::UiBuilder::new().scope_id(id), |ui| {
             // ButtonStyle subtracts each state's border from its padding before
             // the per-button override. Our separately painted border must not
             // affect layout, including hover expansion and pressed states.
@@ -92,7 +92,7 @@ impl ValueComboBox {
         ui.painter().add(egui::Shape::convex_polygon(vec![
             center + egui::vec2(-4.0, -2.5), center + egui::vec2(4.0, -2.5), center + egui::vec2(0.0, 2.5),
         ], visuals.fg_stroke.color, Stroke::NONE));
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), label.as_str()));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), label.as_str()));
         let inner = egui::Popup::menu(&response)
             .width(response.rect.width())
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
@@ -109,7 +109,7 @@ pub(in crate::app) fn value_dropdown_contents<R>(
 ) -> R {
     let limit = max_height.min((ui.ctx().content_rect().height() - 80.0).max(32.0));
 
-    let state_id = ui.id().with("value_dropdown_search");
+    let state_id = ui.scope_id().with("value_dropdown_search");
     let pass = ui.ctx().cumulative_pass_nr();
     let mut state = ui
         .data(|data| data.get_temp::<SearchState>(state_id))
@@ -566,7 +566,7 @@ mod tests {
             assert_eq!(demo.search, search, "search stays stationary while results scroll");
             let before_wheel = demo.rows[0].1.top();
             let over_results = demo.scroll_bars[0].center() - egui::vec2(40.0, 0.0);
-            demo.frame(vec![egui::Event::PointerMoved(over_results), egui::Event::MouseWheel {
+            demo.frame(vec![egui::Event::PointerMoved(over_results), egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown,
                 unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -150.0), modifiers: Default::default(),
                 phase: egui::TouchPhase::Move,
             }]);

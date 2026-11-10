@@ -25,7 +25,7 @@ impl Dialog for RenameTagState {
             };
             egui::Window::new(title)
                 .constrain_to(window_work_area(ctx))
-                .id(egui::Id::new("rename_tag"))
+                .id(egui::Id::unique("rename_tag"))
                 .open(&mut open)
                 .default_width(window_width(ctx, 560.0))
                 .show(ctx, |ui| {
@@ -51,7 +51,7 @@ impl Dialog for RenameTagState {
                             ui.label(RichText::new(parent).color(subtle_dark()).monospace());
                             let response = ui.add(
                                 crate::app::ui_kit::singleline_text_edit(&mut state.new_path_input)
-                                    .id(egui::Id::new("duplicate_tag_name"))
+                                    .id(egui::Id::unique("duplicate_tag_name"))
                                     .desired_width(330.0)
                                     .font(egui::TextStyle::Monospace),
                             );

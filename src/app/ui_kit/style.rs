@@ -477,7 +477,7 @@ pub(in crate::app) fn window_height(ctx: &egui::Context, content: f32, title_bar
 /// Where the root frame's windows may sit: the screen less the menu bar, the
 /// status bar and the terminal. Recorded by the root frame each pass.
 fn window_work_area_id() -> egui::Id {
-    egui::Id::new("baboon_window_work_area")
+    egui::Id::unique("baboon_window_work_area")
 }
 
 pub(in crate::app) fn set_window_work_area(ctx: &egui::Context, rect: egui::Rect) {

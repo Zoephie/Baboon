@@ -21,7 +21,7 @@ impl Dialog for LockedReplaceConfirm {
     fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let mut cancel = false;
         let mut confirm = false;
-        let response = egui::Modal::new(egui::Id::new("locked_replace_confirm")).show(cx.egui, |ui| {
+        let response = egui::Modal::new(egui::Id::unique("locked_replace_confirm")).show(cx.egui, |ui| {
             ui.set_width(420.0);
             ui.heading("Replace Normally Locked Fields?");
             ui.label(format!("This replacement includes {} normally locked field(s). Expert mode allows these fields to be edited. Replace {} matching occurrence(s)?",
@@ -39,7 +39,7 @@ impl Dialog for LockedReplaceConfirm {
 impl Dialog for LockedReplaceNotice {
     fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let mut close = false;
-        let response = egui::Modal::new(egui::Id::new("locked_replace_notice")).show(cx.egui, |ui| {
+        let response = egui::Modal::new(egui::Id::unique("locked_replace_notice")).show(cx.egui, |ui| {
             ui.set_width(420.0);
             ui.heading(self.title);
             ui.label(&self.message);

@@ -26,9 +26,13 @@ atomic-write-file = "0.3"
 blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "808260772f744d8fa6e9ae3551bc2fb333cc9569", features = ["audio", "iostore", "halo5"] }
 directories = "6"
 display-info = "0.5"
-eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "links", "wayland", "x11"] }
-egui_extras = { version = "0.36", features = ["image", "svg"] }
-egui_tiles = "0.17"
+# 0.37 made the clipboard a feature; without it copy and paste do nothing.
+eframe = { version = "0.37", default-features = false, features = ["clipboard", "default_fonts", "glow", "links", "wayland", "x11"] }
+# The emoji fonts `default_fonts` carried until 0.37, which the sound player's
+# controls and other icons draw with.
+egui = { version = "0.37", default-features = false, features = ["monochrome_emoji_fonts"] }
+egui_extras = { version = "0.37", features = ["image", "svg"] }
+egui_tiles = "0.18"
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["ico", "png"] }
 libc = "0.2"
@@ -77,3 +81,20 @@ debug = false
 [profile.dev.package.audiopus_sys]
 opt-level = 1
 debug = false
+
+# egui 0.37.0 with eframe asking for the newest OpenGL core context first:
+# on Windows it asked for exactly 3.3, which drivers gave, so Halo 3, ODST and
+# Reach game shaders (4.1) never drew. Every egui crate comes from the same
+# commit, or eframe's path dependencies make a second copy of egui. Drop this
+# once egui releases the change.
+[patch.crates-io]
+ecolor = { git = "https://github.com/camden-smallwood/egui", rev = "ce0307b68be258b1ff57e92163c7518b24408dc6" }
+eframe = { git = "https://github.com/camden-smallwood/egui", rev = "ce0307b68be258b1ff57e92163c7518b24408dc6" }
+egui = { git = "https://github.com/camden-smallwood/egui", rev = "ce0307b68be258b1ff57e92163c7518b24408dc6" }
+egui_extras = { git = "https://github.com/camden-smallwood/egui", rev = "ce0307b68be258b1ff57e92163c7518b24408dc6" }
+egui_glow = { git = "https://github.com/camden-smallwood/egui", rev = "ce0307b68be258b1ff57e92163c7518b24408dc6" }
+egui-wgpu = { git = "https://github.com/camden-smallwood/egui", rev = "ce0307b68be258b1ff57e92163c7518b24408dc6" }
+egui-winit = { git = "https://github.com/camden-smallwood/egui", rev = "ce0307b68be258b1ff57e92163c7518b24408dc6" }
+emath = { git = "https://github.com/camden-smallwood/egui", rev = "ce0307b68be258b1ff57e92163c7518b24408dc6" }
+epaint = { git = "https://github.com/camden-smallwood/egui", rev = "ce0307b68be258b1ff57e92163c7518b24408dc6" }
+epaint_default_fonts = { git = "https://github.com/camden-smallwood/egui", rev = "ce0307b68be258b1ff57e92163c7518b24408dc6" }

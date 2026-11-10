@@ -31,7 +31,7 @@ impl Baboon {
         let target = payload
             .as_ref()
             .and_then(|_| kit_tool_under_cursor(&mut self.kit_tools.kit_tool_drag.executables));
-        let cursor_id = egui::Id::new(KIT_TOOL_DROP_CURSOR);
+        let cursor_id = egui::Id::unique(KIT_TOOL_DROP_CURSOR);
         let (Some(payload), Some(target)) = (payload, target) else {
             ctx.data_mut(|data| data.remove_temp::<egui::CursorIcon>(cursor_id));
             if !egui::DragAndDrop::has_any_payload(ctx) {
@@ -286,7 +286,7 @@ mod tests {
             let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
                 egui::DragAndDrop::set_payload(ui.ctx(), "rifle.weapon");
                 if let Some(cursor) = requested {
-                    let id = egui::Id::new(KIT_TOOL_DROP_CURSOR);
+                    let id = egui::Id::unique(KIT_TOOL_DROP_CURSOR);
                     ui.ctx().data_mut(|data| data.insert_temp(id, cursor));
                 }
             });

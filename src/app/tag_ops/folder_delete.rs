@@ -62,7 +62,7 @@ impl Dialog for DeleteFolderConfirm {
             .is_some_and(|document| document.dirty.is_set())).count();
         let mut delete = false;
         let mut cancel = false;
-        let response = egui::Modal::new(egui::Id::new("delete_folder_confirm"))
+        let response = egui::Modal::new(egui::Id::unique("delete_folder_confirm"))
             .frame(egui::Frame::window(&cx.egui.global_style()))
             .show(cx.egui, |ui| {
                 ui.set_width(window_width(cx.egui, 520.0));

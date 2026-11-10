@@ -1116,7 +1116,7 @@ mod shader_section_tests {
         let header_y = frame(Vec::new());
         let initial_body_y = body_y.get();
         frame(vec![egui::Event::PointerMoved(egui::pos2(300.0, 120.0))]);
-        frame(vec![egui::Event::MouseWheel {
+        frame(vec![egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: Vec2::new(0.0, -160.0),
             modifiers: egui::Modifiers::NONE,
