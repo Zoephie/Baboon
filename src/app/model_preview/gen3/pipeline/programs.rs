@@ -24,8 +24,6 @@ const PRT_NAMES: [&str; 3] = ["a_BLENDWEIGHT1", "a_BLENDWEIGHT2", "a_BLENDWEIGHT
 
 /// A linked pass and where its uniforms landed.
 pub(in crate::app::model_preview) struct Gen3Program {
-    /// Held so its address, the program's key, stays its own.
-    _pass: Arc<Gen3Pass>,
     linked: Linked,
 }
 
@@ -53,8 +51,9 @@ impl Gen3State {
         Some(draw(self, core, &program))
     }
 
-    /// `pass`'s program, linked the first time it is asked for. It stays in
-    /// the cache while lent, so a pass drawn inside another's draw finds it.
+    /// `pass`'s program, linked the first time its source is asked for. It
+    /// stays in the cache while lent, so a pass drawn inside another's draw
+    /// finds it.
     unsafe fn program(
         &mut self,
         core: &mut RenderCore,
@@ -62,41 +61,60 @@ impl Gen3State {
         pass: &Arc<Gen3Pass>,
     ) -> Option<Rc<Gen3Program>> {
         let key = Arc::as_ptr(pass) as usize;
-        match self.programs.get(&key) {
-            Some(Ok(program)) => return Some(Rc::clone(program)),
-            Some(Err((_, error))) => {
+        let known = match self.programs.get(&key) {
+            Some((_, known)) => known.clone(),
+            None => {
+                // A new pass: the old ones only these entries still hold go.
+                self.programs
+                    .retain(|_, (held, _)| Arc::strong_count(held) > 1);
+                let source = (pass.vertex.clone(), pass.pixel.clone());
+                let known = match self.linked.get(&source) {
+                    Some(known) => known.clone(),
+                    None => {
+                        let linked = unsafe { link_pass(core, gl, pass) };
+                        self.linked.insert(source, linked.clone());
+                        linked
+                    }
+                };
+                self.programs.insert(key, (Arc::clone(pass), known.clone()));
+                known
+            }
+        };
+        match known {
+            Ok(program) => Some(program),
+            Err(error) => {
                 core.note(format!("a pass did not link: {error}"));
-                return None;
+                None
             }
-            None => {}
         }
-        unsafe {
-            let stages = [
-                (glow::VERTEX_SHADER, pass.vertex.as_str()),
-                (glow::FRAGMENT_SHADER, pass.pixel.as_str()),
-            ];
-            let mut attributes = Vec::new();
-            for (name, preview) in ATTRIBUTES {
-                if let Some(location) = gl.get_attrib_location(core.program, preview) {
-                    attributes.push((location, name));
-                }
+    }
+}
+
+/// `pass`'s stages linked, with the attributes the preview's vertices bind.
+unsafe fn link_pass(
+    core: &RenderCore,
+    gl: &glow::Context,
+    pass: &Gen3Pass,
+) -> super::super::state::LinkedPass {
+    unsafe {
+        let stages = [
+            (glow::VERTEX_SHADER, pass.vertex.as_str()),
+            (glow::FRAGMENT_SHADER, pass.pixel.as_str()),
+        ];
+        let mut attributes = Vec::new();
+        for (name, preview) in ATTRIBUTES {
+            if let Some(location) = gl.get_attrib_location(core.program, preview) {
+                attributes.push((location, name));
             }
-            attributes.extend(PRT_ATTRIBUTES.into_iter().zip(PRT_NAMES));
-            match super::super::super::gl::link::link(gl, &stages, &attributes) {
-                Ok(program) => {
-                    let program = Rc::new(Gen3Program {
-                        _pass: Arc::clone(pass),
-                        linked: Linked::new(program),
-                    });
-                    self.programs.insert(key, Ok(Rc::clone(&program)));
-                    Some(program)
-                }
-                Err(error) => {
-                    eprintln!("h3 program: {error}");
-                    core.note(format!("a pass did not link: {error}"));
-                    self.programs.insert(key, Err((Arc::clone(pass), error)));
-                    None
-                }
+        }
+        attributes.extend(PRT_ATTRIBUTES.into_iter().zip(PRT_NAMES));
+        match super::super::super::gl::link::link(gl, &stages, &attributes) {
+            Ok(program) => Ok(Rc::new(Gen3Program {
+                linked: Linked::new(program),
+            })),
+            Err(error) => {
+                eprintln!("h3 program: {error}");
+                Err(error)
             }
         }
     }

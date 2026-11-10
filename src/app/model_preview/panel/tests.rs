@@ -1349,13 +1349,65 @@ fn sectioned_object() -> ModelPreviewData {
     let mut data = model_preview_data(String::new(), String::new(), preview, Vec::new());
     data.scenario_bsps = vec![Some("levels\\a\\a.scenario_structure_bsp".into())];
     data.ce.weapons = Some(crate::app::model_preview::ce::weapons::CeBipedWeapons {
-        equippable: vec![
+        equippable: Some(vec![
             crate::app::model_preview::ce::weapons::CeEquippable::for_test("weapons\\rifle\\rifle"),
-        ],
+        ]),
         hidden_clips: Default::default(),
     });
     data.ce.functions = Some(Default::default());
     data
+}
+
+/// A biped's weapons are listed once its picker opens, not by the load: until
+/// then the picker counts none and opening it asks for them. A listed one
+/// never asks.
+#[test]
+fn the_weapon_picker_asks_for_its_weapons_when_first_opened() {
+    let opened = |listed: bool| {
+        let mut data = sectioned_object();
+        if !listed && let Some(weapons) = data.ce.weapons.as_mut() {
+            weapons.equippable = None;
+        }
+        let mut state = ModelPreviewState::default();
+        reset_model_preview_selection(&mut state, &data, None);
+        let mut body = SetupBody::new();
+        body.frame(&data, &mut state, Vec::new());
+        let texts = body.frame(&data, &mut state, Vec::new());
+        let count = if listed { "(1)" } else { "(…)" };
+        let button = texts
+            .iter()
+            .find(|(text, _)| text == count)
+            .unwrap_or_else(|| panic!("no {count} on the picker: {texts:?}"))
+            .1
+            .center();
+        assert!(!state.list_weapons, "nothing asks before it opens");
+        body.click(&data, &mut state, button);
+        let texts = body.frame(&data, &mut state, Vec::new());
+        let listing = texts.iter().any(|(text, _)| text == "Listing weapons…");
+        (state.list_weapons, listing)
+    };
+    assert_eq!(opened(false), (true, true));
+    assert_eq!(opened(true), (false, false));
+}
+
+/// Without Game Shaders the object's functions get no card, though it has
+/// some: only Game Shaders read them.
+#[test]
+fn the_functions_card_shows_with_game_shaders_alone() {
+    let data = sectioned_object();
+    let shown = |game_shaders| {
+        let mut state = ModelPreviewState {
+            game_shaders,
+            ..Default::default()
+        };
+        reset_model_preview_selection(&mut state, &data, None);
+        let mut body = SetupBody::new();
+        body.frame(&data, &mut state, Vec::new());
+        let texts = body.frame(&data, &mut state, Vec::new());
+        texts.iter().any(|(text, _)| text == "Object Functions")
+    };
+    assert!(shown(true));
+    assert!(!shown(false));
 }
 
 /// Each section shows only with something in it, and its Reset is enabled
@@ -1369,7 +1421,11 @@ fn setup_sections_reset_what_they_hold_and_only_once_it_changed() {
         "Object Functions",
     ];
     let data = sectioned_object();
-    let mut state = ModelPreviewState::default();
+    // The Effects and Object Functions cards show with Game Shaders alone.
+    let mut state = ModelPreviewState {
+        game_shaders: true,
+        ..Default::default()
+    };
     reset_model_preview_selection(&mut state, &data, None);
     let mut body = SetupBody::new();
     body.frame(&data, &mut state, Vec::new());
@@ -1412,7 +1468,7 @@ fn setup_sections_reset_what_they_hold_and_only_once_it_changed() {
     assert_eq!(state.region_selections["body"].permutation, "base");
     assert_eq!(state.weapon, None);
     assert!(
-        state.weapon_carry.is_some(),
+        state.reload_carry.is_some(),
         "the selection rides the weapon's reload"
     );
     assert!(state.ce.function_inputs.is_empty());

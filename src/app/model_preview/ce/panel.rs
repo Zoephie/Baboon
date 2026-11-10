@@ -1,7 +1,7 @@
 //! The panel's controls for a Halo CE object's functions and effects.
 
 use super::super::load::{ObjectControls, SectionControls};
-use super::super::panel::{carry_through_weapon_change, weapon_dropdown};
+use super::super::panel::{carry_through_reload, weapon_dropdown};
 use super::super::{ModelPreviewData, ModelPreviewState, frame};
 use crate::app::model_preview::ce::functions::{
     CeEventCounts, CeFunctionInputs, CeObjectFunctions, CeObjectKey, OUTPUTS, object_time,
@@ -172,12 +172,7 @@ pub(in crate::app::model_preview) fn draw_ce_function_controls(
 /// the effects its objects play and fire, and its functions' inputs.
 pub(in crate::app::model_preview) const CONTROLS: ObjectControls = ObjectControls {
     weapons: SectionControls {
-        has: |data| {
-            data.ce
-                .weapons
-                .as_ref()
-                .is_some_and(|weapons| !weapons.equippable.is_empty())
-        },
+        has: |data| data.ce.weapons.is_some(),
         draw: draw_ce_weapon_picker,
         // The weapon it holds is the shared section's to reset.
         changed: |_, _| false,
@@ -324,30 +319,30 @@ pub(in crate::app::model_preview) fn draw_ce_weapon_picker(
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
 ) {
-    let Some(weapons) = data
-        .ce
-        .weapons
-        .as_ref()
-        .filter(|weapons| !weapons.equippable.is_empty())
-    else {
+    let Some(weapons) = data.ce.weapons.as_ref() else {
         return;
     };
-    let options: Vec<_> = weapons
-        .equippable
-        .iter()
-        .map(|weapon| super::super::weapons::WeaponOption {
-            path: weapon.path.clone(),
-            name: weapon.name.clone(),
-            class: weapon.class.clone(),
-        })
-        .collect();
+    let options: Option<Vec<_>> = weapons.equippable.as_ref().map(|listed| {
+        listed
+            .iter()
+            .map(|weapon| super::super::weapons::WeaponOption {
+                path: weapon.path.clone(),
+                name: weapon.name.clone(),
+                class: weapon.class.clone(),
+            })
+            .collect()
+    });
     let held = options
         .iter()
+        .flatten()
         .find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
     let salt = ("ce_weapon_picker", data.render_model_path.as_str());
-    let chosen = weapon_dropdown(ui, "Weapon", salt, &options, held);
-    if let Some(choice) = chosen.filter(|choice| *choice != state.weapon) {
-        carry_through_weapon_change(data, state);
+    let pick = weapon_dropdown(ui, "Weapon", salt, options.as_deref(), held);
+    if pick.opened && options.is_none() {
+        state.list_weapons = true;
+    }
+    if let Some(choice) = pick.chosen.filter(|choice| *choice != state.weapon) {
+        carry_through_reload(data, state);
         state.weapon = choice;
     }
 }

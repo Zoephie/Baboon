@@ -19,10 +19,11 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
 ) {
     // Hold the viewport until the textures land, rather than drawing the model
     // untextured and re-shading it a second later — a model that changes
-    // appearance under the cursor reads as a glitch, not as progress.
+    // appearance under the cursor reads as a glitch, not as progress. Game
+    // Shaders turned on waits the same way for the textures it resolves.
     let waiting_for_textures = state.render_mode.uses_textures()
         && !data.preview.materials.is_empty()
-        && data.textures.is_none();
+        && data.textures_for(state.game_shaders).is_none();
     if waiting_for_textures {
         let (rect, _) = ui.allocate_exact_size(desired_size, Sense::hover());
         ui.painter().rect_stroke(

@@ -42,7 +42,7 @@ impl Image {
 }
 
 /// A texture's address and filter modes, from the bake.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Sampler {
     pub(crate) address: [BitmapAddressMode; 2],
     pub(crate) filter: BitmapFilterMode,
@@ -50,7 +50,7 @@ pub(crate) struct Sampler {
 
 /// What a texel means to the card, from the bitmap's format and curve as
 /// `bitmap_format_to_hardware_format_pc_unchecked` chooses its DXGI format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ImageTexels {
     Linear,
     /// The card decodes the `sRGB` curve as it samples.

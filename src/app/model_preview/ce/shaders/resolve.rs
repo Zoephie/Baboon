@@ -152,6 +152,11 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
         expand_ce_digits(reader, transparent, permutation, caches);
     caches.ce.model_common = common;
     if !textures.dx9_layers[Dx9Layer::Transparent as usize].is_empty() {
+        // Its passes are the game's shaders, which draw with Game Shaders on.
+        if textures.slots.iter().all(Option::is_none) {
+            textures.bare_without_passes =
+                Some("a transparent shader, drawn only by its passes, without Game Shaders".to_owned());
+        }
         return textures;
     }
     if !matches!(&group, b"soso" | b"senv") {

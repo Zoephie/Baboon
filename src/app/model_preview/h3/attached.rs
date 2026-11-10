@@ -24,6 +24,11 @@ pub(in crate::app::model_preview) fn read_h3_attached_features<
         frame,
         name,
     } = *cx;
+    // Without Game Shaders, the cloth alone (`TagReader::game_shaders`).
+    if !reader.game_shaders() {
+        super::super::cloth::read_cloth(cx, preview, ClothGame::Halo3, [0.0; 3]);
+        return;
+    }
     let lights = super::super::h3::lights::read_h3_lights(reader, object, owner, markers, frame);
     let flares =
         super::super::gen3::effects::flares::read_h3_flares(reader, object, owner, markers, frame);

@@ -18,10 +18,10 @@ pub(in crate::app::model_preview) struct PassLight {
     pub(in crate::app::model_preview) gel: Option<glow::NativeTexture>,
 }
 
-/// A pass's program as [`Gen3State::programs`] keeps it: linked, or the pass
-/// that did not link and why.
+/// A pass's program as [`Gen3State::programs`] keeps it: linked, or why it
+/// did not link.
 pub(in crate::app::model_preview) type LinkedPass =
-    Result<Rc<super::super::gen3::pipeline::Gen3Program>, (Arc<super::shaders::Gen3Pass>, String)>;
+    Result<Rc<super::super::gen3::pipeline::Gen3Program>, String>;
 
 /// What the gen3 pipeline keeps between and within frames. `Gen3Pipeline`
 /// owns it, and the pipeline's stages are its methods, each handed the core.
@@ -31,10 +31,14 @@ pub(in crate::app::model_preview) struct Gen3State {
     /// The frame's targets: albedo and normals, the lit scene, what lies
     /// behind camo, the depth copy and the distortion.
     pub(in crate::app::model_preview) targets: Option<super::super::gen3::pipeline::Gen3Targets>,
-    /// Linked passes by their address, or the pass that failed to link and
-    /// why: each holds its pass, so no other pass can come to have its
-    /// address.
-    pub(in crate::app::model_preview) programs: HashMap<usize, LinkedPass>,
+    /// Each pass drawn, by its address, with its program: each holds its pass,
+    /// so no other pass can come to have its address. A pass nothing else
+    /// holds any more goes when another arrives.
+    pub(in crate::app::model_preview) programs: HashMap<usize, (Arc<super::shaders::Gen3Pass>, LinkedPass)>,
+    /// The programs by their stages' source: every resolve makes its passes
+    /// anew, so a model opened again, or another with the same shaders,
+    /// links none again.
+    pub(in crate::app::model_preview) linked: HashMap<(String, String), LinkedPass>,
     /// The light drawing now, which a game's dynamic lights set for each.
     pub(in crate::app::model_preview) light: Option<PassLight>,
     /// Whether this frame's particles drew any distortion to apply.
@@ -78,6 +82,7 @@ impl Default for Gen3State {
             frame_values: super::pipeline::plain_frame_values,
             targets: Default::default(),
             programs: Default::default(),
+            linked: Default::default(),
             light: Default::default(),
             distorted: Default::default(),
             distortion_program: Default::default(),

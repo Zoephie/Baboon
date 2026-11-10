@@ -7,7 +7,9 @@ use std::sync::Arc;
 /// One decoded texture, ready to become a GL texture.
 #[derive(Debug, Clone)]
 pub(crate) struct TextureImage {
-    pub rgba: Vec<u8>,
+    /// Shared: every material binding a map holds the one decode, so a
+    /// renderer uploads it once.
+    pub rgba: std::sync::Arc<Vec<u8>>,
     pub width: usize,
     pub height: usize,
     /// Whether the sampler should repeat rather than clamp, per axis. Halo

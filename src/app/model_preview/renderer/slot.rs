@@ -14,6 +14,8 @@ use super::grid::grid_line_vertices;
 use super::program::bind_preview_vertex_layout;
 use eframe::glow;
 use eframe::glow::HasContext as _;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// How many models stay on the GPU at once: geometry, ground grid and
 /// textures. Past this, the one drawn longest ago gives up its slot.
@@ -409,6 +411,11 @@ impl ModelGpuSlot {
         let Some(textures) = frame.textures.as_ref() else {
             return;
         };
+        // One texture per decoded image, however many materials bind it: the
+        // resolve hands each the same decode of a map. A slot's wrap is part
+        // of its texture; its scale is a uniform.
+        let mut slots = HashMap::new();
+        let mut passes_shared = HashMap::new();
         self.materials = textures
             .iter()
             .map(|material| {
@@ -419,10 +426,13 @@ impl ModelGpuSlot {
                         continue;
                     };
                     uploaded.uv_scales[index] = image.scale;
-                    uploaded.textures[index] = unsafe { upload_texture(gl, image) };
+                    let key = (Arc::as_ptr(&image.rgba), image.repeat_x, image.repeat_y);
+                    uploaded.textures[index] = *slots
+                        .entry(key)
+                        .or_insert_with(|| unsafe { upload_texture(gl, image) });
                 }
                 uploaded.detail = material.detail;
-                let upload = |passes: &[Dx9DrawPass]| -> Vec<Vec<Option<glow::NativeTexture>>> {
+                let mut upload = |passes: &[Dx9DrawPass]| -> Vec<Vec<Option<glow::NativeTexture>>> {
                     passes
                         .iter()
                         .map(|pass| {
@@ -430,7 +440,9 @@ impl ModelGpuSlot {
                                 .iter()
                                 .map(|texture| {
                                     let image = texture.image.as_ref()?;
-                                    unsafe { upload_image(gl, image) }
+                                    *passes_shared
+                                        .entry(Arc::as_ptr(image))
+                                        .or_insert_with(|| unsafe { upload_image(gl, image) })
                                 })
                                 .collect()
                         })
@@ -444,6 +456,8 @@ impl ModelGpuSlot {
     }
 
     pub(super) unsafe fn release_textures(&mut self, gl: &glow::Context) {
+        // Materials share their textures (`sync_textures`): each goes once.
+        let mut shared = std::collections::HashSet::new();
         for material in self.materials.drain(..) {
             let passes = material
                 .dx9_textures
@@ -451,9 +465,10 @@ impl ModelGpuSlot {
                 .flatten()
                 .flatten()
                 .flatten();
-            for texture in material.textures.into_iter().flatten().chain(passes) {
-                unsafe { gl.delete_texture(texture) };
-            }
+            shared.extend(material.textures.into_iter().flatten().chain(passes));
+        }
+        for texture in shared {
+            unsafe { gl.delete_texture(texture) };
         }
     }
 }

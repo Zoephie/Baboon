@@ -56,11 +56,11 @@ fn weapon(name: &str, class: &str, kind: &str, dual: bool, only_dual: bool) -> E
 
 fn unit() -> UnitWeapons {
     UnitWeapons {
-        equippable: vec![
+        equippable: Some(vec![
             weapon("magnum", "pistol", "hp", true, false),
             weapon("rocket", "missile", "rl", false, false),
             weapon("shield", "pistol", "js", true, true),
-        ],
+        ]),
         graph: vec![
             entry("combat", "pistol", "any", true),
             slotted(
@@ -254,7 +254,12 @@ fn the_left_hand_opens_only_for_a_primary_that_pairs() {
 
 #[test]
 fn what_only_pairs_is_no_primary() {
-    let names: Vec<_> = unit().primaries().into_iter().map(|w| w.name).collect();
+    let names: Vec<_> = unit()
+        .primaries()
+        .into_iter()
+        .flatten()
+        .map(|w| w.name)
+        .collect();
     assert_eq!(names, ["magnum", "rocket"]);
 }
 
@@ -418,13 +423,11 @@ fn a_reach_graph_reads_its_slots_from_the_any_set() {
         "the rifle class idles under any"
     );
     let unit = load_referenced_tag_from_source(&source, spartan, "biped", b"bipd").unwrap();
-    let weapons = unit_weapons(
-        &crate::app::model_preview::load::TagReader::new(&source),
-        &unit,
-        None,
-    );
-    let paths: Vec<_> = weapons
-        .equippable
+    let reader = crate::app::model_preview::load::TagReader::new(&source);
+    // The load lists none: the picker asks once it opens.
+    assert!(unit_weapons(&reader, &unit, None).equippable.is_none());
+    let listed = list_unit_weapons(&reader, &unit);
+    let paths: Vec<_> = listed
         .iter()
         .map(|weapon| weapon.option.name.as_str())
         .collect();

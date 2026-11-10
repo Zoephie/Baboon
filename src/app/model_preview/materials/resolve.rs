@@ -17,12 +17,21 @@ use std::sync::Arc;
 ///
 /// Runs on a worker: it reads and decodes a shader tag plus several bitmaps per
 /// material, which is far too much to do inside a frame.
+///
+/// Without `game_shaders` ([`TagReader::game_shaders`]), the Halo 3, ODST,
+/// Reach and Halo 4 materials keep their slot maps only: translating their
+/// passes and decoding the maps those read at full size was most of a
+/// resolve's time, for a look only Game Shaders draws. Halo CE's and Halo 2's
+/// DX9 passes, which Game Shaders alone draws too, still resolve: they cost a
+/// few milliseconds, and whether a material has any decides what the footer
+/// says of it drawn without them.
 pub(crate) fn resolve_model_textures(
     source: &TagSource,
     materials: &[RenderModelPreviewMaterial],
+    game_shaders: bool,
 ) -> Vec<MaterialTextures> {
     // The materials' own reads, once each for this resolve.
-    let reader = &TagReader::new(source);
+    let reader = &TagReader::with_game_shaders(source, game_shaders);
     let mut caches = ResolveCaches {
         kit_names: match source {
             TagSource::LooseFolder {
@@ -169,7 +178,8 @@ fn resolve_one_material(
             textures.slots[TextureSlot::Base as usize].clone();
     }
     // `Game::of` calls every tag after Halo 2 `Halo3`, Reach's included.
-    if blam_tags::game::Game::of(&shader) == blam_tags::game::Game::Halo3 {
+    if reader.game_shaders() && blam_tags::game::Game::of(&shader) == blam_tags::game::Game::Halo3
+    {
         match prepare_gen3_material(reader, &values, caches) {
             Ok(material) => textures.gen3 = Some(Arc::new(material)),
             Err(error) => {
@@ -208,7 +218,7 @@ pub(in crate::app::model_preview) fn decode_image(
     if kind == SamplerKind::Texture2D {
         let image = decode_thumbnail(&tag, index, MAX_TEXTURE_EDGE).ok()?;
         return Some(Image::Flat(TextureImage {
-            rgba: image.rgba,
+            rgba: image.rgba.into(),
             width: image.width,
             height: image.height,
             repeat_x: true,

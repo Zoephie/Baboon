@@ -104,7 +104,7 @@ fn decode_bound_bitmap(reader: &TagReader, binding: &SlotBitmap) -> Option<Textu
     let image =
         decode_thumbnail(&tag, binding.image_index.max(0) as usize, MAX_TEXTURE_EDGE).ok()?;
     Some(TextureImage {
-        rgba: image.rgba,
+        rgba: image.rgba.into(),
         width: image.width,
         height: image.height,
         repeat_x: binding.repeat_x,

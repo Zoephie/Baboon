@@ -143,11 +143,18 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
                     "Ground-reference grid on the z = 0 plane, spaced to the model's size.",
                 );
             ui.baboon_checkbox(&mut state.show_backfaces, "Render Backfaces");
-            ui.baboon_checkbox(&mut state.game_shaders, "Game Shaders")
+            let toggled = ui
+                .baboon_checkbox(&mut state.game_shaders, "Game Shaders")
                 .on_hover_text(
                     "Draw Halo CE, Halo 2 and Halo 3 materials through the game's own \
-                     shaders, lit by its default lighting.",
-                );
+                     shaders, lit by its default lighting, with the object's effects \
+                     and functions. Off, the preview reads none of those.",
+                )
+                .changed();
+            // What it reads changes, so the preview reads again.
+            if toggled {
+                super::weapons::carry_through_reload(data, state);
+            }
             // What a game's models draw no differently for, its rules leave out.
             let lit_options = super::super::load::rules(data.preview.game).lit_options;
             if lit_options {

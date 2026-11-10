@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 /// A Halo 3 or ODST object's own shield, lights, flares, light volumes,
 /// particles, strips, screen effects, antennas, cloth, extension weapons and
-/// leaves; `model` is its `.model`.
+/// leaves; `model` is its `.model`. Without Game Shaders, its cloth alone
+/// (`TagReader::game_shaders`).
 pub(in crate::app::model_preview) fn read_h3_object_features(
     reader: &TagReader,
     model_tag: &TagFile,
@@ -17,6 +18,19 @@ pub(in crate::app::model_preview) fn read_h3_object_features(
     preview: &mut RenderModelPreview,
 ) {
     let frame = own_marker_frame;
+    let markers = preview.markers.clone();
+    let cx = super::super::load::LoadCx {
+        reader,
+        object: model_tag,
+        owner: 0,
+        markers: &markers,
+        frame: &frame,
+        name: None,
+    };
+    if !reader.game_shaders() {
+        super::super::cloth::read_cloth(&cx, preview, ClothGame::Halo3, [0.0; 3]);
+        return;
+    }
     preview.h3.shield = model
         .root()
         .read_tag_ref_path("shield impact parameter override")
@@ -81,15 +95,6 @@ pub(in crate::app::model_preview) fn read_h3_object_features(
         preview.h3.motion_blur = super::super::h3::vision::read_h3_motion_blur(reader);
     }
     preview.antennas = super::super::antennas::read_antennas(reader, model_tag, &preview.markers);
-    let markers = preview.markers.clone();
-    let cx = super::super::load::LoadCx {
-        reader,
-        object: model_tag,
-        owner: 0,
-        markers: &markers,
-        frame: &frame,
-        name: None,
-    };
     super::super::cloth::read_cloth(&cx, preview, ClothGame::Halo3, [0.0; 3]);
     super::super::weapons::attached::read_extension_weapons(&cx, preview);
     let middle =

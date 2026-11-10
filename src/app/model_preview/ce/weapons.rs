@@ -129,7 +129,7 @@ impl CeLoadSettings {
                     .ce
                     .weapons
                     .as_ref()
-                    .map(|weapons| weapons.equippable.clone()),
+                    .and_then(|weapons| weapons.equippable.clone()),
                 _ => None,
             },
         }
@@ -162,7 +162,9 @@ impl CeEquippable {
 /// What a biped can hold, and which clips the held weapon leaves out.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CeBipedWeapons {
-    pub(crate) equippable: Vec<CeEquippable>,
+    /// The kit's weapons it can hold: none until listed, which the picker
+    /// asks for when first opened ([`list_ce_weapons`]).
+    pub(crate) equippable: Option<Vec<CeEquippable>>,
     pub(crate) hidden_clips: std::collections::BTreeSet<usize>,
 }
 
@@ -271,7 +273,17 @@ fn hidden_clips(graph: &TagFile, weapon_label: &str) -> std::collections::BTreeS
 }
 
 /// The weapons `unit_can_use_weapon` lets this unit hold in its resting seat:
-/// the biped has no say, only its animations do.
+/// the biped has no say, only its animations do. Every `.weapon` in the kit
+/// is read, so this runs on a worker, when the picker first opens.
+pub(in crate::app::model_preview) fn list_ce_weapons(
+    reader: &TagReader,
+    object: &TagFile,
+) -> Vec<CeEquippable> {
+    object_reference(object, "animation graph")
+        .and_then(|graph| reader.load(&graph, "model_animations", b"antr").ok())
+        .map_or_else(Vec::new, |graph| equippable_of(reader, &graph))
+}
+
 fn equippable_of(reader: &TagReader, graph: &TagFile) -> Vec<CeEquippable> {
     let TagSource::LooseFolder { root, .. } = &reader.source else {
         return Vec::new();
@@ -294,29 +306,37 @@ fn equippable_of(reader: &TagReader, graph: &TagFile) -> Vec<CeEquippable> {
     equippable
 }
 
-/// A biped's weapon choices, with `chosen` held. `known` spares the scan when
-/// only the choice changed.
+/// A biped's weapons, with `chosen` held: `known` is an earlier load's list,
+/// or none, which leaves the weapons to [`list_ce_weapons`]; `chosen` is
+/// held either way. None for a biped with no animations, which holds
+/// nothing.
 pub(in crate::app::model_preview) fn biped_weapons(
     reader: &TagReader,
     object: &TagFile,
     chosen: Option<&str>,
     known: Option<&[CeEquippable]>,
-) -> CeBipedWeapons {
-    let Some(graph) = object_reference(object, "animation graph")
-        .and_then(|graph| reader.load(&graph, "model_animations", b"antr").ok())
-    else {
-        return CeBipedWeapons::default();
-    };
-    let equippable = known.map_or_else(|| equippable_of(reader, &graph), <[_]>::to_vec);
-    let held = chosen.and_then(|path| equippable.iter().find(|weapon| weapon.path == path));
-    // With nothing held every clip stays.
-    let hidden_clips = held.map_or_else(Default::default, |weapon| {
-        hidden_clips(&graph, weapon.label.as_str())
+) -> Option<CeBipedWeapons> {
+    let graph = object_reference(object, "animation graph")
+        .and_then(|graph| reader.load(&graph, "model_animations", b"antr").ok())?;
+    let equippable = known.map(<[_]>::to_vec);
+    // The held weapon's label: from the list, or, before one, its own tag.
+    let label = chosen.and_then(|path| match &equippable {
+        Some(listed) => listed
+            .iter()
+            .find(|weapon| weapon.path == path)
+            .map(|weapon| weapon.label.clone()),
+        None => reader
+            .load(path, "weapon", b"weap")
+            .ok()?
+            .root()
+            .read_string("label"),
     });
-    CeBipedWeapons {
+    // With nothing held every clip stays.
+    let hidden_clips = label.map_or_else(Default::default, |label| hidden_clips(&graph, &label));
+    Some(CeBipedWeapons {
         equippable,
         hidden_clips,
-    }
+    })
 }
 
 /// Once a Halo CE unit's clips are listed after a weapon change, the clip to
@@ -330,6 +350,7 @@ pub(in crate::app::model_preview) fn clip_after_listing(
     let held = weapons
         .equippable
         .iter()
+        .flatten()
         .find(|weapon| Some(&weapon.path) == held);
     let class = held.map_or(UNARMED, |weapon| weapon.class.as_str());
     clip_after_weapon_change(clips, &weapons.hidden_clips, clip, class)
@@ -400,8 +421,14 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
             attach_to,
         ));
     }
-    let lights = super::lights::read_attached_lights(reader, &weapon, 1, &attached, parent, child);
-    preview.ce.lights.extend(lights);
+    // Its lights, functions and change colors are Game Shaders' alone
+    // (`TagReader::game_shaders`).
+    let game_shaders = reader.game_shaders();
+    if game_shaders {
+        let lights =
+            super::lights::read_attached_lights(reader, &weapon, 1, &attached, parent, child);
+        preview.ce.lights.extend(lights);
+    }
     let markers = attached
         .markers
         .iter()
@@ -420,8 +447,14 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
         name,
         path: path.to_owned(),
         markers,
-        functions: read_ce_object_functions(&weapon),
-        change_colors: read_change_colors(&weapon),
+        functions: game_shaders
+            .then(|| read_ce_object_functions(&weapon))
+            .flatten(),
+        change_colors: if game_shaders {
+            read_change_colors(&weapon)
+        } else {
+            Default::default()
+        },
     })
 }
 
@@ -726,6 +759,7 @@ mod tests {
                 Some(path),
                 Some(&equippable),
             )
+            .unwrap()
             .hidden_clips;
             let tag = graph("characters\\cyborg\\cyborg");
             let clips: Vec<_> = elements(tag.root(), "animations")
@@ -752,6 +786,7 @@ mod tests {
             None,
             Some(&[]),
         )
+        .unwrap()
         .hidden_clips;
         assert!(
             unarmed.is_empty(),

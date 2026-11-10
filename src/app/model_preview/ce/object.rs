@@ -7,6 +7,7 @@ use super::super::{
     RenderModelPreviewMaterial, TagEntry, TagReader, model_preview_data, read_change_colors,
 };
 use blam_tags::TagFile;
+use std::sync::Arc;
 
 /// A Halo CE object's own lights, antennas, effects, contrails, light volumes,
 /// lightning, glows, particle systems, flags and the effects it names for its
@@ -42,6 +43,18 @@ pub(in crate::app::model_preview) fn read_ce_object_features(
     attached: Option<&super::super::ce::weapons::CeAttachedObject>,
     preview: &mut RenderModelPreview,
 ) {
+    // The held weapon, whose features hang on it as object 1.
+    let held_tag = attached.and_then(|held| {
+        reader
+            .load(&held.path, "weapon", b"weap")
+            .ok()
+            .map(|tag| (tag, held))
+    });
+    // Without Game Shaders, the flags alone (`TagReader::game_shaders`).
+    if !reader.game_shaders() {
+        read_flags(reader, model_tag, held_tag.as_ref(), preview);
+        return;
+    }
     let own = super::super::ce::lights::read_ce_lights(
         reader,
         model_tag,
@@ -63,12 +76,6 @@ pub(in crate::app::model_preview) fn read_ce_object_features(
     // Empty until now: only the held weapon's lights come before.
     read_ce_features(reader, model_tag, 0, &preview.markers, &mut preview.ce);
     // What hangs on the held weapon, as object 1, on its markers in the hand.
-    let held_tag = attached.and_then(|held| {
-        reader
-            .load(&held.path, "weapon", b"weap")
-            .ok()
-            .map(|tag| (tag, held))
-    });
     if let Some((weapon, held)) = &held_tag {
         read_ce_features(reader, weapon, 1, &held.markers, &mut preview.ce);
     }
@@ -93,10 +100,20 @@ pub(in crate::app::model_preview) fn read_ce_object_features(
         super::super::ce::firing::read_ce_weapon_firing(weapon, 1, &preview.ce.effects)
     });
     preview.ce.firing = own.into_iter().chain(held).collect();
+    read_flags(reader, model_tag, held_tag.as_ref(), preview);
+}
+
+/// The object's flags, then its held weapon's, as object 1.
+fn read_flags(
+    reader: &TagReader,
+    model_tag: &TagFile,
+    held: Option<&(Arc<TagFile>, &super::super::ce::weapons::CeAttachedObject)>,
+    preview: &mut RenderModelPreview,
+) {
     let markers = preview.markers.clone();
     preview.ce.flags =
         super::super::ce::flags::read_ce_flags(reader, model_tag, 0, &markers, preview);
-    if let Some((weapon, held)) = &held_tag {
+    if let Some((weapon, held)) = held {
         let flags =
             super::super::ce::flags::read_ce_flags(reader, weapon, 1, &held.markers, preview);
         preview.ce.flags.extend(flags);
@@ -191,13 +208,22 @@ pub(in crate::app::model_preview) fn load_ce_object(
     let chosen = settings.weapon.as_deref();
     let weapons = feature(&mut notes, "the biped's weapons", || {
         let known = settings.ce.equippable.as_deref();
-        is_biped.then(|| super::weapons::biped_weapons(reader, model_tag, chosen, known))
+        is_biped
+            .then(|| super::weapons::biped_weapons(reader, model_tag, chosen, known))
+            .flatten()
     });
-    let held = match &weapons {
-        Some(weapons) => chosen
-            .filter(|path| weapons.equippable.iter().any(|weapon| weapon.path == *path))
+    // A biped holds what was chosen: one its list has, or, before the list,
+    // any it was handed.
+    let held = match (is_biped, &weapons) {
+        (true, Some(weapons)) => chosen
+            .filter(|path| {
+                weapons.equippable.as_ref().is_none_or(|listed| {
+                    listed.iter().any(|weapon| weapon.path == *path)
+                })
+            })
             .map(str::to_owned),
-        None => super::weapons::first_weapon(model_tag),
+        (true, None) => None,
+        (false, _) => super::weapons::first_weapon(model_tag),
     };
     let attached = held.and_then(|path| {
         let attach = |preview: &mut RenderModelPreview| {
@@ -218,12 +244,15 @@ pub(in crate::app::model_preview) fn load_ce_object(
         },
     );
     let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
-    data.change_colors = feature(&mut notes, "its change colors", || {
-        read_change_colors(model_tag)
-    });
-    data.ce.functions = feature(&mut notes, "its functions", || {
-        super::functions::read_ce_object_functions(model_tag)
-    });
+    // Game Shaders' alone (`TagReader::game_shaders`).
+    if reader.game_shaders() {
+        data.change_colors = feature(&mut notes, "its change colors", || {
+            read_change_colors(model_tag)
+        });
+        data.ce.functions = feature(&mut notes, "its functions", || {
+            super::functions::read_ce_object_functions(model_tag)
+        });
+    }
     data.ce.attached.extend(attached);
     data.ce.weapons = weapons;
     data.notes = notes;

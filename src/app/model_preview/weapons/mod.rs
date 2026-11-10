@@ -26,5 +26,8 @@ mod unit;
 pub(in crate::app::model_preview) use unit::*;
 mod attach;
 pub(in crate::app::model_preview) use attach::*;
+mod listed;
+pub(crate) use listed::ListedWeapons;
+pub(in crate::app::model_preview) use listed::list_weapons;
 #[cfg(test)]
 mod tests;

@@ -252,12 +252,25 @@ impl Baboon {
                 WorkerMessage::ImportAnalysisFinished { result, templates } => {
                     self.handle_import_analysis_finished(result, templates, ctx)
                 }
+                WorkerMessage::UnitWeaponsListed {
+                    stamp,
+                    key,
+                    geometry_id,
+                    listed,
+                } => self.handle_unit_weapons_listed(stamp, key, geometry_id, listed),
                 WorkerMessage::ModelTexturesResolved {
                     stamp,
                     key,
                     textures_id,
+                    game_shaders,
                     textures,
-                } => self.handle_model_textures_resolved(stamp, key, textures_id, textures),
+                } => self.handle_model_textures_resolved(
+                    stamp,
+                    key,
+                    textures_id,
+                    game_shaders,
+                    textures,
+                ),
                 WorkerMessage::BitmapThumbnailDecoded { stamp, key, result } => {
                     self.handle_thumbnail_ready::<Bitmaps>(stamp, key, result, ctx)
                 }

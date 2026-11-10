@@ -11,12 +11,12 @@ use super::super::{
 };
 use super::setup::draw_scenario_setup;
 use super::variants::{draw_variant_controls, draw_variant_selector};
-use super::weapons::{carry_through_weapon_change, draw_unit_weapon_pickers};
+use super::weapons::{carry_through_reload, draw_unit_weapon_pickers};
 use eframe::egui::Ui;
 
 /// The sidebar's cards: a scenario's BSPs, the permutations (with the
-/// variant picker and `variant_actions` in its header), the weapons, the
-/// effects and the object's functions.
+/// variant picker and `variant_actions` in its header), the weapons, and,
+/// with Game Shaders on, the effects and the object's functions.
 pub(in crate::app::model_preview) fn draw_setup_body(
     ui: &mut Ui,
     data: &ModelPreviewData,
@@ -50,7 +50,7 @@ pub(in crate::app::model_preview) fn draw_setup_body(
     let shared_weapons = data
         .weapons
         .as_ref()
-        .is_some_and(|weapons| !weapons.equippable.is_empty());
+        .is_some_and(|weapons| weapons.can_hold());
     if shared_weapons || (own.weapons.has)(data) {
         let changed = weapons_changed(state) || (own.weapons.changed)(data, state);
         if setup_section(ui, "Weapons", changed, |ui, part| {
@@ -64,6 +64,10 @@ pub(in crate::app::model_preview) fn draw_setup_body(
             reset_weapons(data, state);
             (own.weapons.reset)(data, state);
         }
+    }
+    // Effects and functions are Game Shaders' alone: off, the load reads none.
+    if !state.game_shaders {
+        return;
     }
     let shader_inputs = frame::shader_input_names(data, 0);
     let (events, sliders) = data
@@ -200,7 +204,7 @@ fn weapons_changed(state: &ModelPreviewState) -> bool {
 /// Empties both hands, carrying the selection through the reload.
 fn reset_weapons(data: &ModelPreviewData, state: &mut ModelPreviewState) {
     if weapons_changed(state) {
-        carry_through_weapon_change(data, state);
+        carry_through_reload(data, state);
         state.weapon = None;
         state.secondary_weapon = None;
     }

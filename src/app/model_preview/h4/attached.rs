@@ -28,6 +28,11 @@ pub(in crate::app::model_preview) fn read_h4_attached_features<
         frame,
         name,
     } = *cx;
+    // Without Game Shaders, the cloth alone (`TagReader::game_shaders`).
+    if !reader.game_shaders() {
+        super::super::cloth::read_cloth(cx, preview, ClothGame::Reach, center);
+        return;
+    }
     // A weapon opened on its own has no parent to hold it.
     let lone_weapon = name.is_none() && object.group().tag == u32::from_be_bytes(*b"weap");
     let (lights, cheap) = super::super::h4::lights::read_h4_lights(

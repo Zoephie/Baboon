@@ -28,15 +28,25 @@ pub(in crate::app::model_preview) fn weapon_matches(
     weapon.name.to_lowercase().contains(query) || weapon.class.to_lowercase().contains(query)
 }
 
-/// A dropdown of weapons, returning what was picked, `None` being empty hands.
+/// What a weapon dropdown did this frame.
+pub(in crate::app::model_preview) struct WeaponPick {
+    /// What was picked, `None` being empty hands.
+    pub(in crate::app::model_preview) chosen: Option<Option<String>>,
+    /// Whether it opened, which is when its weapons are first listed.
+    pub(in crate::app::model_preview) opened: bool,
+}
+
+/// A dropdown of `weapons`, or of none yet, while `None`: they are listed
+/// once it first opens.
 pub(in crate::app::model_preview) fn weapon_dropdown(
     ui: &mut Ui,
     label: &str,
     salt: (&str, &str),
-    weapons: &[super::super::weapons::WeaponOption],
+    weapons: Option<&[super::super::weapons::WeaponOption]>,
     held: Option<&super::super::weapons::WeaponOption>,
-) -> Option<Option<String>> {
+) -> WeaponPick {
     let mut chosen = None;
+    let mut opened = false;
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         ui.label(label);
@@ -46,12 +56,13 @@ pub(in crate::app::model_preview) fn weapon_dropdown(
             ui,
             popup_id,
             held.map_or("None", |weapon| weapon.name.as_str()),
-            weapons.len(),
+            weapons.map(<[_]>::len),
             220.0,
             text_dark(),
             true,
         );
         let just_opened = response.clicked() && !open;
+        opened = just_opened;
         if response.clicked() {
             egui::Popup::toggle_id(ui.ctx(), popup_id);
         }
@@ -63,6 +74,10 @@ pub(in crate::app::model_preview) fn weapon_dropdown(
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .show(|ui| {
                 picker_popup_width(ui, &response);
+                let Some(weapons) = weapons else {
+                    ui.label(RichText::new("Listing weapons…").color(subtle_dark()));
+                    return;
+                };
                 let row_height = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
                 let mut query = String::new();
                 let mut changed = false;
@@ -107,16 +122,17 @@ pub(in crate::app::model_preview) fn weapon_dropdown(
                 });
             });
     });
-    chosen
+    WeaponPick { chosen, opened }
 }
 
-/// Note what should outlive the reload a weapon change makes.
-pub(in crate::app::model_preview) fn carry_through_weapon_change(
+/// Note what should outlive the reload a weapon change or the Game Shaders
+/// toggle makes.
+pub(in crate::app::model_preview) fn carry_through_reload(
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
 ) {
     state.remember_selection();
-    state.weapon_carry = Some((data.geometry_id, state.region_selections.clone()));
+    state.reload_carry = Some((data.geometry_id, state.region_selections.clone()));
 }
 
 /// A Halo 2 unit's two hands. The left only opens for what can pair, and
@@ -126,22 +142,21 @@ pub(in crate::app::model_preview) fn draw_unit_weapon_pickers(
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
 ) {
-    let Some(weapons) = data
-        .weapons
-        .as_ref()
-        .filter(|weapons| !weapons.equippable.is_empty())
-    else {
+    let Some(weapons) = data.weapons.as_ref().filter(|weapons| weapons.can_hold()) else {
         return;
     };
     let primaries = weapons.primaries();
     let held = primaries
         .iter()
+        .flatten()
         .find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
     let salt = ("primary_weapon_picker", data.render_model_path.as_str());
-    if let Some(choice) = weapon_dropdown(ui, "Primary", salt, &primaries, held)
-        .filter(|choice| *choice != state.weapon)
-    {
-        carry_through_weapon_change(data, state);
+    let pick = weapon_dropdown(ui, "Primary", salt, primaries.as_deref(), held);
+    if pick.opened && primaries.is_none() {
+        state.list_weapons = true;
+    }
+    if let Some(choice) = pick.chosen.filter(|choice| *choice != state.weapon) {
+        carry_through_reload(data, state);
         let pairs = weapons.secondaries(choice.as_deref());
         if !pairs
             .iter()
@@ -159,10 +174,11 @@ pub(in crate::app::model_preview) fn draw_unit_weapon_pickers(
         .iter()
         .find(|weapon| Some(&weapon.path) == state.secondary_weapon.as_ref());
     let salt = ("secondary_weapon_picker", data.render_model_path.as_str());
-    if let Some(choice) = weapon_dropdown(ui, "Secondary", salt, &secondaries, held)
+    if let Some(choice) = weapon_dropdown(ui, "Secondary", salt, Some(&secondaries), held)
+        .chosen
         .filter(|choice| *choice != state.secondary_weapon)
     {
-        carry_through_weapon_change(data, state);
+        carry_through_reload(data, state);
         state.secondary_weapon = choice;
     }
 }

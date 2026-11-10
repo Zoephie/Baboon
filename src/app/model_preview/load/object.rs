@@ -82,10 +82,14 @@ impl ObjectLoad<'_> {
         notes: &mut Vec<String>,
     ) {
         let Self {
+            reader,
             object: model_tag,
             model,
-            ..
         } = *self;
+        // Game Shaders' alone (`TagReader::game_shaders`).
+        if !reader.game_shaders() {
+            return;
+        }
         data.change_colors = feature(notes, "its change colors", || read_change_colors(model_tag));
         let functions = || super::super::functions::read_object_functions(model_tag, Some(model));
         data.object_functions = feature(notes, "its functions", functions);

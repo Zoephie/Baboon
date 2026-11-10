@@ -52,7 +52,7 @@ pub(super) const ALPHA_REFERENCE: f32 = 0.5;
 /// it: the shape of `global_rasterizer_data`'s default bitmaps.
 pub(super) fn flat(value: u8) -> Arc<Image> {
     Arc::new(Image::Flat(super::super::super::materials::TextureImage {
-        rgba: vec![value, value, value, value],
+        rgba: vec![value, value, value, value].into(),
         width: 1,
         height: 1,
         repeat_x: true,
@@ -177,7 +177,7 @@ pub(super) fn normalization(slot: u32) -> Dx9DrawTexture {
 /// A flat normal, as the default vector bitmap has it.
 pub(super) fn flat_normal() -> Arc<Image> {
     Arc::new(Image::Flat(super::super::super::materials::TextureImage {
-        rgba: vec![128, 128, 255, 255],
+        rgba: vec![128, 128, 255, 255].into(),
         width: 1,
         height: 1,
         repeat_x: true,

@@ -236,6 +236,7 @@ pub(super) fn model_preview_data(
         mesh_id: geometry_id,
         textures_id: geometry_id,
         textures: None,
+        textures_game_shaders: false,
         variants,
         default_variant: None,
         change_colors: Default::default(),
@@ -277,6 +278,10 @@ pub(in crate::app) struct ModelPreviewData {
     /// its spinner rather than drawing the model untextured, so a model never
     /// appears half-shaded and then changes under the cursor.
     pub(in crate::app) textures: Option<std::sync::Arc<Vec<MaterialTextures>>>,
+    /// Whether `textures` were resolved with what only Game Shaders draws
+    /// (see `resolve_model_textures`). Plain ones stay drawn with Game Shaders
+    /// off; turned on, they are resolved again.
+    pub(in crate::app) textures_game_shaders: bool,
     pub(in crate::app) variants: Vec<ModelVariantPreview>,
     /// The variant an object tag starts in, when it names one.
     pub(in crate::app) default_variant: Option<String>,
@@ -303,6 +308,39 @@ pub(in crate::app) struct ModelPreviewData {
     pub(in crate::app) notes: Vec<String>,
 }
 
+impl ModelPreviewData {
+    /// The textures, if they were resolved for a preview with `game_shaders`
+    /// as it is: ones resolved for Game Shaders serve it off as well.
+    pub(in crate::app) fn textures_for(
+        &self,
+        game_shaders: bool,
+    ) -> Option<&std::sync::Arc<Vec<MaterialTextures>>> {
+        self.textures
+            .as_ref()
+            .filter(|_| self.textures_game_shaders || !game_shaders)
+    }
+
+    /// Take `textures`, resolved for `game_shaders`, unless it holds ones
+    /// for Game Shaders and these are plain: off, those draw as plain ones.
+    /// Whether it took them. Replacing what the GPU holds under
+    /// `textures_id`, they take a new one, so the renderer uploads them.
+    pub(in crate::app) fn set_textures(
+        &mut self,
+        textures: Vec<MaterialTextures>,
+        game_shaders: bool,
+    ) -> bool {
+        if self.textures_game_shaders && !game_shaders {
+            return false;
+        }
+        if self.textures.is_some() {
+            self.textures_id = NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed);
+        }
+        self.textures = Some(Arc::new(textures));
+        self.textures_game_shaders = game_shaders;
+        true
+    }
+}
+
 #[derive(Clone)]
 /// Resolved model variant with an explicit removed-vs-inherited region boundary.
 pub(in crate::app) struct ModelVariantPreview {
@@ -317,4 +355,42 @@ pub(in crate::app) struct ModelVariantPreview {
     /// Halo 4's `muted nodes`: each, and everything under it, held at its
     /// bind pose while an animation plays.
     pub(in crate::app) muted_nodes: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resolved(count: usize) -> Vec<MaterialTextures> {
+        (0..count).map(|_| MaterialTextures::default()).collect()
+    }
+
+    /// Plain textures serve the preview only with Game Shaders off; ones for
+    /// Game Shaders replace them under a new `textures_id`, so the renderer
+    /// uploads them, and plain ones never replace those.
+    #[test]
+    fn textures_for_game_shaders_replace_plain_ones_and_are_kept_over_them() {
+        let mut data = model_preview_data(
+            "a.model".to_owned(),
+            "a".to_owned(),
+            RenderModelPreview::default(),
+            Vec::new(),
+        );
+        assert!(data.textures_for(false).is_none(), "nothing resolved yet");
+        let first = data.textures_id;
+        assert!(data.set_textures(resolved(1), false));
+        assert_eq!(data.textures_id, first, "the first resolve keeps the load's id");
+        assert!(data.textures_for(false).is_some());
+        assert!(data.textures_for(true).is_none(), "Game Shaders wait for their own");
+
+        assert!(data.set_textures(resolved(2), true));
+        assert_ne!(data.textures_id, first, "replaced, so uploaded again");
+        assert_eq!(data.textures_for(true).map(|t| t.len()), Some(2));
+        assert_eq!(data.textures_for(false).map(|t| t.len()), Some(2), "and serve off too");
+
+        let kept = data.textures_id;
+        assert!(!data.set_textures(resolved(3), false), "plain ones are dropped");
+        assert_eq!(data.textures_id, kept);
+        assert_eq!(data.textures_for(true).map(|t| t.len()), Some(2));
+    }
 }

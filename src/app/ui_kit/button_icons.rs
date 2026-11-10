@@ -1007,7 +1007,7 @@ mod tests {
                         3 => icon_menu_button(ui, ButtonIcon::Other, "Pick", |ui| { ui.label("Menu item"); }),
                         4 => aligned_menu_button(ui, "Pick", |ui| { ui.label("Menu item"); }).response,
                         _ => {
-                            let response = crate::app::editor::fields::picker_button(ui, picker_id, "Pick", 3, 180.0, text_dark(), true);
+                            let response = crate::app::editor::fields::picker_button(ui, picker_id, "Pick", Some(3), 180.0, text_dark(), true);
                             egui::Popup::from_response(&response).id(picker_id).open_memory(None).show(|ui| { ui.label("Menu item"); });
                             response
                         }

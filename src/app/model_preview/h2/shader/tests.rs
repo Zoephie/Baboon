@@ -478,7 +478,7 @@ fn brute_hair_resolves_from_the_kit() {
         |path, _| {
             read(path, "bitmap", b"bitm")?;
             Some(std::sync::Arc::new(Image::Flat(TextureImage {
-                rgba: vec![0; 4],
+                rgba: vec![0; 4].into(),
                 width: 1,
                 height: 1,
                 repeat_x: true,

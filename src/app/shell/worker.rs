@@ -208,6 +208,15 @@ pub(in crate::app) enum WorkerMessage {
         /// What would not build, for the preview to say.
         notes: Vec<String>,
     },
+    /// A unit's weapons, listed once its picker asked; `None` when the
+    /// listing crashed.
+    UnitWeaponsListed {
+        stamp: KitStamp,
+        key: String,
+        /// The load whose picker asked, so a reload drops it.
+        geometry_id: u64,
+        listed: Option<crate::app::model_preview::weapons::ListedWeapons>,
+    },
     /// One model's materials resolved to decoded textures, off the UI thread.
     ModelTexturesResolved {
         stamp: KitStamp,
@@ -217,6 +226,8 @@ pub(in crate::app) enum WorkerMessage {
         /// user switched detail level or reloaded is dropped rather than paired
         /// with geometry it does not belong to.
         textures_id: u64,
+        /// Whether they were resolved for Game Shaders.
+        game_shaders: bool,
         textures: Vec<MaterialTextures>,
     },
     BitmapReimportFinished {

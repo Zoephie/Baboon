@@ -143,11 +143,10 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
         textures.dx9_layers[Dx9Layer::ActiveCamo as usize] =
             prepare_h2_camo_passes(reader, bump, caches);
     }
-    // Passes draw it with Game Shaders on: an emblem's overlay does, and is only
-    // off for want of a player. Without them, and with no slots, it is bare.
-    if textures.slots.iter().all(Option::is_none)
-        && textures.dx9_layers[Dx9Layer::Transparent as usize].is_empty()
-    {
+    // Passes draw it with Game Shaders on, transparent ones too: an emblem's
+    // overlay does, and is only off for want of a player. Without them, and
+    // with no slots, it is bare.
+    if textures.slots.iter().all(Option::is_none) {
         let template = root.read_tag_ref_path("template").unwrap_or_default();
         let leaf = tag_path::name(&template);
         let reason = format!("its template ({leaf}) uses none of the maps this preview draws");

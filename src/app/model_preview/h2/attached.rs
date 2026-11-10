@@ -27,6 +27,11 @@ pub(in crate::app::model_preview) fn read_h2_features<
         frame,
         name,
     } = *cx;
+    // Without Game Shaders, the cloth alone (`TagReader::game_shaders`).
+    if !reader.game_shaders() {
+        super::super::cloth::read_cloth(cx, preview, ClothGame::Halo2, [0.0; 3]);
+        return;
+    }
     let (flares, lights, gels) =
         super::lights::read_h2_flares(reader, object, owner, markers, frame);
     preview.h2.flares.extend(named(flares, name));
@@ -71,6 +76,10 @@ pub(in crate::app::model_preview) fn read_h2_extension_weapon_features<
         frame,
         name: within,
     } = *cx;
+    // Game Shaders' alone (`TagReader::game_shaders`).
+    if !reader.game_shaders() {
+        return;
+    }
     let particles = super::super::particles::read_particles(reader, weapon, owner, markers, frame);
     preview
         .particles

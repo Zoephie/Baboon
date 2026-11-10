@@ -162,12 +162,24 @@ pub(in crate::app) fn decode_thumbnail(
         max_edge,
     );
     let data = build_bitmap_preview(tag, image_index, mip)?;
-    let (rgba, width, height) = crate::app::editor::shader::downscale_rgba(
-        &data.rgba,
-        data.width as u32,
-        data.height as u32,
-        max_edge,
-    );
+    let (width, height) = (data.width as usize, data.height as usize);
+    let texels = width * height * 4;
+    // A level that already fits is the thumbnail as decoded: the downscale
+    // would copy it a texel at a time, which was most of resolving a model's
+    // textures.
+    let fits = width.max(height) <= max_edge as usize && width > 0 && height > 0;
+    let (rgba, width, height) = if fits && data.rgba.len() >= texels {
+        let mut rgba = data.rgba;
+        rgba.truncate(texels);
+        (rgba, width, height)
+    } else {
+        crate::app::editor::shader::downscale_rgba(
+            &data.rgba,
+            data.width as u32,
+            data.height as u32,
+            max_edge,
+        )
+    };
     if width == 0 || height == 0 {
         anyhow::bail!("bitmap image is empty at every mip level");
     }
@@ -895,7 +907,7 @@ mod tests {
         state.textures_pending = true;
         app.model.kits[0].generation = app.model.kits[0].generation.wrapping_add(1);
 
-        app.handle_model_textures_resolved(stamp, "file:a.model".to_owned(), 1, Vec::new());
+        app.handle_model_textures_resolved(stamp, "file:a.model".to_owned(), 1, false, Vec::new());
 
         assert!(!app.views[app.model.kits[0].id].caches.model_previews["file:a.model"].textures_pending);
     }

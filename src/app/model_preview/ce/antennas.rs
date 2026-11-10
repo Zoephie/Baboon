@@ -191,7 +191,7 @@ mod tests {
             fade: 1.0,
             image: Arc::new(Image::Flat(
                 crate::app::model_preview::materials::TextureImage {
-                    rgba: Vec::new(),
+                    rgba: Vec::new().into(),
                     width: 0,
                     height: 0,
                     repeat_x: true,

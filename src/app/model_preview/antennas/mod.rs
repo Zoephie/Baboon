@@ -543,7 +543,7 @@ mod tests {
             only_under: None,
             gen3_bitmap: None,
             image: Arc::new(Image::Flat(super::super::super::materials::TextureImage {
-                rgba: Vec::new(),
+                rgba: Vec::new().into(),
                 width: 0,
                 height: 0,
                 repeat_x: true,

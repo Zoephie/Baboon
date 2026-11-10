@@ -43,9 +43,18 @@ pub(in crate::app) struct ModelPreviewState {
     /// Halo 2 and later bipeds: what the left hand holds.
     pub(in crate::app) secondary_weapon: Option<String>,
     pub(in crate::app) loaded_secondary_weapon: Option<String>,
-    /// What outlives the reload a weapon change makes: the old geometry's id,
-    /// for its function inputs, and the region selections.
-    pub(in crate::app) weapon_carry: Option<(u64, HashMap<String, ModelRegionSelection>)>,
+    /// The `game_shaders` the cached `data` was read for: turned on or off,
+    /// the preview reads again (`TagReader::game_shaders`).
+    pub(in crate::app) loaded_game_shaders: bool,
+    /// The weapon picker opened before the unit's weapons were listed: the
+    /// pane lists them on a worker (`maybe_request_unit_weapons`).
+    pub(in crate::app) list_weapons: bool,
+    /// Whether that listing is running.
+    pub(in crate::app) weapons_pending: bool,
+    /// What outlives the reload a weapon change or the Game Shaders toggle
+    /// makes: the old geometry's id, for its function inputs, and the region
+    /// selections.
+    pub(in crate::app) reload_carry: Option<(u64, HashMap<String, ModelRegionSelection>)>,
     /// The clip selected before a reload, picked again by name once listed.
     pub(in crate::app) clip_after_load: Option<String>,
     /// The variant selected before a reload, or one just created, chosen
@@ -133,7 +142,10 @@ impl Default for ModelPreviewState {
             loaded_weapon: None,
             secondary_weapon: None,
             loaded_secondary_weapon: None,
-            weapon_carry: None,
+            loaded_game_shaders: false,
+            list_weapons: false,
+            weapons_pending: false,
+            reload_carry: None,
             clip_after_load: None,
             variant_after_load: None,
             show_collision: false,
@@ -210,6 +222,7 @@ impl ModelPreviewState {
             || !self.campaign_evolved.loaded_as_set()
             || self.loaded_weapon != self.weapon
             || self.loaded_secondary_weapon != self.secondary_weapon
+            || self.loaded_game_shaders != self.game_shaders
             || self.loaded_scenario_selection != self.scenario_bsp_selection
     }
 }
