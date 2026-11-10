@@ -239,7 +239,7 @@ impl PreviewLoadSettings {
                 Some(Ok(data)) => data
                     .weapons
                     .as_ref()
-                    .map(|weapons| weapons.equippable.clone()),
+                    .and_then(|weapons| weapons.equippable.clone()),
                 _ => None,
             },
             ce: super::super::ce::weapons::CeLoadSettings::of(state.data.as_ref()),
@@ -319,6 +319,7 @@ impl Baboon {
         state.overlays_pending = false;
         state.overlays_loaded = false;
         state.textures_pending = false;
+        state.weapons_pending = false;
         // How the clip plays outlives the reload; the clip itself is picked
         // again by name once the new geometry lists its own.
         let kept = std::mem::take(&mut state.animation);
@@ -422,6 +423,121 @@ impl Baboon {
             }
         }
         state.data = Some(result);
+        false
+    }
+}
+
+impl Baboon {
+    /// List a unit's weapons on a worker, once its picker asked
+    /// (`ModelPreviewState::list_weapons`): listing reads every weapon in the
+    /// kit, which no load waits for. Cheap to call every frame.
+    pub(in crate::app) fn maybe_request_unit_weapons(
+        &mut self,
+        kit_index: usize,
+        key: &str,
+        ctx: &egui::Context,
+    ) -> bool {
+        let kit = &self.model.kits[kit_index];
+        let Some(state) = self.views[kit.id].caches.model_previews.get(key) else {
+            return false;
+        };
+        if !state.list_weapons || state.weapons_pending {
+            return false;
+        }
+        let Some(Ok(data)) = state.data.as_ref() else {
+            return false;
+        };
+        let geometry_id = data.geometry_id;
+        let (Some(entry), Some(source)) = (
+            kit.entry_for_key(key).cloned(),
+            kit.source.as_ref().map(|source| source.source.clone()),
+        ) else {
+            return false;
+        };
+        // Read as the base load reads it, unsaved edits and all.
+        let edits = snapshot_edits(kit.parsed_tags.get(key));
+        let stamp = KitStamp {
+            kit: kit.id,
+            generation: kit.generation,
+        };
+        if let Some(state) = self.views[kit.id].caches.model_previews.get_mut(key) {
+            state.list_weapons = false;
+            state.weapons_pending = true;
+        }
+        let (key, panic_key) = (key.to_owned(), key.to_owned());
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || WorkerMessage::UnitWeaponsListed {
+                stamp,
+                key,
+                geometry_id,
+                listed: Some(super::super::weapons::list_weapons(&source, &entry, edits)),
+            },
+            // The picker stops waiting, and lists nothing.
+            move |_| WorkerMessage::UnitWeaponsListed {
+                stamp,
+                key: panic_key,
+                geometry_id,
+                listed: None,
+            },
+        );
+        true
+    }
+
+    /// Put a worker's weapon list in the preview it was listed for: none,
+    /// when the worker crashed.
+    pub(in crate::app) fn handle_unit_weapons_listed(
+        &mut self,
+        stamp: KitStamp,
+        key: String,
+        geometry_id: u64,
+        listed: Option<super::super::weapons::ListedWeapons>,
+    ) -> bool {
+        let Some(kit_index) = self.model.resolve_kit(stamp.kit) else {
+            return true;
+        };
+        let stale = self.model.resolve_stamp(stamp).is_none();
+        let Some(state) = self.views[self.model.kits[kit_index].id]
+            .caches
+            .model_previews
+            .get_mut(&key)
+        else {
+            return true;
+        };
+        // Answered before the staleness check, so the picker can ask again.
+        state.weapons_pending = false;
+        if stale {
+            return true;
+        }
+        let Some(Ok(data)) = state.data.as_mut() else {
+            return true;
+        };
+        // The preview reloaded while this ran; its picker asks again.
+        if data.geometry_id != geometry_id {
+            return true;
+        }
+        use super::super::weapons::ListedWeapons;
+        match listed {
+            Some(ListedWeapons::Unit(listed)) => {
+                if let Some(weapons) = data.weapons.as_mut() {
+                    weapons.equippable = Some(listed);
+                }
+            }
+            Some(ListedWeapons::HaloCe(listed)) => {
+                if let Some(weapons) = data.ce.weapons.as_mut() {
+                    weapons.equippable = Some(listed);
+                }
+            }
+            None => {
+                if let Some(weapons) = data.weapons.as_mut() {
+                    weapons.equippable.get_or_insert_with(Vec::new);
+                }
+                if let Some(weapons) = data.ce.weapons.as_mut() {
+                    weapons.equippable.get_or_insert_with(Vec::new);
+                }
+            }
+        }
         false
     }
 }

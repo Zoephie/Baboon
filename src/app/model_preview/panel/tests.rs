@@ -1349,13 +1349,45 @@ fn sectioned_object() -> ModelPreviewData {
     let mut data = model_preview_data(String::new(), String::new(), preview, Vec::new());
     data.scenario_bsps = vec![Some("levels\\a\\a.scenario_structure_bsp".into())];
     data.ce.weapons = Some(crate::app::model_preview::ce::weapons::CeBipedWeapons {
-        equippable: vec![
+        equippable: Some(vec![
             crate::app::model_preview::ce::weapons::CeEquippable::for_test("weapons\\rifle\\rifle"),
-        ],
+        ]),
         hidden_clips: Default::default(),
     });
     data.ce.functions = Some(Default::default());
     data
+}
+
+/// A biped's weapons are listed once its picker opens, not by the load: until
+/// then the picker counts none and opening it asks for them. A listed one
+/// never asks.
+#[test]
+fn the_weapon_picker_asks_for_its_weapons_when_first_opened() {
+    let opened = |listed: bool| {
+        let mut data = sectioned_object();
+        if !listed && let Some(weapons) = data.ce.weapons.as_mut() {
+            weapons.equippable = None;
+        }
+        let mut state = ModelPreviewState::default();
+        reset_model_preview_selection(&mut state, &data, None);
+        let mut body = SetupBody::new();
+        body.frame(&data, &mut state, Vec::new());
+        let texts = body.frame(&data, &mut state, Vec::new());
+        let count = if listed { "(1)" } else { "(…)" };
+        let button = texts
+            .iter()
+            .find(|(text, _)| text == count)
+            .unwrap_or_else(|| panic!("no {count} on the picker: {texts:?}"))
+            .1
+            .center();
+        assert!(!state.list_weapons, "nothing asks before it opens");
+        body.click(&data, &mut state, button);
+        let texts = body.frame(&data, &mut state, Vec::new());
+        let listing = texts.iter().any(|(text, _)| text == "Listing weapons…");
+        (state.list_weapons, listing)
+    };
+    assert_eq!(opened(false), (true, true));
+    assert_eq!(opened(true), (false, false));
 }
 
 /// Without Game Shaders the object's functions get no card, though it has

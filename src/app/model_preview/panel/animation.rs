@@ -98,7 +98,7 @@ pub(in crate::app::model_preview) fn draw_animation_combo(
         ui,
         popup_id,
         selected_text,
-        shown,
+        Some(shown),
         width,
         text_dark(),
         shown > 0,

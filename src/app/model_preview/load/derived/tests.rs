@@ -1025,3 +1025,53 @@ fn an_overlay_merge_keeps_the_texture_resolve_in_flight() {
     };
     assert!(data.textures.is_some(), "and its result is kept");
 }
+
+/// A unit's weapons land in the preview whose picker asked for them, and the
+/// picker stops waiting; ones listed for an earlier load are dropped, which
+/// still stops it waiting, so it can ask again.
+#[test]
+fn listed_weapons_land_in_the_load_that_asked_for_them() {
+    use crate::app::model_preview::weapons::{ListedWeapons, UnitWeapons};
+    let mut app = Baboon::for_test();
+    let stamp = app.model.kit_stamp();
+    let key = "file:a.biped".to_owned();
+    let mut data = super::super::super::model_preview_data(
+        key.clone(),
+        key.clone(),
+        RenderModelPreview::default(),
+        Vec::new(),
+    );
+    data.weapons = Some(UnitWeapons::default());
+    let geometry_id = data.geometry_id;
+    let state = app.views[app.model.kits[0].id]
+        .caches
+        .model_previews
+        .entry(key.clone())
+        .or_default();
+    state.data = Some(Ok(data));
+    let listed = |app: &Baboon| {
+        let state = &app.views[app.model.kits[0].id].caches.model_previews[&key];
+        let Some(Ok(data)) = state.data.as_ref() else {
+            panic!("preview data");
+        };
+        let weapons = data.weapons.as_ref().expect("the unit's weapons");
+        (state.weapons_pending, weapons.equippable.as_ref().map(Vec::len))
+    };
+    let pending = |app: &mut Baboon| {
+        let id = app.model.kits[0].id;
+        app.views[id].caches.model_previews.get_mut(&key).unwrap().weapons_pending = true;
+    };
+
+    pending(&mut app);
+    app.handle_unit_weapons_listed(
+        stamp,
+        key.clone(),
+        geometry_id + 1,
+        Some(ListedWeapons::Unit(Vec::new())),
+    );
+    assert_eq!(listed(&app), (false, None), "another load's list is dropped");
+
+    pending(&mut app);
+    app.handle_unit_weapons_listed(stamp, key.clone(), geometry_id, Some(ListedWeapons::Unit(Vec::new())));
+    assert_eq!(listed(&app), (false, Some(0)), "its own lands");
+}

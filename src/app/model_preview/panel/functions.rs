@@ -50,7 +50,7 @@ pub(in crate::app::model_preview) fn draw_setup_body(
     let shared_weapons = data
         .weapons
         .as_ref()
-        .is_some_and(|weapons| !weapons.equippable.is_empty());
+        .is_some_and(|weapons| weapons.can_hold());
     if shared_weapons || (own.weapons.has)(data) {
         let changed = weapons_changed(state) || (own.weapons.changed)(data, state);
         if setup_section(ui, "Weapons", changed, |ui, part| {

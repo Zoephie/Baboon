@@ -2763,7 +2763,7 @@ fn searchable_block_selector_with_none(
         ui,
         popup_id,
         selected_label,
-        count,
+        Some(count),
         width,
         foundation_block_text(),
         count > 0 || none_label.is_some(),

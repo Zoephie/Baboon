@@ -40,7 +40,7 @@ fn gen3_stored_mips(tag: &TagFile, index: usize, image: &Image) -> Option<Vec<Im
                 let (width, height) = (side(width, level), side(height, level));
                 (data.width as usize == width && data.height as usize == height).then_some(
                     Image::Flat(TextureImage {
-                        rgba: data.rgba,
+                        rgba: data.rgba.into(),
                         width,
                         height,
                         repeat_x: top.repeat_x,
@@ -86,7 +86,7 @@ fn alpha_only(image: &mut Image) {
             .for_each(|texel| texel[..3].fill(0))
     };
     match image {
-        Image::Flat(flat) => blacken(&mut flat.rgba),
+        Image::Flat(flat) => blacken(std::sync::Arc::make_mut(&mut flat.rgba)),
         Image::Cube { faces, .. } => faces.iter_mut().for_each(blacken),
         Image::Volume { rgba, .. } => blacken(rgba),
     }
@@ -102,7 +102,7 @@ fn red_only(image: &mut Image) {
         })
     };
     match image {
-        Image::Flat(flat) => keep_red(&mut flat.rgba),
+        Image::Flat(flat) => keep_red(std::sync::Arc::make_mut(&mut flat.rgba)),
         Image::Cube { faces, .. } => faces.iter_mut().for_each(keep_red),
         Image::Volume { rgba, .. } => keep_red(rgba),
     }

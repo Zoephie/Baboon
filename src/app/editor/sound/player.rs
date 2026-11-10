@@ -94,7 +94,7 @@ fn draw_clip_selector(
         ui,
         popup_id,
         &title,
-        clips.len(),
+        Some(clips.len()),
         width,
         text_dark(),
         !clips.is_empty(),

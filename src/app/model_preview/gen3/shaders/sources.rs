@@ -6,6 +6,7 @@ use super::definition::{Gen3Definition, VERTEX_SKINNED, entry_functions, read_h3
 use super::dialect::RenderMethodDialect;
 use super::pass::{Gen3Pass, SCREEN_VERTEX, pass_of};
 use super::{Preprocessor, Stage, TagSource, Translated, parse, translate};
+use crate::core::hlsl::pre::Lines;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -35,7 +36,8 @@ pub(crate) struct Gen3Sources {
     reader: TagReader,
     dialect: RenderMethodDialect,
     definitions: HashMap<String, Option<Arc<Gen3Definition>>>,
-    files: HashMap<String, Option<Arc<str>>>,
+    /// Each `hlsl_include` read, split into lines once for every compile.
+    files: HashMap<String, Option<Arc<Lines>>>,
     passes: HashMap<(String, [Vec<Option<usize>>; 2], String, bool), Arc<Gen3Pass>>,
 }
 
@@ -64,7 +66,7 @@ impl Gen3Sources {
             .clone()
     }
 
-    fn file(&mut self, name: &str) -> Option<Arc<str>> {
+    fn file(&mut self, name: &str) -> Option<Arc<Lines>> {
         let (reader, dialect) = (&self.reader, self.dialect);
         self.files
             .entry(name.to_owned())
@@ -73,9 +75,9 @@ impl Gen3Sources {
                     .load(&include_tag(dialect, name), "hlsl_include", b"hlsl")
                     .ok()?;
                 let data = tag.root().field("include file")?.as_data()?.to_vec();
-                Some(Arc::from(
+                Some(Arc::new(Lines::of(
                     String::from_utf8_lossy(&data).trim_end_matches('\0'),
-                ))
+                )))
             })
             .clone()
     }
@@ -126,7 +128,7 @@ impl Gen3Sources {
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_str()))
             .collect();
-        let mut include = |name: &str, _: &str| self.file(name).map(|text| (Arc::from(name), text));
+        let mut include = |name: &str, _: &str| self.file(name).map(|lines| (Arc::from(name), lines));
         let tokens = Preprocessor::new(&borrowed, &mut include).run(main)?;
         translate(&parse(&tokens)?, entry, stage)
     }

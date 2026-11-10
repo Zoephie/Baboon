@@ -1008,7 +1008,7 @@ fn reachs_axis_scale_flattens_what_its_shape_emits() {
 /// A 2 by 1 texture: red on the left, green on the right, half blue.
 fn turbulence_image() -> TextureImage {
     TextureImage {
-        rgba: vec![255, 0, 128, 255, 0, 255, 128, 255],
+        rgba: vec![255, 0, 128, 255, 0, 255, 128, 255].into(),
         width: 2,
         height: 1,
         repeat_x: true,

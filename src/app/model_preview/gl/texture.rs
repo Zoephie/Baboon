@@ -344,8 +344,15 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
         ImageTexels::Signed => (glow::RGBA8_SNORM, glow::BYTE),
     };
     let format = format as i32;
-    let finish = |target| unsafe {
-        gl.generate_mipmap(target);
+    // A flat or cube image's stored mips stand in for generated ones: with
+    // them, the max level set below stops sampling at the last, so generating
+    // the chain first only to write over it was most of an upload's time. A
+    // volume takes no stored mips, and always generates.
+    let stored = !mips.is_empty();
+    let finish = |target, generate: bool| unsafe {
+        if generate {
+            gl.generate_mipmap(target);
+        }
         gl.tex_parameter_i32(
             target,
             glow::TEXTURE_MIN_FILTER,
@@ -373,7 +380,7 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
                     kind,
                     glow::PixelUnpackData::Slice(Some(&signed_bytes(&image.rgba, texels))),
                 );
-                finish(glow::TEXTURE_2D);
+                finish(glow::TEXTURE_2D, !stored);
                 for (level, mip) in mips.iter().enumerate() {
                     if let Image::Flat(mip) = mip {
                         let rgba = signed_bytes(&mip.rgba, texels);
@@ -421,7 +428,7 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
                         glow::PixelUnpackData::Slice(Some(&signed_bytes(rgba, texels))),
                     );
                 }
-                finish(glow::TEXTURE_CUBE_MAP);
+                finish(glow::TEXTURE_CUBE_MAP, !stored);
                 for (level, mip) in mips.iter().enumerate() {
                     if let Image::Cube { size, faces } = mip {
                         for (face, rgba) in faces.iter().enumerate() {
@@ -473,7 +480,7 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
                     kind,
                     glow::PixelUnpackData::Slice(Some(&signed_bytes(rgba, texels))),
                 );
-                finish(glow::TEXTURE_3D);
+                finish(glow::TEXTURE_3D, true);
                 if let Some(sampler) = sampler {
                     gen3_apply_sampler(gl, glow::TEXTURE_3D, sampler);
                 }

@@ -18,7 +18,7 @@ use crate::app::model_preview::h4::shield::{DEPTH_DECODE, WORLD_SCALE};
 use crate::core::hlsl::emit::{Stage, Translated, translate_with};
 use crate::core::hlsl::parse::{Program, parse};
 use crate::core::hlsl::parse::{Scalar, Type};
-use crate::core::hlsl::pre::{Preprocessor, Token};
+use crate::core::hlsl::pre::{Lines, Preprocessor, Token};
 
 /// Where an `#include` falls back to when the including file's own folder
 /// doesn't hold it.
@@ -98,8 +98,11 @@ impl H4ShaderSource {
             .get(&normalize_path(&self.main))
             .cloned()
             .ok_or("main file missing")?;
+        // Each file is read once per effect, so it is split as it is read.
         let mut include = |name: &str, includer: &str| {
-            self.resolve(name, if includer.is_empty() { &main } else { includer })
+            let includer = if includer.is_empty() { &main } else { includer };
+            let (path, text) = self.resolve(name, includer)?;
+            Some((path, Arc::new(Lines::of(&text))))
         };
         Preprocessor::new(defines, &mut include).run(&text)
     }

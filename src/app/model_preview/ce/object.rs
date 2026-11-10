@@ -208,13 +208,22 @@ pub(in crate::app::model_preview) fn load_ce_object(
     let chosen = settings.weapon.as_deref();
     let weapons = feature(&mut notes, "the biped's weapons", || {
         let known = settings.ce.equippable.as_deref();
-        is_biped.then(|| super::weapons::biped_weapons(reader, model_tag, chosen, known))
+        is_biped
+            .then(|| super::weapons::biped_weapons(reader, model_tag, chosen, known))
+            .flatten()
     });
-    let held = match &weapons {
-        Some(weapons) => chosen
-            .filter(|path| weapons.equippable.iter().any(|weapon| weapon.path == *path))
+    // A biped holds what was chosen: one its list has, or, before the list,
+    // any it was handed.
+    let held = match (is_biped, &weapons) {
+        (true, Some(weapons)) => chosen
+            .filter(|path| {
+                weapons.equippable.as_ref().is_none_or(|listed| {
+                    listed.iter().any(|weapon| weapon.path == *path)
+                })
+            })
             .map(str::to_owned),
-        None => super::weapons::first_weapon(model_tag),
+        (true, None) => None,
+        (false, _) => super::weapons::first_weapon(model_tag),
     };
     let attached = held.and_then(|path| {
         let attach = |preview: &mut RenderModelPreview| {

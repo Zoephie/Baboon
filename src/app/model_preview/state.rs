@@ -46,6 +46,11 @@ pub(in crate::app) struct ModelPreviewState {
     /// The `game_shaders` the cached `data` was read for: turned on or off,
     /// the preview reads again (`TagReader::game_shaders`).
     pub(in crate::app) loaded_game_shaders: bool,
+    /// The weapon picker opened before the unit's weapons were listed: the
+    /// pane lists them on a worker (`maybe_request_unit_weapons`).
+    pub(in crate::app) list_weapons: bool,
+    /// Whether that listing is running.
+    pub(in crate::app) weapons_pending: bool,
     /// What outlives the reload a weapon change or the Game Shaders toggle
     /// makes: the old geometry's id, for its function inputs, and the region
     /// selections.
@@ -138,6 +143,8 @@ impl Default for ModelPreviewState {
             secondary_weapon: None,
             loaded_secondary_weapon: None,
             loaded_game_shaders: false,
+            list_weapons: false,
+            weapons_pending: false,
             reload_carry: None,
             clip_after_load: None,
             variant_after_load: None,

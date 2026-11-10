@@ -246,6 +246,12 @@ impl Baboon {
                 WorkerMessage::ImportAnalysisFinished { result, templates } => {
                     self.handle_import_analysis_finished(result, templates, ctx)
                 }
+                WorkerMessage::UnitWeaponsListed {
+                    stamp,
+                    key,
+                    geometry_id,
+                    listed,
+                } => self.handle_unit_weapons_listed(stamp, key, geometry_id, listed),
                 WorkerMessage::ModelTexturesResolved {
                     stamp,
                     key,

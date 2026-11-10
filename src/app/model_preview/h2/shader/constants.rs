@@ -260,7 +260,7 @@ fn draw_textures(
                 Some(Dx9ParameterValue::Bitmap(path)) => bitmap(path.as_str(), sampler.kind),
                 Some(Dx9ParameterValue::Extern(name)) if CAMERA_FEEDS.contains(&name.as_str()) => {
                     Some(std::sync::Arc::new(Image::Flat(TextureImage {
-                        rgba: vec![0, 0, 0, 255],
+                        rgba: vec![0, 0, 0, 255].into(),
                         width: 1,
                         height: 1,
                         repeat_x: false,

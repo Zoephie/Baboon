@@ -14,7 +14,10 @@ use std::collections::BTreeSet;
 /// What a Halo 2 unit can hold, and which clips what it holds leaves out.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct UnitWeapons {
-    pub(crate) equippable: Vec<Equippable>,
+    /// The kit's weapons the unit can hold: none until listed, which the
+    /// weapon picker asks for when first opened ([`list_unit_weapons`]), as
+    /// listing reads every weapon in the kit.
+    pub(crate) equippable: Option<Vec<Equippable>>,
     pub(super) graph: Vec<GraphEntry>,
     pub(super) ik: Vec<GraphIk>,
     /// Clips that set `disable weapon ik`.
@@ -26,9 +29,21 @@ pub(crate) struct UnitWeapons {
 }
 
 impl UnitWeapons {
-    pub(crate) fn primaries(&self) -> Vec<WeaponOption> {
-        let usable = self.equippable.iter().filter(|weapon| !weapon.only_dual);
-        usable.map(|weapon| weapon.option.clone()).collect()
+    /// Whether the unit's animations hold weapons at all, so it has a picker.
+    pub(crate) fn can_hold(&self) -> bool {
+        !self.graph.is_empty()
+    }
+
+    /// The listed weapons, none before they are.
+    fn listed(&self) -> &[Equippable] {
+        self.equippable.as_deref().unwrap_or_default()
+    }
+
+    /// What the right hand can hold, or `None` until the weapons are listed.
+    pub(crate) fn primaries(&self) -> Option<Vec<WeaponOption>> {
+        let listed = self.equippable.as_deref()?;
+        let usable = listed.iter().filter(|weapon| !weapon.only_dual);
+        Some(usable.map(|weapon| weapon.option.clone()).collect())
     }
 
     /// What can go in the left hand, as `unit_get_weapon_pickup_options` has
@@ -38,7 +53,7 @@ impl UnitWeapons {
         if !held.is_some_and(|held| held.dual) || !self.has_dual() {
             return Vec::new();
         }
-        let usable = self.equippable.iter().filter(|weapon| weapon.dual);
+        let usable = self.listed().iter().filter(|weapon| weapon.dual);
         usable.map(|weapon| weapon.option.clone()).collect()
     }
 
@@ -50,7 +65,7 @@ impl UnitWeapons {
     }
 
     fn find(&self, path: Option<&str>) -> Option<&Equippable> {
-        self.equippable
+        self.listed()
             .iter()
             .find(|weapon| Some(weapon.option.path.as_str()) == path)
     }
@@ -238,7 +253,9 @@ impl UnitWeapons {
     }
 }
 
-/// What a unit can hold, from a loose folder's weapons.
+/// What a unit's animations let it hold, with the weapons `known` lists:
+/// `known` is an earlier load's list, or none, which leaves the weapons to
+/// [`list_unit_weapons`].
 pub(in crate::app::model_preview) fn unit_weapons(
     reader: &TagReader,
     unit: &TagFile,
@@ -248,51 +265,56 @@ pub(in crate::app::model_preview) fn unit_weapons(
         return UnitWeapons::default();
     };
     let graph = graph_entries(&tag);
-    let equippable = known.map_or_else(
-        || {
-            let TagSource::LooseFolder { root, .. } = &reader.source else {
-                return Vec::new();
-            };
-            let mut found: Vec<_> = loose_weapon_paths(root)
-                .into_iter()
-                .filter_map(|path| {
-                    let weapon = reader.load(&path, "weapon", b"weap").ok()?;
-                    let class = string_id_in(&weapon, "weapon class");
-                    let kind = string_id_in(&weapon, "weapon name");
-                    accepts(&graph, &class, &kind).then(|| {
-                        // The weapon's own `flags` sit beside its `magazines`.
-                        let holder = holder_of(weapon.root(), "magazines");
-                        let has = |flag: &str| {
-                            holder.is_some_and(|holder| has_flag(holder, "flags", flag))
-                        };
-                        Equippable {
-                            option: WeaponOption {
-                                name: tag_path::name(&path).to_owned(),
-                                path,
-                                class,
-                            },
-                            kind,
-                            dual: has(CAN_BE_DUAL) || has(ONLY_DUAL),
-                            only_dual: has(ONLY_DUAL),
-                        }
-                    })
-                })
-                .collect();
-            found.sort_by(|a, b| {
-                (&a.option.class, &a.option.name).cmp(&(&b.option.class, &b.option.name))
-            });
-            found
-        },
-        <[_]>::to_vec,
-    );
     UnitWeapons {
-        equippable,
+        equippable: known.map(<[_]>::to_vec),
         graph,
         ik: graph_ik(&tag),
         ik_off: clips_without_ik(&tag),
         overlays: graph_overlays(&tag),
         hidden_clips: BTreeSet::new(),
     }
+}
+
+/// The loose folder's weapons `unit`'s animations let it hold, by class then
+/// name: every `.weapon` in the kit is read, so this runs on a worker, when
+/// the picker first opens.
+pub(in crate::app::model_preview) fn list_unit_weapons(
+    reader: &TagReader,
+    unit: &TagFile,
+) -> Vec<Equippable> {
+    let TagSource::LooseFolder { root, .. } = &reader.source else {
+        return Vec::new();
+    };
+    let Some(tag) = unit_graph(reader, unit) else {
+        return Vec::new();
+    };
+    let graph = graph_entries(&tag);
+    let mut found: Vec<_> = loose_weapon_paths(root)
+        .into_iter()
+        .filter_map(|path| {
+            let weapon = reader.load(&path, "weapon", b"weap").ok()?;
+            let class = string_id_in(&weapon, "weapon class");
+            let kind = string_id_in(&weapon, "weapon name");
+            accepts(&graph, &class, &kind).then(|| {
+                // The weapon's own `flags` sit beside its `magazines`.
+                let holder = holder_of(weapon.root(), "magazines");
+                let has =
+                    |flag: &str| holder.is_some_and(|holder| has_flag(holder, "flags", flag));
+                Equippable {
+                    option: WeaponOption {
+                        name: tag_path::name(&path).to_owned(),
+                        path,
+                        class,
+                    },
+                    kind,
+                    dual: has(CAN_BE_DUAL) || has(ONLY_DUAL),
+                    only_dual: has(ONLY_DUAL),
+                }
+            })
+        })
+        .collect();
+    found.sort_by(|a, b| (&a.option.class, &a.option.name).cmp(&(&b.option.class, &b.option.name)));
+    found
 }
 
 /// One row of a weapon dropdown.

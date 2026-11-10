@@ -994,12 +994,13 @@ pub(in crate::app) fn picker_results<R>(
     .inner
 }
 
-/// Shared picker button with a muted total beside the dropdown arrow.
+/// Shared picker button with a muted total beside the dropdown arrow: `…`
+/// while `count` is not yet known.
 pub(in crate::app) fn picker_button(
     ui: &mut Ui,
     popup_id: egui::Id,
     label: &str,
-    count: usize,
+    count: Option<usize>,
     width: f32,
     foreground: Color32,
     enabled: bool,
@@ -1019,7 +1020,7 @@ pub(in crate::app) fn picker_button(
     } else {
         foreground
     };
-    let count_label = format!("({count})");
+    let count_label = count.map_or_else(|| "(…)".to_owned(), |count| format!("({count})"));
     let count_font = TextStyle::Small.resolve(ui.style());
     let count_width = ui
         .painter()
@@ -1054,7 +1055,10 @@ pub(in crate::app) fn picker_button(
         popup_id.with("entry_count"),
         Sense::hover(),
     )
-    .on_hover_text(format!("{count} entries"));
+    .on_hover_text(count.map_or_else(
+        || "Not listed yet".to_owned(),
+        |count| format!("{count} entries"),
+    ));
     response
 }
 

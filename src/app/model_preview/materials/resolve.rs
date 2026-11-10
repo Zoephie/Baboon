@@ -218,7 +218,7 @@ pub(in crate::app::model_preview) fn decode_image(
     if kind == SamplerKind::Texture2D {
         let image = decode_thumbnail(&tag, index, MAX_TEXTURE_EDGE).ok()?;
         return Some(Image::Flat(TextureImage {
-            rgba: image.rgba,
+            rgba: image.rgba.into(),
             width: image.width,
             height: image.height,
             repeat_x: true,

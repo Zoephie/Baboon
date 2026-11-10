@@ -13,8 +13,10 @@ use super::{
     Gen3Animated, Gen3Material, Gen3State, Gen3Value, ImageTexels, Scalar, Type,
     upload_image_linear,
 };
+use crate::app::model_preview::common::image::Image;
 use eframe::glow;
 use eframe::glow::HasContext as _;
+use std::sync::Arc;
 
 /// Uploaded textures of a geometry, by material then name.
 #[derive(Default)]
@@ -225,11 +227,13 @@ impl Gen3State {
             return;
         }
         unsafe {
-            for texture in uploaded
+            // Materials share their textures (see below): each goes once.
+            let shared: std::collections::HashSet<_> = uploaded
                 .materials
                 .drain(..)
                 .flat_map(|map| map.into_values())
-            {
+                .collect();
+            for texture in shared {
                 gl.delete_texture(texture);
             }
             for texture in uploaded.gels.drain(..).flatten() {
@@ -276,22 +280,30 @@ impl Gen3State {
                     gel.and_then(|gel| upload_image_linear(gl, gel, ImageTexels::Srgb, &[], None))
                 })
                 .collect();
+            // One texture per image, sampled one way, however many materials
+            // bind it: the resolve hands every material the same decoded
+            // image of a map, and a Reach Spartan's 199 materials bound 390
+            // images 1,744 times. Its stored mips are part of what it is: a
+            // frame of an animated map goes up without them.
+            let mut shared = HashMap::new();
+            let mut upload = |image: &Arc<Image>, texels, mips: &[Image], sampler| {
+                let key = (Arc::as_ptr(image), mips.len(), texels, sampler);
+                *shared
+                    .entry(key)
+                    .or_insert_with(|| upload_image_linear(gl, image, texels, mips, sampler))
+            };
             for textures in frame.textures.iter().flat_map(|textures| textures.iter()) {
                 let mut map = HashMap::new();
                 if let Some(material) = &textures.gen3 {
                     for texture in &material.textures {
-                        if let Some(uploaded) = upload_image_linear(
-                            gl,
-                            &texture.image,
-                            texture.texels,
-                            &texture.mips,
-                            texture.sampler,
-                        ) {
+                        let image = &texture.image;
+                        if let Some(uploaded) =
+                            upload(image, texture.texels, &texture.mips, texture.sampler)
+                        {
                             map.insert(texture.uniform.clone(), uploaded);
                         }
                         for (at, image) in texture.frames.iter().enumerate() {
-                            if let Some(uploaded) =
-                                upload_image_linear(gl, image, texture.texels, &[], texture.sampler)
+                            if let Some(uploaded) = upload(image, texture.texels, &[], texture.sampler)
                             {
                                 map.insert(frame_key(&texture.uniform, at), uploaded);
                             }
