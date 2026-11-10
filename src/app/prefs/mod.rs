@@ -216,12 +216,15 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             .map(|value| value as f32)
             .unwrap_or(DEFAULT_ZOOM_SPEED)
             .clamp(MIN_ZOOM_SPEED, MAX_ZOOM_SPEED),
-        model_preview_size: value
-            .get("model_preview_size")
+        // An older `model_preview_size` is ignored: the viewport now fills
+        // the space the sidebar leaves.
+        model_setup_width: value
+            .get("model_setup_width")
             .and_then(Value::as_f64)
             .map(|value| value as f32)
-            .unwrap_or(DEFAULT_MODEL_PREVIEW_SIZE)
-            .clamp(MIN_MODEL_PREVIEW_SIZE, MAX_MODEL_PREVIEW_SIZE),
+            .filter(|width| width.is_finite())
+            .unwrap_or(DEFAULT_MODEL_SETUP_WIDTH)
+            .clamp(MIN_MODEL_SETUP_WIDTH, MAX_MODEL_SETUP_WIDTH),
         model_preview_perspective: value
             .get("model_preview_perspective")
             .and_then(Value::as_bool)
@@ -786,7 +789,7 @@ fn prefs_to_value(
         "ui_scale": prefs.ui_scale,
         "scroll_speed": prefs.scroll_speed,
         "zoom_speed": prefs.zoom_speed,
-        "model_preview_size": prefs.model_preview_size,
+        "model_setup_width": prefs.model_setup_width,
         "model_preview_perspective": prefs.model_preview_perspective,
         "bitmap_preview_background": prefs.bitmap_preview_view.bg.as_str(),
         "bitmap_preview_checkerboard": prefs.bitmap_preview_view.show_checkerboard,
@@ -1208,6 +1211,23 @@ mod tests {
             vec![PathBuf::from("objects/brute.model")]
         );
         assert!(favorites[1].folders.is_empty());
+    }
+
+    /// The model preview sidebar's width loads as saved, clamped; a file
+    /// from before it, holding the old viewport size, loads the default.
+    #[test]
+    fn model_setup_width_loads_clamped_and_ignores_the_old_size() {
+        let old = prefs_from_value(&json!({ "model_preview_size": 2.0 }));
+        assert_eq!(old.model_setup_width, DEFAULT_MODEL_SETUP_WIDTH);
+        let saved = prefs_from_value(&json!({ "model_setup_width": 500.0 }));
+        assert_eq!(saved.model_setup_width, 500.0);
+        let narrow = prefs_from_value(&json!({ "model_setup_width": 10.0 }));
+        assert_eq!(narrow.model_setup_width, MIN_MODEL_SETUP_WIDTH);
+        let wide = prefs_from_value(&json!({ "model_setup_width": 1.0e9 }));
+        assert_eq!(wide.model_setup_width, MAX_MODEL_SETUP_WIDTH);
+        let written = prefs_to_value(&saved, &HashSet::new(), true);
+        assert_eq!(written["model_setup_width"], json!(500.0));
+        assert!(written.get("model_preview_size").is_none());
     }
 
     #[test]
@@ -1867,7 +1887,7 @@ mod tests {
             ui_scale: 1.25,
             scroll_speed: 2.5,
             zoom_speed: 0.75,
-            model_preview_size: 333.0,
+            model_setup_width: 333.0,
             model_preview_perspective: false,
             blender_path: Some(PathBuf::from("/blender")),
             tool_commands_window_pos: Some(egui::pos2(10.0, 20.0)),

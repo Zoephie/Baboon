@@ -1,0 +1,239 @@
+//! Halo CE's hooks into the dx9 pipeline, and its state for each slot.
+
+use super::super::common::slots::GameSlots;
+use super::super::common::view::ViewFrame;
+use super::super::dx9::binds::Dx9Binds;
+use super::super::dx9::passes::Dx9Layer;
+use super::super::dx9::pipeline::Dx9Game;
+use super::super::dx9::sprites::Dx9Sprites;
+use super::super::renderer::FrameCx;
+use super::super::{ModelGpuFrame, RenderCore};
+use super::draw::{
+    CE_EVENTS_RUNNING, CeEffectGl, advance_ce_effects, ce_groups, ce_has_groups,
+    ce_sorts_transparents, draw_ce_group, draw_ce_transparents,
+};
+use super::lights::CePointBinds;
+use super::slot::CeSlot;
+use crate::app::model_preview::common::sprite_gl::{draw_flare_sprites, sprite_occlusion};
+use eframe::glow::{self, HasContext as _};
+
+/// Halo CE's own part of the dx9 shading: its flags and effects, its
+/// transparents in the order the game sorts them, its effects' groups and
+/// its lights' flares.
+#[derive(Default)]
+pub(in crate::app::model_preview) struct CeGame {
+    slots: GameSlots<CeSlot>,
+    /// The `effect` shader's program, made on first use.
+    effect_gl: Option<Option<CeEffectGl>>,
+    /// Its passes' point lights.
+    points: CePointBinds,
+}
+
+impl Dx9Game for CeGame {
+    fn binds(&self) -> &dyn Dx9Binds {
+        &self.points
+    }
+
+    fn begin(&mut self, frame: &ModelGpuFrame) {
+        // Set again if this frame steps the effects and something runs on,
+        // so a frame that finds no slot leaves nothing asking for frames.
+        CE_EVENTS_RUNNING.with(|running| running.borrow_mut().remove(&frame.geometry_id));
+    }
+
+    unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
+        unsafe {
+            let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
+            self.points.now = None;
+            let ce = self.slots.of(slot, cx.core.slot_uploads(slot));
+            if !frame.preview.ce.flags.is_empty() {
+                move_ce_flags(cx.core, gl, frame, slot, ce);
+            }
+            // Halo CE's effects advance once a frame, here, before anything
+            // draws or lights by them.
+            if !frame.preview.ce.effects.is_empty() {
+                let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+                advance_ce_effects(ce, frame, bones);
+                let made: Vec<super::lights::CeLight> = ce
+                    .simulations
+                    .particles
+                    .lights(&frame.preview.ce.effects)
+                    .into_iter()
+                    .map(|(_, _, light)| light)
+                    .collect();
+                if !made.is_empty() {
+                    self.points.now = Some(frame.ce_point_lights_with(&made));
+                }
+            }
+            // Before anything draws: the transparents and the sprites both
+            // draw the effects' groups.
+            if cx.core.draws_object_sprites(frame) {
+                ce.sync_textures(gl, frame);
+            }
+        }
+    }
+
+    /// Halo CE's renderer has no bloom: only the remaster's does.
+    unsafe fn bloom(&mut self, _cx: &mut FrameCx<'_>, _order: Vec<usize>) {}
+
+    /// `render_transparent_geometry`'s sort, when the batches carry it;
+    /// else the layer.
+    unsafe fn transparents(&mut self, cx: &mut FrameCx<'_>, order: &[usize]) {
+        unsafe {
+            if ce_sorts_transparents(cx.frame) {
+                let ce = self.slots.of(cx.slot, cx.core.slot_uploads(cx.slot));
+                draw_ce_transparents(
+                    cx.core,
+                    cx.gl,
+                    cx.frame,
+                    cx.slot,
+                    ce,
+                    &mut self.effect_gl,
+                    &self.points,
+                );
+            } else {
+                cx.core.draw_dx9_layer(
+                    cx.gl,
+                    cx.frame,
+                    cx.slot,
+                    order,
+                    Dx9Layer::Transparent,
+                    None,
+                    &self.points,
+                );
+            }
+        }
+    }
+
+    /// The effects' groups, when the transparents did not sort them in.
+    unsafe fn draw_own_sprites(&mut self, cx: &mut Dx9Sprites<'_>) {
+        let Dx9Sprites {
+            gl,
+            frame,
+            flares,
+            view,
+            bones,
+            program,
+            slot,
+            uploads,
+            ..
+        } = *cx;
+        if !ce_has_groups(&frame.preview) || ce_sorts_transparents(frame) {
+            return;
+        }
+        let ce = self.slots.of(slot, uploads);
+        unsafe {
+            for group in ce_groups(gl, ce, frame, bones, view) {
+                draw_ce_group(
+                    gl,
+                    &mut self.effect_gl,
+                    program,
+                    flares,
+                    ce,
+                    &frame.camera,
+                    group,
+                );
+            }
+            gl.use_program(Some(flares.program));
+            gl.bind_vertex_array(Some(flares.vertex_array));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+            gl.blend_equation(glow::FUNC_ADD);
+            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+        }
+    }
+
+    /// The lights' flares, and those of the lights the effects make.
+    unsafe fn draw_flares(&mut self, cx: &mut Dx9Sprites<'_>) {
+        let Dx9Sprites {
+            gl,
+            frame,
+            flares,
+            view,
+            bones,
+            slot,
+            uploads,
+            ..
+        } = *cx;
+        let view: &ViewFrame = view;
+        let camera = &frame.camera;
+        let ce = self.slots.of(slot, uploads);
+        unsafe {
+            for (index, light) in frame.preview.ce.lights.iter().enumerate() {
+                let state = frame.ce.objects.get(usize::from(light.object));
+                let outputs = state.map_or([0.0; 4], |state| state.outputs);
+                let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);
+                let Some(patch) = light.occlusion_patch(&outputs, &colors, bones, view) else {
+                    continue;
+                };
+                let Some(occlusion) = sprite_occlusion(gl, flares, camera, view, &patch) else {
+                    continue;
+                };
+                let sprites = light.sprites(&outputs, &colors, bones, view, frame.time, occlusion);
+                let Some(textures) = ce.textures.light_flares.get(index) else {
+                    continue;
+                };
+                draw_flare_sprites(gl, flares, camera, view, &sprites, textures);
+            }
+            for (effect, def, light) in ce.simulations.particles.lights(&frame.preview.ce.effects) {
+                let state = frame.ce.objects.get(usize::from(light.object));
+                let outputs = state.map_or([0.0; 4], |state| state.outputs);
+                let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);
+                let Some(patch) = light.occlusion_patch(&outputs, &colors, bones, view) else {
+                    continue;
+                };
+                let Some(occlusion) = sprite_occlusion(gl, flares, camera, view, &patch) else {
+                    continue;
+                };
+                let sprites = light.sprites(&outputs, &colors, bones, view, frame.time, occlusion);
+                let Some(textures) = ce
+                    .textures
+                    .effect_flares
+                    .get(&effect)
+                    .and_then(|lights| lights.get(def))
+                else {
+                    continue;
+                };
+                draw_flare_sprites(gl, flares, camera, view, &sprites, textures);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn each_simulation(
+        &self,
+        slot: usize,
+        uploads: u64,
+        visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug),
+    ) {
+        if let Some(ce) = self.slots.current(slot, uploads) {
+            ce.simulations.each(visit);
+        }
+    }
+}
+
+/// `flag_render_proper` builds its mesh from where the sheet is now.
+pub(in crate::app::model_preview) unsafe fn move_ce_flags(
+    core: &mut RenderCore,
+    gl: &glow::Context,
+    frame: &ModelGpuFrame,
+    slot: usize,
+    ce: &mut CeSlot,
+) {
+    let uploaded = &mut core.slots[slot];
+    let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+    let lowest = frame
+        .preview
+        .vertices
+        .iter()
+        .map(|vertex| vertex.position[2]);
+    let ground = lowest.fold(0.0, f32::min);
+    let written = ce
+        .simulations
+        .flags
+        .advance(&frame.preview.ce.flags, bones, ground, frame.time);
+    for (first, moved) in written {
+        let moved = moved
+            .into_iter()
+            .map(|(position, normal)| (position, normal, None));
+        unsafe { uploaded.rewrite_vertices(gl, frame, first, moved) };
+    }
+}

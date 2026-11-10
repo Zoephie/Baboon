@@ -513,7 +513,9 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) scroll_speed: f32,
     /// Multiplier on mouse-wheel zoom in the model and bitmap viewports.
     pub(in crate::app) zoom_speed: f32,
-    pub(in crate::app) model_preview_size: f32,
+    /// The model preview's Model Setup sidebar width, dragged by its edge
+    /// and shared by every tag pane.
+    pub(in crate::app) model_setup_width: f32,
     /// The model preview's projection: perspective, or orthographic when
     /// cleared. Shared by every tag pane and remembered across sessions.
     pub(in crate::app) model_preview_perspective: bool,
@@ -591,7 +593,7 @@ impl Default for GuiPrefs {
             ui_scale: DEFAULT_UI_SCALE,
             scroll_speed: DEFAULT_SCROLL_SPEED,
             zoom_speed: DEFAULT_ZOOM_SPEED,
-            model_preview_size: DEFAULT_MODEL_PREVIEW_SIZE,
+            model_setup_width: DEFAULT_MODEL_SETUP_WIDTH,
             model_preview_perspective: true,
             bitmap_preview_view: BitmapPreviewViewSettings::default(),
             blender_path: None,

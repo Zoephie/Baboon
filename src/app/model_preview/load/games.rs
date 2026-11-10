@@ -1,0 +1,456 @@
+//! The one place the loader names a game: what each game reads of an
+//! object, a model and a Halo CE object of its own.
+
+use super::super::animation::{DecodedAnimationPose, PreviewAnimationEntry};
+use super::super::cloth::{ClothGame, ClothRules};
+use super::super::common::marker::MarkerFrame;
+use super::super::common::streams::{VertexStream, VertexStreamKind};
+use super::super::dx9::passes::{Dx9DrawPass, Dx9Layer};
+use super::super::functions::{FunctionRules, TypeExporter};
+use super::super::{
+    GameId, ModelPreviewData, RenderModelPreview, TagEntry, TagFile, TagSource,
+    is_object_family_group,
+};
+use super::super::{
+    MaterialTextures, RenderModelPreviewMarker, RenderModelPreviewMaterial, ResolveCaches,
+};
+use super::jobs::PreviewLoadSettings;
+use super::object::ObjectLoad;
+use super::{GameRules, LoadCx, OwnViewSettings, TagReader, feature_into};
+use std::sync::Arc;
+
+/// The kit's game's load rules: its own folder's.
+pub(in crate::app::model_preview) fn rules(game: Option<GameId>) -> &'static GameRules {
+    match game {
+        Some(GameId::HaloCe) => &super::super::ce::rules::RULES,
+        Some(GameId::Halo2) => &super::super::h2::rules::RULES,
+        Some(GameId::Halo3) => &super::super::h3::rules::RULES,
+        Some(GameId::Halo3Odst) => &super::super::h3::rules::ODST_RULES,
+        Some(GameId::HaloReach) => &super::super::reach::rules::RULES,
+        Some(GameId::Halo4) => &super::super::h4::rules::RULES,
+        Some(GameId::CampaignEvolved) => &super::super::campaign_evolved::rules::RULES,
+        _ => &GameRules::DEFAULT,
+    }
+}
+
+/// The game a model is previewed as: Halo CE's and Halo 2's by their tags'
+/// generation, the Halo 3 family's by the kit, which `Game::of` cannot tell
+/// apart.
+pub(super) fn game_of(
+    generation: blam_tags::game::Game,
+    source: Option<&TagSource>,
+) -> Option<GameId> {
+    match generation {
+        blam_tags::game::Game::Halo1 => Some(GameId::HaloCe),
+        blam_tags::game::Game::Halo2 => Some(GameId::Halo2),
+        blam_tags::game::Game::Halo3 => source.and_then(TagSource::game),
+    }
+}
+
+/// What `object`'s type exports to its functions, where its game's
+/// exporters are known: Halo 2's.
+pub(in crate::app::model_preview) fn type_exports(
+    object: &TagFile,
+    model: Option<&TagFile>,
+) -> Option<Arc<dyn TypeExporter>> {
+    let exports = super::super::h2::function_exports::TypeExports::of(object, model)?;
+    Some(Arc::new(exports))
+}
+
+/// The object's change colors, functions and its game's own features, each
+/// noted if its reader crashes, by the kit's game.
+pub(super) fn read_object_features(
+    object: &ObjectLoad<'_>,
+    data: &mut ModelPreviewData,
+    notes: &mut Vec<String>,
+) {
+    let ObjectLoad {
+        reader,
+        object: model_tag,
+        model,
+    } = *object;
+    let game = match &reader.source {
+        TagSource::LooseFolder { game, .. } => *game,
+        _ => None,
+    };
+    match game {
+        Some(GameId::Halo3 | GameId::Halo3Odst) => {
+            object.read_colors_and_functions(data, notes);
+            let preview = std::sync::Arc::make_mut(&mut data.preview);
+            feature_into(notes, "its lights and effects", preview, |preview| {
+                super::super::h3::object::read_h3_object_features(
+                    reader, model_tag, model, preview,
+                );
+            });
+        }
+        // Reach's attachments, lights and effects read differently, and wait
+        // on their own readers; what the object's shaders read does not.
+        Some(GameId::HaloReach) => {
+            object.read_colors_and_functions(data, notes);
+            let preview = std::sync::Arc::make_mut(&mut data.preview);
+            feature_into(notes, "its flares and lights", preview, |preview| {
+                super::super::reach::object::read_reach_object_features(
+                    reader, model_tag, model, preview,
+                );
+            });
+        }
+        // Halo 4's functions and switches feed its materials' functions; its
+        // attachments, lights and effects wait on their own readers.
+        Some(GameId::Halo4) => {
+            object.read_colors_and_functions(data, notes);
+            super::super::h4::object::read_h4_object_features(
+                reader, model_tag, model, data, notes,
+            );
+        }
+        Some(GameId::Halo2) => {
+            object.read_colors_and_functions(data, notes);
+            let preview = std::sync::Arc::make_mut(&mut data.preview);
+            feature_into(notes, "its lights and effects", preview, |preview| {
+                super::super::h2::attached::read_h2_object_features(reader, model_tag, preview);
+            });
+        }
+        _ => {}
+    }
+}
+
+/// An attached object's own features, by its game's readers: Halo 4's and
+/// Reach's own (`Game::of` calls them `Halo3` too, and they read their
+/// attachments, lights and held weapons differently), the Halo 3 family's
+/// with the unit's extension weapons, or Halo 2's.
+pub(in crate::app::model_preview) fn read_attached_features<
+    F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
+>(
+    cx: &LoadCx<'_, F>,
+    attached: &RenderModelPreview,
+    preview: &mut RenderModelPreview,
+) {
+    let center = || {
+        std::array::from_fn(|axis| (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5)
+    };
+    match cx.reader.source.game() {
+        Some(GameId::Halo4) => {
+            super::super::h4::attached::read_h4_attached_features(cx, center(), preview);
+        }
+        Some(GameId::HaloReach) => {
+            super::super::reach::attached::read_reach_attached_features(cx, center(), preview);
+        }
+        _ if blam_tags::game::Game::of(cx.object) == blam_tags::game::Game::Halo3 => {
+            super::super::h3::attached::read_h3_attached_features(cx, preview);
+            super::super::weapons::attached::read_extension_weapons(cx, preview);
+        }
+        _ => super::super::h2::attached::read_h2_features(cx, preview),
+    }
+}
+
+/// What a unit's `extension of parent` weapon, `cx`'s object, plays at the
+/// unit's markers, by the weapon's own generation: the Halo 3 family's
+/// attached features, or Halo 2's effects.
+pub(in crate::app::model_preview) fn read_extension_weapon_features<
+    F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
+>(
+    cx: &LoadCx<'_, F>,
+    preview: &mut RenderModelPreview,
+) {
+    if blam_tags::game::Game::of(cx.object) == blam_tags::game::Game::Halo3 {
+        super::super::h3::attached::read_h3_attached_features(cx, preview);
+    } else {
+        super::super::h2::attached::read_h2_extension_weapon_features(cx, preview);
+    }
+}
+
+/// What a model's game reads of its own once its preview is built: Halo
+/// 4's colour grading.
+pub(super) fn read_model_features(reader: Option<&TagReader>, data: &mut ModelPreviewData) {
+    if let Some(reader) = reader.filter(|reader| reader.source.game() == Some(GameId::Halo4)) {
+        // Just built: no other handle shares it, so this does not copy.
+        Arc::make_mut(&mut data.preview).h4.color_grading =
+            super::super::h4::lighting::read_h4_color_grading(reader);
+    }
+}
+
+/// The shaders a `.model` lays over its render model: Halo 2's hologram and
+/// shield shaders, which no other game's `.model` names.
+pub(super) fn add_overlay_shaders(model_tag: &TagFile, preview: &mut RenderModelPreview) {
+    super::super::h2::overlays::add_overlay_shaders(model_tag, preview);
+}
+
+/// The collision and physics overlays of an object whose game builds them
+/// its own way: a Halo CE object's collision, through the gbxmodel it names.
+/// `None` for any other tag.
+pub(super) fn own_object_overlays(
+    model: &TagFile,
+    reader: &TagReader,
+) -> Option<(super::overlays::Overlay, super::overlays::Overlay)> {
+    let object = is_object_family_group(model.header.group_tag, reader.source.game());
+    (blam_tags::game::Game::of(model) == blam_tags::game::Game::Halo1 && object).then(|| {
+        (
+            super::super::ce::overlays::halo1_object_collision_overlay(model, reader),
+            Ok(None),
+        )
+    })
+}
+
+/// The animations of a model whose game lists them its own way: a Halo CE
+/// object's `model_animations`. `None` for any other tag.
+pub(in crate::app::model_preview) fn list_own_animations(
+    source: &TagSource,
+    model: &TagFile,
+) -> Option<Result<Vec<PreviewAnimationEntry>, String>> {
+    (blam_tags::game::Game::of(model) == blam_tags::game::Game::Halo1)
+        .then(|| super::super::ce::animation::list_ce_animations(source, model))
+}
+
+/// One of a model's animations, decoded, where its game decodes them its own
+/// way: a Halo CE object's. `None` for any other tag.
+pub(in crate::app::model_preview) fn decode_own_animation(
+    source: &TagSource,
+    model: &TagFile,
+    animation_index: usize,
+) -> Option<Result<DecodedAnimationPose, String>> {
+    (blam_tags::game::Game::of(model) == blam_tags::game::Game::Halo1)
+        .then(|| super::super::ce::animation::decode_ce_animation(source, model, animation_index))
+}
+
+/// What the clip `group` of `graphs[0]` solves after its sampled pose, in
+/// the order it solves: Halo 4's IK set, then Reach's IK chains (which Halo
+/// 4's graphs carry too). Every graph is read for each, as each reads only
+/// the blocks that name it.
+pub(in crate::app::model_preview) fn read_pose_solvers(
+    graphs: &[&TagFile],
+    group: &blam_tags::animation::AnimationGroup<'_>,
+) -> Vec<std::sync::Arc<dyn super::super::animation::ik::solve::PoseSolver>> {
+    const READERS: [super::super::animation::ik::solve::PoseSolverReader; 2] = [
+        super::super::h4::ik::read_h4_ik_set_solver,
+        super::super::reach::ik::read_reach_ik_chains,
+    ];
+    READERS
+        .iter()
+        .filter_map(|read| read(graphs, group))
+        .collect()
+}
+
+/// Whether what a game keeps of its own on the opened object moves with
+/// time alone: a Halo CE object's functions (and those of what is attached
+/// to it) that move at rest, or Reach's shield while it shows at the frame's
+/// `function_values`.
+pub(in crate::app::model_preview) fn own_state_moves(
+    data: &ModelPreviewData,
+    function_values: Option<&super::super::functions::FunctionValues>,
+) -> bool {
+    super::super::ce::frame::object_functions(data).any(|functions| functions.move_at_rest())
+        || data.preview.reach.shield.as_ref().is_some_and(|shield| {
+            let damage = function_values
+                .and_then(|values| values.get(super::super::gen3::pipeline::SHIELD_DAMAGE))
+                .copied()
+                .unwrap_or(0.0);
+            shield.settings.showing(damage)
+        })
+}
+
+/// Whether the opened object's own shield (Reach's or Halo 4's) offers the
+/// shield's damage among the sliders.
+pub(in crate::app::model_preview) fn own_shield_gates(data: &ModelPreviewData) -> bool {
+    data.preview.reach.shield.is_some() || data.preview.h4.shield.is_some()
+}
+
+/// Once the clips are listed after a weapon change, the clip to play where
+/// the game picks it its own way: a Halo CE unit's, taking the `waiting`
+/// one. `None` for any other model, or with no clip waiting.
+pub(in crate::app::model_preview) fn own_clip_after_listing(
+    data: &ModelPreviewData,
+    waiting: &mut Option<String>,
+    held: Option<&String>,
+    clips: &[PreviewAnimationEntry],
+) -> Option<Option<usize>> {
+    let weapons = data.ce.weapons.as_ref()?;
+    let clip = waiting.take()?;
+    Some(super::super::ce::weapons::clip_after_listing(
+        weapons, clips, &clip, held,
+    ))
+}
+
+/// An object whose game loads it its own way: a Halo CE object, which names
+/// its gbxmodel itself. `None` for any other tag.
+pub(super) fn load_own_object(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    reader: Option<&TagReader>,
+    settings: &PreviewLoadSettings,
+) -> Option<Result<ModelPreviewData, String>> {
+    let object = is_object_family_group(
+        model_tag.header.group_tag,
+        reader.and_then(|reader| reader.source.game()),
+    );
+    (blam_tags::game::Game::of(model_tag) == blam_tags::game::Game::Halo1 && object)
+        .then(|| super::super::ce::object::load_ce_object(model_tag, entry, reader, settings))
+}
+
+/// The view menu's own settings for `tag`, where its game shows such a model
+/// differently: a Campaign Evolved model drawn from its Unreal meshes.
+pub(in crate::app::model_preview) fn own_view_settings(tag: &TagFile) -> Option<OwnViewSettings> {
+    super::super::campaign_evolved::is_campaign_evolved_model(tag)
+        .then_some(super::super::campaign_evolved::VIEW_SETTINGS)
+}
+
+/// A Halo: Campaign Evolved `.model`, which names no `render model`: its
+/// geometry is the UE5 SkeletalMeshes its `DA_MeshSynchronization` reaches,
+/// rebuilt as the cross-game `RenderModel` for the standard pipeline. `None`
+/// for any other tag.
+pub(super) fn load_unreal_model(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    reader: Option<&TagReader>,
+    settings: &PreviewLoadSettings,
+) -> Option<Result<ModelPreviewData, String>> {
+    super::super::campaign_evolved::load_campaign_evolved_preview(
+        model_tag,
+        entry,
+        reader,
+        settings.campaign_evolved.high_detail,
+    )
+}
+
+/// What a render model's generation turns before it becomes a preview: Halo
+/// CE's markers.
+pub(super) fn turn_render_model(
+    generation: blam_tags::game::Game,
+    render_model: &mut blam_tags::RenderModel,
+) {
+    if generation == blam_tags::game::Game::Halo1 {
+        super::super::ce::render_model::turn_markers(render_model);
+    }
+}
+
+/// What a render model's generation keeps of its preview: Halo CE's sorting
+/// positions and shader permutations. The later games' sorting positions
+/// belong to a renderer the preview does not run.
+pub(super) fn finish_render_preview(
+    generation: blam_tags::game::Game,
+    render_tag: &TagFile,
+    preview: &mut RenderModelPreview,
+) {
+    if generation == blam_tags::game::Game::Halo1 {
+        super::super::ce::render_model::read_shader_permutations(render_tag, preview);
+    } else {
+        preview
+            .batches
+            .iter_mut()
+            .for_each(|batch| batch.sort_position = None);
+    }
+}
+
+/// The render model's precomputed transfer, by the fields its tag has: Halo
+/// 2's `PRT info` (which Halo 2 Anniversary's self-describing tags carry
+/// too, so this does not go by generation), and the Halo 3 family's
+/// `per_mesh_prt_data`.
+pub(super) fn read_render_prt(
+    render_tag: &TagFile,
+    render_model: &blam_tags::RenderModel,
+    render_meshes: &[blam_tags::render_model::RenderMesh],
+    preview: &mut RenderModelPreview,
+) {
+    preview.h2.prt = super::super::h2::prt::read_model_prt(render_tag, render_model, render_meshes)
+        .filter(|prt| prt.vertices.len() == preview.vertices.len());
+    // Instances draw `static_lighting_sh`, with no transfer of their own.
+    let instance_vertices = preview.instances.vertex_count;
+    preview.gen3.prt =
+        super::super::gen3::prt::read_gen3_prt(render_tag, render_model, render_meshes)
+            .map(|mut prt| {
+                prt.pad(instance_vertices);
+                prt
+            })
+            .filter(|prt| prt.vertices.len() == preview.vertices.len());
+}
+
+/// Whose `object_get_function_value` an object of `generation` answers by:
+/// Halo 2's, or the Halo 3 family's.
+pub(in crate::app::model_preview) fn function_rules(
+    generation: blam_tags::game::Game,
+) -> FunctionRules {
+    match generation {
+        blam_tags::game::Game::Halo2 => FunctionRules::LastOfNameStands,
+        _ => FunctionRules::FirstOfNameAnswers,
+    }
+}
+
+/// A shader whose game resolves it its own way: Halo 4's `material`, Halo
+/// CE's shaders, and Halo 2's template-and-parameters `shader`. `None` for a
+/// render method, which the shared resolver reads.
+/// Every lit dx9 material's and gen3 material's shadow passes: dx9's own,
+/// then Halo 2's gel mask and Halo 3's shadow apply, which draw through the
+/// same machinery.
+pub(in crate::app::model_preview) fn shadow_passes() -> Vec<(Dx9Layer, Dx9DrawPass)> {
+    let mut passes = super::super::dx9::passes::dx9_shadow_passes().to_vec();
+    passes.push(super::super::h2::lighting::gel_mask_pass());
+    passes.push(super::super::h3::shadow::shadow_apply_pass());
+    passes
+}
+
+/// The streams the games' models carry beside their vertices, in the order
+/// the slot uploads them.
+pub(in crate::app::model_preview) fn vertex_streams() -> [&'static dyn VertexStream; 2] {
+    [
+        &super::super::h2::prt::H2PrtStream,
+        &super::super::gen3::prt::Gen3PrtStream,
+    ]
+}
+
+/// Whether `preview` carries the stream of `kind`.
+pub(in crate::app::model_preview) fn has_vertex_stream(
+    preview: &RenderModelPreview,
+    kind: VertexStreamKind,
+) -> bool {
+    vertex_streams()
+        .iter()
+        .any(|stream| stream.kind() == kind && stream.present(preview))
+}
+
+/// Keep every stream parallel to `count` added vertices that have none.
+pub(in crate::app::model_preview) fn pad_vertex_streams(
+    preview: &mut RenderModelPreview,
+    count: usize,
+) {
+    for stream in vertex_streams() {
+        stream.pad(preview, count);
+    }
+}
+
+pub(in crate::app::model_preview) fn resolve_own_shader(
+    reader: &TagReader,
+    shader: &TagFile,
+    group: [u8; 4],
+    material: &RenderModelPreviewMaterial,
+    caches: &mut ResolveCaches,
+) -> Option<MaterialTextures> {
+    if group == *b"mat " {
+        return Some(super::super::h4::materials::resolve_h4_material(
+            reader, shader, caches,
+        ));
+    }
+    match blam_tags::game::Game::of(shader) {
+        blam_tags::game::Game::Halo1 => {
+            Some(super::super::ce::shaders::resolve::resolve_ce_shader(
+                reader,
+                shader,
+                group,
+                material.ce.permutation,
+                caches,
+            ))
+        }
+        blam_tags::game::Game::Halo2 if group == *b"shad" => Some(
+            super::super::h2::shader::resolve::resolve_h2_shader(reader, shader, caches),
+        ),
+        _ => None,
+    }
+}
+
+impl ClothGame {
+    /// The game's cloth rules, from its own folder.
+    pub(crate) const fn rules(self) -> ClothRules {
+        match self {
+            ClothGame::Halo2 => super::super::h2::cloth::CLOTH,
+            ClothGame::Halo3 => super::super::h3::cloth::CLOTH,
+            ClothGame::Reach => super::super::reach::cloth::CLOTH,
+        }
+    }
+}

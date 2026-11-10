@@ -317,7 +317,7 @@ pub(in crate::app) fn draw_tag_pane(
     let mut sound_queue = std::collections::VecDeque::new();
     let mut sound_extract_request = None;
     let mut tool_import = None;
-    let mut model_preview_size = cx.model.prefs.model_preview_size;
+    let mut model_setup_width = cx.model.prefs.model_setup_width;
 
     // Taken rather than read: it is a one-shot, and egui remembers the
     // state each container lands in, so forcing it for a single frame is
@@ -505,7 +505,7 @@ pub(in crate::app) fn draw_tag_pane(
             &mut grid_color_popup,
             &mut grid_function_popup,
             model_preview,
-            &mut model_preview_size,
+            &mut model_setup_width,
             cx.model.prefs.expert_mode,
             &mut edit_context,
         );
@@ -540,8 +540,8 @@ pub(in crate::app) fn draw_tag_pane(
         request
     });
 
-    if model_preview_size != cx.model.prefs.model_preview_size {
-        cx.edit_prefs(move |prefs| prefs.model_preview_size = model_preview_size);
+    if model_setup_width != cx.model.prefs.model_setup_width {
+        cx.edit_prefs(move |prefs| prefs.model_setup_width = model_setup_width);
     }
     if status != cx.model.status {
         cx.set_status(status);

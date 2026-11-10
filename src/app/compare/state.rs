@@ -3,6 +3,7 @@
 
 use super::*;
 
+/// One differing leaf field between two compared tags (Tag Diff).
 #[derive(Debug, Clone)]
 pub(in crate::app) struct TagFieldDiff {
     /// Path in the edited tag.

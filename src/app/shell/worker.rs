@@ -178,6 +178,8 @@ pub(in crate::app) enum WorkerMessage {
     ModelAnimationsListed {
         stamp: KitStamp,
         key: String,
+        /// The geometry it was listed for; a reload since makes it stale.
+        geometry_id: u64,
         result: Result<Vec<PreviewAnimationEntry>, String>,
     },
     /// One animation decoded into per-frame node transforms, off the UI
@@ -186,6 +188,8 @@ pub(in crate::app) enum WorkerMessage {
     ModelAnimationDecoded {
         stamp: KitStamp,
         key: String,
+        /// As `ModelAnimationsListed`.
+        geometry_id: u64,
         animation_index: usize,
         result: Result<DecodedAnimationPose, String>,
     },
@@ -200,6 +204,8 @@ pub(in crate::app) enum WorkerMessage {
         geometry_id: u64,
         collision: Option<RenderModelPreview>,
         physics: Option<RenderModelPreview>,
+        /// What would not build, for the preview to say.
+        notes: Vec<String>,
     },
     /// One model's materials resolved to decoded textures, off the UI thread.
     ModelTexturesResolved {
@@ -721,12 +727,16 @@ pub(in crate::app) fn spawn_export<J>(
 
 /// A panic payload as text, for a message saying the job crashed.
 pub(in crate::app) fn panic_text(panic: &(dyn std::any::Any + Send)) -> String {
-    let detail = panic
+    format!("the worker crashed: {}", panic_detail(panic))
+}
+
+/// What a panic said.
+pub(in crate::app) fn panic_detail(panic: &(dyn std::any::Any + Send)) -> &str {
+    panic
         .downcast_ref::<String>()
         .map(String::as_str)
         .or_else(|| panic.downcast_ref::<&'static str>().copied())
-        .unwrap_or("no message");
-    format!("the worker crashed: {detail}")
+        .unwrap_or("no message")
 }
 
 #[cfg(test)]

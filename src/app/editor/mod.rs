@@ -34,6 +34,7 @@ pub(super) use crate::core::document::apply::*;
 pub(super) use crate::core::document::value::*;
 pub(super) use field_meta::*;
 mod bitmap;
+pub(in crate::app) mod bitmap_state;
 pub(super) use bitmap::*;
 mod model;
 pub(super) use model::*;
@@ -67,19 +68,19 @@ pub(super) fn draw_tag(
     color_popup: &mut Option<MaterialColorPopup>,
     function_popup: &mut Option<FunctionPopup>,
     model_preview: &mut ModelPreviewState,
-    model_preview_size: &mut f32,
+    model_setup_width: &mut f32,
     expert_mode: bool,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let is_object_family = is_object_family_group(entry.group_tag);
+    let is_object_family = is_object_family_group(entry.group_tag, source_game);
     let is_shaderish = !supports_field_search(entry, &bundled_group_hierarchy(source_game));
     let is_model = is_previewable_geometry_group_for_game(entry.group_tag, names, source_game);
 
     if expert_mode {
         draw_tag_metadata(ui, tag, entry, names);
     }
-    if !is_object_family {
-        draw_object_model_summary(ui, tag, entry, names, edit);
+    if is_object_family {
+        draw_object_model_summary(ui, tag, entry, names, source_game, edit);
     }
     if is_sound_classes_group(entry.group_tag) {
         draw_sound_classes_summary(ui, tag);
@@ -115,7 +116,7 @@ pub(super) fn draw_tag(
             names,
             source_game,
             model_preview,
-            model_preview_size,
+            model_setup_width,
             edit,
         );
         return;
