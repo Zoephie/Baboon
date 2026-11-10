@@ -250,8 +250,15 @@ impl Baboon {
                     stamp,
                     key,
                     textures_id,
+                    game_shaders,
                     textures,
-                } => self.handle_model_textures_resolved(stamp, key, textures_id, textures),
+                } => self.handle_model_textures_resolved(
+                    stamp,
+                    key,
+                    textures_id,
+                    game_shaders,
+                    textures,
+                ),
                 WorkerMessage::BitmapThumbnailDecoded { stamp, key, result } => {
                     self.handle_thumbnail_ready::<Bitmaps>(stamp, key, result, ctx)
                 }

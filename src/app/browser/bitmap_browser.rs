@@ -895,7 +895,7 @@ mod tests {
         state.textures_pending = true;
         app.model.kits[0].generation = app.model.kits[0].generation.wrapping_add(1);
 
-        app.handle_model_textures_resolved(stamp, "file:a.model".to_owned(), 1, Vec::new());
+        app.handle_model_textures_resolved(stamp, "file:a.model".to_owned(), 1, false, Vec::new());
 
         assert!(!app.views[app.model.kits[0].id].caches.model_previews["file:a.model"].textures_pending);
     }

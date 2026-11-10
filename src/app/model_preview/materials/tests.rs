@@ -97,7 +97,7 @@ fn a_shipped_character_resolves_to_real_textures_in_both_games() {
             case.model
         );
 
-        let resolved = resolve_model_textures(&source, &materials);
+        let resolved = resolve_model_textures(&source, &materials, true);
         assert_eq!(resolved.len(), materials.len(), "one result per material");
 
         // Every material must resolve to *something*. A character whose parts
@@ -177,7 +177,7 @@ fn masterchiefs_body_shader_carries_diffuse_detail_and_normal() {
         eprintln!("skipping: could not read masterchief.render_model");
         return;
     };
-    let resolved = resolve_model_textures(&source, &materials);
+    let resolved = resolve_model_textures(&source, &materials, true);
 
     // The body material is the one that has all three; the visor and light
     // shaders legitimately do not.
@@ -210,6 +210,7 @@ fn a_material_with_no_shader_reports_why() {
             h2: Default::default(),
             object: 0,
         }],
+        true,
     );
     assert_eq!(resolved.len(), 1);
     assert!(resolved[0].error.is_some());
@@ -241,7 +242,7 @@ fn dervish_resolves_a_detail_normal_on_top_of_his_bump_map() {
         eprintln!("skipping: could not read dervish.render_model");
         return;
     };
-    let resolved = resolve_model_textures(&source, &materials);
+    let resolved = resolve_model_textures(&source, &materials, true);
 
     assert!(
         resolved
@@ -254,6 +255,34 @@ fn dervish_resolves_a_detail_normal_on_top_of_his_bump_map() {
             .filter_map(|t| t.error.clone())
             .collect::<Vec<_>>()
     );
+}
+
+/// Without Game Shaders a Halo 3 material keeps its slot maps and translates
+/// no pass; with them, the same material translates its passes too.
+#[test]
+fn a_gen3_material_translates_its_passes_only_for_game_shaders() {
+    let Some(root) = case_kit_root(&CASES[0]) else {
+        eprintln!("skipping: H3EK not present");
+        return;
+    };
+    let source = loose_source(root, "halo3_mcc");
+    let material = RenderModelPreviewMaterial {
+        shader_path: r"objects\characters\dervish\shaders\dervish_armor".to_owned(),
+        shader_group: u32::from_be_bytes(*b"rmsh"),
+        ce: Default::default(),
+        h2: Default::default(),
+        object: 0,
+    };
+    let resolve = |game_shaders| {
+        resolve_model_textures(&source, std::slice::from_ref(&material), game_shaders).remove(0)
+    };
+    let (off, on) = (resolve(false), resolve(true));
+    assert!(on.gen3.is_some(), "{:?}", on.gen3_error);
+    assert!(off.gen3.is_none() && off.gen3_error.is_none());
+    assert!(off.error.is_none(), "{:?}", off.error);
+    for slot in [TextureSlot::Base, TextureSlot::Detail] {
+        assert_eq!(off.get(slot).is_some(), on.get(slot).is_some(), "{slot:?}");
+    }
 }
 
 /// The detail maps tile by the shader's own scale animator, as tool's
@@ -275,6 +304,7 @@ fn detail_tiling_comes_from_the_shaders_animator() {
             h2: Default::default(),
             object: 0,
         }],
+        true,
     );
     let material = &resolved[0];
     assert!(
@@ -312,6 +342,7 @@ fn resolve_classic(source: &TagSource, path: &str, group: &[u8; 4]) -> MaterialT
             h2: Default::default(),
             object: 0,
         }],
+        true,
     )
     .remove(0)
 }
@@ -405,7 +436,7 @@ fn a_halo_ce_permutation_picks_the_image_and_wraps() {
             h2: Default::default(),
             object: 0,
         };
-        resolve_model_textures(&source, &[material]).remove(0)
+        resolve_model_textures(&source, &[material], true).remove(0)
     };
     let shader = load_referenced_tag_from_source(&source, path, "shader_model", b"soso").unwrap();
     let base = shader.root().read_tag_ref_path("base map").unwrap();
@@ -603,7 +634,7 @@ fn every_h2_shader_takes_the_global_active_camo() {
         object: 0,
     };
     let camo = |path: &str| {
-        let textures = resolve_model_textures(&source, &[material(path)]);
+        let textures = resolve_model_textures(&source, &[material(path)], true);
         textures[0].dx9_layers[Dx9Layer::ActiveCamo as usize].clone()
     };
     let chief = camo("objects\\characters\\masterchief\\shaders\\masterchief");

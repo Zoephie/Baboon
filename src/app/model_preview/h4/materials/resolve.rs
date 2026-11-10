@@ -2,7 +2,9 @@
 
 use super::super::super::gen3::materials::gen3_image;
 use super::super::super::materials::{SlotBitmap, cached_bitmap};
-use super::super::super::{MaterialTextures, ResolveCaches, TagFile, TagReader, TextureSlot};
+use super::super::super::{
+    MaterialTextures, ResolveCaches, TagFile, TagReader, TextureImage, TextureSlot,
+};
 use super::options::{
     ENTRY_ALBEDO, ENTRY_DEFAULT, ENTRY_SINGLE_PASS_SINGLE_PROBE, ENTRY_STATIC_PROBE, H4Shader,
     bitmap_kind, h4_address, h4_blend, h4_filter, read_shader,
@@ -11,7 +13,7 @@ use super::{
     Gen3Blend, Gen3Material, Gen3MaterialDialect, Gen3Pass, Gen3Texture, H4HologramPost,
     H4ScreenMaterial, H4Submit, Sampler, SamplerKind, Stage, TextureKind, elements, translate_pass,
 };
-use blam_tags::material::{Material, bake, shader_flags};
+use blam_tags::material::{BakedMaterial, Material, MaterialShader, bake, shader_flags};
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -154,6 +156,42 @@ pub(super) fn texture_uniform<'a>(
         .map(|(name, kind)| (name.as_str(), kind))
 }
 
+/// `material` baked over its `shader`, each bitmap's kind looked up once.
+fn bake_material(
+    reader: &TagReader,
+    material: &Material,
+    shader: &MaterialShader,
+    caches: &mut ResolveCaches,
+) -> BakedMaterial {
+    let lookup = |path: &str| bitmap_kind(reader, path, caches);
+    // The lookup needs the caches mutably; the bake only reads.
+    let lookup = std::cell::RefCell::new(lookup);
+    bake(material, shader, &|path: &str| (lookup.borrow_mut())(path))
+}
+
+/// The baked material's `color_map`, which the plain shaded preview shows.
+fn color_map(
+    reader: &TagReader,
+    baked: &BakedMaterial,
+    caches: &mut ResolveCaches,
+) -> Option<TextureImage> {
+    let color = baked
+        .textures
+        .iter()
+        .find(|texture| texture.parameter == "color_map")?;
+    let binding = SlotBitmap {
+        path: color.bitmap.clone(),
+        image_index: 0,
+        repeat_x: true,
+        repeat_y: true,
+        scale: baked
+            .texture_constants
+            .get(usize::from(color.sampler))
+            .map_or([1.0, 1.0], |xform| [xform[0], xform[1]]),
+    };
+    cached_bitmap(reader, &binding, caches)
+}
+
 pub(in crate::app::model_preview) fn resolve_h4_material(
     reader: &TagReader,
     tag: &TagFile,
@@ -162,6 +200,22 @@ pub(in crate::app::model_preview) fn resolve_h4_material(
     let material = Material::from_tag(tag);
     if material.shader.is_empty() {
         return MaterialTextures::failed("the material names no material shader");
+    }
+    // Without Game Shaders only the colour map draws: no effect to parse and
+    // no pass to translate (see `TagReader::game_shaders`).
+    if !reader.game_shaders() {
+        let shader = match reader.load(&material.shader, "material_shader", b"mats") {
+            Ok(tag) => MaterialShader::from_tag(&tag),
+            Err(error) => {
+                return MaterialTextures::failed(format!(
+                    "Halo 4 material shader not read: {error}"
+                ));
+            }
+        };
+        let baked = bake_material(reader, &material, &shader, caches);
+        let mut textures = MaterialTextures::default();
+        textures.slots[TextureSlot::Base as usize] = color_map(reader, &baked, caches);
+        return textures;
     }
     let shader = match caches.h4.shaders.remove(&material.shader) {
         Some(known) => known,
@@ -177,14 +231,7 @@ pub(in crate::app::model_preview) fn resolve_h4_material(
             return MaterialTextures::failed(format!("Halo 4 material shader not read: {error}"));
         }
     };
-    let baked = {
-        let lookup = |path: &str| bitmap_kind(reader, path, caches);
-        // The lookup needs the caches mutably; the bake only reads.
-        let lookup = std::cell::RefCell::new(lookup);
-        bake(&material, &shader.shader, &|path: &str| {
-            (lookup.borrow_mut())(path)
-        })
-    };
+    let baked = bake_material(reader, &material, &shader.shader, caches);
     let blend = h4_blend(baked.alpha_blend_mode);
     // A decal shader's one technique (`techniques_decals.fxh`) writes the
     // albedo target, ahead of the lights unless the material puts it after
@@ -373,23 +420,7 @@ pub(in crate::app::model_preview) fn resolve_h4_material(
         None => Err("no object pass compiled".to_owned()),
     };
     // The plain shaded preview still shows the colour map.
-    if let Some(color) = baked
-        .textures
-        .iter()
-        .find(|texture| texture.parameter == "color_map")
-    {
-        let binding = SlotBitmap {
-            path: color.bitmap.clone(),
-            image_index: 0,
-            repeat_x: true,
-            repeat_y: true,
-            scale: baked
-                .texture_constants
-                .get(usize::from(color.sampler))
-                .map_or([1.0, 1.0], |xform| [xform[0], xform[1]]),
-        };
-        textures.slots[TextureSlot::Base as usize] = cached_bitmap(reader, &binding, caches);
-    }
+    textures.slots[TextureSlot::Base as usize] = color_map(reader, &baked, caches);
     match result {
         Ok(h3) => textures.gen3 = Some(Arc::new(h3)),
         Err(error) => textures.error = Some(format!("Halo 4 material not drawn: {error}")),

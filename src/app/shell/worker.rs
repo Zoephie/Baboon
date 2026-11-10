@@ -216,6 +216,8 @@ pub(in crate::app) enum WorkerMessage {
         /// user switched detail level or reloaded is dropped rather than paired
         /// with geometry it does not belong to.
         textures_id: u64,
+        /// Whether they were resolved for Game Shaders.
+        game_shaders: bool,
         textures: Vec<MaterialTextures>,
     },
     BitmapReimportFinished {

@@ -942,7 +942,7 @@ fn a_real_bsps_render_layer_keeps_uvs_tangents_and_shader_paths() {
 
         let sample: Vec<RenderModelPreviewMaterial> =
             preview.materials.iter().take(12).cloned().collect();
-        let resolved = resolve_model_textures(&source, &sample);
+        let resolved = resolve_model_textures(&source, &sample, true);
         let base = resolved
             .iter()
             .filter(|material| material.get(TextureSlot::Base).is_some())
@@ -1016,7 +1016,7 @@ fn an_overlay_merge_keeps_the_texture_resolve_in_flight() {
         "the effects and inputs keep theirs"
     );
 
-    app.handle_model_textures_resolved(stamp, key.clone(), textures_id, vec![Default::default()]);
+    app.handle_model_textures_resolved(stamp, key.clone(), textures_id, false, vec![Default::default()]);
     let Some(Ok(data)) = app.views[app.model.kits[0].id].caches.model_previews[&key]
         .data
         .as_ref()

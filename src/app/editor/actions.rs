@@ -201,8 +201,9 @@ impl Baboon {
     /// Start resolving a loaded model's materials to textures, if it needs it.
     ///
     /// Idempotent and cheap to call every frame: it only spawns when a model is
-    /// loaded, a textured mode is on, its textures are still absent, and no job for it
-    /// is already running.
+    /// loaded, a textured mode is on, it has no textures resolved for Game
+    /// Shaders as they are (`ModelPreviewData::textures_for`), and no job for
+    /// it is already running.
     pub(in crate::app) fn maybe_request_model_textures(
         &mut self,
         kit_index: usize,
@@ -218,7 +219,8 @@ impl Baboon {
         let Some(Ok(data)) = state.data.as_ref() else {
             return false;
         };
-        if data.textures.is_some() || data.preview.materials.is_empty() {
+        let game_shaders = state.game_shaders;
+        if data.textures_for(game_shaders).is_some() || data.preview.materials.is_empty() {
             return false;
         }
         let Some(source) = self.model.kits[kit_index]
@@ -246,13 +248,15 @@ impl Baboon {
                 stamp,
                 key,
                 textures_id,
-                textures: resolve_model_textures(&source, &materials),
+                game_shaders,
+                textures: resolve_model_textures(&source, &materials, game_shaders),
             },
             // No textures: the preview draws untextured, and stops waiting.
             move |_| WorkerMessage::ModelTexturesResolved {
                 stamp,
                 key: panic_key,
                 textures_id,
+                game_shaders,
                 textures: Vec::new(),
             },
         );
@@ -264,6 +268,7 @@ impl Baboon {
         stamp: KitStamp,
         key: String,
         textures_id: u64,
+        game_shaders: bool,
         textures: Vec<MaterialTextures>,
     ) -> bool {
         let Some(kit_index) = self.model.resolve_kit(stamp.kit) else {
@@ -289,8 +294,7 @@ impl Baboon {
         if data.textures_id != textures_id {
             return true;
         }
-        data.textures = Some(std::sync::Arc::new(textures));
-        false
+        !data.set_textures(textures, game_shaders)
     }
 
     /// Apply pasted TSV (header row = field names, one data row per element) to

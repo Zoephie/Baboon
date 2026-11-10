@@ -52,8 +52,9 @@ impl TagReader {
 
     /// Whether the preview reads for Game Shaders. Off, the readers leave out
     /// what only they draw or drive: every effect, light, flare and widget,
-    /// and the objects' functions and change colors. Cloth, Halo CE's flags,
-    /// held weapons and IK still read, as the plain draw shows them.
+    /// the objects' functions and change colors, and the materials'
+    /// translated passes. Cloth, Halo CE's flags, held weapons and IK still
+    /// read, as the plain draw shows them.
     pub(in crate::app::model_preview) fn game_shaders(&self) -> bool {
         self.game_shaders
     }

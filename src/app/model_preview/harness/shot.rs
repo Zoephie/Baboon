@@ -272,7 +272,7 @@ pub(super) fn render(
     if options.no_game {
         Arc::make_mut(&mut data.preview).game = None;
     }
-    let textures = materials::resolve_model_textures(source, &data.preview.materials);
+    let textures = materials::resolve_model_textures(source, &data.preview.materials, shot.shaders);
     let with_passes = textures
         .iter()
         .filter(|t| t.dx9_layers.iter().any(|l| !l.is_empty()))
