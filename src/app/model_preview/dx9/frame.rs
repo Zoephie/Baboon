@@ -7,12 +7,9 @@ use super::passes::{Dx9Layer, object_light_direction};
 
 impl ModelGpuFrame {
     /// The passes are the game's shaders, so they draw with Game Shaders on
-    /// alone, the transparent ones too; the camo layer with camo on.
+    /// alone, the transparent ones too; the camo layer only with camo on.
     pub(in crate::app::model_preview) fn dx9_draws(&self, layer: Dx9Layer) -> bool {
-        match layer {
-            Dx9Layer::ActiveCamo => self.active_camo,
-            _ => self.game_shaders,
-        }
+        self.game_shaders && (layer != Dx9Layer::ActiveCamo || self.active_camo)
     }
 
     pub(in crate::app::model_preview) fn dx9_lightmap_layer(&self) -> Dx9Layer {
