@@ -122,6 +122,7 @@ pub(in crate::app) enum ButtonIcon {
     Bitmap,
     View,
     WindowMode,
+    NavigationPane,
     FolderClosed,
     FolderOpen,
 }
@@ -232,6 +233,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
             }
         }
         ButtonIcon::WindowMode => include_root_str!("assets/Button Icons/Window Mode.svg"),
+        ButtonIcon::NavigationPane => include_root_str!("assets/Button Icons/Navigation Pane.svg"),
         ButtonIcon::FolderClosed => include_root_str!("assets/Button Icons/Folder - closed.svg"),
         ButtonIcon::FolderOpen => include_root_str!("assets/Button Icons/Folder - open.svg"),
     }
@@ -1115,6 +1117,7 @@ mod tests {
             ButtonIcon::Pin,
             ButtonIcon::View,
             ButtonIcon::WindowMode,
+            ButtonIcon::NavigationPane,
         ];
         for icon in icons {
             assert!(button_icon_svg(icon).contains("<svg"), "missing {icon:?}");

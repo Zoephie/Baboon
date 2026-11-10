@@ -653,6 +653,7 @@ impl Baboon {
         let Some(entry) = self.model.entry_for_key(key).cloned() else {
             return;
         };
+        self.views[self.model.kits[self.model.active].id].navigation_hidden = false;
         self.views[self.model.kits[self.model.active].id].browser.filter.clear();
         self.views[self.model.kits[self.model.active].id].browser.mode = BrowserMode::Folders;
         // An open tag comes to the front as well as being selected; one that is

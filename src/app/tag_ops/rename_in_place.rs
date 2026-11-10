@@ -1073,6 +1073,7 @@ mod tests {
             chimp: _,
 
             // Not addressed by a tag key at all.
+            navigation_hidden: _,
             blam: _,
             terminal: _,
             // Classified field by field below.

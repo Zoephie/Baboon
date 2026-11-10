@@ -5,6 +5,29 @@ use super::*;
 use crate::app::shell::frame::centered_empty_state;
 use crate::app::shell::frame::wheel_scroll_tab_bar;
 
+/// A tab-strip control with the same silhouette and hover as the tabs.
+fn navigation_pane_button(ui: &mut Ui, kit: KitId, view: &mut KitView, divider: bool) {
+    let tooltip = if view.navigation_hidden { "Show navigation pane" } else { "Hide navigation pane" };
+    let (_, rect) = ui.allocate_space(egui::vec2(32.0, 24.0));
+    let response = ui.interact(rect, egui::Id::new(("navigation_pane_toggle", kit.0)), Sense::click())
+        .on_hover_text(tooltip);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tooltip));
+    let fill = if response.hovered() || response.has_focus() || response.is_pointer_button_down_on() {
+        context_menu_hover()
+    } else { Color32::TRANSPARENT };
+    crate::app::shell::frame::paint_connected_tab(ui, rect, fill, false, false);
+    paint_button_icon_at(ui, ButtonIcon::NavigationPane,
+        egui::Rect::from_center_size(response.rect.center(), Vec2::splat(16.0)), text_dark());
+    if divider {
+        ui.painter().vline(rect.right() - 0.5, (rect.top() + 5.0)..=(rect.bottom() - 5.0),
+            Stroke::new(1.0, grid_line()));
+    }
+    if response.clicked() {
+        view.navigation_hidden = !view.navigation_hidden;
+        ui.ctx().request_repaint();
+    }
+}
+
 fn page_corners(page: egui::Rect, tab: Option<&egui::Rect>) -> egui::CornerRadius {
     let mut corners = egui::CornerRadius::same(6);
     // A tab at an outer edge shares that straight side with the page.
@@ -37,6 +60,7 @@ struct TagPaneBehavior<'a, 'c, 'p> {
     tab_labels: HashMap<String, (String, Option<u32>)>,
     active_tab_rects: HashMap<egui_tiles::TileId, egui::Rect>,
     inactive_dividers: HashSet<egui_tiles::TileId>,
+    primary_group: Option<egui_tiles::TileId>,
     close_requests: Vec<String>,
     /// Deferred tab context-menu choices, applied after the tree is drawn for
     /// the same reason closes are: they mutate the layout or the open set.
@@ -54,9 +78,15 @@ struct TagPaneBehavior<'a, 'c, 'p> {
 
 impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
     fn tab_bar_left_ui(
-        &mut self, tiles: &egui_tiles::Tiles<String>, _ui: &mut Ui,
-        _tile_id: egui_tiles::TileId, tabs: &egui_tiles::Tabs,
+        &mut self, tiles: &egui_tiles::Tiles<String>, ui: &mut Ui,
+        tile_id: egui_tiles::TileId, tabs: &egui_tiles::Tabs,
     ) {
+        // Only the first (top/left) group controls this kit's navigation.
+        if *self.primary_group.get_or_insert(tile_id) == tile_id {
+            let divider = tabs.children.iter().find(|id| tiles.is_visible(**id))
+                .is_some_and(|id| !tabs.is_active(*id));
+            navigation_pane_button(ui, self.kit, &mut self.parts.views[self.kit], divider);
+        }
         // The tab container is temporarily removed from Tiles while its
         // children draw, so record neighboring inactive tabs at this hook.
         let visible = tabs.children.iter().copied().filter(|id| tiles.is_visible(*id)).collect::<Vec<_>>();
@@ -686,6 +716,7 @@ pub(in crate::app) fn draw_tag_tiles(
         tab_labels,
         active_tab_rects: HashMap::new(),
         inactive_dividers: HashSet::new(),
+        primary_group: None,
         close_requests: Vec::new(),
         reveal: None,
         reveal_in_explorer: None,

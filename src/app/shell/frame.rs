@@ -595,8 +595,8 @@ pub(in crate::app) fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction:
 
 /// The kit's game card: emblem, game name, and source path.
 ///
-/// Fills the sidebar width and allows long source paths to reflow as the pane
-/// narrows. Zero-width break opportunities after path separators keep Windows
+/// Fills the sidebar width with a fixed-height banner. Source paths wrap to
+/// at most three lines. Break opportunities after path separators keep Windows
 /// paths readable without changing the text the user sees.
 /// `texture` is the banner [`Baboon::workspace_banner_texture`] resolved for
 /// this game and profile; resolving it can load it, so it is done before the
@@ -649,22 +649,23 @@ pub(in crate::app) fn draw_kit_banner_tile(
     let text_width = (card_width - MARGIN * 2.0 - EMBLEM - GAP).max(1.0);
     let title = editing_kit_title_text(ui, title_label, read_only, 14.0, true).into_galley(
         ui,
-        Some(egui::TextWrapMode::Wrap),
+        Some(egui::TextWrapMode::Truncate),
         text_width,
         TextStyle::Body,
     );
     let wrappable_path = sidebar_wrappable_path_label(path_label);
-    let path = egui::WidgetText::from(RichText::new(wrappable_path).color(subtle_dark()).small())
-        .into_galley(
-            ui,
-            Some(egui::TextWrapMode::Wrap),
-            text_width,
-            TextStyle::Small,
-        );
+    let mut path_job = egui::text::LayoutJob::default();
+    RichText::new(wrappable_path).color(subtle_dark()).small().append_to(
+        &mut path_job, ui.style(), egui::FontSelection::Style(TextStyle::Small), egui::Align::Min,
+    );
+    path_job.wrap.max_width = text_width;
+    path_job.wrap.max_rows = 3;
+    path_job.wrap.break_anywhere = true;
+    let path = ui.fonts_mut(|fonts| fonts.layout_job(path_job));
 
-    let text_height = TITLE_TOP + title.size().y + path.size().y;
-    let card_height = MARGIN * 2.0 + EMBLEM.max(text_height);
-    let (full, _) = ui.allocate_exact_size(Vec2::new(card_width, card_height), Sense::hover());
+    let card_height = MARGIN * 2.0 + EMBLEM;
+    let (full, response) = ui.allocate_exact_size(Vec2::new(card_width, card_height), Sense::hover());
+    response.on_hover_text(format!("{title_label}{}\n{path_label}", if read_only { " (read-only)" } else { "" }));
 
     let painter = ui.painter_at(full);
     painter.rect_filled(full, 0.0, foundation_documentation_bg());
@@ -678,8 +679,11 @@ pub(in crate::app) fn draw_kit_banner_tile(
     }
     let text_x = full.min.x + MARGIN + EMBLEM + GAP;
     let title_y = full.min.y + MARGIN + TITLE_TOP;
-    painter.galley(egui::pos2(text_x, title_y), title.clone(), text_dark());
-    painter.galley(
+    let text_painter = painter.with_clip_rect(egui::Rect::from_min_max(
+        egui::pos2(text_x, title_y), full.max - Vec2::splat(MARGIN),
+    ).intersect(full));
+    text_painter.galley(egui::pos2(text_x, title_y), title.clone(), text_dark());
+    text_painter.galley(
         egui::pos2(text_x, title_y + title.size().y),
         path,
         subtle_dark(),
@@ -1124,6 +1128,40 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn kit_banner_keeps_its_height_and_caps_text_when_narrowed() {
+        let title = "An editing kit with a deliberately very long descriptive title";
+        let path = r"C:\Editing Kits\A Very Long Kit Name\nested\deep\more\directories\even\more\folders\with\a\particularly\long\final\directory\before\the\tags";
+        for width in [140.0, 220.0, 330.0, 600.0] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            let mut height = 0.0;
+            let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width + 16.0, 200.0))),
+                ..Default::default()
+            }, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    ui.set_width(width);
+                    let top = ui.cursor().top();
+                    draw_kit_banner_tile(ui, title, path, None, false);
+                    height = ui.cursor().top() - top - ui.spacing().item_spacing.y;
+                });
+            });
+            assert!((height - 88.0).abs() < 0.1, "banner height at {width}px: {height}");
+            let text: Vec<_> = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text), _ => None,
+            }).collect();
+            let heading = text.iter().find(|text| text.galley.job.text == title).unwrap();
+            let location = text.iter().find(|text| text.galley.job.text == sidebar_wrappable_path_label(path)).unwrap();
+            assert_eq!(heading.galley.rows.len(), 1);
+            assert!(location.galley.rows.len() <= 3);
+            if width == 220.0 {
+                assert_eq!(location.galley.rows.len(), 3);
+                assert!(location.galley.elided && heading.galley.elided);
+            }
+        }
     }
 
     #[test]
@@ -5604,6 +5642,128 @@ mod tests {
             .collect();
         idle(&mut h);
         (h, keys)
+    }
+
+    /// Read the navigation control from a full application draw.
+    fn navigation_button_rect(h: &mut Harness) -> egui::Rect {
+        h.time += 1.0 / 60.0;
+        let _ = crate::app::run_ui_test(&h.ctx, egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+            time: Some(h.time),
+            focused: true,
+            ..Default::default()
+        }, |ui| h.app.run_frame(ui));
+        let kit = h.app.model.kits[0].id;
+        h.ctx.read_response(egui::Id::new(("navigation_pane_toggle", kit.0)))
+            .expect("navigation toggle remains available").rect
+    }
+
+    #[test]
+    fn navigation_toggle_restores_width_and_survives_closing_all_tags() {
+        let (mut h, keys) = three_tabs();
+        let kit = h.app.model.kits[0].id;
+        let page = |h: &Harness| {
+            let tree = &h.app.views[kit].tag_tree;
+            tree.tiles.iter().find_map(|(id, tile)|
+                matches!(tile, egui_tiles::Tile::Pane(key) if key == &keys[2])
+                    .then(|| tree.tiles.rect(*id)).flatten()).unwrap()
+        };
+        let before = page(&h);
+        let browser_id = egui::Id::new(("kit_browser_panel", kit.0));
+        let browser_rect = egui::containers::panel::PanelState::load(&h.ctx, browser_id).unwrap().outer_rect;
+        let width = browser_rect.width();
+        let toggle = navigation_button_rect(&mut h);
+        assert!((toggle.left() - browser_rect.right() - 4.0).abs() < 1.0,
+            "the main view contributes 4px to the shared 8px gutter");
+        press_at(&mut h, toggle.center(), egui::PointerButton::Primary);
+        assert!(h.app.views[kit].navigation_hidden);
+        h.idle(12);
+        assert!(page(&h).width() > before.width() + 250.0);
+        let toggle = navigation_button_rect(&mut h);
+        assert!((toggle.left() - browser_rect.left() - 8.0).abs() < 1.0,
+            "collapsed navigation leaves an 8px left gutter");
+        press_at(&mut h, toggle.center(), egui::PointerButton::Primary);
+        assert!(!h.app.views[kit].navigation_hidden);
+        h.idle(12);
+        assert!((page(&h).width() - before.width()).abs() < 1.0);
+        assert!((egui::containers::panel::PanelState::load(&h.ctx, browser_id).unwrap().outer_rect.width() - width).abs() < 1.0);
+
+        h.app.views[kit].tag_tree = egui_tiles::Tree::new_horizontal("navigation_split", keys.clone());
+        idle(&mut h);
+        navigation_button_rect(&mut h); // The primary split keeps the toggle reachable.
+        h.app.views[kit].navigation_hidden = true;
+        h.app.reveal_in_browser(&keys[2]);
+        assert!(!h.app.views[kit].navigation_hidden, "Reveal in Browser reopens navigation");
+
+        h.app.views[kit].navigation_hidden = true;
+        h.app.close_all_tabs();
+        assert!(!h.app.views[kit].navigation_hidden, "closing all tabs restores navigation");
+        idle(&mut h);
+        assert!(h.ctx.read_response(egui::Id::new(("navigation_pane_toggle", kit.0))).is_none(),
+            "the empty editor has no navigation toggle");
+        h.click("View", 0);
+        h.click("Navigation Pane", 0);
+        assert!(!h.app.views[kit].navigation_hidden, "the empty editor cannot hide navigation from View");
+    }
+
+    #[test]
+    fn navigation_slide_has_intermediate_layout_and_restores_editor_width() {
+        let (mut h, keys) = three_tabs();
+        let kit = h.app.model.kits[0].id;
+        let page_width = |h: &Harness| {
+            let tree = &h.app.views[kit].tag_tree;
+            tree.tiles.iter().find_map(|(id, tile)|
+                matches!(tile, egui_tiles::Tile::Pane(key) if key == &keys[2])
+                    .then(|| tree.tiles.rect(*id)).flatten()).unwrap().width()
+        };
+        let expanded = page_width(&h);
+        h.app.views[kit].navigation_hidden = true;
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        let during = page_width(&h);
+        h.idle(12);
+        let collapsed = page_width(&h);
+        assert!(during > expanded + 1.0 && during < collapsed - 1.0,
+            "editor width slides between endpoints: {expanded}, {during}, {collapsed}");
+        h.app.views[kit].navigation_hidden = false;
+        h.idle(12);
+        assert!((page_width(&h) - expanded).abs() < 1.0, "slide restores the original panel width");
+    }
+
+    #[test]
+    fn closing_the_last_tag_restores_navigation_but_other_tabs_keep_it_hidden() {
+        let (mut h, keys) = three_tabs();
+        let kit = h.app.model.kits[0].id;
+        h.app.views[kit].navigation_hidden = true;
+        for key in &keys[..2] {
+            h.app.kit_and_view(0).close_tag_pane(key);
+            assert!(h.app.views[kit].navigation_hidden);
+        }
+        h.app.kit_and_view(0).close_tag_pane(&keys[2]);
+        assert!(!h.app.views[kit].navigation_hidden);
+        idle(&mut h);
+        assert!(h.ctx.read_response(egui::Id::new(("navigation_pane_toggle", kit.0))).is_none());
+    }
+
+    #[test]
+    fn navigation_view_menu_and_button_share_workspace_state() {
+        let (mut h, _) = three_tabs();
+        let kit = h.app.model.kits[0].id;
+        h.click("View", 0);
+        h.click("Navigation Pane", 0);
+        assert!(h.app.views[kit].navigation_hidden);
+        h.frame(vec![egui::Event::Key {
+            key: egui::Key::Escape, physical_key: None, pressed: true,
+            repeat: false, modifiers: egui::Modifiers::NONE,
+        }]);
+        idle(&mut h);
+        let toggle = navigation_button_rect(&mut h);
+        press_at(&mut h, toggle.center(), egui::PointerButton::Primary);
+        assert!(!h.app.views[kit].navigation_hidden);
+        h.app.views[kit].navigation_hidden = true;
+        let other = h.app.add_kit();
+        assert!(!h.app.views[other].navigation_hidden, "other workspaces keep their own state");
+        assert!(h.app.views[kit].navigation_hidden);
     }
 
     /// Slide onto the first painting of `text` and press and release `button`

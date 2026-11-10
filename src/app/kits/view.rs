@@ -17,6 +17,8 @@ pub(in crate::app) struct KitView {
     /// `open_tabs` is re-derived from it, never the other way round — so a
     /// split or a drag survives instead of being overwritten by a mirror.
     pub(in crate::app) tag_tree: egui_tiles::Tree<String>,
+    /// Hide this workspace's navigation without discarding its browser state.
+    pub(in crate::app) navigation_hidden: bool,
     /// In-progress text edits keyed by stable widget/edit identifiers. Drafts
     /// rather than bare strings so a value the user is still typing is not
     /// overwritten by the document underneath it.
@@ -72,6 +74,7 @@ impl KitView {
     pub(in crate::app) fn new(kit: KitId, browser: KitBrowser) -> Self {
         Self {
             tag_tree: egui_tiles::Tree::empty(tag_tree_id(kit)),
+            navigation_hidden: false,
             edit_buffers: EditDrafts::default(),
             pending_expand: HashMap::new(),
             find_filter_applied: HashMap::new(),
@@ -348,6 +351,18 @@ impl<'a> KitMut<'a> {
         let open_tabs = self.view.tabs_from_tree();
         let mut changed = open_tabs != self.kit.open_tabs;
         self.kit.open_tabs = open_tabs;
+        if self.kit.open_tabs.is_empty() {
+            if self.view.navigation_hidden {
+                self.view.navigation_hidden = false;
+                changed = true;
+            }
+            // Removing the last pane can leave an empty tab/split container.
+            // Clear it now so menus and layout agree immediately that no tabs remain.
+            if !self.view.tag_tree.is_empty() {
+                self.view.tag_tree = egui_tiles::Tree::empty(tag_tree_id(self.kit.id));
+                changed = true;
+            }
+        }
         match (&self.kit.selected_key, &self.kit.current_pane) {
             (Some(selected), current) if current.as_ref() != Some(selected) => {
                 self.kit.current_pane = Some(selected.clone());

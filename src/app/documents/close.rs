@@ -286,6 +286,7 @@ impl Baboon {
         self.remember_closed_tag_keys(self.model.active, self.views[self.model.kits[self.model.active].id].tabs_from_tree());
         let id = self.model.kits[self.model.active].id;
         self.views[self.model.kits[self.model.active].id].tag_tree = egui_tiles::Tree::empty(tag_tree_id(id));
+        self.views[id].navigation_hidden = false;
         self.model.kits[self.model.active].open_tabs.clear();
         self.kit_and_view(self.model.active).drop_documents_except(None);
         self.model.kits[self.model.active].selected_key = None;

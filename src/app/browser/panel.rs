@@ -783,13 +783,11 @@ fn draw_kit_browser_inner(
             );
         }
         ui.add_space(6.0);
-        // Wrapped, and with the toolbar visuals hoisted out of the two
-        // scopes that used to group these buttons. A scope is placed as one
-        // unit, so grouped buttons could only wrap in blocks — and the
-        // widest block became the sidebar's minimum width. Individually
-        // wrapping buttons let the panel shrink to a single button.
+        // Keep the controls on one row as the sidebar narrows. The scroll
+        // viewport, rather than the toolbar's contents, determines its width.
         let previous_search_scope = view.browser.search_scope;
-        ui.horizontal_wrapped(|ui| {
+        ScrollArea::horizontal().id_salt("browser_toolbar_scroll")
+            .auto_shrink([false, true]).show(ui, |ui| { ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let groups_clicked = browser_toolbar_controls(
                 ui,
@@ -808,7 +806,7 @@ fn draw_kit_browser_inner(
             {
                 need_scan = true;
             }
-        });
+        }); });
         if view.browser.search_scope != previous_search_scope {
             // The last choice seeds new browsers, in this session and the next.
             let scope = view.browser.search_scope;
