@@ -11,13 +11,13 @@ use super::super::{
     ModelPreviewState, is_previewable_geometry_group_for_game,
 };
 use super::animation::{animation_card_height, draw_animation_player};
+use super::functions::draw_setup_body;
 use super::section::{
     MODEL_PREVIEW_SECTION_GAP, MODEL_PREVIEW_STATS_FOOTER_HEIGHT, ModelPreviewSectionPart,
     draw_model_preview_loading_shells, draw_model_preview_section,
 };
 use super::setup::{
-    draw_model_setup_header_controls, draw_setup_body, draw_setup_header_actions,
-    model_setup_extra_header_height,
+    draw_model_setup_header_controls, draw_setup_header_actions, model_setup_extra_header_height,
 };
 use super::view_menu::draw_model_view_settings_menu;
 use super::viewport_size::draw_model_viewport_with_stats;

@@ -1,14 +1,13 @@
 //! The setup card: its header controls, its body and the scenario BSP list.
 
-use super::super::super::ui_kit::style::{subtle_dark, text_dark};
+use super::super::super::ui_kit::style::subtle_dark;
 use super::super::{FieldEditContext, ModelPreviewData, ModelPreviewState, bsp_display_name};
-use super::functions::draw_object_functions;
 use super::layout::{PreviewPanel, SetupRequests};
 use super::section::{
     MODEL_SETUP_EXTRA_HEADER_HEIGHT, MODEL_SETUP_INLINE_HEADER_MIN_WIDTH,
     MODEL_SETUP_SHARED_CONTROLS_ROW_MIN_WIDTH,
 };
-use super::variants::{draw_variant_controls, draw_variant_header_actions, draw_variant_selector};
+use super::variants::{draw_variant_header_actions, draw_variant_selector};
 use crate::app::ui_kit::checkbox::CheckboxUi as _;
 use eframe::egui::{RichText, Ui};
 
@@ -29,18 +28,6 @@ pub(in crate::app::model_preview) fn draw_setup_header_actions(
     }
 }
 
-/// The Model Setup card's body: a scenario's BSPs, the variants and regions,
-/// and the object's functions.
-pub(in crate::app::model_preview) fn draw_setup_body(
-    ui: &mut Ui,
-    data: &ModelPreviewData,
-    state: &mut ModelPreviewState,
-) {
-    draw_scenario_setup(ui, data, state);
-    draw_variant_controls(ui, data, state);
-    draw_object_functions(ui, data, state);
-}
-
 /// A scenario's per-BSP toggle list. Region toggles cannot serve here: a
 /// region only exists once its BSP is loaded, and the point of this list is
 /// choosing what to load in the first place.
@@ -50,7 +37,6 @@ pub(in crate::app::model_preview) fn draw_scenario_setup(
     state: &mut ModelPreviewState,
 ) {
     if !data.scenario_bsps.is_empty() {
-        ui.label(RichText::new("Structure BSPs").strong().color(text_dark()));
         ui.horizontal_wrapped(|ui| {
             for (index, reference) in data.scenario_bsps.iter().enumerate() {
                 let Some(reference) = reference else {
@@ -75,7 +61,6 @@ pub(in crate::app::model_preview) fn draw_scenario_setup(
                 RichText::new("Check a structure BSP to load its geometry.").color(subtle_dark()),
             );
         }
-        ui.separator();
     }
 }
 

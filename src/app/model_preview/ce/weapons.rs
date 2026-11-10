@@ -146,6 +146,19 @@ pub(crate) struct CeEquippable {
     label: String,
 }
 
+#[cfg(test)]
+impl CeEquippable {
+    /// A weapon at `path` the biped can hold, for a test of the panel.
+    pub(crate) fn for_test(path: &str) -> Self {
+        Self {
+            path: path.to_owned(),
+            name: path.to_owned(),
+            class: String::new(),
+            label: String::new(),
+        }
+    }
+}
+
 /// What a biped can hold, and which clips the held weapon leaves out.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CeBipedWeapons {

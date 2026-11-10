@@ -1,5 +1,6 @@
 //! The panel's controls for a Halo CE object's functions and effects.
 
+use super::super::load::{ObjectControls, SectionControls};
 use super::super::panel::{carry_through_weapon_change, weapon_dropdown};
 use super::super::{ModelPreviewData, ModelPreviewState, frame};
 use crate::app::model_preview::ce::functions::{
@@ -83,8 +84,7 @@ pub(in crate::app::model_preview) fn draw_ce_event_effects(
     if events.is_empty() && firing.is_empty() {
         return;
     }
-    ui.add_space(6.0);
-    egui::CollapsingHeader::new("Effects").id_salt("ce_event_effects").show(ui, |ui| {
+    {
         const SCALES: &str = "What effect_new_from_object is given. A firing effect gets its trigger's \
                               rate and error; reloading, readying, damage and the rest get 0 and 0.";
         const FIRE: &str = "Fire the trigger once, as weapon_trigger_fire does: it plays the next \
@@ -92,11 +92,18 @@ pub(in crate::app::model_preview) fn draw_ce_event_effects(
                             rate of fire. The weapon is held as an actor holds one: it never \
                             overheats.";
         for (scale, name) in scales.iter_mut().zip(["scale A", "scale B"]) {
-            ui.add(egui::Slider::new(scale, 0.0..=1.0).text(name)).on_hover_text(SCALES);
+            ui.add(egui::Slider::new(scale, 0.0..=1.0).text(name))
+                .on_hover_text(SCALES);
         }
         for weapon in firing {
-            for (trigger, label) in (0..weapon.triggers.len()).zip(["primary trigger", "secondary trigger"]) {
-                if ui.small_button(format!("Fire {}", named(weapon.object, label))).on_hover_text(FIRE).clicked() {
+            for (trigger, label) in
+                (0..weapon.triggers.len()).zip(["primary trigger", "secondary trigger"])
+            {
+                if ui
+                    .small_button(format!("Fire {}", named(weapon.object, label)))
+                    .on_hover_text(FIRE)
+                    .clicked()
+                {
                     let fired = shots.entry((geometry, weapon.object)).or_default();
                     if let Some(effect) = fired.fire(weapon, trigger, scales[0], time) {
                         *counts.entry((geometry, effect)).or_default() += 1;
@@ -111,7 +118,7 @@ pub(in crate::app::model_preview) fn draw_ce_event_effects(
                 ui.ctx().request_repaint();
             }
         }
-    });
+    }
 }
 
 /// Sliders for an opened object's inputs, and what its functions make of them.
@@ -131,21 +138,12 @@ pub(in crate::app::model_preview) fn draw_ce_function_controls(
     let reaching = read.map_or([true; 4], |read| functions.inputs_reaching(read));
     let read = read.unwrap_or([true; 4]);
     let mut values = functions.inputs_for(set, key);
-    ui.add_space(6.0);
     ui.push_id(key.1, |ui| {
-        ui.horizontal(|ui| {
-            ui.strong(name.map_or("Object Functions".to_owned(), |name| {
-                format!("{name} Functions")
-            }));
-            let changed = values != functions.inputs;
-            if ui
-                .add_enabled(changed, egui::Button::new("Reset"))
-                .clicked()
-            {
-                values = functions.inputs;
-                set.remove(&key);
-            }
-        });
+        // The opened object's go under the section's own title.
+        if let Some(name) = name {
+            ui.add_space(6.0);
+            ui.strong(format!("{name} Functions"));
+        }
         let before = values;
         for ((value, name), active) in values.iter_mut().zip(&functions.input_names).zip(reaching) {
             let Some(name) = name else {
@@ -170,14 +168,76 @@ pub(in crate::app::model_preview) fn draw_ce_function_controls(
     });
 }
 
-/// Above the shared controls: the weapon the biped holds and its event
-/// effects.
-pub(in crate::app::model_preview) fn draw_ce_object_controls(
+/// Halo CE's own controls, by sidebar section: the weapon its biped holds,
+/// the effects its objects play and fire, and its functions' inputs.
+pub(in crate::app::model_preview) const CONTROLS: ObjectControls = ObjectControls {
+    weapons: SectionControls {
+        has: |data| {
+            data.ce
+                .weapons
+                .as_ref()
+                .is_some_and(|weapons| !weapons.equippable.is_empty())
+        },
+        draw: draw_ce_weapon_picker,
+        // The weapon it holds is the shared section's to reset.
+        changed: |_, _| false,
+        reset: |_, _| {},
+    },
+    effects: SectionControls {
+        has: |data| {
+            !data.preview.ce.firing.is_empty()
+                || data
+                    .preview
+                    .ce
+                    .effects
+                    .iter()
+                    .any(|effect| effect.event.is_some())
+        },
+        draw: draw_ce_effects,
+        changed: |data, state| {
+            let geometry = data.geometry_id;
+            state.ce.event_scales != super::functions::CE_EVENT_SCALES
+                || state.ce.event_counts.keys().any(|(at, _)| *at == geometry)
+                || state.ce.shots.keys().any(|(at, _)| *at == geometry)
+        },
+        reset: |data, state| {
+            let geometry = data.geometry_id;
+            state.ce.event_scales = super::functions::CE_EVENT_SCALES;
+            state.ce.event_counts.retain(|(at, _), _| *at != geometry);
+            state.ce.shots.retain(|(at, _), _| *at != geometry);
+        },
+    },
+    functions: SectionControls {
+        has: |data| {
+            data.ce.functions.is_some()
+                || data.ce.attached.iter().any(|held| held.functions.is_some())
+        },
+        draw: draw_ce_function_inputs,
+        changed: |data, state| {
+            let geometry = data.geometry_id;
+            state
+                .ce
+                .function_inputs
+                .keys()
+                .any(|(at, _)| *at == geometry)
+        },
+        reset: |data, state| {
+            let geometry = data.geometry_id;
+            state
+                .ce
+                .function_inputs
+                .retain(|(at, _), _| *at != geometry);
+        },
+    },
+};
+
+/// The effects a Halo CE object's events play and its weapon's triggers
+/// fire, with the scales they go at.
+pub(in crate::app::model_preview) fn draw_ce_effects(
     ui: &mut Ui,
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
 ) {
-    draw_ce_weapon_picker(ui, data, state);
     let held_name = |object: u8| {
         let held = usize::from(object).checked_sub(1)?;
         data.ce.attached.get(held).map(|held| held.name.clone())
@@ -194,8 +254,7 @@ pub(in crate::app::model_preview) fn draw_ce_object_controls(
     draw_ce_event_effects(ui, controls, held_name);
 }
 
-/// Below the shared controls: the inputs of the object's functions and of
-/// what is attached to it, each marked for the outputs something reads.
+/// The inputs of the object's functions and of what is attached to it, each marked for the outputs something reads.
 pub(in crate::app::model_preview) fn draw_ce_function_inputs(
     ui: &mut Ui,
     data: &ModelPreviewData,

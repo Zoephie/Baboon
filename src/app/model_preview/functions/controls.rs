@@ -5,10 +5,34 @@ use super::read::{FunctionInputs, FunctionValues, ObjectFunctions};
 use eframe::egui;
 use eframe::egui::Ui;
 
-/// A button for each effect an event would play. An effect starts when its
-/// function comes on, so a press turns it off for a frame and then on.
-fn draw_event_effects(ui: &mut Ui, events: &[&str], key: u64, set: &mut FunctionInputs) {
-    const STARTING: f32 = -1.0;
+/// An event effect's function the frame it is pressed: off, so it is seen
+/// coming on the next.
+const STARTING: f32 = -1.0;
+
+/// What an object's functions take from outside, split into the event
+/// effects it can play and the inputs a slider sets.
+pub(in crate::app::model_preview) fn function_names<'a>(
+    functions: &'a ObjectFunctions,
+    shader_inputs: &'a [String],
+) -> (Vec<&'a str>, Vec<&'a str>) {
+    let mut names = functions.imports();
+    for name in shader_inputs {
+        if !functions.makes(name) && !names.contains(&name.as_str()) {
+            names.push(name);
+        }
+    }
+    names
+        .into_iter()
+        .partition(|name| super::super::effects::is_event_function(name))
+}
+
+/// Turns on each event effect pressed last frame. Run every frame, whether
+/// or not its buttons are shown, or a press would hold it off.
+pub(in crate::app::model_preview) fn settle_event_effects(
+    events: &[&str],
+    key: u64,
+    set: &mut FunctionInputs,
+) {
     for name in events {
         if let Some(value) = set.get_mut(&(key, (*name).to_owned()))
             && *value == STARTING
@@ -16,63 +40,43 @@ fn draw_event_effects(ui: &mut Ui, events: &[&str], key: u64, set: &mut Function
             *value = 1.0;
         }
     }
-    if events.is_empty() {
-        return;
-    }
-    ui.add_space(6.0);
-    egui::CollapsingHeader::new("Effects")
-        .id_salt("object_event_effects")
-        .show(ui, |ui| {
-            for name in events {
-                if ui.small_button(format!("Play {name}")).clicked() {
-                    set.insert((key, (*name).to_owned()), STARTING);
-                    // It has to be seen off for a frame before it can come on.
-                    ui.ctx().request_repaint();
-                }
-            }
-        });
 }
 
-/// Sliders for what an object imports, and what its functions come to.
+/// A button for each effect an event would play. An effect starts when its
+/// function comes on, so a press turns it off for a frame and then on.
+pub(in crate::app::model_preview) fn draw_event_effects(
+    ui: &mut Ui,
+    events: &[&str],
+    key: u64,
+    set: &mut FunctionInputs,
+) {
+    for name in events {
+        if ui.small_button(format!("Play {name}")).clicked() {
+            set.insert((key, (*name).to_owned()), STARTING);
+            // It has to be seen off for a frame before it can come on.
+            ui.ctx().request_repaint();
+        }
+    }
+}
+
+/// Sliders for what an object imports, `names` (the inputs of
+/// [`function_names`]), and what its functions come to.
 pub(in crate::app::model_preview) fn draw_function_controls(
     ui: &mut Ui,
     functions: &ObjectFunctions,
+    names: &[&str],
     key: u64,
     set: &mut FunctionInputs,
     values: &FunctionValues,
     shader_inputs: &[String],
 ) {
-    let mut names = functions.imports();
-    for name in shader_inputs {
-        if !functions.makes(name) && !names.contains(&name.as_str()) {
-            names.push(name);
-        }
-    }
-    let (events, names): (Vec<&str>, Vec<&str>) = names
-        .into_iter()
-        .partition(|name| super::super::effects::is_event_function(name));
-    draw_event_effects(ui, &events, key, set);
-    if names.is_empty() {
-        return;
-    }
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        ui.strong("Object Functions");
-        let changed = set.keys().any(|(geometry, _)| *geometry == key);
-        if ui
-            .add_enabled(changed, egui::Button::new("Reset"))
-            .clicked()
-        {
-            set.retain(|(geometry, _), _| *geometry != key);
-        }
-    });
     const SCRIPTED: &str = "Set it as a script would, with object_set_function_variable: \
                             the game reads that before what the function makes.";
     const UNREAD: &str = "Nothing this preview draws reads this. It may drive something \
                           the preview does not have, such as an effect's particles.";
     let reached = functions.reaching(shader_inputs);
     let drawn = |name: &str| reached.iter().any(|known| known == name);
-    for name in names {
+    for &name in names {
         let at_rest = functions.idle(name);
         let mut value = set.get(&(key, name.to_owned())).copied().unwrap_or(at_rest);
         let slider = egui::Slider::new(&mut value, 0.0..=1.0).text(name);

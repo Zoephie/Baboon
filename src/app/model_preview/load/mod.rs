@@ -35,7 +35,9 @@ pub(in crate::app::model_preview) use games::{
     resolve_own_shader, rules, shadow_passes, type_exports, vertex_streams,
 };
 mod rules;
-pub(in crate::app::model_preview) use rules::{GameRules, ObjectControls, OwnViewSettings};
+pub(in crate::app::model_preview) use rules::{
+    GameRules, ObjectControls, OwnViewSettings, SectionControls,
+};
 mod object;
 pub(in crate::app::model_preview) use object::*;
 mod model;

@@ -44,8 +44,9 @@ pub(crate) struct GameRules {
     /// Whether the panel offers Default Lights, PRT, Bloom and Self Shadow,
     /// which change what its models draw.
     pub(crate) lit_options: bool,
-    /// The game's own object controls in the panel, around the shared ones.
-    pub(crate) object_controls: Option<ObjectControls>,
+    /// The game's own object controls, each in its sidebar section beside
+    /// the shared ones.
+    pub(crate) object_controls: ObjectControls,
     /// Whether something of the object runs on at `time` outside what the
     /// frame knows moves, so the view keeps drawing.
     pub(crate) runs_on:
@@ -63,12 +64,45 @@ pub(crate) struct OwnViewSettings {
     pub(crate) hides_overlays: bool,
 }
 
-/// A game's own controls for an object, drawn around the shared weapon
-/// pickers and function sliders.
+/// A game's own controls for an object, by the sidebar section each goes
+/// in: after the shared weapon pickers, event effects and function sliders.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ObjectControls {
-    pub(crate) above: ObjectControlsDraw,
-    pub(crate) below: ObjectControlsDraw,
+    pub(crate) weapons: SectionControls,
+    pub(crate) effects: SectionControls,
+    pub(crate) functions: SectionControls,
+}
+
+impl ObjectControls {
+    /// A game with none of its own.
+    pub(crate) const NONE: Self = Self {
+        weapons: SectionControls::NONE,
+        effects: SectionControls::NONE,
+        functions: SectionControls::NONE,
+    };
+}
+
+/// One section's share of a game's own controls.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SectionControls {
+    /// Whether the object has any of them to show.
+    pub(crate) has: fn(&super::super::ModelPreviewData) -> bool,
+    pub(crate) draw: ObjectControlsDraw,
+    /// Whether anything they set is away from where it starts, which the
+    /// section's Reset puts back.
+    pub(crate) changed:
+        fn(&super::super::ModelPreviewData, &super::super::ModelPreviewState) -> bool,
+    pub(crate) reset: fn(&super::super::ModelPreviewData, &mut super::super::ModelPreviewState),
+}
+
+impl SectionControls {
+    /// No controls of the game's own.
+    pub(crate) const NONE: Self = Self {
+        has: |_| false,
+        draw: |_, _, _| {},
+        changed: |_, _| false,
+        reset: |_, _| {},
+    };
 }
 
 pub(crate) type ObjectControlsDraw = fn(
@@ -94,7 +128,7 @@ impl GameRules {
         gen3: Gen3Rules::DEFAULT,
         textures: false,
         lit_options: true,
-        object_controls: None,
+        object_controls: ObjectControls::NONE,
         runs_on: None,
     };
 }

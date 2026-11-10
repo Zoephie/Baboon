@@ -6,12 +6,12 @@ use super::super::super::ui_kit::style::{
 };
 use super::super::super::{Baboon, TagSource, locate_definitions_root};
 use super::super::{
-    ANIMATION_FRAME_RATE, MIN_MODEL_SETUP_WIDTH, ModelPreviewLayer, ModelPreviewState,
-    ModelRegionSelection, ModelRenderMode, PHYSICS_REGION, PreviewAnimationEntry,
-    PreviewAnimationPlayback, PreviewAnimationPose, RenderModelPreview, RenderModelPreviewBatch,
-    RenderModelPreviewRegion, build_render_preview, frame, is_model_physics_overlay_region,
-    load_referenced_tag_from_source, merge_preview_append, model_preview_data,
-    reset_model_preview_selection, selected_variant_regions,
+    ANIMATION_FRAME_RATE, MIN_MODEL_SETUP_WIDTH, ModelPreviewData, ModelPreviewLayer,
+    ModelPreviewState, ModelRegionSelection, ModelRenderMode, PHYSICS_REGION,
+    PreviewAnimationEntry, PreviewAnimationPlayback, PreviewAnimationPose, RenderModelPreview,
+    RenderModelPreviewBatch, RenderModelPreviewRegion, build_render_preview, frame,
+    is_model_physics_overlay_region, load_referenced_tag_from_source, merge_preview_append,
+    model_preview_data, reset_model_preview_selection, selected_variant_regions,
 };
 use super::animation::{
     advance_playback_clock, animation_header_group, draw_animation_combo, frame_tick_xs,
@@ -1234,4 +1234,229 @@ fn menu_checkbox_glyphs_align_with_option_icons() {
         "plain checkbox inset"
     );
     assert_eq!(glyph_x("Textured"), glyph_x("Folders"), "radio row inset");
+}
+
+/// The sidebar body, 360 points wide, drawn frame after frame.
+struct SetupBody {
+    context: egui::Context,
+    time: f64,
+}
+
+impl SetupBody {
+    const WIDTH: f32 = 360.0;
+
+    fn new() -> Self {
+        let context = egui::Context::default();
+        context.set_fonts(foundation_fonts());
+        context.set_global_style(foundation_style());
+        Self { context, time: 0.0 }
+    }
+
+    /// One frame with `events`: the texts it painted, and where.
+    fn frame(
+        &mut self,
+        data: &ModelPreviewData,
+        state: &mut ModelPreviewState,
+        events: Vec<egui::Event>,
+    ) -> Vec<(String, egui::Rect)> {
+        self.time += 1.0 / 60.0;
+        let output = crate::app::run_ui_test(
+            &self.context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(Self::WIDTH, 900.0),
+                )),
+                time: Some(self.time),
+                events,
+                ..Default::default()
+            },
+            |context| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(context, |ui| {
+                        super::functions::draw_setup_body(ui, data, state)
+                    });
+            },
+        );
+        output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Where `title`'s section header puts its Reset: at the row's right.
+    fn reset_of(texts: &[(String, egui::Rect)], title: &str) -> egui::Pos2 {
+        let row = texts
+            .iter()
+            .find(|(text, _)| text == title)
+            .unwrap_or_else(|| panic!("no {title} section: {texts:?}"))
+            .1;
+        egui::pos2(Self::WIDTH - ICON_BUTTON_SIZE.x / 2.0, row.center().y)
+    }
+
+    /// Whether the widget at `at` in the last frame was enabled. A pass
+    /// ends by swapping its widgets into `prev_pass`.
+    fn enabled_at(&self, at: egui::Pos2) -> Option<bool> {
+        self.context.viewport(|viewport| {
+            viewport
+                .prev_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, widgets)| widgets.iter())
+                .filter(|widget| widget.rect.contains(at) && widget.sense.senses_click())
+                .last()
+                .map(|widget| widget.enabled)
+        })
+    }
+
+    fn click(&mut self, data: &ModelPreviewData, state: &mut ModelPreviewState, at: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        self.frame(data, state, vec![egui::Event::PointerMoved(at)]);
+        self.frame(data, state, vec![button(true)]);
+        self.frame(data, state, vec![button(false)]);
+    }
+}
+
+/// A Halo CE biped with a scenario BSP, two permutations of one region, a
+/// weapon it can hold and functions, but no effects.
+fn sectioned_object() -> ModelPreviewData {
+    let preview = RenderModelPreview {
+        game: Some(GameId::HaloCe),
+        regions: vec![RenderModelPreviewRegion {
+            name: "body".into(),
+            permutations: vec!["base".into(), "alt".into()],
+        }],
+        ..RenderModelPreview::default()
+    };
+    let mut data = model_preview_data(String::new(), String::new(), preview, Vec::new());
+    data.scenario_bsps = vec![Some("levels\\a\\a.scenario_structure_bsp".into())];
+    data.ce.weapons = Some(crate::app::model_preview::ce::weapons::CeBipedWeapons {
+        equippable: vec![
+            crate::app::model_preview::ce::weapons::CeEquippable::for_test("weapons\\rifle\\rifle"),
+        ],
+        hidden_clips: Default::default(),
+    });
+    data.ce.functions = Some(Default::default());
+    data
+}
+
+/// Each section shows only with something in it, and its Reset is enabled
+/// only once something in it is changed, and puts that back.
+#[test]
+fn setup_sections_reset_what_they_hold_and_only_once_it_changed() {
+    const TITLES: [&str; 4] = [
+        "Structure BSPs",
+        "Permutations",
+        "Weapons",
+        "Object Functions",
+    ];
+    let data = sectioned_object();
+    let mut state = ModelPreviewState::default();
+    reset_model_preview_selection(&mut state, &data, None);
+    let mut body = SetupBody::new();
+    body.frame(&data, &mut state, Vec::new());
+    let texts = body.frame(&data, &mut state, Vec::new());
+    assert!(
+        !texts.iter().any(|(text, _)| text == "Effects"),
+        "an Effects section with no effects: {texts:?}"
+    );
+    for title in TITLES {
+        let at = SetupBody::reset_of(&texts, title);
+        assert_eq!(
+            body.enabled_at(at),
+            Some(false),
+            "{title}'s Reset with nothing changed"
+        );
+    }
+
+    state.scenario_bsp_selection.insert(0);
+    state.region_selections.get_mut("body").unwrap().permutation = "alt".into();
+    state.weapon = Some("weapons\\rifle\\rifle".into());
+    state
+        .ce
+        .function_inputs
+        .insert((data.geometry_id, 0), [0.5; 4]);
+    let texts = body.frame(&data, &mut state, Vec::new());
+    for title in TITLES {
+        let at = SetupBody::reset_of(&texts, title);
+        assert_eq!(
+            body.enabled_at(at),
+            Some(true),
+            "{title}'s Reset with it changed"
+        );
+    }
+
+    for title in TITLES {
+        let texts = body.frame(&data, &mut state, Vec::new());
+        body.click(&data, &mut state, SetupBody::reset_of(&texts, title));
+    }
+    assert!(state.scenario_bsp_selection.is_empty());
+    assert_eq!(state.region_selections["body"].permutation, "base");
+    assert_eq!(state.weapon, None);
+    assert!(
+        state.weapon_carry.is_some(),
+        "the selection rides the weapon's reload"
+    );
+    assert!(state.ce.function_inputs.is_empty());
+}
+
+/// Halo CE's Effects reset puts its scales back and forgets its plays and
+/// shots, of this object only.
+#[test]
+fn halo_ce_effects_reset_forgets_this_objects_plays() {
+    let controls = crate::app::model_preview::ce::panel::CONTROLS.effects;
+    let data = sectioned_object();
+    let mut state = ModelPreviewState::default();
+    assert!(!(controls.changed)(&data, &state));
+    state.ce.event_scales = [0.5, 0.5];
+    assert!((controls.changed)(&data, &state));
+    (controls.reset)(&data, &mut state);
+    assert!(!(controls.changed)(&data, &state));
+    state.ce.event_counts.insert((data.geometry_id, 0), 2);
+    state.ce.event_counts.insert((data.geometry_id + 1, 0), 3);
+    assert!((controls.changed)(&data, &state));
+    (controls.reset)(&data, &mut state);
+    assert!(!(controls.changed)(&data, &state));
+    assert_eq!(
+        state.ce.event_counts.len(),
+        1,
+        "another object's plays went too"
+    );
+}
+
+/// The shared Effects and Object Functions sections split the object's
+/// inputs between them: each resets its own and leaves the other's.
+#[test]
+fn effects_and_functions_reset_their_own_inputs() {
+    use super::functions::{held_inputs, release_inputs};
+    let mut state = ModelPreviewState::default();
+    let events = ["fire"];
+    state.function_inputs.insert((7, "fire".into()), 1.0);
+    state.function_inputs.insert((7, "speed".into()), 0.3);
+    state.function_inputs.insert((8, "fire".into()), 1.0);
+    assert!(held_inputs(&state, 7, &events, true));
+    assert!(held_inputs(&state, 7, &events, false));
+    release_inputs(&mut state, 7, &events, true);
+    assert!(!held_inputs(&state, 7, &events, true));
+    assert!(
+        held_inputs(&state, 7, &events, false),
+        "the slider went with the effect"
+    );
+    assert!(state.function_inputs.contains_key(&(8, "fire".into())));
+    release_inputs(&mut state, 7, &events, false);
+    assert!(!held_inputs(&state, 7, &events, false));
+    assert_eq!(state.function_inputs.len(), 1);
 }
