@@ -564,28 +564,18 @@ impl Baboon {
                 return;
             }
         };
-        #[cfg(windows)]
-        {
-            if !path.is_file() {
-                self.model.status = format!(
-                    "Could not open File Explorer: file no longer exists at {}",
-                    path.display()
-                );
-                return;
-            }
-            match Command::new("explorer.exe")
-                .args(explorer_select_args(&path))
-                .spawn()
-            {
-                Ok(_) => self.model.status = format!("Opened {}", path.display()),
-                Err(error) => self.model.status = format!("Could not open File Explorer: {error}"),
-            }
+        self.open_file_with(path, |mut command| command.spawn().map(drop));
+    }
+
+    fn open_file_with(&mut self, path: PathBuf, spawn: impl FnOnce(Command) -> std::io::Result<()>) {
+        if !path.is_file() {
+            self.model.status = format!("Could not open {}: file no longer exists at {}", file_manager_name(), path.display());
+            return;
         }
-        #[cfg(not(windows))]
-        {
-            let _ = path;
-            self.model.status = "Open with File Explorer is only available on Windows".to_owned();
-        }
+        self.model.status = match spawn(file_revealer(&path)) {
+            Ok(()) => format!("Opened {}", path.display()),
+            Err(error) => format!("Could not open {}: {error}", file_manager_name()),
+        };
     }
 
     pub(in crate::app) fn open_loaded_tags_folder(&mut self) {
@@ -702,6 +692,36 @@ pub(in crate::app) fn looks_like_absolute_windows_path(path: &Path) -> bool {
     let network_or_device_absolute =
         bytes.len() >= 2 && matches!(bytes[0], b'\\' | b'/') && matches!(bytes[1], b'\\' | b'/');
     drive_absolute || network_or_device_absolute
+}
+
+/// Native wording for an action that opens the platform's file manager.
+pub(in crate::app) fn folder_opener_label() -> &'static str {
+    #[cfg(windows)] { "Open in File Explorer" }
+    #[cfg(target_os = "macos")] { "Open in Finder" }
+    #[cfg(not(any(windows, target_os = "macos")))] { "Open in File Manager" }
+}
+
+pub(in crate::app) fn file_manager_name() -> &'static str {
+    #[cfg(windows)] { "File Explorer" }
+    #[cfg(target_os = "macos")] { "Finder" }
+    #[cfg(not(any(windows, target_os = "macos")))] { "File Manager" }
+}
+
+/// Reveal the file where supported; Linux opens its containing folder.
+fn file_revealer(path: &Path) -> Command {
+    #[cfg(windows)] {
+        let mut command = Command::new("explorer.exe");
+        command.args(explorer_select_args(path));
+        command
+    }
+    #[cfg(target_os = "macos")] {
+        let mut command = Command::new("open");
+        command.arg("-R").arg(path);
+        command
+    }
+    #[cfg(not(any(windows, target_os = "macos")))] {
+        folder_opener(path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or(Path::new(".")))
+    }
 }
 
 /// The command that opens `folder` in the platform's file manager.
@@ -1420,24 +1440,11 @@ mod tests {
                 setup: no_setup,
                 check: nothing_happened,
             },
-            // 7: elsewhere than Windows, the arm says it cannot; on Windows a
-            // known key would launch Explorer, so the unknown-key guard is used.
+            // 7: the unknown-key guard never launches a desktop file manager.
             Case {
-                action: |kit| {
-                    if cfg!(windows) {
-                        A::OpenInExplorer(UNKNOWN.to_owned())
-                    } else {
-                        A::OpenInExplorer(kit.key(MODEL))
-                    }
-                },
+                action: |_| A::OpenInExplorer(UNKNOWN.to_owned()),
                 setup: no_setup,
-                check: |app, _, _| {
-                    if cfg!(windows) {
-                        status_is(app, "Tag is no longer in the browser")
-                    } else {
-                        status_is(app, "Open with File Explorer is only available on Windows")
-                    }
-                },
+                check: |app, _, _| status_is(app, "Tag is no longer in the browser"),
             },
             // 8
             Case {
@@ -2045,6 +2052,32 @@ mod tests {
         });
         assert!(!launched);
         assert!(app.model.status.contains("not found"), "{}", app.model.status);
+    }
+
+    #[test]
+    fn reveal_file_launches_the_platform_file_manager() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let mut app = Baboon::for_test();
+        let mut launched = None;
+        app.open_file_with(path.clone(), |command| {
+            launched = Some((command.get_program().to_owned(), command.get_args().map(ToOwned::to_owned).collect::<Vec<_>>()));
+            Ok(())
+        });
+        let expected = if cfg!(windows) {
+            ("explorer.exe", vec![std::ffi::OsString::from("/select,"), path.clone().into_os_string()])
+        } else if cfg!(target_os = "macos") {
+            ("open", vec![std::ffi::OsString::from("-R"), path.clone().into_os_string()])
+        } else {
+            ("xdg-open", vec![path.parent().unwrap().as_os_str().to_owned()])
+        };
+        assert_eq!(launched, Some((expected.0.into(), expected.1)));
+        assert!(app.model.status.starts_with("Opened "));
+        let mut launched = false;
+        app.open_file_with(path.join("missing"), |_| { launched = true; Ok(()) });
+        assert!(!launched);
+        assert!(app.model.status.contains("file no longer exists"));
+        app.open_file_with(path, |_| Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "launch denied")));
+        assert!(app.model.status.contains("launch denied"));
     }
 
     #[test]

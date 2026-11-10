@@ -302,7 +302,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
                 self.reveal = Some(key.clone());
                 close_menu(ui);
             }
-            if ui.button("Open with File Explorer").clicked() {
+            if ui.button(crate::app::browser::actions::folder_opener_label()).clicked() {
                 self.reveal_in_explorer = Some(key.clone());
                 close_menu(ui);
             }

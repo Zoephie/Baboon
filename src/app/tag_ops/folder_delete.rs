@@ -145,6 +145,10 @@ impl Baboon {
         }
         let stamp = self.model.kit_stamp();
         let game = self.model.source().and_then(|source| source.game);
+        let recovery_target = match self.prepare_loose_recovery_target(self.model.active) {
+            Ok(target) => target,
+            Err(error) => { self.model.status = error; return; }
+        };
         let names = self.model.names().clone();
         let tx = self.tx.clone();
         self.tag_ops.folder_refactor = Some(FolderRefactorUiState {
@@ -152,7 +156,7 @@ impl Baboon {
             phase: "Moving folder to deleted-tags".into(), progress: None,
         });
         self.spawn_job(move || WorkerMessage::FolderDeleteFinished { stamp,
-            result: delete_folder(confirm, game, names, &tx),
+            result: delete_folder(confirm, game, names, recovery_target, &tx),
         }, move |_| WorkerMessage::FolderDeleteFinished { stamp, result: Err("Folder deletion worker crashed".into()) });
         ctx.request_repaint();
     }
@@ -206,6 +210,7 @@ fn prune_folder(children: &mut Vec<crate::core::source::TagTreeNode>, relative: 
 }
 
 fn delete_folder(confirm: DeleteFolderConfirm, game: Option<GameId>, names: TagNameIndex,
+    recovery_target: (PathBuf, crate::core::recovery::RecoveryOrigin),
     tx: &Sender<WorkerMessage>) -> Result<DeletedFolder, String> {
     checked_folder(&confirm.root, &confirm.relative)?;
     let current = scan_folder_subtree_entries(&confirm.root, &confirm.relative, &names).map_err(|error| error.to_string())?;
@@ -214,8 +219,8 @@ fn delete_folder(confirm: DeleteFolderConfirm, game: Option<GameId>, names: TagN
         return Err("Folder contents changed. Open Delete Folder again to review the new tag count.".into());
     }
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-    let destination = super::delete::loose_trash_destination(game.map(GameId::as_str),
-        &tag_path::relative_tag_path(&confirm.relative), now.as_secs())?;
+    let destination = crate::core::recovery::prepare_batch(&recovery_target.0, &recovery_target.1,
+        &confirm.relative, "delete folder", now.as_secs())?;
     move_folder_to_trash(&confirm.root, &confirm.relative, &destination, tx)?;
     // A failed cache write must not hide the completed deletion from the UI.
     let warning = game.and_then(|game| (|| -> anyhow::Result<()> {
@@ -338,7 +343,8 @@ mod tests {
         let confirm = app.dialogs.close::<DeleteFolderConfirm>().unwrap();
         kit.write_mcc("doomed/new", "model", |_| {});
         let (tx, _rx) = mpsc::channel();
-        assert!(delete_folder(confirm, Some(GameId::from_id("halo3_mcc").unwrap()), kit.names(), &tx).is_err());
+        let target = app.loose_recovery_context(0).unwrap();
+        assert!(delete_folder(confirm, Some(GameId::from_id("halo3_mcc").unwrap()), kit.names(), target, &tx).is_err());
         assert!(kit.root.join("doomed").exists());
         let occupied = kit.root.parent().unwrap().join("occupied");
         fs::create_dir_all(&occupied).unwrap();
@@ -367,6 +373,36 @@ mod tests {
     }
 
     #[test]
+    fn folder_deletion_uses_profile_recovery_and_records_non_tag_contents() {
+        let kit = fixture();
+        let mut app = app();
+        kit.install_indexed(&mut app);
+        let root = kit.root.parent().unwrap().to_path_buf();
+        let custom = root.join("deleted-tags");
+        let id = uuid::Uuid::new_v4().to_string();
+        app.model.prefs.custom_editing_kit_profiles.push(CustomEditingKitProfile {
+            recovery: crate::core::recovery::RecoveryLocation { name: "test_kit".into(), folder: Some("deleted-tags".into()) },
+            id: id.clone(), name: "Test Kit".into(), game: "halo3_mcc".into(), root,
+            read_only: false, git_tracked: false, icon: None, tags_folder: None, data_folder: None,
+        });
+        app.model.kits[0].profile = Some(EditingKitProfileIdentity { id: id.clone(), name: "Test Kit".into() });
+        fs::write(kit.root.join("doomed/readme.txt"), b"non-tag content").unwrap();
+        fs::create_dir_all(kit.root.join("doomed/empty")).unwrap();
+        app.open_delete_folder("doomed".into(), ctx());
+        app.begin_delete_folder(ctx());
+        crate::app::loose_fixture::pump_until(&mut app, "custom folder recovery", |app| app.tag_ops.folder_refactor.is_none());
+        assert!(!kit.root.join("doomed").exists(), "{}", app.model.status);
+        let destination = PathBuf::from(app.model.status.split(" — moved to ").nth(1).unwrap());
+        assert!(destination.starts_with(custom.canonicalize().unwrap()));
+        assert_eq!(fs::read(destination.join("readme.txt")).unwrap(), b"non-tag content");
+        assert!(destination.join("empty").is_dir());
+        let batch = destination.ancestors().find(|p| p.file_name().is_some_and(|n| n == "files")).unwrap().parent().unwrap();
+        let info: serde_json::Value = serde_json::from_slice(&fs::read(batch.join("recovery-info.json")).unwrap()).unwrap();
+        assert_eq!(info["origin"]["kit_id"], id);
+        assert_eq!(info["operation"], "delete folder");
+    }
+
+    #[test]
     fn confirmed_folder_deletion_runs_the_worker_and_keeps_a_recovery_copy() {
         let kit = fixture();
         let mut app = app();
@@ -377,7 +413,7 @@ mod tests {
         assert!(!kit.root.join("doomed").exists(), "{}", app.model.status);
         assert_eq!(app.model.source().unwrap().full_entry_set().len(), 1);
         let destination = PathBuf::from(app.model.status.split(" — moved to ").nth(1).expect("recovery location"));
-        assert!(destination.starts_with(crate::core::storage::data_path("deleted-tags")));
+        assert!(destination.starts_with(crate::core::storage::data_path("deleted-tags").canonicalize().unwrap()));
         assert!(destination.join("render.render_model").is_file());
         fs::remove_dir_all(destination).unwrap();
     }

@@ -296,6 +296,11 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
         close_menu(ui);
         cx.send(AppAction::OpenDataFolder);
     }
+    if ui.add_enabled(!menu.home && cx.model.source().is_some_and(|source|
+        matches!(source.source, TagSource::LooseFolder { .. } | TagSource::SingleFile { .. })), egui::Button::new("Open Deleted Tags Folder")).clicked() {
+        close_menu(ui);
+        cx.send(AppAction::OpenDeletedTagsFolder);
+    }
     let recent_action = right_opening_menu_button(ui, "Recent Folders", 280.0, |ui| {
         style_list_menu(ui);
         draw_recent_folders_menu(ui, &cx.model.prefs.recent_folders)

@@ -612,6 +612,7 @@ mod tests {
 
     fn profile(id: &str, git_tracked: bool) -> CustomEditingKitProfile {
         CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: false,
             git_tracked,
             id: id.to_owned(),

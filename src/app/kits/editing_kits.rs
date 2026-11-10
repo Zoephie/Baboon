@@ -910,6 +910,7 @@ mod tests {
         fs::create_dir_all(root.join("tags")).unwrap();
         fs::create_dir_all(root.join("data")).unwrap();
         let profiles = vec![CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: false,
             git_tracked: false,
             id: "existing".to_owned(),
@@ -965,6 +966,7 @@ mod tests {
         );
 
         let referencing_profile = CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: false,
             git_tracked: false,
             id: "profile".to_owned(),
@@ -1022,6 +1024,7 @@ mod tests {
         data: Option<&str>,
     ) -> CustomEditingKitProfile {
         CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: false,
             git_tracked: false,
             id: id.to_owned(),

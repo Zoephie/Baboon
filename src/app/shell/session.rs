@@ -1912,6 +1912,7 @@ mod tests {
         let mut saved = kit(&root.display().to_string(), Some(BrowserMode::Folders));
         saved.profile_id = Some("custom-h2-project".to_owned());
         let profile = CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: false,
             git_tracked: false,
             id: "custom-h2-project".to_owned(),

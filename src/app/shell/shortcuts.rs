@@ -1389,6 +1389,7 @@ mod tests {
         prefs
             .custom_editing_kit_profiles
             .push(CustomEditingKitProfile {
+                recovery: Default::default(),
                 id: "closed-kit".to_owned(),
                 name: "Closed kit".to_owned(),
                 game: "halo3_mcc".to_owned(),

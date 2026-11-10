@@ -1427,6 +1427,7 @@ mod tests {
         std::fs::create_dir_all(h2.join("tags")).unwrap();
         let profiles = vec![
             CustomEditingKitProfile {
+                recovery: Default::default(),
                 read_only: false,
                 git_tracked: false,
                 id: "one".to_owned(),
@@ -1438,6 +1439,7 @@ mod tests {
                 data_folder: None,
             },
             CustomEditingKitProfile {
+                recovery: Default::default(),
                 read_only: false,
                 git_tracked: false,
                 id: "two".to_owned(),

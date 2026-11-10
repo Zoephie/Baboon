@@ -339,7 +339,7 @@ fn context_menu_icon(label: &str) -> Option<ButtonIcon> {
         "Remove Shortcut" => Some(ButtonIcon::Garbage),
         "Move" => Some(ButtonIcon::Move),
         "Copy To" => Some(ButtonIcon::Copy),
-        "Open with File Explorer" => Some(ButtonIcon::FileExplorer),
+        "Open in File Explorer" | "Open in Finder" | "Open in File Manager" => Some(ButtonIcon::FileExplorer),
         "Add to Favorites" | "Remove from Favorites" => Some(ButtonIcon::Favourite),
         "Copy Tag Path" => Some(ButtonIcon::CopyPath),
         "Copy Folder Path" => Some(ButtonIcon::CopyPath),
@@ -1209,7 +1209,7 @@ fn draw_tree_node_lazy_block(
         // The same action the tag menu offers, aimed at the folder rather than a
         // file in it. A browser folder maps straight onto a directory under the
         // tags root, so there is nothing to resolve beyond joining the two.
-        if context_menu_button(ui, "Open with File Explorer").clicked() {
+        if context_menu_button(ui, crate::app::browser::actions::folder_opener_label()).clicked() {
             clicked = Some(BrowserAction::OpenLooseFolderInExplorer {
                 rel_path: node.rel_path.clone(),
             });
@@ -1431,7 +1431,7 @@ fn draw_tree_node_block(
             ) {
                 clicked = Some(action);
             }
-            if context_menu_button(ui, "Open with File Explorer").clicked() {
+            if context_menu_button(ui, crate::app::browser::actions::folder_opener_label()).clicked() {
                 clicked = Some(BrowserAction::OpenLooseFolderInExplorer {
                     rel_path: node.rel_path.clone(),
                 });
@@ -3048,7 +3048,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
     }
 
     context_menu_separator(ui);
-    if context_menu_button(ui, "Open with File Explorer").clicked() {
+    if context_menu_button(ui, crate::app::browser::actions::folder_opener_label()).clicked() {
         action = Some(BrowserAction::OpenInExplorer(entry.key.clone()));
         close_menu(ui);
     }
@@ -3178,7 +3178,7 @@ pub(in crate::app) fn draw_favorites(
                 ) {
                     action = Some(folder_action);
                 }
-                if context_menu_button(ui, "Open with File Explorer").clicked() {
+                if context_menu_button(ui, crate::app::browser::actions::folder_opener_label()).clicked() {
                     action = Some(BrowserAction::OpenLooseFolderInExplorer {
                         // Bind a favorite to the root it was rendered from.
                         // This avoids resolving it against a different active

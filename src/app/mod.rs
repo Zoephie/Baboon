@@ -302,6 +302,10 @@ impl Baboon {
             names,
             last_opened_windows,
         );
+        if let Err(error) = crate::core::recovery::migrate_legacy(&crate::core::storage::data_path("deleted-tags")) {
+            app.model.status = format!("Deleted-tags migration: {error}");
+            eprintln!("{}", app.model.status);
+        }
         if let Some(kits) = auto_restore_session {
             app.begin_last_session_restore(kits, cc.egui_ctx.clone());
         }

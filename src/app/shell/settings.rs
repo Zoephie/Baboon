@@ -332,8 +332,12 @@ fn draw_editing_kit_form(
     ui: &mut Ui,
     draft: &mut CustomEditingKitDraft,
     texture: Option<&egui::TextureHandle>,
+    profiles: &[CustomEditingKitProfile],
+    loaded_tags_roots: &[PathBuf],
 ) -> EditingKitFormActions {
     let mut actions = EditingKitFormActions::default();
+    crate::app::kits::recovery::refresh_draft_recovery(draft, profiles);
+    let mut recovery_error = None;
     egui::Frame::NONE.inner_margin(ui.spacing().window_margin).show(ui, |ui| {
     let title = if draft.name.trim().is_empty() {
         "Editing Kit"
@@ -348,6 +352,50 @@ fn draw_editing_kit_form(
         draft.read_only && !draft.is_campaign_evolved(),
     );
     ui.add_space(12.0);
+    ScrollArea::horizontal()
+        .id_salt("editing_kit_form_tabs_scroll")
+        .max_height(BUTTON_ICON_SIZE + 20.0)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                for (tab, label) in [(EditingKitFormTab::General, "General"), (EditingKitFormTab::Advanced, "Advanced")] {
+                    if view_text_tab_button(ui, label, draft.tab == tab).clicked() { draft.tab = tab; }
+                }
+            });
+        });
+    ui.push_id(("editing_kit_form_body", draft.tab), |ui| match draft.tab {
+        EditingKitFormTab::General => draw_editing_kit_general(ui, draft),
+        EditingKitFormTab::Advanced => draw_editing_kit_advanced(ui, draft, profiles, loaded_tags_roots),
+    });
+    recovery_error = recovery_folder_validation(ui.ctx(), draft, profiles, loaded_tags_roots);
+    if draft.tab == EditingKitFormTab::General && let Some(error) = &recovery_error {
+        ui.label(RichText::new(format!("Advanced settings: {error}")).color(material_delete_text()));
+        if ui.button("Review Advanced Settings").clicked() { draft.tab = EditingKitFormTab::Advanced; }
+    }
+    if let Some(error) = &draft.error {
+        ui.label(RichText::new(error).color(material_delete_text()));
+    }
+    });
+    ui.add_space(8.0);
+    popup_footer(ui, |ui| {
+    ui.allocate_ui_with_layout(
+        Vec2::new(ui.available_width(), BUTTON_HEIGHT),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
+            if draft.editing_id.is_some() {
+                actions.remove = ui.button("Remove Editing Kit").clicked();
+            }
+            actions.cancel = ui.button("Cancel").clicked();
+            actions.save = ui.add_enabled(recovery_error.is_none(), egui::Button::new("Save")).clicked();
+        },
+    );
+    });
+    actions
+}
+
+fn draw_editing_kit_general(ui: &mut Ui, draft: &mut CustomEditingKitDraft) {
+    ui.add_space(8.0);
     ui.columns(2, |columns| {
         editing_kit_field_label(&mut columns[0], "Name");
         let width = columns[0].available_width();
@@ -423,24 +471,13 @@ fn draw_editing_kit_form(
             ui_repaint_for_kit_draft(ui);
         }
     });
-    if kit_folders_are_choosable(&draft.game) {
-        draw_kit_folder_input(ui, draft, KitFolder::Tags);
-        draw_kit_folder_input(ui, draft, KitFolder::Data);
-        ui.label(
-            RichText::new(
-                "Leave a folder empty to use the root's own. Its tools are pointed at \
-                 other folders with -tags_dir and -data_dir.",
-            )
-            .small()
-            .color(subtle_dark()),
-        );
-    }
     ui.add_space(8.0);
     editing_kit_field_label(ui, "Custom Icon (.png)");
     let icon_state = editing_kit_input_state(draft, CustomEditingKitInput::Icon);
     ui.horizontal(|ui| {
-        let mut display = draft_icon_path(ui.ctx(), &draft.icon)
-            .map(|path| path.display().to_string())
+        let icon_path = draft_icon_path(ui.ctx(), &draft.icon);
+        let mut display = icon_path.as_deref()
+            .map(crate::app::kits::recovery::abbreviated_path_display)
             .unwrap_or_default();
         let width = (ui.available_width()
             - editing_kit_action_width(ui, "Browse")
@@ -453,7 +490,7 @@ fn draw_editing_kit_form(
                 .validation_state(icon_state)
                 .interactive(false)
                 .hint_text(placeholder_text("Default engine artwork")),
-        );
+        ).on_hover_text(icon_path.map(|path| path.display().to_string()).unwrap_or_default());
         if icon_text_button(ui, ButtonIcon::Browse, "Browse", true).clicked()
             && let Some(path) = rfd::FileDialog::new()
                 .set_title("Select Editing Kit Icon")
@@ -494,6 +531,34 @@ fn draw_editing_kit_form(
             .small()
             .color(subtle_dark()),
     );
+    if let Some(warning) = &draft.icon_warning {
+        ui.label(
+            RichText::new(warning)
+                .small()
+                .color(Color32::from_rgb(220, 170, 70)),
+        );
+    }
+
+}
+
+fn draw_editing_kit_advanced(ui: &mut Ui, draft: &mut CustomEditingKitDraft,
+    profiles: &[CustomEditingKitProfile], loaded_tags_roots: &[PathBuf]) {
+    if kit_folders_are_choosable(&draft.game) {
+        draw_kit_folder_input(ui, draft, KitFolder::Tags);
+        draw_kit_folder_input(ui, draft, KitFolder::Data);
+        ui.label(
+            RichText::new(
+                "Leave a folder empty to use the root's own. Its tools are pointed at \
+                 other folders with -tags_dir and -data_dir.",
+            )
+            .small()
+            .color(subtle_dark()),
+        );
+    }
+    ui.add_space(8.0);
+    if !draft.is_campaign_evolved() {
+        draw_recovery_folder_input(ui, draft, profiles, loaded_tags_roots);
+    }
     if !draft.is_campaign_evolved() {
         ui.add_space(8.0);
         editing_kit_field_label(ui, "Options");
@@ -523,36 +588,97 @@ fn draw_editing_kit_form(
             );
         });
     }
-    if let Some(warning) = &draft.icon_warning {
-        ui.label(
-            RichText::new(warning)
-                .small()
-                .color(Color32::from_rgb(220, 170, 70)),
-        );
+
+    if draft.is_campaign_evolved() {
+        ui.label(RichText::new("No advanced editing-kit settings are available for this engine.").color(subtle_dark()));
     }
-    if let Some(error) = &draft.error {
-        ui.label(RichText::new(error).color(material_delete_text()));
-    }
-    });
-    ui.add_space(8.0);
-    popup_footer(ui, |ui| {
-    ui.allocate_ui_with_layout(
-        Vec2::new(ui.available_width(), BUTTON_HEIGHT),
-        egui::Layout::right_to_left(egui::Align::Center),
-        |ui| {
-            if draft.editing_id.is_some() {
-                actions.remove = ui.button("Remove Editing Kit").clicked();
-            }
-            actions.cancel = ui.button("Cancel").clicked();
-            actions.save = ui.button("Save").clicked();
-        },
-    );
-    });
-    actions
 }
 
 fn ui_repaint_for_kit_draft(ui: &Ui) {
     ui.ctx().request_repaint();
+}
+
+fn recovery_folder_validation(ctx: &egui::Context, draft: &CustomEditingKitDraft,
+    profiles: &[CustomEditingKitProfile], loaded_tags_roots: &[PathBuf]) -> Option<String> {
+    use crate::app::kits::recovery::{draft_recovery_folder, validate_draft_recovery};
+    if draft.is_campaign_evolved() { return None; }
+    let roots: Vec<_> = profiles.iter().map(|p| (p.id.clone(), p.root.clone(), p.tags_folder.clone(), p.game.clone())).collect();
+    recheck_cached(ctx, ("recovery_validation", &draft.root_input, &draft.tags_folder_input,
+        &draft.game, &draft.recovery.folder, draft_recovery_folder(draft), roots, loaded_tags_roots), || {
+            validate_draft_recovery(draft, profiles).or_else(||
+                crate::core::recovery::validate_folder(&draft_recovery_folder(draft), loaded_tags_roots).err())
+        })
+}
+
+fn draw_recovery_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft,
+    profiles: &[CustomEditingKitProfile], loaded_tags_roots: &[PathBuf]) -> Option<String> {
+    use crate::app::kits::recovery::{draft_recovery_folder, validate_draft_recovery, profile_recovery_folder, abbreviated_path_display};
+    editing_kit_field_label(ui, "Deleted Tags Folder");
+    let context = ui.ctx().clone();
+    let probe = |draft: &CustomEditingKitDraft| recovery_folder_validation(&context, draft, profiles, loaded_tags_roots);
+    let state = if probe(draft).is_some() { InputState::Invalid } else { InputState::Normal };
+    let width = ui.available_width();
+    let mut default_draft = draft.clone();
+    default_draft.recovery.folder = None;
+    let hint = abbreviated_path_display(&draft_recovery_folder(&default_draft));
+    let resolved_before_edit = draft_recovery_folder(draft);
+    if ui.add(editing_kit_text_input(&mut draft.recovery_input, width).validation_state(state)
+        .hint_text(placeholder_text(&hint))).on_hover_text(resolved_before_edit.display().to_string()).changed() {
+        draft.recovery.folder = (!draft.recovery_input.trim().is_empty()).then(|| PathBuf::from(draft.recovery_input.trim()));
+        draft.error = None;
+    }
+    ui.horizontal_wrapped(|ui| {
+        if icon_text_button(ui, ButtonIcon::Browse, "Browse", true).clicked()
+            && let Some(path) = rfd::FileDialog::new().set_title("Select Deleted Tags Folder")
+                .set_directory(draft_recovery_folder(draft)).pick_folder() {
+            let root = PathBuf::from(draft.root_input.trim());
+            let stored = path.strip_prefix(&root).ok().filter(|p| !p.as_os_str().is_empty()).unwrap_or(&path);
+            draft.recovery.folder = Some(stored.to_path_buf());
+            draft.recovery_input = stored.display().to_string();
+            draft.error = None;
+        }
+        if icon_text_button(ui, ButtonIcon::FileExplorer, crate::app::browser::actions::folder_opener_label(), probe(draft).is_none()).clicked() {
+            let result = (|| -> Result<(), String> {
+                if let Some(error) = validate_draft_recovery(draft, profiles) { return Err(error); }
+                let path = draft_recovery_folder(draft);
+                crate::core::recovery::validate_folder(&path, loaded_tags_roots)?;
+                crate::core::recovery::prepare_custom_location(&crate::core::storage::data_path("deleted-tags"), &path)?;
+                fs::create_dir_all(&path).map_err(|e| format!("Could not create Deleted Tags Folder: {e}"))?;
+                if let Some(error) = validate_draft_recovery(draft, profiles) { return Err(error); }
+                crate::core::recovery::validate_folder(&path, loaded_tags_roots)?;
+                crate::app::browser::actions::folder_opener(&path).spawn().map(drop)
+                    .map_err(|e| format!("Could not open Deleted Tags Folder: {e}"))
+            })();
+            if let Err(error) = result { draft.error = Some(error); }
+        }
+        if icon_text_button(ui, ButtonIcon::Refresh, "Reset to Default", true).clicked() {
+            draft.recovery.folder = None;
+            draft.recovery_input.clear();
+            draft.error = None;
+        }
+    });
+    let resolved = draft_recovery_folder(draft);
+    if draft.recovery.folder.is_some() {
+        ui.label(RichText::new(format!("Resolved location: {}", resolved.display())).small().color(subtle_dark()));
+    }
+    if draft.original_recovery_folder.as_ref().is_some_and(|original| original != &resolved) {
+        ui.label(RichText::new("This changes future deletions only. Existing deleted files will not be moved.")
+            .small().color(Color32::from_rgb(220, 170, 70)));
+    }
+    let shared = recheck_cached(ui.ctx(), ("shared_recovery", &resolved,
+        profiles.iter().map(|p| (p.id.clone(), profile_recovery_folder(p))).collect::<Vec<_>>()), || {
+        let target = crate::core::recovery::resolved_path(&resolved).ok();
+        target.is_some() && profiles.iter().any(|profile| Some(profile.id.as_str()) != draft.editing_id.as_deref()
+            && !profile.is_campaign_evolved()
+            && crate::core::recovery::resolved_path(&profile_recovery_folder(profile)).ok() == target)
+    });
+    if shared {
+        ui.label(RichText::new("Another editing kit uses this folder. Their recovery batches will be mixed together.")
+            .small().color(Color32::from_rgb(220, 170, 70)));
+    }
+    let error = probe(draft);
+    if let Some(error) = &error { ui.label(RichText::new(error).color(material_delete_text())); }
+    error
 }
 
 #[derive(Clone, Copy)]
@@ -981,6 +1107,7 @@ impl Baboon {
 
     fn commit_custom_editing_kit_draft(&mut self, draft: &mut CustomEditingKitDraft) -> bool {
         draft.error_input = None;
+        crate::app::kits::recovery::refresh_draft_recovery(draft, &self.model.prefs.custom_editing_kit_profiles);
         let name = draft.name.trim().to_owned();
         if name.is_empty() {
             draft.error = Some("Enter an editing kit name".to_owned());
@@ -1033,6 +1160,15 @@ impl Baboon {
         let data_folder = choosable
             .then(|| folder_to_store(&layout.root, layout.data.as_deref(), "data"))
             .flatten();
+        let roots: Vec<_> = (0..self.model.kits.len())
+            .filter_map(|index| self.model.loaded_tags_root_for(index)).collect();
+        if let Err(error) = crate::app::kits::recovery::prepare_draft_recovery_folder(
+            draft, &self.model.prefs.custom_editing_kit_profiles, &roots,
+        ) {
+            draft.error = Some(error);
+            draft.error_input = Some(CustomEditingKitInput::Recovery);
+            return false;
+        }
 
         let id = draft
             .editing_id
@@ -1071,6 +1207,7 @@ impl Baboon {
             }
         };
         let profile = CustomEditingKitProfile {
+            recovery: draft.recovery.clone(),
             read_only: draft.read_only && !game.is_campaign_evolved(),
             git_tracked: draft.git_tracked && !game.is_campaign_evolved(),
             id: id.clone(),
@@ -1274,6 +1411,12 @@ impl Baboon {
             SettingsCommand::ReorderEditingKits(request) => self.reorder_editing_kits(&request),
             SettingsCommand::CommitEditingKitDraft(mut draft) => {
                 if !self.commit_custom_editing_kit_draft(&mut draft) {
+                    if let Some(field) = &draft.error_input {
+                        draft.tab = match field {
+                            CustomEditingKitInput::Tags | CustomEditingKitInput::Data | CustomEditingKitInput::Recovery => EditingKitFormTab::Advanced,
+                            _ => EditingKitFormTab::General,
+                        };
+                    }
                     self.dialogs.open(draft);
                 }
             }
@@ -1889,7 +2032,8 @@ impl Dialog for CustomEditingKitDraft {
             .show(ctx, |ui| {
                 crate::app::search::draw_icon_window_header(ui, title, ButtonIcon::Edit, &mut open);
                 ui.add_space(8.0);
-                actions = draw_editing_kit_form(ui, self, texture.as_ref());
+                let roots: Vec<_> = (0..cx.model.kits.len()).filter_map(|index| cx.model.loaded_tags_root_for(index)).collect();
+                actions = draw_editing_kit_form(ui, self, texture.as_ref(), &cx.model.prefs.custom_editing_kit_profiles, &roots);
             });
         let EditingKitFormActions {
             save,
@@ -2184,7 +2328,7 @@ mod tests {
         let output = crate::app::run_ui_test(&ctx, egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 1000.0))),
             ..Default::default()
-        }, |ui| { draw_editing_kit_form(ui, &mut draft, None); });
+        }, |ui| { draw_editing_kit_form(ui, &mut draft, None, &[], &[]); });
         let borders: Vec<_> = output.shapes.iter().filter_map(|shape| match &shape.shape {
             egui::Shape::Rect(rect) if rect.stroke == invalid_value_stroke() => Some(rect),
             _ => None,
@@ -2406,6 +2550,7 @@ mod tests {
     #[test]
     fn editing_kit_read_only_policy_tracks_profiles_and_excludes_campaign_evolved() {
         let mut profile = CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: true,
             git_tracked: false,
             id: "read-only-kit".to_owned(),
@@ -2447,10 +2592,11 @@ mod tests {
         ctx.set_global_style(foundation_style());
         for game in ["halo2_mcc", "haloce_mcc", "halo3_mcc", "haloce_evolved"] {
             let mut draft = CustomEditingKitDraft::new();
+            draft.tab = EditingKitFormTab::Advanced;
             draft.game = game.to_owned();
             let output = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    draw_editing_kit_form(ui, &mut draft, None);
+                    draw_editing_kit_form(ui, &mut draft, None, &[], &[]);
                 });
             });
             let checkbox_visible = output.shapes.iter().any(|shape| {
@@ -2515,6 +2661,102 @@ mod tests {
     }
 
     #[test]
+    fn editing_kit_tabs_group_fields_and_preserve_the_draft() {
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        let mut draft = CustomEditingKitDraft::new();
+        draft.name = "Draft kit".into();
+        draft.tags_folder_input = "custom_tags".into();
+        draft.data_folder_input = "custom_data".into();
+        draft.read_only = true;
+        draft.git_tracked = true;
+        let mut time = 0.0;
+        let mut frame = |draft: &mut CustomEditingKitDraft, events| {
+            time += 0.1;
+            let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(620.0, 1100.0))),
+                time: Some(time), events, ..Default::default()
+            }, |ui| { egui::CentralPanel::default().show(ui, |ui| {
+                draw_editing_kit_form(ui, draft, None, &[], &[]);
+            }); });
+            output.shapes.iter().filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some((text.galley.text().to_owned(), text.galley.rect.translate(text.pos.to_vec2()))),
+                _ => None,
+            }).collect::<Vec<_>>()
+        };
+        let check = |painted: &[(String, egui::Rect)], tab| {
+            for label in ["Name", "Engine", "Editing Kit Root Folder", "Custom Icon (.png)"] {
+                assert_eq!(painted.iter().any(|(text, _)| text == label), tab == EditingKitFormTab::General, "{label}");
+            }
+            for label in ["Tags Folder", "Data Folder", "Deleted Tags Folder", "Options", "Read-Only", "Tracked in Git"] {
+                assert_eq!(painted.iter().any(|(text, _)| text == label), tab == EditingKitFormTab::Advanced, "{label}");
+            }
+            assert!(painted.iter().any(|(text, _)| text == "Draft kit (read-only)"), "banner stays visible on both tabs");
+        };
+        let mut painted = frame(&mut draft, Vec::new());
+        check(&painted, EditingKitFormTab::General);
+        for (label, tab) in [("Advanced", EditingKitFormTab::Advanced), ("General", EditingKitFormTab::General)] {
+            let pos = painted.iter().find(|(text, _)| text == label).unwrap().1.center();
+            frame(&mut draft, vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                frame(&mut draft, vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary,
+                    pressed, modifiers: egui::Modifiers::NONE }]);
+            }
+            painted = frame(&mut draft, Vec::new());
+            assert_eq!(draft.tab, tab);
+            check(&painted, tab);
+            assert_eq!(draft.tags_folder_input, "custom_tags");
+            assert_eq!(draft.data_folder_input, "custom_data");
+            assert!(draft.read_only && draft.git_tracked);
+        }
+    }
+
+    #[test]
+    fn invalid_recovery_folder_disables_save_until_corrected() {
+        let root = std::env::temp_dir().join(format!("baboon-recovery-form-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("tags")).unwrap();
+        let mut draft = CustomEditingKitDraft::new();
+        draft.name = "Recovery test".into();
+        draft.root_input = root.display().to_string();
+        draft.recovery.folder = Some("tags/deleted".into());
+        draft.recovery_input = "tags/deleted".into();
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        let mut time = 0.0;
+        let mut frame = |draft: &mut CustomEditingKitDraft, events| {
+            time += 0.1;
+            let mut saved = false;
+            let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(620.0, 1600.0))),
+                time: Some(time), events, ..Default::default()
+            }, |ui| { egui::CentralPanel::default().show(ui, |ui| {
+                saved = draw_editing_kit_form(ui, draft, None, &[], &[]).save;
+            }); });
+            let save = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "Save" =>
+                    Some(text.galley.rect.translate(text.pos.to_vec2()).center()),
+                _ => None,
+            }).unwrap();
+            (save, saved)
+        };
+        for valid in [false, true] {
+            if valid {
+                draft.recovery.folder = Some("deleted-tags".into());
+                draft.recovery_input = "deleted-tags".into();
+            }
+            let (pos, _) = frame(&mut draft, Vec::new());
+            frame(&mut draft, vec![egui::Event::PointerMoved(pos)]);
+            let mut saved = false;
+            for pressed in [true, false] {
+                saved |= frame(&mut draft, vec![egui::Event::PointerButton { pos,
+                    button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }]).1;
+            }
+            assert_eq!(saved, valid, "Save must follow recovery-path validity");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn editing_kit_form_preview_tracks_draft_name_and_keeps_fields_inside_dialog() {
         let ctx = egui::Context::default();
         ctx.set_global_style(foundation_style());
@@ -2537,7 +2779,7 @@ mod tests {
                 |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {
                         let right = ui.max_rect().right();
-                        let actions = draw_editing_kit_form(ui, &mut draft, None);
+                        let actions = draw_editing_kit_form(ui, &mut draft, None, &[], &[]);
                         assert!(!actions.save && !actions.cancel && !actions.remove);
                         assert!(ui.min_rect().right() <= right + 1.0, "form fields overflow");
                         assert!(
@@ -2773,6 +3015,7 @@ mod tests {
         let mut profiles: Vec<_> = ["one", "two", "three"]
             .into_iter()
             .map(|id| CustomEditingKitProfile {
+                recovery: Default::default(),
                 read_only: false,
                 git_tracked: false,
                 id: id.to_owned(),

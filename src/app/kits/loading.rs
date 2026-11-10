@@ -1542,6 +1542,7 @@ mod tests {
         }
         let mut app = Baboon::for_test();
         let profile = |id: &str, tags: Option<&str>| CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: false,
             git_tracked: false,
             id: id.to_owned(),
@@ -1593,6 +1594,7 @@ mod tests {
     fn a_read_only_profile_still_covers_its_kit() {
         let mut app = loose_kit_at(Path::new("/ek/H3EK/tags"));
         app.model.prefs.custom_editing_kit_profiles = vec![CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: true,
             git_tracked: false,
             id: "00000000-0000-4000-8000-000000000001".to_owned(),

@@ -1530,8 +1530,8 @@ fn draw_folder_header_launcher(
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = PANE_HEADER_ACTION_GAP;
-        if icon_text_button(ui, ButtonIcon::FileExplorer, "File Explorer", is_loose)
-            .on_disabled_hover_text("Only loose editing-kit folders exist in File Explorer")
+        if icon_text_button(ui, ButtonIcon::FileExplorer, crate::app::browser::actions::file_manager_name(), is_loose)
+            .on_disabled_hover_text("Only loose editing-kit folders exist on disk")
             .clicked()
         {
             action.replace(BrowserAction::OpenLooseFolderInExplorer {
