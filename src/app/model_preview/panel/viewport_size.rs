@@ -1,53 +1,15 @@
-//! The viewport's size setting and the viewport with its stats footer.
+//! The viewport with its stats footer.
 
 use super::super::super::ui_kit::style::{
     foundation_block_text, foundation_input_edge, foundation_section_bar, subtle_dark,
 };
 use super::super::{
-    MAX_MODEL_PREVIEW_SIZE, MIN_MODEL_PREVIEW_SIZE, MaterialTextures, ModelPreviewData,
-    ModelPreviewState, RenderModelPreviewMaterial, draw_model_viewport,
+    MaterialTextures, ModelPreviewData, ModelPreviewState, RenderModelPreviewMaterial,
+    draw_model_viewport,
 };
 use super::section::MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
 use eframe::egui;
-use eframe::egui::{Align2, FontId, RichText, Sense, Stroke, Ui, Vec2};
-
-pub(in crate::app) fn draw_model_viewport_size_input(ui: &mut Ui, model_preview_size: &mut f32) {
-    let mut percent = model_preview_size_percent(*model_preview_size);
-    let response = ui.add(
-        egui::DragValue::new(&mut percent)
-            .range(
-                model_preview_size_percent(MIN_MODEL_PREVIEW_SIZE)
-                    ..=model_preview_size_percent(MAX_MODEL_PREVIEW_SIZE),
-            )
-            .speed(1.0)
-            .max_decimals(0)
-            .suffix("%"),
-    );
-    if response.changed() {
-        *model_preview_size = model_preview_size_from_percent(percent);
-    }
-}
-
-pub(in crate::app::model_preview) fn model_preview_size_percent(model_preview_size: f32) -> f32 {
-    model_preview_size * 100.0
-}
-
-pub(in crate::app::model_preview) fn model_preview_size_from_percent(percent: f32) -> f32 {
-    (percent / 100.0).clamp(MIN_MODEL_PREVIEW_SIZE, MAX_MODEL_PREVIEW_SIZE)
-}
-
-pub(in crate::app::model_preview) fn model_viewport_size(
-    available_width: f32,
-    model_preview_size: f32,
-) -> Vec2 {
-    let scale = model_preview_size.clamp(MIN_MODEL_PREVIEW_SIZE, MAX_MODEL_PREVIEW_SIZE);
-    let desired = Vec2::new(470.0 * scale, 300.0 * scale);
-    // Never force a minimum wider than the actual section. Doing so made the
-    // GL callback overflow its panel while egui clipped only the width, which
-    // visually stretched the model as the window narrowed.
-    let width = desired.x.min(available_width.max(1.0));
-    Vec2::new(width, desired.y * (width / desired.x))
-}
+use eframe::egui::{FontId, RichText, Sense, Stroke, Ui, Vec2};
 
 pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
     ui: &mut Ui,
@@ -80,16 +42,22 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
     );
     ui.painter()
         .rect_filled(footer_rect, 0.0, foundation_section_bar());
-    ui.painter().text(
-        footer_rect.left_center() + Vec2::new(8.0, 0.0),
-        Align2::LEFT_CENTER,
-        format!(
+    // The stats, then what the load left out and why materials drew
+    // untextured, all in the footer's one row so the card keeps its height.
+    let mut footer = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(footer_rect.shrink2(Vec2::new(8.0, 0.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    footer.spacing_mut().item_spacing.x = 12.0;
+    footer.label(
+        RichText::new(format!(
             "{} vertices, {} triangles",
             data.preview.vertices.len(),
             data.preview.indices.len() / 3
-        ),
-        FontId::proportional(10.0),
-        foundation_block_text(),
+        ))
+        .font(FontId::proportional(10.0))
+        .color(foundation_block_text()),
     );
     // What the load left out, which would otherwise just be missing.
     if !data.notes.is_empty() {
@@ -97,7 +65,8 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
             1 => "1 part of this preview left out".to_owned(),
             count => format!("{count} parts of this preview left out"),
         };
-        ui.label(RichText::new(summary).small().color(subtle_dark()))
+        footer
+            .label(RichText::new(summary).small().color(subtle_dark()))
             .on_hover_text(data.notes.join("\n"));
     }
     // Why a material drew untextured, which the resolve records and nothing
@@ -107,7 +76,8 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
         && let Some((summary, detail)) =
             texture_resolve_note(textures, &data.preview.materials, state.game_shaders)
     {
-        ui.label(RichText::new(summary).small().color(subtle_dark()))
+        footer
+            .label(RichText::new(summary).small().color(subtle_dark()))
             .on_hover_text(detail);
     }
 }

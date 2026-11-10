@@ -221,13 +221,6 @@ fn draw_first_run_interface(ui: &mut Ui, s: &mut FirstRunDraw) {
             s.prefs.ui_scale = s.wizard.pending_ui_scale;
         }
     });
-    ui.horizontal(|ui| {
-        ui.label("Model viewport size");
-        ui.add(egui::Slider::new(
-            &mut s.prefs.model_preview_size,
-            MIN_MODEL_PREVIEW_SIZE..=MAX_MODEL_PREVIEW_SIZE,
-        ));
-    });
     ui.add_space(12.0);
     ui.label(RichText::new("Tag browser").strong());
     ui.baboon_checkbox(

@@ -10,8 +10,9 @@ pub(in crate::app) use section::*;
 mod functions;
 mod view_menu;
 mod viewport_size;
+#[cfg(test)]
+pub(in crate::app::model_preview) use viewport_size::texture_resolve_note;
 mod weapons;
-pub(in crate::app) use viewport_size::*;
 pub(in crate::app::model_preview) use weapons::{carry_through_weapon_change, weapon_dropdown};
 mod standalone;
 pub(in crate::app) use standalone::*;

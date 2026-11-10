@@ -68,7 +68,7 @@ pub(super) fn draw_tag(
     color_popup: &mut Option<MaterialColorPopup>,
     function_popup: &mut Option<FunctionPopup>,
     model_preview: &mut ModelPreviewState,
-    model_preview_size: &mut f32,
+    model_setup_width: &mut f32,
     expert_mode: bool,
     edit: &mut FieldEditContext<'_>,
 ) {
@@ -116,7 +116,7 @@ pub(super) fn draw_tag(
             names,
             source_game,
             model_preview,
-            model_preview_size,
+            model_setup_width,
             edit,
         );
         return;

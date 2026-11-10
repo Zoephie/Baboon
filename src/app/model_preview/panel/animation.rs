@@ -7,7 +7,9 @@ use super::super::{
     picker_button, picker_popup_width, picker_results, picker_search_field,
 };
 use super::layout::PreviewPanel;
-use super::section::{ModelPreviewSectionPart, draw_model_preview_section};
+use super::section::{
+    ModelPreviewSectionPart, animation_extra_header_height, draw_model_preview_section,
+};
 use eframe::egui;
 use eframe::egui::{Color32, FontId, RichText, Ui, Vec2};
 
@@ -162,15 +164,25 @@ pub(in crate::app::model_preview) struct ClipFrames {
     last_frame: f32,
 }
 
-/// The Animation Player card, under the viewport and setup row so the player
-/// can use the full page width, matching the layout in the design reference.
+/// The Animation Player body's inner height: the scrubber, and a line for a
+/// clip's error under it.
+pub(in crate::app::model_preview) const ANIMATION_BODY_HEIGHT: f32 = 44.0;
+
+/// The Animation Player card's fixed height on a page `width` wide: its
+/// header, with the rows it wraps to, over its body and the body's margins.
+pub(in crate::app::model_preview) fn animation_card_height(width: f32) -> f32 {
+    40.0 + animation_extra_header_height(width) + ANIMATION_BODY_HEIGHT + 16.0
+}
+
+/// The Animation Player card, docked along the bottom of the panel at a
+/// fixed height, the full page width.
 pub(in crate::app::model_preview) fn draw_animation_player(
     ui: &mut Ui,
     panel: &PreviewPanel<'_>,
     state: &mut ModelPreviewState,
 ) {
-    ui.add_space(8.0);
-    draw_model_preview_section(ui, "Animation Player", None, |ui, part| {
+    let body = Some(ANIMATION_BODY_HEIGHT);
+    draw_model_preview_section(ui, "Animation Player", body, |ui, part| {
         let animations = panel
             .data
             .animations

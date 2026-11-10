@@ -12,11 +12,9 @@ use super::super::super::ui_kit::style::{
 use super::super::super::ui_kit::tag_icons::paint_tag_icon_at;
 use super::super::load::OwnViewSettings;
 use super::super::{
-    MAX_MODEL_PREVIEW_SIZE, MAX_PREVIEW_SCALE, MIN_MODEL_PREVIEW_SIZE, ModelPreviewData,
-    ModelPreviewLayer, ModelPreviewState, ModelRenderMode, is_object_family_group,
-    min_preview_scale,
+    MAX_PREVIEW_SCALE, ModelPreviewData, ModelPreviewLayer, ModelPreviewState, ModelRenderMode,
+    is_object_family_group, min_preview_scale,
 };
-use super::viewport_size::draw_model_viewport_size_input;
 use crate::app::ui_kit::checkbox::CheckboxUi as _;
 use crate::app::ui_kit::radio::RadioUi as _;
 use blam_tags::TagFile;
@@ -29,7 +27,6 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
     tag: &TagFile,
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
-    model_preview_size: &mut f32,
     supports_textures: bool,
     own_view: Option<OwnViewSettings>,
     source_game: Option<GameId>,
@@ -237,18 +234,6 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
                  it for the flat orthographic view. The framing at the orbit point stays \
                  identical, so toggling never jumps.",
             );
-        ui.horizontal(|ui| {
-            ui.label("Preview Size");
-            ui.add(
-                egui::Slider::new(
-                    model_preview_size,
-                    MIN_MODEL_PREVIEW_SIZE..=MAX_MODEL_PREVIEW_SIZE,
-                )
-                .show_value(false)
-                .clamping(egui::SliderClamping::Always),
-            );
-            draw_model_viewport_size_input(ui, model_preview_size);
-        });
         if ui.button("Reset View").clicked() {
             state.yaw = -0.45;
             state.pitch = 0.25;

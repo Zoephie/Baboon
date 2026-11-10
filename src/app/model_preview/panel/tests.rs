@@ -6,12 +6,12 @@ use super::super::super::ui_kit::style::{
 };
 use super::super::super::{Baboon, TagSource, locate_definitions_root};
 use super::super::{
-    ANIMATION_FRAME_RATE, MAX_MODEL_PREVIEW_SIZE, MIN_MODEL_PREVIEW_SIZE, ModelPreviewLayer,
-    ModelPreviewState, ModelRegionSelection, ModelRenderMode, PHYSICS_REGION,
-    PreviewAnimationEntry, PreviewAnimationPlayback, PreviewAnimationPose, RenderModelPreview,
-    RenderModelPreviewBatch, RenderModelPreviewRegion, build_render_preview, frame,
-    is_model_physics_overlay_region, load_referenced_tag_from_source, merge_preview_append,
-    model_preview_data, reset_model_preview_selection, selected_variant_regions,
+    ANIMATION_FRAME_RATE, MIN_MODEL_SETUP_WIDTH, ModelPreviewLayer, ModelPreviewState,
+    ModelRegionSelection, ModelRenderMode, PHYSICS_REGION, PreviewAnimationEntry,
+    PreviewAnimationPlayback, PreviewAnimationPose, RenderModelPreview, RenderModelPreviewBatch,
+    RenderModelPreviewRegion, build_render_preview, frame, is_model_physics_overlay_region,
+    load_referenced_tag_from_source, merge_preview_append, model_preview_data,
+    reset_model_preview_selection, selected_variant_regions,
 };
 use super::animation::{
     advance_playback_clock, animation_header_group, draw_animation_combo, frame_tick_xs,
@@ -169,13 +169,13 @@ fn bitmap_header_moves_actions_to_a_second_row_below_its_wrap_width() {
 
 #[test]
 fn model_setup_header_wraps_only_when_controls_need_room() {
-    assert_eq!(model_setup_extra_header_height(559.0), 64.0);
-    assert_eq!(model_setup_extra_header_height(560.0), 32.0);
+    assert_eq!(model_setup_extra_header_height(399.0), 64.0);
+    assert_eq!(model_setup_extra_header_height(400.0), 32.0);
     assert_eq!(
-        model_setup_extra_header_height(679.0),
+        model_setup_extra_header_height(559.0),
         MODEL_SETUP_EXTRA_HEADER_HEIGHT
     );
-    assert_eq!(model_setup_extra_header_height(680.0), 0.0);
+    assert_eq!(model_setup_extra_header_height(560.0), 0.0);
 }
 
 #[test]
@@ -211,7 +211,7 @@ fn model_setup_header_groups_stay_inside_their_card() {
         RenderModelPreview::default(),
         Vec::new(),
     );
-    for width in [400.0, 559.0, 560.0, 679.0, 680.0, 900.0] {
+    for width in [240.0, 300.0, 399.0, 400.0, 559.0, 560.0, 900.0] {
         let context = egui::Context::default();
         context.set_fonts(foundation_fonts());
         context.set_global_style(foundation_style());
@@ -241,12 +241,6 @@ fn model_setup_header_groups_stay_inside_their_card() {
                                 |ui, _| {
                                     icon_text_dropdown_button(ui, ButtonIcon::Save, "Save", |_| {});
                                     icon_text_button(ui, ButtonIcon::Garbage, "Delete", true);
-                                    icon_text_button(
-                                        ui,
-                                        ButtonIcon::Refresh,
-                                        "Refresh Model",
-                                        true,
-                                    );
                                 },
                             );
                             actions_bounds = ui.min_rect();
@@ -480,27 +474,6 @@ fn collision_toggle_is_available_only_with_collision_geometry() {
 }
 
 #[test]
-fn viewport_percentage_conversion_clamps_to_persisted_range() {
-    assert_eq!(model_preview_size_percent(1.25), 125.0);
-    assert_eq!(model_preview_size_from_percent(125.0), 1.25);
-    assert_eq!(
-        model_preview_size_from_percent(20.0),
-        MIN_MODEL_PREVIEW_SIZE
-    );
-    assert_eq!(
-        model_preview_size_from_percent(400.0),
-        MAX_MODEL_PREVIEW_SIZE
-    );
-}
-
-#[test]
-fn viewport_shrinks_without_changing_aspect_ratio() {
-    let size = model_viewport_size(200.0, 1.0);
-    assert_eq!(size.x, 200.0);
-    assert!((size.x / size.y - 470.0 / 300.0).abs() < 0.000_001);
-}
-
-#[test]
 fn variant_buttons_wrap_without_widening_a_narrow_setup_card() {
     let preview = RenderModelPreview {
         regions: vec![RenderModelPreviewRegion {
@@ -643,87 +616,124 @@ fn animation_groups_and_scrubber_fit_narrow_cards() {
     }
 }
 
+/// The cards split the page with nothing over: the animation player along
+/// the bottom, the sidebar as wide as asked within its clamp, and the
+/// viewport taking the rest.
 #[test]
-fn preview_scale_resizes_the_wide_section_until_setup_reaches_its_minimum() {
-    assert_eq!(wide_model_preview_section_width(1_600.0, 1.0), 470.0);
-    assert_eq!(wide_model_preview_section_width(1_600.0, 1.5), 705.0);
+fn panel_rects_split_the_page_and_clamp_the_sidebar() {
+    let page = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), Vec2::new(1_400.0, 900.0));
+    let rects = panel_rects(page, 360.0);
+    assert_eq!(rects.setup.width(), 360.0);
+    assert_eq!(rects.animation.bottom(), page.bottom());
+    assert_eq!(rects.animation.width(), page.width());
     assert_eq!(
-        wide_model_preview_section_width(1_000.0, 2.0),
-        1_000.0 - MODEL_PREVIEW_SECTION_GAP - WIDE_MODEL_SETUP_MIN_WIDTH
+        rects.animation.height(),
+        super::animation::animation_card_height(page.width())
+    );
+    assert_eq!(rects.preview.left(), page.left());
+    assert_eq!(rects.setup.right(), page.right());
+    assert_eq!(rects.preview.right(), rects.handle.left());
+    assert_eq!(rects.handle.right(), rects.setup.left());
+    assert_eq!(
+        rects.preview.bottom() + MODEL_PREVIEW_SECTION_GAP,
+        rects.animation.top()
+    );
+    assert_eq!(
+        rects.preview.width() + rects.handle.width() + rects.setup.width(),
+        page.width()
+    );
+    // Too narrow: the sidebar keeps its least width.
+    assert_eq!(panel_rects(page, 10.0).setup.width(), MIN_MODEL_SETUP_WIDTH);
+    // Too wide: the viewport keeps its own.
+    let wide = panel_rects(page, 5_000.0);
+    assert_eq!(wide.preview.width(), MIN_MODEL_VIEWPORT_WIDTH);
+    assert_eq!(
+        clamp_setup_width(f32::NAN, page.width()),
+        MIN_MODEL_SETUP_WIDTH
     );
 }
 
+/// Each card drawn into its rect fills it exactly, at the sidebar header's
+/// breakpoints and the animation header's, so nothing pushes the page into
+/// scrolling.
 #[test]
-fn preview_and_setup_cards_match_outer_height_at_both_header_breakpoints() {
-    for setup_width in [360.0, 800.0] {
-        for scale in [1.0, 1.5] {
-            let context = egui::Context::default();
-            context.set_fonts(foundation_fonts());
-            let viewport = model_viewport_size(470.0 * scale, scale);
-            let shared_body_height = viewport.y + MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
-            let setup_body_height =
-                shared_body_height - model_setup_extra_header_height(setup_width) - 16.0;
-            let mut preview_rect = egui::Rect::NOTHING;
-            let mut setup_rect = egui::Rect::NOTHING;
-            let _ = crate::app::run_ui_test(
-                &context,
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        Vec2::new(2_000.0, 1_200.0),
-                    )),
-                    ..Default::default()
-                },
-                |context| {
-                    egui::CentralPanel::default().show(context, |ui| {
-                        ui.horizontal_top(|ui| {
-                            ui.allocate_ui(Vec2::new(viewport.x, 0.0), |ui| {
-                                ui.set_width(viewport.x);
-                                preview_rect = draw_model_preview_section(
-                                    ui,
-                                    "Model Preview",
-                                    Some(shared_body_height),
-                                    |ui, part| {
-                                        if part == ModelPreviewSectionPart::Body {
-                                            ui.allocate_exact_size(viewport, Sense::hover());
-                                            ui.allocate_exact_size(
-                                                Vec2::new(
-                                                    viewport.x,
-                                                    MODEL_PREVIEW_STATS_FOOTER_HEIGHT,
-                                                ),
-                                                Sense::hover(),
-                                            );
-                                        }
-                                    },
-                                );
-                            });
-                            ui.allocate_ui(Vec2::new(setup_width, 0.0), |ui| {
-                                ui.set_width(setup_width);
-                                setup_rect = draw_model_preview_section(
-                                    ui,
-                                    "Model Setup",
-                                    Some(setup_body_height),
-                                    |ui, part| {
-                                        if part == ModelPreviewSectionPart::Body {
-                                            crate::app::ScrollArea::vertical()
-                                                .auto_shrink([false, false])
-                                                .max_height(setup_body_height)
-                                                .show(ui, |ui| {
-                                                    ui.set_min_height(setup_body_height * 2.0);
-                                                });
-                                        }
-                                    },
-                                );
-                            });
-                        });
+fn cards_fill_their_rects_at_the_header_breakpoints() {
+    for (page_width, setup_width) in [(1_600.0, 360.0), (1_600.0, 800.0), (700.0, 300.0)] {
+        let context = egui::Context::default();
+        context.set_fonts(foundation_fonts());
+        context.set_global_style(foundation_style());
+        let page = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(page_width, 800.0));
+        let rects = panel_rects(page, setup_width);
+        let mut drawn = [egui::Rect::NOTHING; 3];
+        let _ = crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(page_width, 800.0),
+                )),
+                ..Default::default()
+            },
+            |context| {
+                egui::CentralPanel::default().show(context, |ui| {
+                    let preview_body = rects.preview.height() - PREVIEW_HEADER_HEIGHT;
+                    drawn[0] = in_rect(ui, rects.preview, "preview", |ui| {
+                        draw_model_preview_section(
+                            ui,
+                            "Model Preview",
+                            Some(preview_body),
+                            |ui, part| {
+                                if part == ModelPreviewSectionPart::Body {
+                                    let viewport = Vec2::new(
+                                        ui.available_width(),
+                                        preview_body - MODEL_PREVIEW_STATS_FOOTER_HEIGHT,
+                                    );
+                                    ui.allocate_exact_size(viewport, Sense::hover());
+                                    ui.allocate_exact_size(
+                                        Vec2::new(viewport.x, MODEL_PREVIEW_STATS_FOOTER_HEIGHT),
+                                        Sense::hover(),
+                                    );
+                                }
+                            },
+                        )
                     });
-                },
-            );
+                    let setup_body = setup_body_height(rects.setup);
+                    drawn[1] = in_rect(ui, rects.setup, "setup", |ui| {
+                        draw_model_preview_section(
+                            ui,
+                            "Model Setup",
+                            Some(setup_body),
+                            |ui, part| {
+                                if part == ModelPreviewSectionPart::Body {
+                                    crate::app::ScrollArea::vertical()
+                                        .auto_shrink([false, false])
+                                        .max_height(setup_body)
+                                        .show(ui, |ui| {
+                                            ui.set_min_height(setup_body * 2.0);
+                                        });
+                                }
+                            },
+                        )
+                    });
+                    drawn[2] = in_rect(ui, rects.animation, "animation", |ui| {
+                        draw_model_preview_section(
+                            ui,
+                            "Animation Player",
+                            Some(super::animation::ANIMATION_BODY_HEIGHT),
+                            |_, _| {},
+                        )
+                    });
+                });
+            },
+        );
+        for (card, rect) in drawn
+            .iter()
+            .zip([rects.preview, rects.setup, rects.animation])
+        {
             assert!(
-                (preview_rect.height() - setup_rect.height()).abs() < 1.0,
-                "scale {scale}, setup width {setup_width}: preview={}, setup={}",
-                preview_rect.height(),
-                setup_rect.height()
+                (card.height() - rect.height()).abs() < 1.0
+                    && (card.top() - rect.top()).abs() < 1.0,
+                "page {page_width}, setup {setup_width}: card {card:?} in {rect:?}"
             );
         }
     }
@@ -996,7 +1006,6 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
         .into_iter()
         .find(|mode| *mode != state.render_mode)
         .expect("more than one mode");
-    let mut size = 300.0;
     let mut time = 0.0;
     type Painted = Vec<(String, egui::Rect)>;
     let mut frame = |events: Vec<egui::Event>, state: &mut ModelPreviewState| -> Painted {
@@ -1019,7 +1028,6 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
                         &tag,
                         &data,
                         state,
-                        &mut size,
                         true,
                         None,
                         Some(GameId::Halo3),

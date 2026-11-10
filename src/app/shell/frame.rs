@@ -1994,6 +1994,8 @@ mod tests {
         /// app's own throttles see time pass as they would at 60 Hz.
         time: f64,
         pixels_per_point: f32,
+        /// The window, in points.
+        pub(super) screen: egui::Vec2,
         /// Every text painted by the last frame, for the scenario checks.
         pub(super) painted: Vec<String>,
         /// The same texts with where they were painted, for clicking them.
@@ -2029,6 +2031,7 @@ mod tests {
                 app,
                 time: 0.0,
                 pixels_per_point,
+                screen: SCREEN,
                 painted: Vec::new(),
                 painted_rects: Vec::new(),
                 commands: Vec::new(),
@@ -2039,7 +2042,7 @@ mod tests {
         pub(super) fn frame(&mut self, events: Vec<egui::Event>) -> FrameSample {
             self.time += 1.0 / 60.0;
             let mut input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.screen)),
                 time: Some(self.time),
                 focused: true,
                 events,
@@ -5081,6 +5084,148 @@ mod tests {
         for _ in 0..4 {
             h.frame(Vec::new());
         }
+    }
+
+    /// A Model Preview pane, loaded, in a loose Halo 3 kit.
+    fn model_preview_pane(h: &mut Harness) -> crate::app::loose_fixture::LooseKit {
+        let kit = crate::app::loose_fixture::LooseKit::new("preview_pane", "halo3_mcc");
+        kit.write_mcc("objects\\smoke", "render_model", |_| {});
+        kit.install(&mut h.app);
+        let key = kit.open(&mut h.app, "objects\\smoke.render_model");
+        let id = h.app.model.kits[h.app.model.active].id;
+        h.app.views[id].caches.model_previews.insert(
+            key.clone(),
+            crate::app::model_preview::state::ModelPreviewState::loaded_empty_for_test(&key),
+        );
+        idle(h);
+        kit
+    }
+
+    /// Press at `from`, slide by `by` over a few frames, release.
+    fn drag(h: &mut Harness, from: egui::Pos2, by: egui::Vec2) {
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        h.frame(vec![pointer_at(from)]);
+        h.frame(vec![button(from, true)]);
+        for step in 1..=4 {
+            h.frame(vec![pointer_at(from + by * step as f32 / 4.0)]);
+        }
+        h.frame(vec![button(from + by, false)]);
+        idle(h);
+    }
+
+    /// Refresh Model sits in the viewport's header, left of the Camera
+    /// menu, not in the sidebar, and pressing it loads the preview again.
+    #[test]
+    fn refresh_model_is_in_the_viewport_header_and_reloads() {
+        let mut h = Harness::new();
+        let _kit = model_preview_pane(&mut h);
+        let rect_of = |h: &Harness, needle: &str| {
+            h.painted_rects
+                .iter()
+                .filter(|(text, _)| text.trim() == needle)
+                .map(|(_, rect)| *rect)
+                .collect::<Vec<_>>()
+        };
+        let refresh = rect_of(&h, "Refresh Model");
+        assert_eq!(refresh.len(), 1, "{:?}", h.painted);
+        let refresh = refresh[0];
+        let camera = rect_of(&h, "Camera")[0];
+        let setup = rect_of(&h, "Model Setup")[0];
+        // The card's title, under the page's tab of the same name.
+        let title = rect_of(&h, "Model Preview")
+            .into_iter()
+            .max_by(|a, b| a.top().total_cmp(&b.top()))
+            .unwrap();
+        assert!(refresh.right() < camera.left(), "refresh {refresh:?}, camera {camera:?}");
+        assert!(refresh.right() < setup.left(), "in the sidebar: {refresh:?}");
+        assert!((refresh.center().y - title.center().y).abs() < 4.0, "not on the header row");
+        let id = h.app.model.kits[h.app.model.active].id;
+        let loaded = |h: &Harness| {
+            let previews = &h.app.views[id].caches.model_previews;
+            let (key, state) = previews.iter().next().unwrap();
+            !state.needs_preview_load(key)
+        };
+        assert!(loaded(&h));
+        h.click("Refresh Model", 0);
+        assert!(!loaded(&h), "Refresh Model left the preview as loaded");
+    }
+
+    /// The sidebar's left edge drags its width, which is saved and kept
+    /// within its clamp; a drag inside the sidebar leaves it.
+    #[test]
+    fn dragging_the_model_setup_edge_sets_and_saves_its_width() {
+        use crate::app::model_preview::{DEFAULT_MODEL_SETUP_WIDTH, MIN_MODEL_SETUP_WIDTH};
+        let mut h = Harness::new();
+        let _kit = model_preview_pane(&mut h);
+        let setup_title = |h: &Harness| {
+            h.painted_rects
+                .iter()
+                .find(|(text, _)| text == "Model Setup")
+                .map(|(_, rect)| *rect)
+                .expect("the sidebar's title")
+        };
+        assert_eq!(h.app.model.prefs.model_setup_width, DEFAULT_MODEL_SETUP_WIDTH);
+        // Inside the sidebar's header: nothing changes.
+        let title = setup_title(&h);
+        drag(&mut h, title.center(), egui::vec2(-100.0, 0.0));
+        assert_eq!(h.app.model.prefs.model_setup_width, DEFAULT_MODEL_SETUP_WIDTH);
+        // The gap left of the card (8 points of header padding, then the
+        // 8-point gap): wider by what it moved.
+        let edge = egui::pos2(title.left() - 12.0, title.center().y + 100.0);
+        drag(&mut h, edge, egui::vec2(-100.0, 0.0));
+        let widened = h.app.model.prefs.model_setup_width;
+        assert!((widened - (DEFAULT_MODEL_SETUP_WIDTH + 100.0)).abs() < 1.0, "{widened}");
+        assert!((setup_title(&h).left() - (title.left() - 100.0)).abs() < 1.0);
+        // Far to the right: no narrower than its least.
+        let edge = egui::pos2(setup_title(&h).left() - 12.0, edge.y);
+        drag(&mut h, edge, egui::vec2(2_000.0, 0.0));
+        assert_eq!(h.app.model.prefs.model_setup_width, MIN_MODEL_SETUP_WIDTH);
+        // Far to the left: the viewport keeps its least width.
+        let edge = egui::pos2(setup_title(&h).left() - 12.0, edge.y);
+        drag(&mut h, edge, egui::vec2(-3_000.0, 0.0));
+        let widest = h.app.model.prefs.model_setup_width;
+        assert!(widest > DEFAULT_MODEL_SETUP_WIDTH + 400.0, "{widest}");
+        assert!(widest < SCREEN.x - 320.0, "{widest}");
+    }
+
+    /// The Model Preview tab fills the pane: its Animation Player sits on
+    /// screen and a wheel over the page header moves nothing. Where the pane
+    /// is shorter than the panel's least height, the page does scroll.
+    #[test]
+    fn the_model_preview_tab_fills_the_pane_without_scrolling() {
+        let header_after_wheel = |height: f32| {
+            let mut h = Harness::new();
+            h.screen = egui::vec2(SCREEN.x, height);
+            let _kit = model_preview_pane(&mut h);
+            let rect_of = |h: &Harness, text: &str| {
+                h.painted_rects.iter().find(|(painted, _)| painted == text).map(|(_, rect)| *rect)
+            };
+            let player = rect_of(&h, "Animation Player");
+            let screen = h.screen;
+            // The page's own tab row: in the page, and over nothing that
+            // scrolls on its own.
+            let tabs = rect_of(&h, "Tag Fields").expect("the page's tabs");
+            h.frame(vec![pointer_at(tabs.center())]);
+            for _ in 0..20 {
+                h.frame(vec![wheel(-200.0)]);
+            }
+            idle(&mut h);
+            let after = rect_of(&h, "Tag Fields").map(|rect| rect.top());
+            (player, screen, tabs.top(), after)
+        };
+        let (player, screen, before, after) = header_after_wheel(SCREEN.y);
+        let player = player.unwrap_or_else(|| panic!("no Animation Player drawn"));
+        assert!(player.bottom() <= screen.y, "player {player:?} on a {screen:?} screen");
+        assert_eq!(after, Some(before), "the page scrolled");
+        // A pane too short for the panel scrolls, so the wheel above did reach
+        // the page.
+        let (_, _, before, after) = header_after_wheel(420.0);
+        assert!(after.is_none_or(|after| after < before), "a short pane did not scroll");
     }
 
     /// The tests below see the request; only eframe's `links` feature turns it

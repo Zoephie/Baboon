@@ -4,9 +4,8 @@ use super::super::super::ui_kit::style::{
     bold_font, foundation_block_text, foundation_group_bg, foundation_group_edge,
     foundation_section_bar,
 };
-use super::super::{MAX_MODEL_PREVIEW_SIZE, MIN_MODEL_PREVIEW_SIZE};
+use super::layout::{PREVIEW_HEADER_HEIGHT, PanelRects, in_rect};
 use super::setup::model_setup_extra_header_height;
-use super::viewport_size::model_viewport_size;
 use eframe::egui;
 use eframe::egui::{RichText, Sense, Stroke, Ui, Vec2};
 
@@ -20,11 +19,13 @@ pub(in crate::app::model_preview) const MODEL_PREVIEW_STATS_FOOTER_HEIGHT: f32 =
 
 pub(in crate::app::model_preview) const MODEL_SETUP_EXTRA_HEADER_HEIGHT: f32 = 32.0;
 
-pub(in crate::app::model_preview) const MODEL_SETUP_INLINE_HEADER_MIN_WIDTH: f32 = 680.0;
+/// The sidebar width from which its title, variant picker and variant
+/// actions share one header row.
+pub(in crate::app::model_preview) const MODEL_SETUP_INLINE_HEADER_MIN_WIDTH: f32 = 560.0;
 
-pub(in crate::app::model_preview) const MODEL_SETUP_SHARED_CONTROLS_ROW_MIN_WIDTH: f32 = 560.0;
-
-pub(in crate::app::model_preview) const WIDE_MODEL_SETUP_MIN_WIDTH: f32 = 400.0;
+/// The sidebar width from which the variant picker and the variant actions
+/// share the row under the title.
+pub(in crate::app::model_preview) const MODEL_SETUP_SHARED_CONTROLS_ROW_MIN_WIDTH: f32 = 400.0;
 
 pub(in crate::app::model_preview) const MODEL_PREVIEW_SECTION_GAP: f32 = 8.0;
 
@@ -36,82 +37,51 @@ pub(in crate::app::model_preview) fn draw_loading_section_body(ui: &mut Ui, heig
     crate::app::shell::loading::paint_loading_rings(ui, rect);
 }
 
-/// Draw the final preview/setup card geometry before any model parsing begins.
-/// The post-pane worker hook starts the actual build after this frame, so a tab
-/// switch never has to wait for a complex render model or BSP to be walked.
+/// Draw the panel's cards where they will be before any model parsing
+/// begins. The post-pane worker hook starts the actual build after this
+/// frame, so a tab switch never has to wait for a complex render model or BSP
+/// to be walked.
 pub(in crate::app::model_preview) fn draw_model_preview_loading_shells(
     ui: &mut Ui,
-    model_preview_size: f32,
+    rects: &PanelRects,
 ) {
-    let page_width = ui.available_width();
-    if page_width >= 780.0 {
-        let gap = MODEL_PREVIEW_SECTION_GAP;
-        let preview_width = wide_model_preview_section_width(page_width, model_preview_size);
-        let setup_width = (page_width - preview_width - gap).max(WIDE_MODEL_SETUP_MIN_WIDTH);
-        let viewport_size = model_viewport_size(preview_width, model_preview_size);
-        let shared_body_height = viewport_size.y + MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
-        let setup_body_height =
-            (shared_body_height - model_setup_extra_header_height(setup_width) - 16.0).max(1.0);
-
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
-            ui.allocate_ui(Vec2::new(preview_width, 0.0), |ui| {
-                ui.set_width(preview_width);
-                draw_model_preview_section(
-                    ui,
-                    "Model Preview",
-                    Some(shared_body_height),
-                    |ui, part| {
-                        if part == ModelPreviewSectionPart::Body {
-                            draw_loading_section_body(ui, shared_body_height);
-                        }
-                    },
-                );
-            });
-            ui.allocate_ui(Vec2::new(setup_width, 0.0), |ui| {
-                ui.set_width(setup_width);
-                draw_model_preview_section(
-                    ui,
-                    "Model Setup",
-                    Some(setup_body_height),
-                    |ui, part| {
-                        if part == ModelPreviewSectionPart::Body {
-                            draw_loading_section_body(ui, setup_body_height);
-                        }
-                    },
-                );
-            });
-        });
-    } else {
-        let viewport_size = model_viewport_size(page_width, model_preview_size);
-        let preview_body_height = viewport_size.y + MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
-        draw_model_preview_section(
-            ui,
-            "Model Preview",
-            Some(preview_body_height),
-            |ui, part| {
+    let cards = [
+        (rects.preview, "Model Preview", PREVIEW_HEADER_HEIGHT),
+        (
+            rects.setup,
+            "Model Setup",
+            PREVIEW_HEADER_HEIGHT + model_setup_extra_header_height(rects.setup.width()) + 16.0,
+        ),
+        (
+            rects.animation,
+            "Animation Player",
+            PREVIEW_HEADER_HEIGHT + animation_extra_header_height(rects.animation.width()) + 16.0,
+        ),
+    ];
+    for (rect, title, chrome) in cards {
+        in_rect(ui, rect, title, |ui| {
+            let body = (rect.height() - chrome).max(1.0);
+            draw_model_preview_section(ui, title, Some(body), |ui, part| {
                 if part == ModelPreviewSectionPart::Body {
-                    draw_loading_section_body(ui, preview_body_height);
+                    draw_loading_section_body(ui, body);
                 }
-            },
-        );
-        ui.add_space(MODEL_PREVIEW_SECTION_GAP);
-        draw_model_preview_section(ui, "Model Setup", Some(160.0), |ui, part| {
-            if part == ModelPreviewSectionPart::Body {
-                draw_loading_section_body(ui, 160.0);
-            }
+            });
         });
     }
 }
 
-pub(in crate::app::model_preview) fn wide_model_preview_section_width(
-    page_width: f32,
-    model_preview_size: f32,
-) -> f32 {
-    let desired_width =
-        470.0 * model_preview_size.clamp(MIN_MODEL_PREVIEW_SIZE, MAX_MODEL_PREVIEW_SIZE);
-    desired_width
-        .min((page_width - MODEL_PREVIEW_SECTION_GAP - WIDE_MODEL_SETUP_MIN_WIDTH).max(1.0))
+/// The Animation Player header's extra rows at `width`: its picker and
+/// transport wrap under the title as the page narrows.
+pub(in crate::app::model_preview) fn animation_extra_header_height(width: f32) -> f32 {
+    if width >= 800.0 {
+        0.0
+    } else if width < 320.0 {
+        96.0
+    } else if width < 560.0 {
+        64.0
+    } else {
+        32.0
+    }
 }
 
 /// A fixed, full-width section styled like the Tag Fields group headers, with
@@ -153,14 +123,8 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
             40.0
         } else if setup_header {
             model_setup_extra_header_height(width)
-        } else if animation_header && width < 800.0 {
-            if width < 320.0 {
-                96.0
-            } else if width < 560.0 {
-                64.0
-            } else {
-                32.0
-            }
+        } else if animation_header {
+            animation_extra_header_height(width)
         } else {
             0.0
         };

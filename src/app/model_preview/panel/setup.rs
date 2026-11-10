@@ -1,6 +1,5 @@
 //! The setup card: its header controls, its body and the scenario BSP list.
 
-use super::super::super::ui_kit::button_icons::{ButtonIcon, icon_text_button};
 use super::super::super::ui_kit::style::{subtle_dark, text_dark};
 use super::super::{FieldEditContext, ModelPreviewData, ModelPreviewState, bsp_display_name};
 use super::functions::draw_object_functions;
@@ -13,8 +12,7 @@ use super::variants::{draw_variant_controls, draw_variant_header_actions, draw_v
 use crate::app::ui_kit::checkbox::CheckboxUi as _;
 use eframe::egui::{RichText, Ui};
 
-/// The Model Setup card's header actions: the variant actions, then Refresh
-/// Model.
+/// The Model Setup card's header actions: the variant actions.
 pub(in crate::app::model_preview) fn draw_setup_header_actions(
     ui: &mut Ui,
     panel: &PreviewPanel<'_>,
@@ -28,10 +26,6 @@ pub(in crate::app::model_preview) fn draw_setup_header_actions(
         && draw_variant_header_actions(ui, panel.data, state, edit)
     {
         requests.mutation = true;
-    }
-    if icon_text_button(ui, ButtonIcon::Refresh, "Refresh Model", true).clicked() {
-        state.invalidate_load();
-        requests.reload = true;
     }
 }
 

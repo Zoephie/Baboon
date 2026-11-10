@@ -4,9 +4,11 @@
 use super::{ModelPreviewData, PreviewAnimationPlayback};
 use std::collections::HashMap;
 
-pub(in crate::app) const DEFAULT_MODEL_PREVIEW_SIZE: f32 = 1.0;
-pub(in crate::app) const MIN_MODEL_PREVIEW_SIZE: f32 = 0.8;
-pub(in crate::app) const MAX_MODEL_PREVIEW_SIZE: f32 = 2.6;
+/// The Model Setup sidebar's width, in points, before it is dragged.
+pub(in crate::app) const DEFAULT_MODEL_SETUP_WIDTH: f32 = 360.0;
+/// The narrowest the sidebar is dragged to, and the widest it is saved at.
+pub(in crate::app) const MIN_MODEL_SETUP_WIDTH: f32 = 240.0;
+pub(in crate::app) const MAX_MODEL_SETUP_WIDTH: f32 = 1200.0;
 
 /// Cross-frame model selection and camera state.
 /// `loaded_key` prevents data and variant choices from being reused for a newly
@@ -209,6 +211,28 @@ impl ModelPreviewState {
             || self.loaded_weapon != self.weapon
             || self.loaded_secondary_weapon != self.secondary_weapon
             || self.loaded_scenario_selection != self.scenario_bsp_selection
+    }
+}
+
+#[cfg(test)]
+impl ModelPreviewState {
+    /// A state showing an empty preview of `entry_key` as loaded, for a test
+    /// that draws the panel around it.
+    pub(in crate::app) fn loaded_empty_for_test(entry_key: &str) -> Self {
+        let data = super::model_preview_data(
+            entry_key.to_owned(),
+            entry_key.to_owned(),
+            super::RenderModelPreview::default(),
+            Vec::new(),
+        );
+        let mut state = Self {
+            active_tab: ModelTagPanelTab::ModelPreview,
+            loaded_key: Some(entry_key.to_owned()),
+            data: Some(Ok(data)),
+            ..Self::default()
+        };
+        state.campaign_evolved.loaded_high_detail = state.campaign_evolved.high_detail;
+        state
     }
 }
 
