@@ -6,6 +6,7 @@ use super::{
     CeRandom, Image, SamplerKind, ViewFrame, argb, cross, decode_image, dot, elements,
     function_slot, has_flag, nonzero_unit, object_block, posed_on,
 };
+use blam_tags::bitmap::BitmapDefinition;
 use blam_tags::{TagFile, TagStruct};
 use std::sync::Arc;
 
@@ -113,6 +114,21 @@ fn read_bounds(root: TagStruct<'_>, name: &str) -> [f32; 2] {
     }
 }
 
+/// The first sprite of a bitmap's first sequence: its rect, registration
+/// point, image, and that image's width.
+pub(in crate::app::model_preview) fn glow_sprite(
+    bitmap: &TagFile,
+) -> Option<([f32; 4], [f32; 2], usize, f32)> {
+    let definition = BitmapDefinition::from_tag(bitmap);
+    let sprite = definition.sequences.first()?.sprites.first()?;
+    let index = sprite.bitmap_index.max(0) as usize;
+    let image_width = definition
+        .images
+        .get(index)
+        .map_or(1.0, |image| f32::from(image.width.max(1)));
+    Some((sprite.rect(), sprite.registration_point, index, image_width))
+}
+
 fn read_glow(
     reader: &TagReader,
     path: &str,
@@ -152,22 +168,7 @@ fn read_glow(
     {
         return None;
     }
-    let sequence = *elements(bitmap.root(), "sequences").first()?;
-    let sprite = *elements(sequence, "sprites").first()?;
-    let real_of = |holder: TagStruct<'_>, name: &str| holder.read_real(name).unwrap_or(0.0);
-    let rect = [
-        real_of(sprite, "left"),
-        real_of(sprite, "right"),
-        real_of(sprite, "top"),
-        real_of(sprite, "bottom"),
-    ];
-    let registration = sprite.read_point2d("registration point");
-    let index = sprite.read_int_any("bitmap index").unwrap_or(0).max(0) as usize;
-    let image_width = elements(bitmap.root(), "bitmaps")
-        .get(index)
-        .map_or(1.0, |image| {
-            image.read_int_any("width").unwrap_or(1).max(1) as f32
-        });
+    let (rect, registration, index, image_width) = glow_sprite(&bitmap)?;
     let dimension = ((rect[1] - rect[0]) * image_width).trunc();
     let image = Arc::new(decode_image(
         reader,
@@ -251,7 +252,7 @@ fn read_glow(
         ],
         dimension,
         rect,
-        registration: [registration.x, registration.y],
+        registration,
         image_width,
         image,
     })

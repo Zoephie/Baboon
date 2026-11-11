@@ -1,22 +1,22 @@
 //! Halo CE's sprite sheets and secondary maps, which effects, particle systems and contrails share.
 
 use super::super::TagReader;
-use super::super::common::fields::elements;
 use super::super::common::image::Image;
 use super::super::common::view::ViewFrame;
 use super::super::materials::decode_image;
 use super::shaders::{CeMapAnimation, read_effect_map_animation};
 use crate::core::h2_pixel_shader::SamplerKind;
-use blam_tags::TagStruct;
+use blam_tags::bitmap::BitmapDefinition;
+use blam_tags::{TagFile, TagStruct};
 use std::sync::Arc;
 
 /// One sprite of a bitmap's sequence: its rect across the bitmap, the point
 /// it hangs from, and the image it is cut from.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct CeSpriteFrame {
-    pub(super) rect: [f32; 4],
-    pub(super) registration: [f32; 2],
-    pub(super) image: usize,
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(in crate::app::model_preview) struct CeSpriteFrame {
+    pub(in crate::app::model_preview) rect: [f32; 4],
+    pub(in crate::app::model_preview) registration: [f32; 2],
+    pub(in crate::app::model_preview) image: usize,
 }
 
 /// An effect shader's second map: drawn over the sprite where anchored to
@@ -115,30 +115,7 @@ pub(in crate::app::model_preview) fn read_sprite_sheet(
     bitmap_path: &str,
 ) -> Option<CeSpriteSheet> {
     let bitmap = reader.load(bitmap_path, "bitmap", b"bitm").ok()?;
-    let sizes: Vec<[f32; 2]> = elements(bitmap.root(), "bitmaps")
-        .iter()
-        .map(|image| {
-            let size = |name: &str| image.read_int_any(name).unwrap_or(1).max(1) as f32;
-            [size("width"), size("height")]
-        })
-        .collect();
-    let sequences: Vec<Vec<CeSpriteFrame>> = elements(bitmap.root(), "sequences")
-        .iter()
-        .map(|sequence| {
-            elements(*sequence, "sprites")
-                .iter()
-                .map(|sprite| {
-                    let read = |name: &str| sprite.read_real(name).unwrap_or(0.0);
-                    let registration = sprite.read_point2d("registration point");
-                    CeSpriteFrame {
-                        rect: [read("left"), read("right"), read("top"), read("bottom")],
-                        registration: [registration.x, registration.y],
-                        image: sprite.read_int_any("bitmap index").unwrap_or(0).max(0) as usize,
-                    }
-                })
-                .collect()
-        })
-        .collect();
+    let (sizes, sequences) = read_sheet_layout(&bitmap);
     let used: Vec<usize> = sequences
         .iter()
         .flatten()
@@ -157,6 +134,35 @@ pub(in crate::app::model_preview) fn read_sprite_sheet(
         sequences,
         images,
     })
+}
+
+/// A sheet's image sizes and its sprites by sequence, read from the bitmap
+/// without decoding it.
+pub(in crate::app::model_preview) fn read_sheet_layout(
+    bitmap: &TagFile,
+) -> (Vec<[f32; 2]>, Vec<Vec<CeSpriteFrame>>) {
+    let definition = BitmapDefinition::from_tag(bitmap);
+    let sizes: Vec<[f32; 2]> = definition
+        .images
+        .iter()
+        .map(|image| [f32::from(image.width.max(1)), f32::from(image.height.max(1))])
+        .collect();
+    let sequences: Vec<Vec<CeSpriteFrame>> = definition
+        .sequences
+        .iter()
+        .map(|sequence| {
+            sequence
+                .sprites
+                .iter()
+                .map(|sprite| CeSpriteFrame {
+                    rect: sprite.rect(),
+                    registration: sprite.registration_point,
+                    image: sprite.bitmap_index.max(0) as usize,
+                })
+                .collect()
+        })
+        .collect();
+    (sizes, sequences)
 }
 
 impl CeSpriteSheet {

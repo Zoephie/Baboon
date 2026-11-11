@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use blam_tags::bitmap::BitmapDefinition;
 use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
@@ -191,6 +192,20 @@ pub(crate) struct CeContrailAt {
     markers: Vec<(usize, [f32; 3], [f32; 3])>,
 }
 
+/// Each of a bitmap's sequences as its first image and image count.
+pub(in crate::app::model_preview) fn sequence_ranges(bitmap: &TagFile) -> Vec<[usize; 2]> {
+    BitmapDefinition::from_tag(bitmap)
+        .sequences
+        .iter()
+        .map(|sequence| {
+            [
+                sequence.first_bitmap_index.max(0) as usize,
+                sequence.bitmap_count.max(0) as usize,
+            ]
+        })
+        .collect()
+}
+
 fn read_contrail(reader: &TagReader, path: &str) -> Option<CeContrailDef> {
     let tag = reader.load(path, "contrail", b"cont").ok()?;
     let root = tag.root();
@@ -210,18 +225,7 @@ fn read_contrail(reader: &TagReader, path: &str) -> Option<CeContrailDef> {
     let (sequences, images) = match &bitmap_path {
         Some(path) => match reader.load(path, "bitmap", b"bitm") {
             Ok(bitmap) => {
-                let sequences = elements(bitmap.root(), "sequences")
-                    .iter()
-                    .map(|sequence| {
-                        let first = sequence
-                            .read_int_any("first bitmap index")
-                            .unwrap_or(0)
-                            .max(0) as usize;
-                        let count =
-                            sequence.read_int_any("bitmap count").unwrap_or(0).max(0) as usize;
-                        [first, count]
-                    })
-                    .collect();
+                let sequences = sequence_ranges(&bitmap);
                 let count = elements(bitmap.root(), "bitmaps").len();
                 let images = (0..count)
                     .map(|index| {

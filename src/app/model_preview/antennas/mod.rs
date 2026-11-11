@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use blam_tags::TagFile;
+use blam_tags::bitmap::BitmapDefinition;
 
 use super::common::fields::{elements, object_block};
 use super::common::image::{Image, Sampler};
@@ -51,22 +52,16 @@ pub(in crate::app::model_preview) fn antenna_sprite(
     sequence: usize,
     trim: f32,
 ) -> Option<AntennaSprite> {
-    let root = bitmap.root();
-    let sequences = elements(root, "sequences");
-    let sprite = *elements(*sequences.get(sequence)?, "sprites").first()?;
-    let read = |name: &str| sprite.read_real(name).unwrap_or(0.0);
-    let index = sprite.read_int_any("bitmap index")?.max(0) as usize;
-    let width = elements(root, "bitmaps")
-        .get(index)?
-        .read_int_any("width")? as f32;
-    let spacing = root.read_int_any("sprite spacing").unwrap_or(0) as f32;
-    let rect = [read("left"), read("right"), read("top"), read("bottom")];
-    let registration = sprite.read_point2d("registration point");
+    let definition = BitmapDefinition::from_tag(bitmap);
+    let sprite = definition.sequences.get(sequence)?.sprites.first()?;
+    let index = sprite.bitmap_index.max(0) as usize;
+    let width = f32::from(definition.images.get(index)?.width);
+    let spacing = f32::from(definition.sprite_spacing);
+    let rect = sprite.rect();
     let pixels = (rect[1] - rect[0]) * width - spacing * 2.0 - trim;
-    let registration = [registration.x, registration.y];
     (pixels > 0.0).then_some(AntennaSprite {
         rect,
-        registration,
+        registration: sprite.registration_point,
         index,
         covered: pixels / width,
         width,

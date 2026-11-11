@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use blam_tags::TagFile;
+use blam_tags::bitmap::BitmapDefinition;
 
 use super::super::cloth::{SharedWind, away_from_pole, turned_about};
 use super::super::common::fields::{elements, object_block};
@@ -234,6 +235,21 @@ impl H3LeavesAt {
     }
 }
 
+/// A leaf plate's sprites, its first sequence's: each one's image and its
+/// left, right, top and bottom.
+pub(in crate::app::model_preview) fn leaf_plate_sprites(bitmap: &TagFile) -> Vec<(i16, [f32; 4])> {
+    BitmapDefinition::from_tag(bitmap)
+        .sequences
+        .first()
+        .map_or(Vec::new(), |sequence| {
+            sequence
+                .sprites
+                .iter()
+                .map(|sprite| (sprite.bitmap_index, sprite.rect()))
+                .collect()
+        })
+}
+
 /// What an object's `leaf_system`s come to: at their marker, or the middle of
 /// the object as `object_get_bounding_sphere` has it.
 pub(in crate::app::model_preview) fn read_h3_leaves(
@@ -264,11 +280,7 @@ pub(in crate::app::model_preview) fn read_h3_leaves(
             continue;
         };
         let bitmap = reader.load(&plate, "bitmap", b"bitm").ok();
-        let sprites = bitmap.as_ref().map_or(Vec::new(), |bitmap| {
-            elements(bitmap.root(), "sequences")
-                .first()
-                .map_or(Vec::new(), |sequence| elements(*sequence, "sprites"))
-        });
+        let sprites = bitmap.as_deref().map_or(Vec::new(), leaf_plate_sprites);
         let mut bitmap_index = 0;
         let types: Vec<LeafType> = elements(root, "leaf types")
             .iter()
@@ -276,13 +288,10 @@ pub(in crate::app::model_preview) fn read_h3_leaves(
                 let real = |name: &str| leaf.read_real(name).unwrap_or(0.0);
                 let sprite = sprites
                     .get(leaf.read_int_any("bitmap sprite index").unwrap_or(0).max(0) as usize);
-                if let Some(sprite) = sprite {
-                    bitmap_index = sprite.read_int_any("bitmap index").unwrap_or(0) as i16;
+                if let Some((index, _)) = sprite {
+                    bitmap_index = *index;
                 }
-                let bounds = sprite.map_or([0.0, 1.0, 0.0, 1.0], |sprite| {
-                    ["left", "right", "top", "bottom"]
-                        .map(|name| sprite.read_real(name).unwrap_or(0.0))
-                });
+                let bounds = sprite.map_or([0.0, 1.0, 0.0, 1.0], |(_, bounds)| *bounds);
                 let scale = leaf.read_real_bounds("geometry scale");
                 let friction = match leaf
                     .field("air friction XY and Z")
