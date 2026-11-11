@@ -3627,6 +3627,15 @@ mod tests {
                         },
                         ctx,
                     );
+                    // Flat view paints rows only after its catalogue is ready.
+                    // A fixed frame count can finish before that worker under suite load.
+                    h.frame(Vec::new());
+                    crate::app::loose_fixture::pump_until(
+                        &mut h.app,
+                        "folder browser catalogue",
+                        |app| app.model.kits[app.model.active].source.as_ref()
+                            .is_some_and(|source| source.complete_scan),
+                    );
                 },
                 &["rifle.biped", "rifle.scenery"],
             ),

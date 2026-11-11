@@ -167,7 +167,7 @@ pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi) {
                             });
                             ui.add_space(8.0);
                             if !conflict.replace_allowed() { ui.label("A file and a folder have the same name. Replace is unavailable."); }
-                            ui.checkbox(&mut review.apply_remaining, "Apply this choice to all remaining conflicts");
+                            ui.baboon_checkbox(&mut review.apply_remaining, "Apply this choice to all remaining conflicts");
                         }
                     }
                 });
