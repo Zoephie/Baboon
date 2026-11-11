@@ -2,6 +2,7 @@
 //! It owns generic schema-driven field presentation; tag-specific panels and application workflow coordination belong elsewhere.
 
 use super::*;
+use crate::core::tag_path_completion::Wanted;
 use std::borrow::Cow;
 
 pub(in crate::app) fn tag_reference_catalog_for_source(
@@ -240,7 +241,18 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
             (if wrong_type { "wrong tag type" } else { "invalid reference" }, reason)
         })
     }).flatten();
+    // The kit's folders and tags of the groups the field takes, offered
+    // under the box once its text has been changed.
+    let completion = TagPathCompletion::for_kit(
+        edit.tag_reference_catalog.map(|catalog| catalog.entries),
+        edit.tags_root,
+        edit.names,
+        Wanted::Tags(accepted.as_deref()),
+        edit.game,
+    );
+    // Escape in an open list only closes it.
     if rejected.is_some() && ui.memory(|memory| memory.has_focus(id) || memory.had_focus_last_frame(id))
+        && !completion_list_open(ui, id)
         && ui.input(|input| input.key_pressed(egui::Key::Escape))
     {
         draft.set_clean(value);
@@ -281,7 +293,8 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
             let is_bitmap_reference = icon_group == Some(u32::from_be_bytes(*b"bitm"));
             let icon = tag_icon(icon_group, edit.game);
             let value_response = if editable {
-                let response = foundation_tag_reference_text_edit_cell(
+                let offer = draft.changed;
+                let (response, picked) = foundation_tag_reference_text_edit_cell(
                     ui,
                     &mut draft.text,
                     value_width,
@@ -289,10 +302,29 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     icon,
                     missing,
                     rejected.as_ref().map(|(label, reason)| (*label, reason.as_str())),
+                    completion.as_ref().map(|completion| (completion, offer)),
                 );
 
                 if response.changed() { ui.ctx().request_repaint(); }
 
+                // The box holds the picked row's text already.
+                match picked {
+                    Some(Picked::Folder) => draft.changed = true,
+                    Some(Picked::Tag { group_tag, path: tag }) => {
+                        ui.ctx().request_repaint();
+                        commit_tag_reference_input(
+                            edit.pending,
+                            edit.status.as_deref_mut(),
+                            path,
+                            format_tag_reference_input(group_tag, &tag),
+                            accepted.as_deref(),
+                            edit.names,
+                            edit.game,
+                        );
+                        draft.mark_committed();
+                    }
+                    None => {}
+                }
                 draft.note_response(&response);
                 if draft.should_commit(ui, &response) {
                     ui.ctx().request_repaint();
@@ -1014,6 +1046,265 @@ mod tests {
         }]);
         assert!(!has_warning(&output, "invalid reference"));
         assert_eq!(edit.buffers.draft_mut(&key, "NONE").text, "NONE");
+    }
+
+    const SKY: u32 = u32::from_be_bytes(*b"sky ");
+    const BITMAP: u32 = u32::from_be_bytes(*b"bitm");
+
+    /// A Halo 2 reference row over a loose tags folder holding a sky and a
+    /// bitmap of one name, driven frame by frame as the app drives it.
+    struct CompletionRow<'a> {
+        ctx: egui::Context,
+        edit: FieldEditContext<'a>,
+        meta: FieldDisplayMeta,
+        key: String,
+        id: egui::Id,
+        time: f64,
+    }
+
+    impl CompletionRow<'_> {
+        fn frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+            self.time += 1.0 / 60.0;
+            let (meta, edit) = (&self.meta, &mut self.edit);
+            crate::app::run_ui_test(&self.ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1100.0, 500.0))),
+                time: Some(self.time),
+                focused: true,
+                events,
+                ..Default::default()
+            }, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    draw_foundation_tag_reference_row(ui, meta, "NONE", None, None, 0, "sky", edit, 320.0);
+                });
+            })
+        }
+
+        /// Focus the box holding `text`, typed (the cursor at its end), and
+        /// draw it for two frames: the list paints nothing on the frame it
+        /// opens, and takes its keys from the frame after.
+        fn type_text(&mut self, text: &str) -> egui::FullOutput {
+            let draft = self.edit.buffers.draft_mut(&self.key, "NONE");
+            draft.text = text.to_owned();
+            draft.changed = true;
+            let mut state = egui::TextEdit::load_state(&self.ctx, self.id).unwrap_or_default();
+            let end = egui::text::CCursor::new(text.chars().count());
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
+            egui::TextEdit::store_state(&self.ctx, self.id, state);
+            self.ctx.memory_mut(|memory| memory.request_focus(self.id));
+            self.frame(Vec::new());
+            self.frame(Vec::new())
+        }
+
+        fn press(&mut self, key: egui::Key) -> egui::FullOutput {
+            self.frame(vec![egui::Event::Key {
+                key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE,
+            }])
+        }
+
+        /// Slide the pointer onto `pos` over three frames, then press and
+        /// release there.
+        fn click(&mut self, pos: egui::Pos2) -> egui::FullOutput {
+            for step in 1..=3 {
+                self.frame(vec![egui::Event::PointerMoved(pos - Vec2::new(0.0, (3 - step) as f32 * 2.0))]);
+            }
+            for pressed in [true, false] {
+                self.frame(vec![egui::Event::PointerButton {
+                    pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            self.frame(Vec::new())
+        }
+
+        fn text(&mut self) -> String {
+            self.edit.buffers.draft_mut(&self.key, "NONE").text.clone()
+        }
+
+        fn focused(&self) -> bool {
+            self.ctx.memory(|memory| memory.has_focus(self.id))
+        }
+
+        /// What a refused commit wrote to the status line.
+        fn status(&self) -> &str {
+            self.edit.status.as_deref().map_or("", String::as_str)
+        }
+    }
+
+    /// Where `text` is drawn, if it is.
+    fn drawn_at(output: &egui::FullOutput, text: &str) -> Option<egui::Pos2> {
+        output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(shown) if shown.galley.text() == text => Some(shown.pos + shown.galley.size() * 0.5),
+            _ => None,
+        })
+    }
+
+    /// Run `test` on a row whose field takes `allowed` (any group if empty),
+    /// over a tags folder holding `altis\sky\snow\snow` as a sky and as a
+    /// bitmap, `snowflake.bitmap` beside them, and `altis\sky\snowy.sky`.
+    fn with_completion_row(name: &str, allowed: &[u32], test: impl FnOnce(&mut CompletionRow<'_>)) {
+        let root = std::env::temp_dir().join(format!("baboon-ref-completion-{name}-{}", std::process::id()));
+        let snow = root.join("altis").join("sky").join("snow");
+        std::fs::create_dir_all(&snow).unwrap();
+        for file in ["snow.sky", "snow.bitmap", "snowflake.bitmap"] {
+            std::fs::write(snow.join(file), []).unwrap();
+        }
+        std::fs::write(root.join("altis").join("sky").join("snowy.sky"), []).unwrap();
+        let names = crate::core::format::TagNameIndex::load_game(
+            &crate::core::bundled::locate_definitions_root(),
+            GameId::Halo2,
+        )
+        .unwrap();
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        egui_extras::install_image_loaders(&ctx);
+        let mut status = String::new();
+        let mut sinks = EditSinks::default();
+        let mut edit = FieldEditContext::read_only(&mut sinks, "test", "tag");
+        edit.status = Some(&mut status);
+        edit.editable = true;
+        edit.game = Some(GameId::Halo2);
+        edit.tags_root = Some(&root);
+        edit.names = Some(&names);
+        let mut meta = field_display_meta("sky");
+        meta.tag_reference_allowed = allowed.to_vec();
+        let key = "tag|sky".to_owned();
+        let id = edit.widget_id(("tag_ref", &key));
+        let mut row = CompletionRow { ctx, edit, meta, key, id, time: 0.0 };
+        row.frame(Vec::new());
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| test(&mut row)));
+        drop(row);
+        std::fs::remove_dir_all(&root).unwrap();
+        if let Err(panic) = outcome {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    /// A pasted path without an extension lists the tags of that name the
+    /// field takes, and only those; with no group named, every one.
+    #[test]
+    fn a_pasted_path_lists_the_tags_of_that_name_the_field_takes() {
+        for (allowed, listed, not_listed) in [
+            (vec![SKY], vec!["snow.sky"], vec!["snow.bitmap", "snowflake.bitmap"]),
+            (vec![BITMAP], vec!["snow.bitmap", "snowflake.bitmap"], vec!["snow.sky"]),
+            (vec![], vec!["snow.sky", "snow.bitmap", "snowflake.bitmap"], vec![]),
+        ] {
+            with_completion_row("lists", &allowed, |row| {
+                let output = row.type_text(r"altis\sky\snow\snow");
+                for label in &listed {
+                    assert!(drawn_at(&output, label).is_some(), "{allowed:?} lists {label}");
+                }
+                for label in &not_listed {
+                    assert!(drawn_at(&output, label).is_none(), "{allowed:?} must not list {label}");
+                }
+                assert!(row.edit.pending.is_empty(), "listing applies nothing");
+            });
+        }
+    }
+
+    /// Nothing is completed by itself: leaving the box with a path that has
+    /// no extension applies nothing and warns, even though only one tag
+    /// matches it.
+    #[test]
+    fn an_extensionless_path_is_not_applied_on_leaving_the_box() {
+        with_completion_row("blur", &[SKY], |row| {
+            let output = row.type_text(r"altis\sky\snow\snow");
+            assert!(drawn_at(&output, "snow.sky").is_some(), "the one matching tag is offered");
+            row.ctx.memory_mut(|memory| memory.surrender_focus(row.id));
+            let output = row.frame(Vec::new());
+            assert!(row.edit.pending.is_empty(), "the path was applied without being picked");
+            assert!(drawn_at(&output, "invalid reference").is_some());
+            assert!(drawn_at(&output, "snow.sky").is_none(), "the list closes with the box");
+            assert_eq!(row.text(), r"altis\sky\snow\snow", "the text stays in the box");
+        });
+    }
+
+    /// Enter picks the highlighted row, which applies the tag it names with
+    /// its group.
+    #[test]
+    fn enter_applies_the_highlighted_tag() {
+        with_completion_row("enter", &[SKY], |row| {
+            row.type_text(r"altis\sky\snow\snow");
+            let output = row.press(egui::Key::Enter);
+            let inputs: Vec<_> = row.edit.pending.iter().map(|edit| edit.input.as_str()).collect();
+            assert_eq!(inputs, [r"sky:altis\sky\snow\snow"]);
+            assert_eq!(row.text(), r"altis\sky\snow\snow.sky");
+            assert!(drawn_at(&output, "invalid reference").is_none());
+        });
+    }
+
+    /// Clicking a row applies its tag, and the click doesn't first commit
+    /// the half-typed text by taking focus from the box.
+    #[test]
+    fn clicking_a_row_applies_its_tag_without_committing_the_typing() {
+        with_completion_row("click", &[], |row| {
+            let output = row.type_text(r"altis\sky\snow\snow");
+            let bitmap = drawn_at(&output, "snow.bitmap").expect("the bitmap is offered");
+            row.click(bitmap);
+            let inputs: Vec<_> = row.edit.pending.iter().map(|edit| edit.input.as_str()).collect();
+            assert_eq!(inputs, [r"bitm:altis\sky\snow\snow"], "only the picked tag is applied");
+            assert_eq!(row.text(), r"altis\sky\snow\snow.bitmap");
+            assert_eq!(row.status(), "", "the typing was committed (and refused) before the pick");
+            assert!(row.focused(), "the click took focus from the box");
+        });
+        // A click anywhere else does take focus, and commits what is typed.
+        with_completion_row("click-elsewhere", &[], |row| {
+            row.type_text(r"altis\sky\snow\snow");
+            let output = row.click(egui::pos2(900.0, 400.0));
+            assert!(!row.focused());
+            assert!(row.status().contains("Invalid tag reference"), "{}", row.status());
+            assert!(drawn_at(&output, "invalid reference").is_some());
+            assert!(row.edit.pending.is_empty());
+        });
+    }
+
+    /// Focusing a box doesn't cover what is below it: the list waits for the
+    /// text to be changed.
+    #[test]
+    fn the_list_waits_for_the_text_to_change() {
+        with_completion_row("unchanged", &[SKY], |row| {
+            row.edit.buffers.draft_mut(&row.key, "NONE").text = r"altis\sky\snow\snow".to_owned();
+            row.ctx.memory_mut(|memory| memory.request_focus(row.id));
+            row.frame(Vec::new());
+            let output = row.frame(Vec::new());
+            assert!(row.focused());
+            assert!(drawn_at(&output, "snow.sky").is_none(), "the list opened on focus alone");
+            let output = row.type_text(r"altis\sky\snow\snow");
+            assert!(drawn_at(&output, "snow.sky").is_some(), "the list opens once the text changes");
+        });
+    }
+
+    /// Picking a folder puts it and a separator in the box and typing goes
+    /// on there: nothing is applied and the box keeps focus.
+    #[test]
+    fn picking_a_folder_continues_typing_inside_it() {
+        with_completion_row("folder", &[SKY], |row| {
+            let output = row.type_text(r"altis\sky\sn");
+            assert!(drawn_at(&output, "snowy.sky").is_some());
+            row.press(egui::Key::Enter);
+            assert_eq!(row.text(), "altis\\sky\\snow\\", "the folder sorts first and is picked");
+            assert!(row.edit.pending.is_empty());
+            assert!(row.focused());
+            // The list closes on the frame a row is picked, and paints
+            // nothing on the frame it reopens.
+            row.frame(Vec::new());
+            let output = row.frame(Vec::new());
+            assert!(drawn_at(&output, "snow.sky").is_some(), "the folder's own tags are listed next");
+        });
+    }
+
+    /// The first Escape only closes the list; the next restores the stored
+    /// value, as Escape in the box always has.
+    #[test]
+    fn escape_closes_the_list_before_it_restores_the_value() {
+        with_completion_row("escape", &[SKY], |row| {
+            row.type_text(r"altis\sky\snow\snow");
+            let output = row.press(egui::Key::Escape);
+            assert!(drawn_at(&output, "snow.sky").is_none(), "the list closes");
+            assert_eq!(row.text(), r"altis\sky\snow\snow", "the typing is kept");
+            assert!(row.focused());
+            row.press(egui::Key::Escape);
+            assert_eq!(row.text(), "NONE", "the second Escape restores the stored value");
+            assert!(row.edit.pending.is_empty());
+        });
     }
 
     #[test]
