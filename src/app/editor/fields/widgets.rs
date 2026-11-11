@@ -518,9 +518,9 @@ pub(super) fn foundation_tag_reference_input_cell_colored(
     })
 }
 
-/// A tag reference's text box, with `completion`'s list under it while the
-/// second of the pair (the text holds a change) is true. Returns the box's
-/// response and the row picked from the list.
+/// A tag reference's text box, with `completion`'s list under it when the
+/// [`Offer`] holds. Returns the box's response and the row picked from the
+/// list.
 pub(super) fn foundation_tag_reference_text_edit_cell(
     ui: &mut Ui,
     text: &mut String,
@@ -529,7 +529,7 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
     icon: TagIcon,
     missing: bool,
     rejected: Option<(&str, &str)>,
-    completion: Option<(&TagPathCompletion<'_>, bool)>,
+    completion: Option<(&TagPathCompletion<'_>, &Offer)>,
 ) -> (egui::Response, Option<Picked>) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
     let mut picked = None;

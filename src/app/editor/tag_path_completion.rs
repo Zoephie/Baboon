@@ -29,6 +29,26 @@ pub(in crate::app) struct TagPathCompletion<'a> {
     pub(in crate::app) game: Option<GameId>,
 }
 
+/// When a box's list may open: once its text has been changed, so focusing
+/// a box doesn't cover what is below it.
+pub(in crate::app) struct Offer {
+    /// The draft held a change before this frame.
+    changed: bool,
+    /// The text before this frame's typing, which opens the list on the
+    /// frame the typing lands rather than on the next one drawn.
+    before: String,
+}
+
+impl Offer {
+    pub(in crate::app) fn new(changed: bool, before: &str) -> Self {
+        Self { changed, before: before.to_owned() }
+    }
+
+    fn holds(&self, text: &str) -> bool {
+        self.changed || text != self.before
+    }
+}
+
 /// A row picked from the list. The box already holds its text: a folder's
 /// path and a separator, or a tag's path and extension.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,15 +113,14 @@ impl<'a> TagPathCompletion<'a> {
         }
     }
 
-    /// Show `edit` (given the id `id`) with the list under it. The list opens
-    /// only while `offer` holds, which a caller ties to the text having been
-    /// changed, so focusing a box doesn't cover what is below it.
+    /// Show `edit` (given the id `id`) with the list under it, open only when
+    /// `offer` holds.
     pub(in crate::app) fn show(
         &self,
         ui: &mut Ui,
         id: egui::Id,
         edit: egui::TextEdit<'_>,
-        offer: bool,
+        offer: &Offer,
     ) -> (egui::text_edit::TextEditOutput, Option<Picked>) {
         let ctx = ui.ctx().clone();
         let folder_icon = button_icon_image(ui, ButtonIcon::FolderClosed, text_dark(), 16.0);
@@ -112,7 +131,7 @@ impl<'a> TagPathCompletion<'a> {
             .align(egui::RectAlign::BOTTOM_START)
             .max_height(LIST_HEIGHT)
             .show(ui, edit, |query| {
-                if !offer {
+                if !offer.holds(query.text) {
                     return Vec::new();
                 }
                 rows = self.rows(&ctx, query.word);

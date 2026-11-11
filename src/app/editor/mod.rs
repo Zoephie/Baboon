@@ -419,7 +419,7 @@ mod responsive_page_tests {
 }
 
 pub(in crate::app) mod tag_path_completion;
-pub(in crate::app) use tag_path_completion::{Picked, TagPathCompletion, completion_list_open};
+pub(in crate::app) use tag_path_completion::{Offer, Picked, TagPathCompletion, completion_list_open};
 pub(in crate::app) mod fields;
 pub(in crate::app) use fields::*;
 pub(in crate::app) mod shader;

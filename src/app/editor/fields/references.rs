@@ -293,7 +293,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
             let is_bitmap_reference = icon_group == Some(u32::from_be_bytes(*b"bitm"));
             let icon = tag_icon(icon_group, edit.game);
             let value_response = if editable {
-                let offer = draft.changed;
+                let offer = Offer::new(draft.changed, &draft.text);
                 let (response, picked) = foundation_tag_reference_text_edit_cell(
                     ui,
                     &mut draft.text,
@@ -302,7 +302,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     icon,
                     missing,
                     rejected.as_ref().map(|(label, reason)| (*label, reason.as_str())),
-                    completion.as_ref().map(|completion| (completion, offer)),
+                    completion.as_ref().map(|completion| (completion, &offer)),
                 );
 
                 if response.changed() { ui.ctx().request_repaint(); }
@@ -1288,6 +1288,21 @@ mod tests {
             row.frame(Vec::new());
             let output = row.frame(Vec::new());
             assert!(drawn_at(&output, "snow.sky").is_some(), "the folder's own tags are listed next");
+        });
+    }
+
+    /// The list opens on the typing itself, and is painted on the next
+    /// frame: no further input or repaint is needed for it to show.
+    #[test]
+    fn typing_opens_the_list_at_once() {
+        with_completion_row("typing", &[SKY], |row| {
+            row.edit.buffers.draft_mut(&row.key, "NONE").text.clear();
+            row.ctx.memory_mut(|memory| memory.request_focus(row.id));
+            row.frame(Vec::new());
+            row.frame(vec![egui::Event::Text(r"altis\sky\snow\snow".to_owned())]);
+            assert_eq!(row.text(), r"altis\sky\snow\snow");
+            let output = row.frame(Vec::new());
+            assert!(drawn_at(&output, "snow.sky").is_some(), "the list waited a frame to open");
         });
     }
 
