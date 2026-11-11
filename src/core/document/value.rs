@@ -645,14 +645,15 @@ pub(crate) fn parse_tag_reference(input: &str) -> Result<TagReferenceData, Strin
             group_tag_and_name: Some((group_tag, tag_path::from_input(path))),
         });
     }
-    let Some((path, extension)) = input.rsplit_once('.') else {
+    let input = tag_path::from_input(input);
+    let Some((path, extension)) = tag_path::split_extension(&input) else {
         return Err("expected <path>.<group> or GROUP:<path>".to_owned());
     };
     let group_tag = extension_to_group_tag(extension)
         .or_else(|| parse_group_tag(extension))
         .ok_or_else(|| format!("unknown tag group {extension:?}"))?;
     Ok(TagReferenceData {
-        group_tag_and_name: Some((group_tag, tag_path::from_input(path))),
+        group_tag_and_name: Some((group_tag, path.to_owned())),
     })
 }
 
@@ -744,6 +745,24 @@ mod tests {
     use crate::core::document::apply::apply_field_edit;
     use crate::core::source::NewContainerTemplate;
     use crate::core::test_kits::test_definition_path;
+
+    /// The extension is read from the tag's name only. A dot in a folder was
+    /// taken as one: `levels\a.b\c` parsed as group `b\c` at `levels\a`.
+    #[test]
+    fn a_dot_in_a_folder_is_not_an_extension() {
+        let parsed = |input: &str| parse_tag_reference(input).map(|reference| reference.group_tag_and_name);
+        assert_eq!(
+            parsed(r"levels\a10.old\foo.scenario"),
+            Ok(Some((u32::from_be_bytes(*b"scnr"), r"levels\a10.old\foo".to_owned())))
+        );
+        assert_eq!(
+            parsed("levels/a10.old/foo.scenario"),
+            Ok(Some((u32::from_be_bytes(*b"scnr"), r"levels\a10.old\foo".to_owned())))
+        );
+        for input in [r"levels\a.b\c", "levels/a.b/c", r"levels\a10.old\foo"] {
+            assert!(parsed(input).is_err(), "{input} has no extension: {:?}", parsed(input));
+        }
+    }
 
     /// Every fallback entry is a group some game really has by that name.
     /// `shader_particle` and `shader_contrail` were filed under `rmp ` and

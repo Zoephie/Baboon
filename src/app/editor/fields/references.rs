@@ -250,7 +250,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
     // (e.g. `.mode` while typing `.model`). Keep that draft neutral until submit
     // or blur, while complete incompatible extensions still warn immediately.
     let editing_draft = draft.changed && ui.memory(|memory| memory.has_focus(id));
-    let unfinished_extension = editing_draft && rejected.is_some() && draft.text.trim().rsplit_once('.').is_some_and(|(_, extension)| {
+    let unfinished_extension = editing_draft && rejected.is_some() && tag_path::split_extension(&tag_path::from_input(draft.text.trim())).is_some_and(|(_, extension)| {
         let prefix = extension.to_ascii_lowercase();
         accepted.as_ref().is_some_and(|groups| groups.iter().any(|group| {
             hierarchy.name(*group)
@@ -589,7 +589,8 @@ pub(in crate::app) fn tag_reference_input_in_game(
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") || trimmed.contains(':') {
         return Cow::Borrowed(input);
     }
-    let Some((path, extension)) = trimmed.rsplit_once('.') else {
+    let typed = tag_path::from_input(trimmed);
+    let Some((path, extension)) = tag_path::split_extension(&typed) else {
         return Cow::Borrowed(input);
     };
     match crate::app::help::bundled_group_hierarchy(game).group_named(extension) {
@@ -1827,8 +1828,14 @@ mod tests {
             tag_reference_input_in_game(r"a\b.model", Some(GameId::HaloReach)),
             r"hlmt:a\b"
         );
-        // Already naming its group, empty, none, or no such group: as typed.
-        for input in [r"weap:a\b", "", "NONE", r"a\b.not_a_group"] {
+        // Typed `/` is a separator, and a dot in a folder is not an extension.
+        assert_eq!(
+            tag_reference_input_in_game("a.weapon/b.model", Some(GameId::HaloReach)),
+            r"hlmt:a.weapon\b"
+        );
+        // Already naming its group, empty, none, no such group, or no
+        // extension in the name: as typed.
+        for input in [r"weap:a\b", "", "NONE", r"a\b.not_a_group", r"a.model\b"] {
             assert_eq!(
                 tag_reference_input_in_game(input, Some(GameId::HaloCe)),
                 input

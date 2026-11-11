@@ -30,14 +30,22 @@ pub(crate) fn name(path: &str) -> &str {
     path.rsplit_once(SEPARATOR).map_or(path, |(_, name)| name)
 }
 
+/// A tag path split before the extension its name ends in, or `None` when it
+/// has none: `levels\a10.old\foo.scenario` is `levels\a10.old\foo` and
+/// `scenario`. A dot in a folder, or one that starts the name, is not an
+/// extension.
+pub(crate) fn split_extension(path: &str) -> Option<(&str, &str)> {
+    let start = path.rfind(SEPARATOR).map_or(0, |separator| separator + 1);
+    match path[start..].rfind('.') {
+        Some(dot) if dot > 0 => Some((&path[..start + dot], &path[start + dot + 1..])),
+        _ => None,
+    }
+}
+
 /// A tag path without the extension its name ends in, if it has one. A dot in
 /// a folder, or one that starts the name, is not an extension.
 pub(crate) fn without_extension(path: &str) -> &str {
-    let start = path.rfind(SEPARATOR).map_or(0, |separator| separator + 1);
-    match path[start..].rfind('.') {
-        Some(dot) if dot > 0 => &path[..start + dot],
-        _ => path,
-    }
+    split_extension(path).map_or(path, |(stem, _)| stem)
 }
 
 /// A tag path's folders and name, with empty segments skipped.
@@ -91,6 +99,10 @@ mod tests {
         assert_eq!(without_extension("objects\\props\\crate.scenery"), "objects\\props\\crate");
         assert_eq!(without_extension("levels\\v1.2\\rock"), "levels\\v1.2\\rock");
         assert_eq!(without_extension("objects\\.hidden"), "objects\\.hidden");
+        assert_eq!(split_extension("levels\\a10.old\\foo.scenario"), Some(("levels\\a10.old\\foo", "scenario")));
+        assert_eq!(split_extension("levels\\a10.old\\foo"), None);
+        assert_eq!(split_extension("objects\\.hidden"), None);
+        assert_eq!(split_extension("crate.scenery"), Some(("crate", "scenery")));
         assert_eq!(to_relative("objects\\props"), PathBuf::from("objects").join("props"));
         assert_eq!(relative_tag_path(&to_relative("objects\\props")), "objects\\props");
         // `/` is not a separator in a tag path, only in what a person types.
