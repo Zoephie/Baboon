@@ -2,6 +2,7 @@
 //! It owns shader-specific models, edits, and presentation helpers; generic field editing, and the commands that apply edits, belong elsewhere.
 
 use super::*;
+use crate::core::tag_path_completion::Wanted;
 
 const SHADER_MODIFIED_ACCENT: Color32 = Color32::from_rgb(224, 158, 62);
 
@@ -2687,6 +2688,18 @@ fn draw_shader_reference_cell(
     } else {
         material_text()
     };
+    // The kit's folders and tags of the cell's group, offered under the box
+    // once its text has been changed.
+    let groups = [cell.group_tag];
+    let completion = TagPathCompletion::for_kit(
+        edit.tag_reference_catalog.map(|catalog| catalog.entries),
+        edit.tags_root,
+        edit.names,
+        Wanted::Tags(Some(&groups)),
+        edit.game,
+    );
+    let offer = Offer::new(draft.changed, &draft.text);
+    let mut picked = None;
     let mut commit = None;
     shader_cell_scope(ui, text_rect, |ui| {
         ui.visuals_mut().extreme_bg_color = foundation_input();
@@ -2702,8 +2715,7 @@ fn draw_shader_reference_cell(
                 text_color,
             )
         };
-        let resp = ui.add(
-            crate::app::ui_kit::singleline_text_edit(&mut draft.text)
+        let text_edit = crate::app::ui_kit::singleline_text_edit(&mut draft.text)
                 .id(id)
                 .margin(egui::Margin {
                     left: icon_inset,
@@ -2718,8 +2730,20 @@ fn draw_shader_reference_cell(
                 .text_color(text_color)
                 .font(egui::TextStyle::Body)
                 .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
-                .vertical_align(egui::Align::Center),
-        );
+                .vertical_align(egui::Align::Center);
+        let resp = match &completion {
+            Some(completion) => {
+                text_edit
+                    .show_through(ui, &mut |ui, text_edit| {
+                        let (output, row) = completion.show(ui, id, text_edit, &offer);
+                        picked = row;
+                        output
+                    })
+                    .response
+                    .response
+            }
+            None => ui.add(text_edit),
+        };
         let shown = shader_reference_name(&draft.text);
         if shown != draft.text
             || ui
@@ -2742,6 +2766,22 @@ fn draw_shader_reference_cell(
             );
             resp.clone()
                 .on_hover_text(format!("Referenced {extension} not found on disk"));
+        }
+        // The box holds the picked row's text already. A tag becomes the
+        // cell's own form of it, as a dropped one does.
+        match picked.take() {
+            Some(Picked::Folder) => draft.changed = true,
+            Some(Picked::Tag { group_tag, path }) => {
+                let value = (cell.drop_value)(&DraggedTagRef {
+                    group_tag,
+                    input: format_tag_reference_input(group_tag, &path),
+                    rel_path: path,
+                    file_path: None,
+                });
+                draft.set_clean(value.clone());
+                commit = Some(value);
+            }
+            None => {}
         }
         draft.note_response(&resp);
         if draft.should_commit(ui, &resp) {
@@ -3950,6 +3990,110 @@ mod tests {
         // read-only tag — which only the bitmap cell used to refuse.
         assert!(drop_onto(structural(), &bitmap, true).is_empty());
         assert!(drop_onto(ShaderRowEditKind::ShaderTemplateRef, &template, false).is_empty());
+    }
+
+    /// Type `typed` into a real shader reference cell of `kind`, over a
+    /// loose tags folder holding a rifle's bitmap and weapon and two shader
+    /// tags, then press Enter. Returns what the list showed once typed and
+    /// the field edits the cell committed.
+    fn pick_in(kind: ShaderRowEditKind, game: GameId, typed: &str) -> (Vec<String>, Vec<String>) {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-shader-completion-{}-{}",
+            std::process::id(),
+            typed.replace('\\', "-")
+        ));
+        for (folder, file) in [
+            ("objects/rifle", "rifle.bitmap"),
+            ("objects/rifle", "rifle.weapon"),
+            ("shaders", "opaque.shader_template"),
+            ("shaders", "shader.render_method_definition"),
+        ] {
+            std::fs::create_dir_all(root.join(folder)).unwrap();
+            std::fs::write(root.join(folder).join(file), []).unwrap();
+        }
+        let definitions_root = locate_definitions_root();
+        let names = crate::core::format::TagNameIndex::load_game(&definitions_root, game).unwrap();
+        let row_edit = ShaderRowEdit { path: "field".to_owned(), current: String::new(), kind };
+        let ctx = egui::Context::default();
+        let mut sinks = EditSinks::default();
+        let mut committed = Vec::new();
+        let mut time = 0.0;
+        let cell_rect = std::cell::Cell::new(egui::Rect::NOTHING);
+        let mut frame = |events: Vec<egui::Event>| {
+            time += 1.0 / 60.0;
+            crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(600.0, 400.0))),
+                    time: Some(time),
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(360.0, 22.0), Sense::hover());
+                        cell_rect.set(egui::Rect::from_min_size(rect.min, Vec2::new(200.0, 22.0)));
+                        let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
+                        edit.game = Some(game);
+                        edit.definitions_root = Some(definitions_root.as_path());
+                        edit.tags_root = Some(&root);
+                        edit.names = Some(&names);
+                        edit.editable = true;
+                        draw_shader_editable_value(ui, rect, "Reference", &row_edit, &mut edit, &mut None);
+                        committed.extend(edit.pending.iter().map(|edit| edit.input.clone()));
+                    });
+                },
+            )
+        };
+        frame(Vec::new());
+        let click = cell_rect.get().center();
+        for step in 1..=3 {
+            frame(vec![egui::Event::PointerMoved(click - Vec2::new((3 - step) as f32 * 2.0, 0.0))]);
+        }
+        for pressed in [true, false] {
+            frame(vec![egui::Event::PointerButton {
+                pos: click, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+        frame(vec![egui::Event::Text(typed.to_owned())]);
+        let output = frame(Vec::new());
+        let listed = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text().contains('.') => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
+        frame(vec![egui::Event::Key {
+            key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE,
+        }]);
+        std::fs::remove_dir_all(&root).unwrap();
+        (listed, committed)
+    }
+
+    /// Every kind of reference cell lists the tags of its own group for a
+    /// typed path, and commits a picked one in the form a dropped one takes.
+    #[test]
+    fn each_reference_cell_commits_a_picked_tag_in_its_own_form() {
+        let bitmap = ShaderRowEditKind::BitmapRef { group_tag: u32::from_be_bytes(*b"bitm"), create: None };
+        let (listed, committed) = pick_in(bitmap, GameId::Halo3, r"objects\rifle\rifle");
+        assert!(listed.contains(&"rifle.bitmap".to_owned()), "{listed:?}");
+        assert!(!listed.contains(&"rifle.weapon".to_owned()), "another group is listed: {listed:?}");
+        assert_eq!(committed, [r"objects\rifle\rifle.bitmap"]);
+
+        let (listed, committed) = pick_in(ShaderRowEditKind::ShaderTemplateRef, GameId::Halo2, r"shaders\opaque");
+        assert!(listed.contains(&"opaque.shader_template".to_owned()), "{listed:?}");
+        assert_eq!(committed, [r"stem:shaders\opaque"]);
+
+        let structural = ShaderRowEditKind::StructuralRef {
+            group_tag: u32::from_be_bytes(*b"rmdf"),
+            extension: "render_method_definition",
+        };
+        let (listed, committed) = pick_in(structural, GameId::Halo3, r"shaders\shader");
+        assert!(listed.contains(&"shader.render_method_definition".to_owned()), "{listed:?}");
+        assert_eq!(committed, [r"rmdf:shaders\shader"]);
     }
 
     /// Switching templates must retain authored parameters for recovery and explicit cleanup.
