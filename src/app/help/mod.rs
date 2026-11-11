@@ -20,6 +20,7 @@ pub(in crate::app) use map_names::*;
 pub(in crate::app) mod window;
 pub(in crate::app) use window::HelpWindow;
 
+pub(in crate::app) const FOLDER_BROWSER_HELP_SECTION: &str = "Folder Browser";
 pub(in crate::app) const STRING_EDITOR_HELP_SECTION: &str = "Strings Editor";
 pub(in crate::app) const FIND_REPLACE_HELP_SECTION: &str = "Find and Replace";
 

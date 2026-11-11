@@ -134,6 +134,10 @@ fn table_id() -> egui::Id {
     egui::Id::unique("folder_browser_table_columns")
 }
 
+pub(in crate::app) fn folder_table_sort_signature(ui:&Ui)->Option<(FolderColumn,bool)> {
+    ui.data(|data|data.get_temp::<FolderTable>(table_id())).and_then(|table|table.sort)
+}
+
 pub(in crate::app) fn begin_folder_table(
     ui: &mut Ui,
     root: Option<PathBuf>,

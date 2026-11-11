@@ -148,11 +148,12 @@ impl Baboon {
             // here would repeat O(all tags) work while blocking the UI.
         }
         if done.moved {
-            let moved_folder = done
-                .moved_folder
-                .as_ref()
-                .map(|(from, to)| (from.as_path(), to.as_path()));
-            self.remap_favorites_for_kit(kit_index, &done.old_to_new_keys, moved_folder);
+            let moved_folders: Vec<_> = if done.moved_folders.is_empty() {done.moved_folder.iter().collect()}else{done.moved_folders.iter().collect()};
+            self.remap_favorites_for_folders(kit_index,&done.old_to_new_keys,&moved_folders.iter().map(|(from,to)|(from.as_path(),to.as_path())).collect::<Vec<_>>());
+            for (from,to) in &moved_folders {
+                let kit_id=self.model.kits[kit_index].id;
+                self.views[kit_id].browser.remap_folder_browser_paths(from,to);
+            }
             self.kit_and_view(kit_index).remap_tag_keys(&done.old_to_new_keys);
             // Keywords are filed by tag key: they move with the tags.
             let keywords = &mut self.model.kits[kit_index].keywords;
@@ -160,11 +161,6 @@ impl Baboon {
                 keywords.rekey_tag(old, new);
             }
             keywords.save_if_dirty();
-            // A docked browser on the folder, or inside it, follows it.
-            if let Some((from, to)) = moved_folder {
-                let kit_id = self.model.kits[kit_index].id;
-                self.views[kit_id].browser.remap_folder_browser_paths(from, to);
-            }
         }
         let kit = &mut self.model.kits[kit_index];
         let view = &mut self.views[kit.id];
@@ -509,6 +505,7 @@ mod tests {
                 old_to_new_keys: HashMap::from([(old_key.clone(), new_key.clone())]),
                 moved: true,
                 moved_folder: Some(("objects/brute".into(), "objects/elite".into())),
+                moved_folders: Vec::new(),
             }),
             &egui::Context::default(),
         );

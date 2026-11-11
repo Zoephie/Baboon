@@ -241,6 +241,15 @@
           ]
         },
         {
+          "title": "Folder Browser",
+          "blocks": [
+            {
+              "kind": "markdown",
+              "file": "folder-browser.md"
+            }
+          ]
+        },
+        {
           "title": "Strings Editor",
           "blocks": [
             {

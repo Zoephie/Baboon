@@ -4,6 +4,7 @@
 use super::*;
 
 pub(in crate::app) enum BrowserAction {
+    Bulk { pane: String, keys: Vec<String>, action: BulkAction },
     /// Open a docked browser pane rooted at one real folder.
     OpenFolderBrowser {
         rel_path: PathBuf,
@@ -148,6 +149,7 @@ pub(in crate::app) enum BrowserAction {
 
 /// Per-tab state for a docked browser rooted at one folder.
 pub(in crate::app) struct FolderBrowserState {
+    pub(in crate::app) selection: BrowserSelection,
     pub(in crate::app) selected_tag: Option<String>,
     pub(in crate::app) rel_path: PathBuf,
     pub(in crate::app) label: String,
@@ -447,6 +449,7 @@ pub(in crate::app) struct ContentExplorer {
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub(in crate::app) enum BrowserMode {
+    Flat,
     #[default]
     Folders,
     Groups,

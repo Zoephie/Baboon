@@ -189,6 +189,9 @@ pub(in crate::app) fn draw_folder_browser_pane(
         return;
     };
     let generation = cx.model.kits[kit_index].generation;
+    let before_view = (pane.mode, pane.assets_view, pane.filter.clone(), pane.search_scope, pane.asset_bitmaps, pane.asset_models);
+    let before_sort = (pane.sort, cx.model.prefs.folders_before_tags);
+    ui.data_mut(|data|data.insert_temp(browser_selection_owner_id().with("drawing"),(kit_id,pane_key.to_owned())));
     set_browser_selected_tag(ui, pane.selected_tag.clone());
     begin_browser_navigation(ui, egui::Id::unique(("folder_navigation", kit_id, pane_key)));
     let bitmap_hover_requests = begin_bitmap_hovers(ui, Arc::clone(&view.bitmap_browser.thumbnails));
@@ -266,6 +269,10 @@ pub(in crate::app) fn draw_folder_browser_pane(
                 return;
             };
 
+            set_operation_entries(
+                ui, kit_id, generation, source.full_entry_set(),
+                cx.model.editing_kit_is_read_only(kit_index), !is_loose || source.complete_scan,
+            );
             let header_entries = if is_loose {
                 &source.entries[..]
             } else {
@@ -283,7 +290,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
             ui.separator();
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                if view_tab_button(ui, ButtonIcon::FolderOpen, "Folder View", !pane.assets_view)
+                if view_tab_button(ui, if pane.mode==BrowserMode::Flat {ButtonIcon::FolderClosed}else{ButtonIcon::FolderOpen}, "Folder View", !pane.assets_view)
                     .clicked()
                 {
                     pane.assets_view = false;
@@ -295,9 +302,10 @@ pub(in crate::app) fn draw_folder_browser_pane(
                 }
             });
             ui.add_space(6.0);
-            egui::Frame::NONE.stroke(Stroke::new(1.0, ui.visuals().window_stroke.color))
-                .corner_radius(4).show(ui, |ui| {
-            let search_response = egui::Frame::NONE.fill(foundation_block_bar()).inner_margin(6)
+            egui::Frame::NONE.stroke(Stroke::new(1.0, foundation_block_edge()))
+                .corner_radius(crate::app::editor::fields::FOUNDATION_CONTAINER_RADIUS).show(ui, |ui| {
+            let header_background = ui.painter().add(egui::Shape::Noop);
+            let header = egui::Frame::NONE.inner_margin(6)
                 .show(ui, |ui| {
             if folder_browser_search_stacks(ui.available_width()) {
                 let search_response = browser_search_field(ui, &mut pane.filter, &search_hint);
@@ -328,7 +336,11 @@ pub(in crate::app) fn draw_folder_browser_pane(
                 })
                 .inner
             }
-            }).inner;
+            });
+            let search_response = header.inner;
+            paint_frame_band(ui, header_background, header.response.rect,
+                egui::CornerRadius::same(crate::app::editor::fields::FOUNDATION_CONTAINER_RADIUS as u8),
+                Stroke::new(1.0, foundation_block_edge()), foundation_block_bar(), true);
             if pane.focus_search {
                 search_response.request_focus();
                 pane.focus_search = false;
@@ -340,8 +352,12 @@ pub(in crate::app) fn draw_folder_browser_pane(
                         .color(Color32::from_rgb(184, 134, 11)),
                 );
             }
+            if before_sort != (pane.sort, folders_before_tags) { invalidate_browser_navigation(ui.ctx()); }
+            if before_view != (pane.mode, pane.assets_view, pane.filter.clone(), pane.search_scope, pane.asset_bitmaps, pane.asset_models) { invalidate_browser_navigation(ui.ctx()); pane.selection.clear(); pane.selected_tag = None; set_browser_selected_tag(ui,None); }
+            let body_height = (ui.available_height() - BUTTON_HEIGHT - 12.0 - ui.spacing().item_spacing.y).max(0.0);
+            ui.allocate_ui_with_layout(Vec2::new(ui.available_width(),body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
             egui::Frame::NONE.inner_margin(6).show(ui, |ui| {
-            ui.set_min_height((ui.available_height() - 6.0).max(0.0));
+            ui.set_min_height((ui.available_height() - 12.0).max(0.0));
             let search_root = match &source.source {
                 TagSource::LooseFolder { root, .. } => Some(root.as_path()),
                 _ => None,
@@ -373,6 +389,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
                     });
                     return;
                 }
+                begin_multi(ui,pane_key,kit_id,&pane.selection,true);
                 draw_folder_asset_grid(
                     cx,
                     ui,
@@ -384,6 +401,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
                     bitmap_library,
                     model_library,
                 );
+                if let Some(state) = end_multi(ui) { pane.selection = state.selection; }
                 return;
             }
 
@@ -401,7 +419,9 @@ pub(in crate::app) fn draw_folder_browser_pane(
                         pane.date_cache.clone(),
                         &mut pane.table_layout,
                     );
-                    draw_folder_pane_tree(
+                    if pane.mode == BrowserMode::Flat {
+                        flat::draw(ui, &mut pane, pane_key, kit_id, source, generation, folders_before_tags, double_click_to_open, &favorite_keys, &table_keywords, &mut need_scan, &mut load_requests, &mut action);
+                    } else { draw_folder_pane_tree(
                         ui,
                         &mut pane,
                         pane_key,
@@ -423,14 +443,19 @@ pub(in crate::app) fn draw_folder_browser_pane(
                         &mut load_requests,
                         &mut action,
                     );
+                    }
                     end_folder_table(ui);
                 });
             });
+            });
+            draw_browser_footer(cx, ui, &pane, pane_key, source, generation);
             });
         });
 
     finish_browser_navigation(ui);
     pane.selected_tag = browser_selected_tag(ui);
+
+
     queue_bitmap_hover_thumbnails(cx, kit_index, &mut view.bitmap_browser, &bitmap_hover_requests);
     edit_browser_prefs(cx, show_browser_prefixes, folders_before_tags);
     if pane.search_scope != previous_search_scope {
@@ -465,6 +490,60 @@ pub(in crate::app) fn draw_folder_browser_pane(
     if let Some(action) = action {
         cx.send(BrowserCommand::Action { kit: kit_id, action });
     }
+}
+
+/// Selection belongs to the browser container, including inactive split panes.
+fn draw_browser_footer(cx: &Ctx, ui: &mut Ui, pane: &FolderBrowserState, pane_key: &str, source: &LoadedSourceData, generation: u64) {
+    let multi = pane.mode == BrowserMode::Flat || pane.assets_view;
+    let (tags, folders) = if multi {
+        let folders = pane.selection.keys.iter().filter(|key| is_folder_pane_key(key)).count();
+        (pane.selection.keys.len() - folders, folders)
+    } else {
+        match browser_selected_tag(ui) {
+            Some(key) if is_folder_pane_key(&key) => (0, 1), Some(_) => (1, 0), None => (0, 0),
+        }
+    };
+    let total = if pane.assets_view {
+        thumbnail_library::asset_grid_order(ui, &format!("footer:{:?}:{pane_key}", ui.scope_id()), pane, source.full_entry_set(), Some(generation)).len()
+    } else {
+        // Listing totals are independent of search and selection. Cache the full
+        // entry walk so large editing kits pay for it only when contents change.
+        let entries = source.full_entry_set();
+        let signature = (generation, entries.as_ptr() as usize, entries.len(), pane.rel_path.clone(), flat::immediate_folders(pane, source).len());
+        let id = ui.make_persistent_id(("folder_item_total", pane_key));
+        let cached = ui.data(|data|data.get_temp::<((u64,usize,usize,PathBuf,usize),usize)>(id));
+        if let Some((_,count)) = cached.filter(|(key,_)| key == &signature) {count} else {
+            let parent=tag_path::relative_tag_path(&pane.rel_path);
+            let count=entries.iter().filter(|entry|tag_path::parent(&entry.display_path).unwrap_or("").eq_ignore_ascii_case(&parent)).count()+flat::immediate_folders(pane, source).len();
+            ui.data_mut(|data|data.insert_temp(id,(signature,count)));count
+        }
+    };
+    let shown = if multi {pane.selection.rows.len().min(total)} else {total};
+    let noun = if total == 1 {"item"} else {"items"};
+    let total_label = if shown == total {format!("{total} {noun}")} else {format!("{shown} of {total} {noun}")};
+    let selection = match (tags,folders) {
+        (0,0)=>"0 selected".into(),
+        (tags,0)=>format!("{tags} {} selected", if tags==1 {"tag"} else {"tags"}),
+        (0,folders)=>format!("{folders} {} selected", if folders==1 {"folder"} else {"folders"}),
+        (tags,folders)=>format!("{tags} {} and {folders} {} selected",if tags==1 {"tag"}else{"tags"},if folders==1 {"folder"}else{"folders"}),
+    };
+    let background = ui.painter().add(egui::Shape::Noop);
+    let footer = egui::Frame::NONE.inner_margin(6).show(ui,|ui| {
+        ui.set_min_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.set_height(BUTTON_HEIGHT);
+            if icon_button(ui, ButtonIcon::About, "About Folder Browser", true, text_dark()).clicked() {
+                cx.send(crate::app::help::HelpCommand::ShowDocSection(crate::app::help::FOLDER_BROWSER_HELP_SECTION));
+            }
+            let mut counts=egui::text::LayoutJob::default();
+            RichText::new(format!("{total_label} · ")).color(subtle_dark()).append_to(&mut counts,ui.style(),egui::FontSelection::Default,egui::Align::Center);
+            RichText::new(&selection).color(text_dark()).append_to(&mut counts,ui.style(),egui::FontSelection::Default,egui::Align::Center);
+            ui.add(egui::Label::new(counts).truncate()).on_hover_text(format!("{total_label} · {selection}"));
+        });
+    });
+    paint_frame_band(ui,background,footer.response.rect,
+        egui::CornerRadius::same(crate::app::editor::fields::FOUNDATION_CONTAINER_RADIUS as u8),
+        Stroke::new(1.0,foundation_block_edge()),foundation_block_bar(),false);
 }
 
 /// What a folder pane's tree reads besides the pane itself.
@@ -768,6 +847,11 @@ fn draw_kit_browser_inner(
     let kit = &cx.model.kits[kit_index];
     let search_keywords = kit.keywords.snapshot();
     if let Some(source) = kit.source.as_ref() {
+        set_operation_entries(
+            ui, kit_id, kit.generation, source.full_entry_set(),
+            cx.model.editing_kit_is_read_only(kit_index),
+            !matches!(source.source, TagSource::LooseFolder { .. }) || source.complete_scan,
+        );
         ui.add_space(8.0);
         let scanning = kit.scanning_entries;
         let mut need_scan = false;
@@ -1022,7 +1106,7 @@ fn draw_kit_browser_inner(
                     }
                 } else {
                     match mode {
-                        BrowserMode::Folders => {
+                        BrowserMode::Flat | BrowserMode::Folders => {
                             if let TagSource::LooseFolder { .. } = &source.source {
                                 draw_tree_lazy(
                                     ui,
@@ -1217,15 +1301,17 @@ fn browser_toolbar_controls(
     style_browser_toolbar(ui);
 
     let mut groups_clicked = false;
+    let dedicated = table_layout.is_some();
     browser_sort_control(ui, sort, folders_before_tags, table_layout);
     if show_modes {
         icon_text_dropdown_button(ui, ButtonIcon::View, "View", |ui| {
             style_list_menu(ui);
-            if selectable_icon_text_button(ui, ButtonIcon::FolderOpen, "Folders", *mode == BrowserMode::Folders).clicked() {
+            if dedicated && selectable_icon_text_button(ui, ButtonIcon::FolderClosed, "Flat", *mode == BrowserMode::Flat).on_hover_text("Current folder only. Mixed multi-selection and bulk actions.").clicked() { *mode = BrowserMode::Flat; close_menu(ui); }
+            if selectable_icon_text_button(ui, ButtonIcon::FolderOpen, if dedicated { "Tree" } else { "Folders" }, *mode == BrowserMode::Folders).on_hover_text("Expandable folder tree. Single selection; use chevrons to expand.").clicked() {
                 *mode = BrowserMode::Folders;
                 close_menu(ui);
             }
-            if selectable_icon_text_button(ui, ButtonIcon::Group, "Groups", *mode == BrowserMode::Groups).clicked() {
+            if selectable_icon_text_button(ui, ButtonIcon::Group, "Groups", *mode == BrowserMode::Groups).on_hover_text("Recursive grouping by tag type. Single selection.").clicked() {
                 *mode = BrowserMode::Groups;
                 groups_clicked = true;
                 close_menu(ui);

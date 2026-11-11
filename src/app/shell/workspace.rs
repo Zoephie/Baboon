@@ -468,6 +468,8 @@ pub(in crate::app) fn draw_status_bar(
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Status").strong());
+
+
                 ui.separator();
                 if cx.model.kits[cx.model.active].scanning_entries {
                     let progress = cx.model.kits[cx.model.active].index_jobs.entry_progress.as_ref();

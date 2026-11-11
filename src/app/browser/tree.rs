@@ -7,10 +7,11 @@ pub(in crate::app) fn browser_open_requested(
     response: &egui::Response,
     double_click_to_open: bool,
 ) -> bool {
+    if response.ctx.input(|input|input.modifiers.ctrl||input.modifiers.command||input.modifiers.shift) { return false; }
     if double_click_to_open {
         response.double_clicked()
     } else {
-        response.clicked() && !response.ctx.input(|input| input.modifiers.ctrl || input.modifiers.command)
+        response.clicked() && !response.ctx.input(|input| input.modifiers.ctrl || input.modifiers.command || input.modifiers.shift)
     }
 }
 
@@ -250,7 +251,7 @@ pub(in crate::app) fn context_menu_button(ui: &mut Ui, label: &str) -> egui::Res
     response
 }
 
-fn context_menu_primary_button(
+pub(super) fn context_menu_primary_button(
     ui: &mut Ui,
     label: &str,
     enabled: bool,
@@ -332,6 +333,13 @@ fn context_menu_primary_button(
 
 fn context_menu_icon(label: &str) -> Option<ButtonIcon> {
     let exact = match label {
+        "Reveal in Browser" => Some(ButtonIcon::NavigationPane),
+        "Expand All" => Some(ButtonIcon::Opened),
+        "Collapse All" => Some(ButtonIcon::Closed),
+        "Close Tab" => Some(ButtonIcon::CloseTab),
+        "Discard Unsaved Changes" => Some(ButtonIcon::Undo),
+        "Open Selected Items" => Some(ButtonIcon::Open),
+        "Dump Selection to JSON..." => Some(ButtonIcon::Json),
         "Rename" => Some(ButtonIcon::Rename),
         "Duplicate" => Some(ButtonIcon::Duplicate),
         "Delete" => Some(ButtonIcon::Garbage),
@@ -379,7 +387,7 @@ fn context_menu_icon(label: &str) -> Option<ButtonIcon> {
 
 /// Keep extract actions in egui's nested menu so their clicks reach the
 /// browser action dispatcher before the menu closes.
-fn context_menu_submenu_button(
+pub(super) fn context_menu_submenu_button(
     ui: &mut Ui,
     label: &str,
     icon: ButtonIcon,
@@ -1202,7 +1210,7 @@ fn draw_tree_node_lazy_block(
             &node.label,
             favorited,
             false,
-            |ui| folder_extract_menu_button(ui, node, entries, false, true),
+            |ui| folder_extract_menu_button(ui, node, entries, false, true, false),
         ) {
             clicked = Some(action);
         }
@@ -1414,112 +1422,7 @@ fn draw_tree_node_block(
         );
     }
     context_menu(&header_response, |ui| {
-        style_tag_context_menu(ui);
-        if !groups_mode && favorite_keys.is_some() {
-            let favorited = browser_favorite_folders(ui).map(|folders| {
-                folders
-                    .iter()
-                    .any(|path| paths_match_case_insensitive(path, &node.rel_path))
-            });
-            if let Some(action) = loose_folder_primary_menu_items(
-                ui,
-                &node.rel_path,
-                &node.label,
-                favorited,
-                browser_is_folder_pane(ui),
-                |ui| folder_extract_menu_button(ui, node, entries, false, false),
-            ) {
-                clicked = Some(action);
-            }
-            if context_menu_button(ui, crate::app::browser::actions::folder_opener_label()).clicked() {
-                clicked = Some(BrowserAction::OpenLooseFolderInExplorer {
-                    rel_path: node.rel_path.clone(),
-                });
-                close_menu(ui);
-            }
-            if context_menu_button(ui, "Copy Folder Path").clicked() {
-                clicked = Some(BrowserAction::CopyFolderPath(node.rel_path.clone()));
-                close_menu(ui);
-            }
-            context_menu_separator(ui);
-        }
-        // Campaign Evolved folder authoring (Folders mode only — in Groups mode
-        // the node path is a group label, not a folder).
-        if is_container && !groups_mode {
-            let folder_rel = tag_path::relative_tag_path(&node.rel_path);
-            let folder_rel = (!folder_rel.is_empty()).then_some(folder_rel);
-            if let Some(action) = container_authoring_menu_items(ui, folder_rel.clone()) {
-                clicked = Some(action);
-            }
-            // Rename and Delete are offered only for a folder the user made and
-            // nothing has landed in. Once a tag is inside, the folder is
-            // expressed by the container's own directory index, and moving it
-            // means rewriting every tag beneath it — a container write, not a
-            // workspace edit, and not what this menu does.
-            if let Some(rel) = folder_rel.filter(|_| folder_is_pending_and_empty(node)) {
-                if context_menu_button(ui, "Rename folder...").clicked() {
-                    clicked = Some(BrowserAction::RenameContainerFolder { rel: rel.clone() });
-                    close_menu(ui);
-                }
-                if context_menu_button(ui, "Delete folder").clicked() {
-                    clicked = Some(BrowserAction::DeleteContainerFolder { rel });
-                    close_menu(ui);
-                }
-            }
-            context_menu_separator(ui);
-        }
-
-        // Loose folders receive this from the shared primary menu above;
-        // indexed/cache folders have no Favorites context, but their browser
-        // path is still useful on the clipboard.
-        if !groups_mode && favorite_keys.is_none() {
-            if context_menu_button(ui, "Copy Folder Path").clicked() {
-                clicked = Some(BrowserAction::CopyFolderPath(node.rel_path.clone()));
-                close_menu(ui);
-            }
-            context_menu_separator(ui);
-        }
-
-        let tag_keys = collect_tag_keys(node, entries);
-        if tag_keys.is_empty() {
-            ui.label(RichText::new("No tags in this folder").color(subtle_dark()));
-        } else if context_menu_button(ui, &format!("Dump folder to JSON... ({})", tag_keys.len()))
-            .clicked()
-        {
-            clicked = Some(BrowserAction::DumpLoadedFolderJson(tag_keys));
-            close_menu(ui);
-        }
-
-        // Monolithic caches only. The tags in one are big-endian and read-only,
-        // so the way out of a cache is a conversion into a kit rather than a copy
-        // — and the destination is the kit's tags root, because a cache tag has
-        // to land at its own path for every reference to it to resolve.
-        if !groups_mode {
-            let cache_tags = count_cache_tags(node, entries);
-            if cache_tags > 0
-                && context_menu_button(ui, &format!("Import into editing kit... ({cache_tags})"))
-                    .on_hover_text(
-                        "Convert this folder to little-endian tags in an open editing kit, \
-                         at the same paths, pulling in whatever they reference",
-                    )
-                    .clicked()
-            {
-                clicked = Some(BrowserAction::ImportCacheFolderIntoKit {
-                    prefix: folder_display_path(node),
-                });
-                close_menu(ui);
-            }
-        }
-
-        // A group node is not a real folder, so only Folders mode may offer a
-        // raw container-folder extraction. Type-specific bulk exports remain
-        // valid in either view, matching their previous availability.
-        if (groups_mode || favorite_keys.is_none())
-            && let Some(action) =
-                folder_extract_menu_button(ui, node, entries, is_container && !groups_mode, false)
-        {
-            clicked = Some(action);
-        }
+        if let Some(action) = draw_folder_context_menu_contents(ui, node, entries, groups_mode, is_container, favorite_keys) { clicked = Some(action); }
     });
     if !groups_mode && header_response.double_clicked() {
         clicked = Some(BrowserAction::OpenFolderBrowser {
@@ -1527,6 +1430,120 @@ fn draw_tree_node_block(
             label: node.label.clone(),
             open_in_new_tab: false,
         });
+    }
+    clicked
+}
+
+
+/// Shared by hierarchical and flat folder rows; callers supply a node whose
+/// entry indices address the supplied list.
+pub(super) fn draw_folder_context_menu_contents(ui: &mut Ui, node: &TagTreeNode, entries: &[TagEntry], groups_mode: bool, is_container: bool, favorite_keys: Option<&HashSet<String>>) -> Option<BrowserAction> {
+    let mut clicked = None;
+    style_tag_context_menu(ui);
+    if !groups_mode && favorite_keys.is_some() {
+        let favorited = browser_favorite_folders(ui).map(|folders| {
+            folders
+                .iter()
+                .any(|path| paths_match_case_insensitive(path, &node.rel_path))
+        });
+        if let Some(action) = loose_folder_primary_menu_items(
+            ui,
+            &node.rel_path,
+            &node.label,
+            favorited,
+            browser_is_folder_pane(ui),
+            |ui| folder_extract_menu_button(ui, node, entries, false, false, false),
+        ) {
+            clicked = Some(action);
+        }
+        if context_menu_button(ui, crate::app::browser::actions::folder_opener_label()).clicked() {
+            clicked = Some(BrowserAction::OpenLooseFolderInExplorer {
+                rel_path: node.rel_path.clone(),
+            });
+            close_menu(ui);
+        }
+        if context_menu_button(ui, "Copy Folder Path").clicked() {
+            clicked = Some(BrowserAction::CopyFolderPath(node.rel_path.clone()));
+            close_menu(ui);
+        }
+        context_menu_separator(ui);
+    }
+    // Campaign Evolved folder authoring (Folders mode only — in Groups mode
+    // the node path is a group label, not a folder).
+    if is_container && !groups_mode {
+        let folder_rel = tag_path::relative_tag_path(&node.rel_path);
+        let folder_rel = (!folder_rel.is_empty()).then_some(folder_rel);
+        if let Some(action) = container_authoring_menu_items(ui, folder_rel.clone()) {
+            clicked = Some(action);
+        }
+        // Rename and Delete are offered only for a folder the user made and
+        // nothing has landed in. Once a tag is inside, the folder is
+        // expressed by the container's own directory index, and moving it
+        // means rewriting every tag beneath it — a container write, not a
+        // workspace edit, and not what this menu does.
+        if let Some(rel) = folder_rel.filter(|_| folder_is_pending_and_empty(node)) {
+            if context_menu_button(ui, "Rename folder...").clicked() {
+                clicked = Some(BrowserAction::RenameContainerFolder { rel: rel.clone() });
+                close_menu(ui);
+            }
+            if context_menu_button(ui, "Delete folder").clicked() {
+                clicked = Some(BrowserAction::DeleteContainerFolder { rel });
+                close_menu(ui);
+            }
+        }
+        context_menu_separator(ui);
+    }
+
+    // Loose folders receive this from the shared primary menu above;
+    // indexed/cache folders have no Favorites context, but their browser
+    // path is still useful on the clipboard.
+    if !groups_mode && favorite_keys.is_none() {
+        if context_menu_button(ui, "Copy Folder Path").clicked() {
+            clicked = Some(BrowserAction::CopyFolderPath(node.rel_path.clone()));
+            close_menu(ui);
+        }
+        context_menu_separator(ui);
+    }
+
+    let tag_keys = collect_tag_keys(node, entries);
+    if tag_keys.is_empty() {
+        ui.label(RichText::new("No tags in this folder").color(subtle_dark()));
+    } else if context_menu_button(ui, &format!("Dump folder to JSON... ({})", tag_keys.len()))
+        .clicked()
+    {
+        clicked = Some(BrowserAction::DumpLoadedFolderJson(tag_keys));
+        close_menu(ui);
+    }
+
+    // Monolithic caches only. The tags in one are big-endian and read-only,
+    // so the way out of a cache is a conversion into a kit rather than a copy
+    // — and the destination is the kit's tags root, because a cache tag has
+    // to land at its own path for every reference to it to resolve.
+    if !groups_mode {
+        let cache_tags = count_cache_tags(node, entries);
+        if cache_tags > 0
+            && context_menu_button(ui, &format!("Import into editing kit... ({cache_tags})"))
+                .on_hover_text(
+                    "Convert this folder to little-endian tags in an open editing kit, \
+                     at the same paths, pulling in whatever they reference",
+                )
+                .clicked()
+        {
+            clicked = Some(BrowserAction::ImportCacheFolderIntoKit {
+                prefix: folder_display_path(node),
+            });
+            close_menu(ui);
+        }
+    }
+
+    // A group node is not a real folder, so only Folders mode may offer a
+    // raw container-folder extraction. Type-specific bulk exports remain
+    // valid in either view, matching their previous availability.
+    if (groups_mode || favorite_keys.is_none())
+        && let Some(action) =
+            folder_extract_menu_button(ui, node, entries, is_container && !groups_mode, false, groups_mode)
+    {
+        clicked = Some(action);
     }
     clicked
 }
@@ -1549,15 +1566,32 @@ fn sound_may_have_languages(display_path: &str) -> bool {
 
 /// Collect the folder-wide export commands beneath one row. Keeping this
 /// shared between the lazy loose-folder tree and fully indexed sources makes
-/// their menus differ only in whether they say "loaded" and whether raw
-/// container tags can be extracted.
+/// menus share complete descendant counts and support raw container extraction.
 fn folder_extract_menu_button(
     ui: &mut Ui,
     node: &TagTreeNode,
     entries: &[TagEntry],
     include_container_tags: bool,
     loaded_labels: bool,
+    groups_mode: bool,
 ) -> Option<BrowserAction> {
+    let catalog = operation_entries(ui);
+    let entries = if browser_loose_source(ui) {
+        catalog.as_deref().map(Vec::as_slice).unwrap_or(entries)
+    } else {
+        entries
+    };
+    // Group nodes carry a type label, not a real directory path. Match their
+    // catalogue entries by group rather than treating the label as a folder.
+    let group_entries: Vec<_> = if groups_mode && browser_loose_source(ui) {
+        entries
+            .iter()
+            .filter(|entry| crate::core::source::group_tree_label(entry) == node.label)
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
     let (container_keys, bitmap_keys, sound_keys, material_shader_keys, hlsl_include_keys) =
         if browser_loose_source(ui) {
             // A loose source has one canonical loaded-entry list shared by the
@@ -1565,7 +1599,15 @@ fn folder_extract_menu_button(
             // path instead of trusting whichever lazy tree happens to be
             // drawing this menu, otherwise the same folder reports different
             // counts in different views.
-            collect_loaded_extractable_keys(entries, &node.rel_path, include_container_tags)
+            if groups_mode {
+                collect_loaded_extractable_keys(
+                    &group_entries,
+                    Path::new(""),
+                    include_container_tags,
+                )
+            } else {
+                collect_loaded_extractable_keys(entries, &node.rel_path, include_container_tags)
+            }
         } else {
             (
                 include_container_tags
@@ -1606,6 +1648,12 @@ pub(in crate::app) fn folder_tree_extract_menu_button(
     loaded_labels: bool,
     open_left: bool,
 ) -> Option<BrowserAction> {
+    let catalog = operation_entries(ui);
+    let entries = if browser_loose_source(ui) {
+        catalog.as_deref().map(Vec::as_slice).unwrap_or(entries)
+    } else {
+        entries
+    };
     let (container_keys, bitmap_keys, sound_keys, material_shader_keys, hlsl_include_keys) =
         if browser_loose_source(ui) {
             collect_loaded_extractable_keys(entries, &rel_path, include_container_tags)
@@ -1721,225 +1769,229 @@ fn collect_loaded_extractable_keys(
     )
 }
 
-fn folder_extract_menu_from_keys(
+pub(super) fn folder_extract_menu_from_keys(
     ui: &mut Ui,
     entries: &[TagEntry],
     label: String,
-    rel_path: PathBuf,
+    _rel_path: PathBuf,
     container_keys: Vec<String>,
     bitmap_keys: Vec<String>,
     sound_keys: Vec<String>,
     material_shader_keys: Vec<String>,
     hlsl_include_keys: Vec<String>,
-    loaded_labels: bool,
+    _loaded_labels: bool,
     include_container_tags: bool,
     open_left: bool,
 ) -> Option<BrowserAction> {
-    let has_extractable = !container_keys.is_empty()
-        || !bitmap_keys.is_empty()
-        || !sound_keys.is_empty()
-        || !material_shader_keys.is_empty()
-        || !hlsl_include_keys.is_empty();
+    let contents = |ui: &mut Ui| {
+        folder_extract_contents(
+            ui,
+            entries,
+            label,
+            container_keys,
+            bitmap_keys,
+            sound_keys,
+            material_shader_keys,
+            hlsl_include_keys,
+            include_container_tags,
+        )
+    };
+    if open_left {
+        left_opening_context_menu_submenu_button(ui, "Extract", ButtonIcon::Export, contents)
+    } else {
+        context_menu_submenu_button(ui, "Extract", ButtonIcon::Export, contents)
+    }
+}
 
-    let menu = ui.add_enabled_ui(true, |ui| {
-        let contents = |ui: &mut Ui| {
-            style_tag_context_menu(ui);
-            let mut action = None;
-            if browser_loose_source(ui) {
-                let response = ui
-                    .add_enabled_ui(!browser_entries_scanning(ui), |ui| {
-                        context_menu_button(ui, "Load entire folder for extractable files")
-                    })
-                    .inner
-                    .on_hover_text(if browser_entries_scanning(ui) {
-                        "A folder scan is already running"
-                    } else {
-                        "Load extractable tags directly in this folder and in every subfolder"
-                    });
-                if response.clicked() {
-                    action = Some(BrowserAction::LoadFolderExtractables {
-                        rel_path: rel_path.clone(),
-                        label: label.clone(),
-                    });
-                    close_menu(ui);
-                }
-                context_menu_separator(ui);
-            }
-            if include_container_tags {
-                let count = container_keys.len();
-                let response = ui
-                    .add_enabled_ui(count > 0, |ui| {
-                        context_menu_button(ui, &format!("Extract tags to folder... ({count})"))
-                    })
-                    .inner
-                    .on_hover_text(
-                        "Write every tag this folder ships to a folder on disk, laid out like an \
-                     editing kit",
-                    );
-                if response.clicked() {
-                    action = Some(BrowserAction::ExtractContainerFolderTags {
-                        label: label.clone(),
-                        keys: container_keys,
-                    });
-                    close_menu(ui);
-                }
-            }
+fn folder_extract_contents(
+    ui: &mut Ui,
+    entries: &[TagEntry],
+    label: String,
+    container_keys: Vec<String>,
+    bitmap_keys: Vec<String>,
+    sound_keys: Vec<String>,
+    material_shader_keys: Vec<String>,
+    hlsl_include_keys: Vec<String>,
+    include_container_tags: bool,
+) -> Option<BrowserAction> {
+    style_tag_context_menu(ui);
+    let mut action = None;
+    if !extraction_catalog_complete(ui) {
+        let scanning = browser_entries_scanning(ui);
+        let response = ui
+            .add_enabled_ui(!scanning, |ui| context_menu_button(ui, "Load Folder"))
+            .inner
+            .on_hover_text("Load the workspace tag list so Extract includes every tag beneath the selected folders, including unopened subfolders. This does not open editor tabs.");
+        if response.clicked() {
+            action = Some(BrowserAction::LoadFolderExtractables {
+                rel_path: PathBuf::new(),
+                label: "Tags".into(),
+            });
+            close_menu(ui);
+        }
+        if scanning {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Loading...");
+            });
+        }
+        return action;
+    }
+    if container_keys.is_empty()
+        && bitmap_keys.is_empty()
+        && sound_keys.is_empty()
+        && material_shader_keys.is_empty()
+        && hlsl_include_keys.is_empty()
+    {
+        ui.label(RichText::new("No Extractable Tags").color(subtle_dark()));
+        return None;
+    }
+    if include_container_tags && !container_keys.is_empty() {
+        let count = container_keys.len();
+        let response = ui
+            .add_enabled_ui(count > 0, |ui| {
+                context_menu_button(ui, &format!("Extract Tags to Folder... ({count})"))
+            })
+            .inner
+            .on_hover_text(
+                "Write every tag this folder ships to a folder on disk, laid out like an \
+         editing kit",
+            );
+        if response.clicked() {
+            action = Some(BrowserAction::ExtractContainerFolderTags {
+                label: label.clone(),
+                keys: container_keys,
+            });
+            close_menu(ui);
+        }
+    }
 
-            let bitmap_count = bitmap_keys.len();
-            let bitmap_qualifier = if loaded_labels { "loaded " } else { "all " };
-            let bitmap_response = ui
+    let bitmap_count = bitmap_keys.len();
+    if bitmap_count > 0 {
+        let bitmap_response = ui
+            .add_enabled_ui(bitmap_count > 0, |ui| {
+                context_menu_button(ui, &format!("Extract Bitmaps... ({bitmap_count})"))
+            })
+            .inner;
+        if bitmap_response.clicked() {
+            action = Some(BrowserAction::ExtractBitmapFolder(bitmap_keys.clone()));
+            close_menu(ui);
+        }
+        if browser_game_keeps_bitmap_sources(ui) {
+            let source_response = ui
                 .add_enabled_ui(bitmap_count > 0, |ui| {
-                    context_menu_button(
-                        ui,
-                        &format!("Extract {bitmap_qualifier}bitmaps... ({bitmap_count})"),
-                    )
-                })
-                .inner;
-            if bitmap_response.clicked() {
-                action = Some(BrowserAction::ExtractBitmapFolder(bitmap_keys.clone()));
-                close_menu(ui);
-            }
-            if browser_game_keeps_bitmap_sources(ui) {
-                let source_response = ui
-                    .add_enabled_ui(bitmap_count > 0, |ui| {
-                        context_menu_button(
-                            ui,
-                            &format!("Extract {bitmap_qualifier}bitmap sources... ({bitmap_count})"),
-                        )
-                    })
-                    .inner
-                    .on_hover_text(BITMAP_SOURCE_HOVER);
-                if source_response.clicked() {
-                    action = Some(BrowserAction::ExtractBitmapSourceFolder(bitmap_keys));
-                    close_menu(ui);
-                }
-            }
-
-            let sound_count = sound_keys.len();
-            let language = browser_sound_language(ui);
-            let sound_set: HashSet<&str> = sound_keys.iter().map(String::as_str).collect();
-            let sound_paths = || {
-                entries
-                    .iter()
-                    .filter(|entry| sound_set.contains(entry.key.as_str()))
-                    .map(|entry| entry.display_path.as_str())
-            };
-            let has_localized_sounds = sound_paths().any(sound_may_have_languages);
-            let has_shared_sounds = sound_paths().any(|path| !sound_may_have_languages(path));
-            let selected_label = if has_localized_sounds {
-                format!("Extract loaded sounds ({language}) ({sound_count})")
-            } else {
-                format!("Extract loaded sounds ({sound_count})")
-            };
-            let sound_response = ui
-                .add_enabled_ui(sound_count > 0, |ui| {
-                    context_menu_button(ui, &selected_label)
+                    context_menu_button(ui, &format!("Extract Bitmap Sources... ({bitmap_count})"))
                 })
                 .inner
-                .on_hover_text(format!(
-                    "Extract {} from {sound_count} loaded sound tag(s){}",
-                    if has_localized_sounds {
-                        format!("the last-selected language ({language})")
-                    } else {
-                        "shared audio".to_owned()
-                    },
-                    if has_localized_sounds && has_shared_sounds {
-                        "; shared SFX are extracted once"
-                    } else {
-                        ""
-                    }
-                ));
-            if sound_response.clicked() {
+                .on_hover_text(BITMAP_SOURCE_HOVER);
+            if source_response.clicked() {
+                action = Some(BrowserAction::ExtractBitmapSourceFolder(bitmap_keys));
+                close_menu(ui);
+            }
+        }
+    }
+    let sound_count = sound_keys.len();
+    if sound_count > 0 {
+        let language = browser_sound_language(ui);
+        let sound_set: HashSet<&str> = sound_keys.iter().map(String::as_str).collect();
+        let sound_paths = || {
+            entries
+                .iter()
+                .filter(|entry| sound_set.contains(entry.key.as_str()))
+                .map(|entry| entry.display_path.as_str())
+        };
+        let has_localized_sounds = sound_paths().any(sound_may_have_languages);
+        let has_shared_sounds = sound_paths().any(|path| !sound_may_have_languages(path));
+        let selected_label = if has_localized_sounds {
+            format!("Extract Sounds ({language}) ({sound_count})")
+        } else {
+            format!("Extract Sounds ({sound_count})")
+        };
+        let sound_response = ui
+            .add_enabled_ui(sound_count > 0, |ui| {
+                context_menu_button(ui, &selected_label)
+            })
+            .inner
+            .on_hover_text(format!(
+                "Extract {} from {sound_count} sound tag(s){}",
+                if has_localized_sounds {
+                    format!("the last-selected language ({language})")
+                } else {
+                    "shared audio".to_owned()
+                },
+                if has_localized_sounds && has_shared_sounds {
+                    "; shared SFX are extracted once"
+                } else {
+                    ""
+                }
+            ));
+        if sound_response.clicked() {
+            action = Some(BrowserAction::ExtractSound {
+                keys: sound_keys.clone(),
+                all_languages: false,
+            });
+            close_menu(ui);
+        }
+        let available_languages = browser_sound_available_languages(ui);
+        let language_suffix =
+            available_languages.map_or_else(String::new, |count| format!(" ×{count}"));
+        // Shared SFX have no meaningful language fan-out.
+        if has_localized_sounds {
+            let all_sound_response = ui
+        .add_enabled_ui(
+            sound_count > 0 && available_languages != Some(0),
+            |ui| {
+                context_menu_button(
+                    ui,
+                    &format!(
+                        "Extract Sounds (All Available Languages) ({sound_count}){language_suffix}"
+                    ),
+                )
+            },
+        )
+        .inner
+        .on_hover_text(
+            "Extract every installed language from localized tags; shared SFX are extracted once",
+        );
+            if all_sound_response.clicked() {
                 action = Some(BrowserAction::ExtractSound {
-                    keys: sound_keys.clone(),
-                    all_languages: false,
+                    keys: sound_keys,
+                    all_languages: true,
                 });
                 close_menu(ui);
             }
-            let available_languages = browser_sound_available_languages(ui);
-            let language_suffix = available_languages
-                .map_or_else(String::new, |count| format!(" ×{count}"));
-            // A loaded SFX-only folder has no meaningful language fan-out, so
-            // keep just the single extract action. Empty folders retain the
-            // disabled row, consistent with the other zero-count extractors.
-            if sound_count == 0 || has_localized_sounds {
-                let all_sound_response = ui
-                    .add_enabled_ui(
-                        sound_count > 0 && available_languages != Some(0),
-                        |ui| {
-                            context_menu_button(
-                                ui,
-                                &format!(
-                                    "Extract loaded sounds (All Available Languages) ({sound_count}){language_suffix}"
-                                ),
-                            )
-                        },
-                    )
-                    .inner
-                    .on_hover_text(
-                        "Extract every installed language from localized tags; shared SFX are extracted once",
-                    );
-                if all_sound_response.clicked() {
-                    action = Some(BrowserAction::ExtractSound {
-                        keys: sound_keys,
-                        all_languages: true,
-                    });
-                    close_menu(ui);
-                }
-            }
-
-            let shader_count = material_shader_keys.len();
-            let shader_qualifier = if loaded_labels { "loaded " } else { "" };
-            let shader_response = ui
-                .add_enabled_ui(shader_count > 0, |ui| {
-                    context_menu_button(
-                        ui,
-                        &format!(
-                            "Extract {shader_qualifier}material shader sources... ({shader_count})"
-                        ),
-                    )
-                })
-                .inner;
-            if shader_response.clicked() {
-                action = Some(BrowserAction::ExtractMaterialShaderSourceFolder(
-                    material_shader_keys,
-                ));
-                close_menu(ui);
-            }
-
-            let hlsl_count = hlsl_include_keys.len();
-            let hlsl_qualifier = if loaded_labels { "loaded " } else { "" };
-            let hlsl_response = ui
-                .add_enabled_ui(hlsl_count > 0, |ui| {
-                    context_menu_button(
-                        ui,
-                        &format!("Extract {hlsl_qualifier}HLSL includes... ({hlsl_count})"),
-                    )
-                })
-                .inner;
-            if hlsl_response.clicked() {
-                action = Some(BrowserAction::ExtractHlslIncludeFolder(hlsl_include_keys));
-                close_menu(ui);
-            }
-
-            if !has_extractable {
-                ui.add_space(3.0);
-                let hint = if loaded_labels {
-                    "No loaded extractable tags — expand the folder to load its contents"
-                } else {
-                    "No extractable tags in this folder"
-                };
-                ui.label(RichText::new(hint).color(subtle_dark()));
-            }
-            action
-        };
-        if open_left {
-            left_opening_context_menu_submenu_button(ui, "Extract", ButtonIcon::Export, contents)
-        } else {
-            context_menu_submenu_button(ui, "Extract", ButtonIcon::Export, contents)
         }
-    });
-    menu.inner
+    }
+    let shader_count = material_shader_keys.len();
+    if shader_count > 0 {
+        let shader_response = ui
+            .add_enabled_ui(shader_count > 0, |ui| {
+                context_menu_button(
+                    ui,
+                    &format!("Extract Material Shader Sources... ({shader_count})"),
+                )
+            })
+            .inner;
+        if shader_response.clicked() {
+            action = Some(BrowserAction::ExtractMaterialShaderSourceFolder(
+                material_shader_keys,
+            ));
+            close_menu(ui);
+        }
+    }
+    let hlsl_count = hlsl_include_keys.len();
+    if hlsl_count > 0 {
+        let hlsl_response = ui
+            .add_enabled_ui(hlsl_count > 0, |ui| {
+                context_menu_button(ui, &format!("Extract HLSL Includes... ({hlsl_count})"))
+            })
+            .inner;
+        if hlsl_response.clicked() {
+            action = Some(BrowserAction::ExtractHlslIncludeFolder(hlsl_include_keys));
+            close_menu(ui);
+        }
+    }
+    action
 }
 
 /// The leading actions shared by loose folders wherever they appear. Keeping
@@ -2076,7 +2128,7 @@ fn folder_label_color(ui: &Ui, node: &TagTreeNode) -> Color32 {
 /// `folder_rel` is `None` at the container root. Shared so the two cannot offer
 /// different sets: the root gained these only after the fact, and a second copy
 /// is how it would quietly fall behind again.
-fn container_authoring_menu_items(
+pub(super) fn container_authoring_menu_items(
     ui: &mut Ui,
     folder_rel: Option<String>,
 ) -> Option<BrowserAction> {
@@ -2198,9 +2250,8 @@ fn show_group_tree_header<R>(
                 .response;
             (content.union(badge), toggle_clicked)
         });
-    if response.clicked() && !toggle_clicked {
-        state.toggle(ui);
-    }
+    // Folder labels select/open; only the disclosure button changes expansion.
+    let _ = toggle_clicked;
     state.show_body_indented(&response, ui, add_body);
     response
 }
@@ -2336,6 +2387,7 @@ fn show_folder_tree_header<R>(
     });
     if let Some(path) = folder_path {
         register_browser_folder(ui, response.id, Some(id), path, id_source, state.is_open());
+        register_browser_name(ui,&folder_pane_key(path),label);
         if select_browser_tag(ui, &response, &folder_pane_key(path)) {
             paint_browser_selection_border(ui, response.rect);
         }
@@ -2357,7 +2409,7 @@ fn show_folder_tree_header<R>(
 /// row is hovered or focused, and lasting on the `current` row, the tag or
 /// folder whose tab the user is on, as an editor's explorer marks the active
 /// file.
-fn browser_row_hover_shape(
+pub(super) fn browser_row_hover_shape(
     ui: &Ui,
     response: &egui::Response,
     row_rect: egui::Rect,
@@ -2736,6 +2788,7 @@ pub(in crate::app) fn draw_entry(
     let (row_rect, _) = ui.allocate_exact_size(row_size, Sense::hover());
     let response = ui.interact(row_rect, ui.make_persistent_id(("browser_tag", &entry.key)), Sense::click_and_drag());
     let browser_selected = select_browser_tag(ui, &response, &entry.key);
+    register_browser_name(ui,&entry.key,tag_path::name(&entry.display_path));
     #[cfg(test)]
     TREE_ROW_TOPS.with(|tops| tops.borrow_mut().push((entry.key.clone(), row_rect.top())));
     if response.hovered() {
@@ -2784,7 +2837,7 @@ pub(in crate::app) fn draw_entry(
             browser_disclosure_reservation(ui)
         } else {
             0.0
-        };
+        } + flat_row_content_inset(ui);
         let icon_rect = egui::Rect::from_center_size(
             egui::pos2(
                 row_rect.left() + disclosure_offset + icon_size * 0.5,
@@ -2849,6 +2902,13 @@ pub(in crate::app) fn select_browser_tag(ui: &Ui, response: &egui::Response, key
     register_browser_navigation(ui, key, response.id);
     let navigated = browser_navigation_target(ui).is_some_and(|(_, id)| id == response.id);
     if response.clicked() || response.secondary_clicked() || navigated {
+        if browser_is_folder_pane(ui) {
+            if let Some(owner)=ui.data(|data|data.get_temp::<(KitId,String)>(browser_selection_owner_id().with("drawing"))) { ui.data_mut(|data|data.insert_temp(browser_selection_owner_id().with("pane"),owner)); }
+        } else {ui.data_mut(|data|{data.remove::<(KitId,String)>(browser_selection_owner_id().with("pane"));data.remove::<(KitId,usize,usize)>(egui::Id::unique("browser_selection_count"));});}
+    }
+
+    let multiple = multi_select(ui, response, key, navigated);
+    if response.clicked() || response.secondary_clicked() || navigated {
         if !navigated { browser_navigation_select(ui, response.id); }
         set_browser_selected_tag(ui, Some(key.to_owned()));
         response.request_focus();
@@ -2862,17 +2922,19 @@ pub(in crate::app) fn select_browser_tag(ui: &Ui, response: &egui::Response, key
     }
     if response.has_focus() {
         ui.memory_mut(|memory| memory.set_focus_lock_filter(response.id, egui::EventFilter {
-            vertical_arrows: true, horizontal_arrows: true, ..Default::default()
+            vertical_arrows: true, horizontal_arrows: true, escape: true, ..Default::default()
         }));
     }
-    browser_selected_tag(ui).as_deref() == Some(key) || response.context_menu_opened()
+    multiple.unwrap_or_else(|| browser_selected_tag(ui).as_deref() == Some(key)) || response.context_menu_opened()
 }
 
 pub(in crate::app) fn paint_browser_selection_border(ui: &Ui, rect: egui::Rect) {
+    let mut stroke = ui.visuals().selection.stroke;
+    if !selection_is_active(ui) { stroke.color = stroke.color.gamma_multiply(0.4); }
     ui.painter().rect_stroke(
         rect,
         ui.visuals().widgets.hovered.corner_radius,
-        ui.visuals().selection.stroke,
+        stroke,
         egui::StrokeKind::Inside,
     );
 }
@@ -2885,6 +2947,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
 ) -> Option<BrowserAction> {
     let mut action = None;
     style_tag_context_menu(ui);
+    if multi(ui).is_some_and(|state| state.selection.keys.len() > 1) { return draw_multi_menu(ui); }
 
     // A cache tag's way out is a conversion, and one tag is the case where
     // the user may want it somewhere other than the path the build gave it.
@@ -3173,7 +3236,7 @@ pub(in crate::app) fn draw_favorites(
                             entries_loaded: true,
                             pending: false,
                         };
-                        folder_extract_menu_button(ui, &folder_node, folder_entries, false, true)
+                        folder_extract_menu_button(ui, &folder_node, folder_entries, false, true, false)
                     },
                 ) {
                     action = Some(folder_action);
@@ -3686,6 +3749,104 @@ mod tests {
         Reveal, TREE_ROW_TOPS, TREE_ROWS_LAID_OUT, TREE_SKIPS_ROWS, draw_tree, draw_tree_lazy,
     };
 
+    fn extract_labels(
+        complete: bool,
+        scanning: bool,
+        entries: &[TagEntry],
+        keys: ExtractableKeys,
+    ) -> Vec<String> {
+        let ctx = egui::Context::default();
+        let (raw, bitmaps, sounds, shaders, includes) = keys;
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                set_browser_loose_source(ui, true);
+                set_browser_entries_scanning(ui, scanning);
+                set_operation_entries(ui, KitId(1), 1, entries, false, complete);
+                folder_extract_contents(
+                    ui,
+                    entries,
+                    "Selected Items".into(),
+                    raw.clone(),
+                    bitmaps.clone(),
+                    sounds.clone(),
+                    shaders.clone(),
+                    includes.clone(),
+                    false,
+                );
+            });
+        });
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn extract_menu_loads_before_showing_partial_or_empty_results() {
+        let keys = (vec![], vec!["partial".into()], vec![], vec![], vec![]);
+        assert_eq!(extract_labels(false, false, &[], keys), ["Load Folder"]);
+        let keys = (vec![], vec![], vec![], vec![], vec![]);
+        assert_eq!(
+            extract_labels(false, true, &[], keys.clone()),
+            ["Load Folder", "Loading..."]
+        );
+        assert_eq!(
+            extract_labels(true, false, &[], keys),
+            ["No Extractable Tags"]
+        );
+    }
+
+    #[test]
+    fn single_and_multi_folder_extract_include_unopened_descendants_once() {
+        let entry = |path: &str| TagEntry {
+            key: format!("file:{path}"),
+            display_path: path.into(),
+            group_tag: u32::from_be_bytes(*b"bitm"),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(path.into()),
+        };
+        let entries = vec![
+            entry(r"ui\a.bitmap"),
+            entry(r"ui\nested\b.bitmap"),
+            entry(r"other\c.bitmap"),
+        ];
+        let single = collect_loaded_extractable_keys(&entries, Path::new("ui"), false);
+        let selected = selection_entries(
+            &[
+                folder_pane_key(Path::new("ui")),
+                folder_pane_key(Path::new(r"ui\nested")),
+            ],
+            &entries,
+        );
+        let multi = (
+            vec![],
+            export_keys(BulkAction::Bitmaps, &selected),
+            vec![],
+            vec![],
+            vec![],
+        );
+        assert_eq!(single.1.len(), 2);
+        assert_eq!(single, multi);
+        let labels = extract_labels(true, false, &entries, single);
+        assert!(labels.contains(&"Extract Bitmaps... (2)".to_owned()));
+        assert!(
+            !labels
+                .iter()
+                .any(|label| label == "Load Folder" || label.contains("Sounds"))
+        );
+    }
+
+    #[test]
+    fn only_the_current_tab_close_command_has_a_close_icon() {
+        assert_eq!(context_menu_icon("Close Tab"),Some(ButtonIcon::CloseTab));
+        assert_eq!(context_menu_icon("Close All"),None);
+        assert_eq!(context_menu_icon("Close All Other Tabs"),None);
+    }
+
     #[test]
     fn favorite_precedes_import_and_extract_without_duplicate_dividers() {
         for open_in_new_tab in [false, true] {
@@ -4185,7 +4346,7 @@ mod tests {
             if double_click && pointer_button == egui::PointerButton::Primary {
                 frame(vec![button(true)]);
                 let (_, action, _, _) = frame(vec![button(false)]);
-                assert!(matches!(action, Some(BrowserAction::Select(_))), "Ctrl must not block double-click opening");
+                assert_eq!(matches!(action, Some(BrowserAction::Select(_))), !ctrl, "modifier clicks only select");
             }
             // Selection survives leaving the row and the editor's active tag stays separate.
             let (_, action, _, selected) = frame(vec![egui::Event::PointerGone]);

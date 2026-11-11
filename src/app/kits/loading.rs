@@ -872,6 +872,13 @@ impl Baboon {
             return;
         };
 
+        // The shared Extract menu asks for the tags root when the complete
+        // catalogue is missing, so single and multiple selections become ready
+        // together. This scans paths/types; payloads are read by extraction.
+        if rel_path.as_os_str().is_empty() && !source.complete_scan {
+            self.begin_scan_all_entries_with_label(ctx, "Loading Folder...");
+            return;
+        }
         if source.complete_scan {
             let entries = source
                 .all_entries
@@ -1445,6 +1452,32 @@ impl Model {
 mod tests {
     use super::*;
     use crate::app::kits::loading::replace_loaded_tree_scope;
+
+    #[test]
+    fn extract_load_folder_builds_the_complete_catalogue_without_opening_tabs() {
+        use crate::app::loose_fixture::{LooseKit, pump_until};
+        let kit = LooseKit::new("extract-load-catalogue", "halo2_mcc");
+        kit.write_mcc(r"ui\a", "bitmap", |_| {});
+        kit.write_mcc(r"ui\nested\b", "bitmap", |_| {});
+        let mut source = kit.source();
+        source.complete_scan = false;
+        source.all_entries.clear();
+        source.entries.clear();
+        source.tree = TagTree::default();
+        source.group_tree = TagTree::default();
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(source);
+        app.begin_load_folder_extractables(PathBuf::new(), "Tags".into(), egui::Context::default());
+        pump_until(&mut app, "complete extraction catalogue", |app| {
+            app.model.kits[0]
+                .source
+                .as_ref()
+                .is_some_and(|source| source.complete_scan)
+        });
+        let source = app.model.kits[0].source.as_ref().unwrap();
+        assert_eq!(source.full_entry_set().len(), 2);
+        assert!(app.model.kits[0].parsed_tags.is_empty());
+    }
 
     /// A refresh that saw a definition or option change, appear or go asks
     /// the shader grid to re-read them; one that saw only other tags does not.

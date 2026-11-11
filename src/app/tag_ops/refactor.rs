@@ -753,13 +753,14 @@ pub(in crate::app) fn run_tag_rename_job(
         old_to_new_keys,
         moved: true,
         moved_folder: None,
+        moved_folders: Vec::new(),
     })
 }
 
 #[derive(Default)]
-pub(super) struct RefactorIndexChanges {
-    pub(super) removed: Vec<String>,
-    pub(super) touched: HashSet<String>,
+pub(in crate::app) struct RefactorIndexChanges {
+    pub(in crate::app) removed: Vec<String>,
+    pub(in crate::app) touched: HashSet<String>,
 }
 
 /// Verify file fingerprints, then read only changed or missing dependency
@@ -777,7 +778,7 @@ pub(super) fn prepare_tag_refactor_index(
     prepare_tag_refactor_index_cancellable(root, source, game, names, previous_entries, existing, label, tx, &|| false)
 }
 
-pub(super) fn prepare_tag_refactor_index_cancellable(
+pub(in crate::app) fn prepare_tag_refactor_index_cancellable(
     root: &Path,
     source: &TagSource,
     game: Option<GameId>,
@@ -859,7 +860,7 @@ pub(super) fn prepare_tag_refactor_index_cancellable(
 
 /// Persistence belongs to the refactor worker. Existing caches receive one
 /// atomic batch of changed rows; only a missing cache needs a full snapshot.
-pub(super) fn persist_refactor_indexes(
+pub(in crate::app) fn persist_refactor_indexes(
     root: &Path,
     game: Option<GameId>,
     entries: &[TagEntry],
@@ -1150,6 +1151,7 @@ pub(in crate::app) fn run_folder_refactor_job_inner(
         reverse_dependencies,
         old_to_new_keys,
         moved: move_folder,
+        moved_folders: Vec::new(),
         moved_folder: move_folder.then(|| {
             (
                 source_rel.clone(),

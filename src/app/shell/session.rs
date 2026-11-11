@@ -84,6 +84,7 @@ pub(in crate::app) struct LastSessionKit {
 
 #[derive(Clone, Debug)]
 pub(in crate::app) struct LastSessionFolder {
+    pub(in crate::app) mode: BrowserMode,
     pub(in crate::app) rel_path: PathBuf,
     pub(in crate::app) label: String,
 }
@@ -459,6 +460,7 @@ impl Baboon {
             .into_iter()
             .filter_map(|key| view.browser.folder_browsers.get(&key))
             .map(|folder| LastSessionFolder {
+                mode: folder.mode,
                 rel_path: folder.rel_path.clone(),
                 label: folder.label.clone(),
             })
@@ -661,6 +663,10 @@ impl Baboon {
                 },
                 ctx.clone(),
             );
+            let kit = self.model.active_kit_id();
+            if let Some(key) = self.model.kits[self.model.active].current_pane.clone() {
+                if let Some(pane) = self.views[kit].browser.folder_browsers.get_mut(&key) { pane.mode = folder.mode; }
+            }
         }
         let restore = std::mem::take(&mut self.model.kits[self.model.active].restore.pending_restore_tags);
         if restore.is_empty() && restore_folders.is_empty() {
@@ -1176,6 +1182,7 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
                 .filter(|label| !label.is_empty())
                 .or_else(|| Path::new(rel_path).file_name().and_then(|name| name.to_str()))?;
             Some(LastSessionFolder {
+                mode: browser_mode_from_str(item.get("mode").and_then(Value::as_str)).unwrap_or(BrowserMode::Flat),
                 rel_path: PathBuf::from(rel_path),
                 label: label.to_owned(),
             })
@@ -1276,6 +1283,7 @@ fn session_value(session: &LastSessionState) -> Value {
                     json!({
                         "path": folder.rel_path.to_string_lossy().replace('\\', "/"),
                         "label": folder.label,
+                        "mode": browser_mode_str(folder.mode),
                     })
                 })
                 .collect::<Vec<_>>();
@@ -1563,6 +1571,7 @@ mod tests {
                     tags: Vec::new(),
                     folders: (0..folder_count)
                         .map(|index| LastSessionFolder {
+                            mode: BrowserMode::Flat,
                             rel_path: PathBuf::from(format!(
                                 "objects/characters/brute/folder{index}"
                             )),
@@ -1883,6 +1892,7 @@ mod tests {
         );
         saved.tags.clear();
         saved.folders.push(LastSessionFolder {
+            mode: BrowserMode::Flat,
             rel_path: PathBuf::from(r"objects\characters\brute"),
             label: "brute".to_owned(),
         });
@@ -1896,6 +1906,7 @@ mod tests {
 
         let restored = parse_last_session(&value).expect("folder session parses");
         assert_eq!(restored.kits[0].folders.len(), 1);
+        assert_eq!(restored.kits[0].folders[0].mode,BrowserMode::Flat);
         assert_eq!(restored.kits[0].folders[0].label, "brute");
 
         let mut prompt =

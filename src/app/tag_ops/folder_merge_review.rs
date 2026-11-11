@@ -39,6 +39,8 @@ pub(in crate::app) struct MergeReview {
     pub apply_remaining: bool,
 }
 pub(in crate::app) enum ReviewKind {
+    BatchSummary { sources: Vec<PathBuf>, destination: PathBuf, files: usize, conflicts: usize },
+    Delete { items: Vec<(PathBuf,Option<usize>)>, folders: Vec<PathBuf>, tags: usize },
     Summary {
         source: PathBuf,
         destination: PathBuf,
@@ -125,12 +127,24 @@ pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi) {
         .frame(egui::Frame::window(&ctx.global_style()))
         .show(ctx, |ui| {
             ui.set_width(window_width(ctx, 560.0));
-            crate::app::search::draw_icon_window_header_without_close(ui, "Merge Folders", ButtonIcon::FolderClosed);
+            crate::app::search::draw_icon_window_header_without_close(ui, match &review.kind { ReviewKind::Delete {..} => "Delete Selected Items", ReviewKind::BatchSummary {..} => "Review Selected Items", _ => "Merge Folders" }, ButtonIcon::FolderClosed);
             ui.add_space(12.0);
             ScrollArea::vertical().id_salt("folder_merge_review_scroll")
                 .max_height((window_work_area(ctx).height() - 180.0).max(100.0))
                 .show(ui, |ui| {
                     match &review.kind {
+                        ReviewKind::Delete { items, folders, tags } => {
+                            ui.label(format!("Delete {tags} tags and {} other files?",items.len()-tags));
+                            ui.label(format!("{} folder(s), including their contents and empty subfolders", folders.len()));
+                            ui.label("Files will be preserved together in Deleted Tags. Reference counts below exclude tags in this deletion.");
+                            for folder in folders { ui.label(RichText::new(format!("{}{}", folder.display(), std::path::MAIN_SEPARATOR)).monospace()); }
+                            for (path,references) in items { ui.label(RichText::new(path.display().to_string()).monospace()); if let Some(count)=references { if *count>0 {ui.label(format!("Referenced by {count} tags outside this selection"));} } }
+                        }
+                        ReviewKind::BatchSummary { sources, destination, files, conflicts } => {
+                            ui.label(format!("{files} incoming files, {conflicts} conflicts"));
+                            ui.label("From:"); for source in sources { ui.label(RichText::new(source.display().to_string()).monospace()); }
+                            ui.label("To:"); ui.label(RichText::new(destination.display().to_string()).monospace());
+                        }
                         ReviewKind::Summary { source, destination, files, conflicts } => {
                             ui.label("Review this operation before changing files.");
                             ui.add_space(8.0);
@@ -162,8 +176,8 @@ pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if icon_text_button(ui, ButtonIcon::Clear, "Cancel", true).clicked() { response = Some(None); }
                     match &review.kind {
-                        ReviewKind::Summary { .. } => {
-                            if icon_text_button(ui, ButtonIcon::Confirm, "Continue", true).clicked() {
+                        ReviewKind::Summary { .. } | ReviewKind::BatchSummary { .. } | ReviewKind::Delete { .. } => {
+                            if icon_text_button(ui, ButtonIcon::Confirm, if matches!(&review.kind,ReviewKind::Delete{..}) {"Delete"} else {"Continue"}, true).clicked() {
                                 response = Some(Some(MergeAnswer { choice: None, apply_remaining: false }));
                             }
                         }

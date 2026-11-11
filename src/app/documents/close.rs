@@ -164,6 +164,10 @@ impl Baboon {
         // will be about first, so all of that — including the project check
         // just below — resolves against the right kit.
         match &action {
+            PendingCloseAction::CloseTabGroup {kit,..} => {
+                let Some(index)=self.model.kit_index(*kit) else {return;};
+                self.focus_kit(index);
+            }
             PendingCloseAction::CloseKit(id) => {
                 if let Some(index) = self.model.kit_index(*id) {
                     self.focus_kit(index);
@@ -272,8 +276,18 @@ impl Baboon {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             PendingCloseAction::CloseTab(key) => self.close_tab(&key),
+            PendingCloseAction::CloseTabGroup {kit,keys,keep} => {
+                let Some(index)=self.model.kit_index(kit) else {return;};
+                self.focus_kit(index);
+                let open=self.views[kit].tabs_from_tree();
+                let closing:Vec<_>=keys.into_iter().filter(|key|open.contains(key)).collect();
+                self.remember_closed_tag_keys(index,closing.clone());
+                for key in closing {self.close_tab_without_history(&key);}
+                if let Some(key)=keep.filter(|key|self.views[kit].tabs_from_tree().contains(key)) {
+                    self.kit_and_view(index).focus_pane(key);
+                }
+            }
             PendingCloseAction::CloseAllTabs => self.close_all_tabs(),
-            PendingCloseAction::CloseAllButThis(key) => self.close_all_tabs_but(&key),
             PendingCloseAction::CloseKit(id) => {
                 self.remove_kit(id);
                 self.close_tag_popups(id, |_| true);
@@ -292,20 +306,6 @@ impl Baboon {
         self.model.kits[self.model.active].selected_key = None;
         self.model.kits[self.model.active].current_pane = None;
         self.close_tag_popups(id, |_| true);
-    }
-
-    pub(in crate::app) fn close_all_tabs_but(&mut self, key: &str) {
-        let closing = self.views[self.model.kits[self.model.active].id].tabs_from_tree().into_iter().filter(|open| open != key).collect();
-        self.remember_closed_tag_keys(self.model.active, closing);
-        for open in self.views[self.model.kits[self.model.active].id].tabs_from_tree() {
-            if open != key {
-                self.kit_and_view(self.model.active).close_tag_pane(&open);
-            }
-        }
-        self.kit_and_view(self.model.active).drop_documents_except(Some(key));
-        self.kit_and_view(self.model.active).focus_pane(key.to_owned());
-        let kit = self.model.kits[self.model.active].id;
-        self.close_tag_popups(kit, |tag| tag != key);
     }
 
     /// Carry out the save-changes prompt's answer.
@@ -739,13 +739,10 @@ impl Model {
             PendingCloseAction::CloseApp | PendingCloseAction::CloseAllTabs => {
                 ordered_unique_keys(self.kits[self.active].open_tabs.iter())
             }
+            PendingCloseAction::CloseTabGroup {kit,keys,..} => {
+                if self.kits[self.active].id==*kit {ordered_unique_keys(keys.iter())}else{Vec::new()}
+            }
             PendingCloseAction::CloseTab(key) => vec![key.clone()],
-            PendingCloseAction::CloseAllButThis(kept_key) => ordered_unique_keys(
-                self.kits[self.active]
-                    .open_tabs
-                    .iter()
-                    .filter(|key| *key != kept_key),
-            ),
             // `request_close_action` has already made this kit active, so the
             // active-kit lookups above address the right documents.
             PendingCloseAction::CloseKit(_) => {
@@ -1099,7 +1096,7 @@ mod tests {
         let (_kit, mut app, key, other) = edited("close-all-but");
 
         // The dirty tag is the one kept, so nothing needs saving.
-        app.request_close_action(PendingCloseAction::CloseAllButThis(key.clone()), &ctx());
+        app.request_close_action(PendingCloseAction::CloseTabGroup {kit:app.model.active_kit_id(),keys:app.model.kits[app.model.active].open_tabs.iter().filter(|open|*open!=&key).cloned().collect(),keep:Some(key.clone())}, &ctx());
 
         assert!(app.dialogs.get::<SaveChangesPrompt>().is_none());
         assert_eq!(app.model.kits[0].open_tabs, vec![key.clone()]);
@@ -1109,7 +1106,7 @@ mod tests {
 
         // Keeping the clean one instead lists the dirty one.
         let (_kit, mut app, key, other) = edited("close-all-but-other");
-        app.request_close_action(PendingCloseAction::CloseAllButThis(other.clone()), &ctx());
+        app.request_close_action(PendingCloseAction::CloseTabGroup {kit:app.model.active_kit_id(),keys:app.model.kits[app.model.active].open_tabs.iter().filter(|open|*open!=&other).cloned().collect(),keep:Some(other.clone())}, &ctx());
         assert!(app.dialogs.get::<SaveChangesPrompt>().is_some());
         assert_eq!(
             app.dialogs.get::<SaveChangesPrompt>().unwrap().dirty_tags[0].tag_id,
@@ -1759,4 +1756,31 @@ mod tests {
             "and its tab closed there"
         );
     }
+    #[test]
+    fn closing_a_group_ignores_dirty_tabs_outside_it() {
+        let (_kit,mut app,dirty,clean)=edited("close-group-clean");
+        let kit=app.model.active_kit_id();
+        app.request_close_action(PendingCloseAction::CloseTabGroup {kit,keys:vec![clean.clone()],keep:None},&ctx());
+        assert!(app.dialogs.get::<SaveChangesPrompt>().is_none());
+        assert!(is_dirty(&app,&dirty));
+        assert!(tab_open(&app,&dirty));
+        assert!(!tab_open(&app,&clean));
+    }
+    #[test]
+    fn a_group_save_prompt_retains_its_workspace_and_exact_members() {
+        let (_kit,mut app,dirty,clean)=edited("close-group-prompt");
+        let kit=app.model.active_kit_id();
+        app.request_close_action(PendingCloseAction::CloseTabGroup {kit,keys:vec![dirty.clone()],keep:None},&ctx());
+        let prompt=app.dialogs.get::<SaveChangesPrompt>().unwrap();
+        assert_eq!(prompt.dirty_tags.iter().map(|tag|&tag.tag_id).collect::<Vec<_>>(),vec![&dirty]);
+        let other=app.add_kit();
+        app.kit_and_view(1).open_tag_pane(&dirty);
+        app.apply_save_changes_prompt_action(SaveChangesPromptAction::DontSave,&ctx());
+        assert_eq!(app.model.active_kit_id(),kit);
+        assert!(app.model.kits[0].open_tabs.contains(&clean));
+        assert!(!app.model.kits[0].open_tabs.contains(&dirty));
+        assert_eq!(app.model.kits[1].id,other);
+        assert!(app.model.kits[1].open_tabs.contains(&dirty));
+    }
+
 }

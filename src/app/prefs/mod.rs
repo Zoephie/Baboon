@@ -903,6 +903,7 @@ pub(super) fn load_terminal_open_games() -> HashSet<String> {
 /// `last_session.json`. Mapped in one place so the two files cannot drift.
 pub(in crate::app) fn browser_mode_from_str(text: Option<&str>) -> Option<BrowserMode> {
     match text? {
+        "flat" => Some(BrowserMode::Flat),
         "folders" => Some(BrowserMode::Folders),
         "groups" => Some(BrowserMode::Groups),
         _ => None,
@@ -911,6 +912,7 @@ pub(in crate::app) fn browser_mode_from_str(text: Option<&str>) -> Option<Browse
 
 pub(in crate::app) fn browser_mode_str(mode: BrowserMode) -> &'static str {
     match mode {
+        BrowserMode::Flat => "flat",
         BrowserMode::Folders => "folders",
         BrowserMode::Groups => "groups",
     }

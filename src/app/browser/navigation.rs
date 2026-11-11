@@ -16,6 +16,12 @@ enum NavigationAction {
 
 #[derive(Clone, Default)]
 struct Navigation {
+    names: HashMap<String,String>,
+    prefix: String,
+    typed_at: f64,
+    typed: Option<(String,bool)>,
+    pending_key: Option<String>,
+    extending: bool,
     scope: Option<egui::Id>,
     owner_scope: Option<egui::Id>,
     owner: Option<egui::Id>,
@@ -42,8 +48,8 @@ pub(super) fn begin_browser_navigation(ui: &Ui, scope: egui::Id) {
     state(ui.ctx(), |nav| {
         nav.scope = Some(scope);
         nav.parent_stack.clear();
-        nav.collecting = nav.owner_scope == Some(scope) && nav.step.is_some() && !nav.ready;
-        if nav.collecting { nav.rows.clear(); nav.seen.clear(); nav.parents.clear(); nav.columns = 1; nav.page_rows = 0; }
+        nav.collecting = nav.owner_scope == Some(scope) && (nav.step.is_some() || nav.typed.is_some() || nav.pending_key.is_some()) && !nav.ready;
+        if nav.collecting { nav.rows.clear(); nav.names.clear(); nav.seen.clear(); nav.parents.clear(); nav.columns = 1; nav.page_rows = 0; }
     });
 }
 
@@ -62,8 +68,15 @@ pub(super) fn browser_navigation_select(ui: &Ui, id: egui::Id) {
         nav.ready = false;
         nav.rows.clear();
         nav.target = None;
-        nav.step = None;
+        nav.step = None; nav.prefix.clear(); nav.typed=None; nav.pending_key=None;
     });
+}
+
+/// Resolve a programmatic selection against the destination pane's widget IDs
+/// on its next draw, retaining keyboard focus and scrolling the row into view.
+pub(super) fn request_browser_selection(ctx:&egui::Context,scope:egui::Id,key:String) {
+    state(ctx,|nav|*nav=Navigation {owner_scope:Some(scope),pending_key:Some(key),..Default::default()});
+    ctx.request_repaint();
 }
 
 pub(super) fn register_browser_navigation(ui: &Ui, key: &str, id: egui::Id) {
@@ -104,8 +117,8 @@ pub(super) fn browser_navigation_target(ui: &Ui) -> Option<(String, egui::Id)> {
     state(ui.ctx(), |nav| (nav.scope == nav.owner_scope).then(|| nav.target.clone()).flatten())
 }
 
-pub(super) fn browser_navigation_pending(ctx: &egui::Context) -> bool {
-    state(ctx, |nav| nav.target.is_some() || nav.step.is_some())
+pub(super) fn reset_browser_navigation_selection(ctx:&egui::Context) {
+    state(ctx,|nav|*nav=Navigation{scope:nav.scope,owner_scope:nav.owner_scope,owner:nav.owner,..Default::default()});
 }
 
 pub(super) fn browser_navigation_arrived(ui: &Ui) {
@@ -124,7 +137,10 @@ pub(super) fn browser_navigation_columns(ui: &Ui, columns: usize, row_height: f3
 }
 
 fn move_selection(nav: &mut Navigation, key: egui::Key) -> Option<NavigationAction> {
-    let index = nav.rows.iter().position(|(_, id)| Some(*id) == nav.owner)?;
+    let index = match nav.rows.iter().position(|(_, id)| Some(*id) == nav.owner) {
+        Some(index)=>index,
+        None=>{let row=nav.rows.get(if key==egui::Key::End{nav.rows.len().saturating_sub(1)}else{0})?.clone();nav.owner=Some(row.1);nav.target=Some(row.clone());return Some(NavigationAction::Select(row.0,row.1));}
+    };
     let (current_key, current_id) = nav.rows[index].clone();
     let folder = nav.folders.get(&current_id);
     let next = match key {
@@ -198,6 +214,12 @@ pub(super) fn finish_browser_navigation(ui: &Ui) {
         if !nav.collecting { return None; }
         nav.collecting = false;
         nav.ready = true;
+        if let Some(key)=nav.pending_key.take() {
+            let row=nav.rows.iter().find(|(candidate,_)|candidate==&key)?.clone();
+            nav.owner=Some(row.1);nav.target=Some(row.clone());
+            return Some(NavigationAction::Select(row.0,row.1));
+        }
+        if let Some((prefix,cycle))=nav.typed.take() { return type_selection(nav,&prefix,cycle); }
         let step = nav.step.take()?;
         move_selection(nav, step)
     });
@@ -208,4 +230,28 @@ pub(super) fn finish_browser_navigation(ui: &Ui) {
         ui.data_mut(|data| data.insert_temp(browser_selection_owner_id(), (id, ui.clip_rect())));
         ui.ctx().request_repaint();
     }
+}
+
+fn type_selection(nav:&mut Navigation,prefix:&str,cycle:bool)->Option<NavigationAction> {
+    if nav.rows.is_empty(){return None;}
+    let current=nav.rows.iter().position(|(_,id)|Some(*id)==nav.owner);
+    let start=if cycle {current.map(|index|(index+1)%nav.rows.len()).unwrap_or(0)}else{current.unwrap_or(0)};
+    for offset in 0..nav.rows.len() {let row=&nav.rows[(start+offset)%nav.rows.len()];
+        let name=nav.names.get(&row.0).map(String::as_str).unwrap_or_else(||tag_path::name(&row.0));
+        if name.to_lowercase().starts_with(prefix) {nav.owner=Some(row.1);nav.target=Some(row.clone());return Some(NavigationAction::Select(row.0.clone(),row.1));}
+    } None
+}
+pub(super) fn register_browser_name(ui:&Ui,key:&str,name:&str) {state(ui.ctx(),|nav|{if nav.collecting {nav.names.insert(key.into(),name.into());}});}
+pub(super) fn browser_navigation_extend(ctx:&egui::Context,extend:bool) {state(ctx,|nav|{nav.extending=extend;nav.prefix.clear();});}
+pub(super) fn browser_navigation_extending(ctx:&egui::Context)->bool {state(ctx,|nav|nav.extending)}
+pub(super) fn type_browser_selection(ctx:&egui::Context,text:&str)->Option<(String,egui::Id)> {
+    let now=ctx.input(|input|input.time);
+    let action=state(ctx,|nav|{
+        let text=text.to_lowercase();
+        let continuing=now-nav.typed_at<=1.0 && !nav.prefix.is_empty();
+        let cycle=!continuing || nav.prefix==text;
+        if !continuing || nav.prefix==text {nav.prefix=text;}else{nav.prefix.push_str(&text);}
+        nav.typed_at=now;nav.extending=false;let prefix=nav.prefix.clone();
+        if nav.ready {type_selection(nav,&prefix,cycle)}else{nav.typed=Some((prefix,cycle));None}
+    }); ctx.request_repaint(); action.map(|action|apply_navigation(ctx,action))
 }

@@ -344,6 +344,7 @@ pub(in crate::app) fn pane_header_breadcrumbs(
 }
 
 pub(in crate::app) fn navigate_folder_browser(pane: &mut FolderBrowserState, path: PathBuf, label: String) {
+    pane.selection.clear(); pane.selected_tag = None;
     if pane.rel_path == path {
         return;
     }
@@ -4156,6 +4157,16 @@ mod tests {
                 &["Save Before Moving or Copying", "Save All and Continue"],
             ),
             case(
+                "bulk_browser_prompt", &["dialog:BulkPrompt"], &[], loose_kit,
+                |h| {h.app.dialogs.open(crate::app::browser::bulk::BulkPrompt {request:crate::app::browser::bulk::BulkRequest { stamp:h.app.model.kit_stamp(),pane:String::new(),keys:Vec::new(),action:crate::app::browser::selection::BulkAction::Open },message:"Open 10 tag tabs?".into()});},
+                &["Confirm Selection Action","Continue"],
+            ),
+            case(
+                "bulk_rename_items", &["dialog:BulkRenameDialog"], &[], loose_kit,
+                |h| {h.app.dialogs.open(crate::app::browser::bulk_rename::BulkRenameDialog::for_smoke(h.app.model.kit_stamp()));},
+                &["Rename 2 Items","Preview","Name Pattern"],
+            ),
+            case(
                 "folder_merge_review",
                 &["tag_ops.folder_merge"],
                 &[],
@@ -5661,7 +5672,7 @@ mod tests {
         assert_eq!(h.app.views[kit_id].browser.folder_browsers[&key].mode, BrowserMode::Groups);
         h.click(&view_menu, view_index);
         h.idle(2);
-        h.click("Folders", 0);
+        h.click("Tree", 0);
         h.idle(2);
         let open_new = |h: &mut Harness| {
             let label = h.painted.iter().find(|text| text.trim() == "New").unwrap().clone();
@@ -6363,12 +6374,79 @@ mod tests {
         }
     }
 
+    #[test]
+    fn folder_browser_footer_and_tab_menu_follow_its_current_folder() {
+        let mut h=Harness::new();
+        fixture::install_kit(&mut h.app,fixture::synthetic_entries(2,1,1));
+        h.app.handle_browser_action(BrowserAction::OpenFolderBrowser {rel_path:PathBuf::new(),label:"Tags".into(),open_in_new_tab:true},h.ctx.clone());
+        idle(&mut h);
+        let kit=h.app.model.active_kit_id();
+        let key=h.app.model.kits[0].current_pane.clone().unwrap();
+        let selected=crate::app::browser::folder_pane_key(Path::new("folder_00"));
+        h.app.views[kit].browser.folder_browsers.get_mut(&key).unwrap().selection.keys.insert(selected);
+        idle(&mut h);
+        let footers:Vec<_>=h.painted_rects.iter().filter(|(text,_)|text=="2 items · 1 folder selected").collect();
+        assert_eq!(footers.len(),1,"the count appears only inside this browser");
+        assert!(footers[0].1.bottom()<h.screen.y-20.0,"footer remains above global status");
+        let about_at=egui::pos2(footers[0].1.left()-20.0,footers[0].1.center().y);
+        press_at(&mut h,about_at,egui::PointerButton::Primary);
+        idle(&mut h);
+        let help=h.app.dialogs.get::<crate::app::help::HelpWindow>().expect("footer About opens Help");
+        assert_eq!(help.doc_section.as_deref(),Some(crate::app::help::FOLDER_BROWSER_HELP_SECTION));
+        h.app.dialogs.close::<crate::app::help::HelpWindow>();
+        h.app.views[kit].browser.folder_browsers.get_mut(&key).unwrap().filter="folder_00".into();
+        h.app.views[kit].browser.folder_browsers.get_mut(&key).unwrap().search_scope.folders=true;
+        idle(&mut h);
+        assert!(h.painted.iter().any(|text|text.starts_with("1 of 2 items · ")),"filtered footer keeps the total: {:?}",h.painted);
+        let pane=h.app.views[kit].browser.folder_browsers.get_mut(&key).unwrap();
+        navigate_folder_browser(pane,PathBuf::from("folder_01/sub_00"),"sub_00".into());
+        h.app.views[kit].navigation_hidden=true;
+        idle(&mut h);
+        press_tab(&mut h,"sub_00",egui::PointerButton::Secondary);
+        for label in ["Reveal in Browser",crate::app::browser::actions::folder_opener_label(),"Close All","Close All Other Tabs"] {
+            assert!(h.painted.iter().any(|text|text==label),"missing tab action {label}: {:?}",h.painted);
+        }
+        h.click("Reveal in Browser",0);
+        assert!(!h.app.views[kit].navigation_hidden);
+        idle(&mut h);
+        assert_eq!(h.app.views[kit].browser.mode,BrowserMode::Folders);
+        assert!(h.painted.iter().any(|text|text=="folder_01"));
+    }
+
+    #[test]
+    fn tab_menu_closes_only_the_clicked_split_in_its_workspace() {
+        for action in ["Close Tab","Close All","Close All Other Tabs"] {
+            let (mut h,keys)=three_tabs();
+            let kit=h.app.model.active_kit_id();
+            let mut tiles=egui_tiles::Tiles::default();
+            let panes:Vec<_>=keys.iter().map(|key|tiles.insert_pane(key.clone())).collect();
+            let left=tiles.insert_tab_tile(panes[..2].to_vec());
+            let right=tiles.insert_tab_tile(vec![panes[2]]);
+            let root=tiles.insert_horizontal_tile(vec![left,right]);
+            h.app.views[kit].tag_tree=egui_tiles::Tree::new(egui::Id::unique(("group-close",action)),root,tiles);
+            let other=h.app.add_kit();
+            h.app.kit_and_view(1).open_tag_pane(&keys[0]);
+            h.app.focus_kit(0);
+            h.app.kit_and_view(0).focus_pane(keys[0].clone());
+            idle(&mut h);
+            press_tab(&mut h,"tag_000.biped",egui::PointerButton::Secondary);
+            for label in ["Close Tab","Close All","Close All Other Tabs"] {assert!(h.painted.iter().any(|text|text==label));}
+            h.click(action,0);idle(&mut h);
+            let open=&h.app.model.kits[0].open_tabs;
+            assert!(open.contains(&keys[2]),"{action} closed the other split");
+            assert_eq!(open.contains(&keys[0]),action=="Close All Other Tabs");
+            assert_eq!(open.contains(&keys[1]),action=="Close Tab");
+            assert_eq!(h.app.model.kits[1].id,other);
+            assert!(h.app.model.kits[1].open_tabs.contains(&keys[0]),"{action} touched another workspace");
+        }
+    }
+
     /// The tab menu's "Close all but this" keeps the tab it was opened on.
     #[test]
     fn close_all_but_this_keeps_that_tab() {
         let (mut h, keys) = three_tabs();
         press_tab(&mut h, "tag_001.biped", egui::PointerButton::Secondary);
-        h.click("Close all but this", 0);
+        h.click("Close All Other Tabs", 0);
         idle(&mut h);
         assert_eq!(open_tabs(&h), [keys[1].clone()]);
     }

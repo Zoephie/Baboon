@@ -78,6 +78,7 @@ pub(in crate::app) struct ContainerDeleteResult {
 /// the result if the kit has closed or its source was replaced, while
 /// preserving receive order for current work.
 pub(in crate::app) enum WorkerMessage {
+    BrowserBulkFinished { stamp: KitStamp, result: Result<crate::app::browser::bulk::BulkOutcome,String> },
     SourceLoaded {
         /// Which kit this load was started for.
         kit: KitId,
@@ -505,6 +506,7 @@ pub(in crate::app) struct FolderRefactorFinished {
     /// paths relative to the tags root, so what is keyed by folder rather than
     /// by tag (favorite folders) can follow it.
     pub(in crate::app) moved_folder: Option<(PathBuf, PathBuf)>,
+    pub(in crate::app) moved_folders: Vec<(PathBuf,PathBuf)>,
 }
 
 pub(in crate::app) struct FolderRefactorUiState {

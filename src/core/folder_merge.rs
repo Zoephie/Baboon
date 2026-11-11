@@ -126,8 +126,7 @@ impl Conflict {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Inventory {
-    pub source: PathBuf,
-    pub destination: PathBuf,
+    roots: Vec<(PathBuf,PathBuf)>,
     pub source_items: BTreeMap<PathBuf, Fingerprint>,
     destination_items: BTreeMap<PathBuf, Fingerprint>,
     children: BTreeMap<PathBuf, Vec<PathBuf>>,
@@ -195,30 +194,27 @@ pub(crate) fn matching_path(path: &Path) -> Result<Option<PathBuf>, String> {
 }
 
 impl Inventory {
+    #[cfg(test)]
     pub fn scan(
         source: &Path,
         destination: &Path,
         cancelled: &impl Fn() -> bool,
     ) -> Result<Self, String> {
-        let source_items = tree(source, cancelled)?;
-        let mut children: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
-        for item in source_items.keys().filter(|p| p.as_path() != source) {
-            children
-                .entry(item.parent().unwrap().to_owned())
-                .or_default()
-                .push(item.clone());
-        }
-        Ok(Self {
-            source: source.to_owned(),
-            destination: destination.to_owned(),
-            source_items,
-            destination_items: tree(destination, cancelled)?,
-            children,
-        })
+        Self::scan_many(&[(source.to_owned(),destination.to_owned())],cancelled)
     }
-    pub fn unchanged(&self, cancelled: &impl Fn() -> bool) -> Result<bool, String> {
-        Ok(self.source_items == tree(&self.source, cancelled)?
-            && self.destination_items == tree(&self.destination, cancelled)?)
+    pub fn scan_many(roots: &[(PathBuf,PathBuf)], cancelled: &impl Fn()->bool) -> Result<Self,String> {
+        let mut source_items = BTreeMap::new();
+        let mut destination_items = BTreeMap::new();
+        for (source,destination) in roots { source_items.extend(tree(source,cancelled)?); destination_items.extend(tree(destination,cancelled)?); }
+        let mut children: BTreeMap<PathBuf,Vec<PathBuf>> = BTreeMap::new();
+        for item in source_items.keys() {
+            children.entry(item.parent().ok_or("Invalid source path")?.to_owned()).or_default().push(item.clone());
+        }
+        Ok(Self { roots:roots.to_vec(), source_items, destination_items, children })
+    }
+    pub fn unchanged(&self, cancelled: &impl Fn()->bool) -> Result<bool,String> {
+        let current=Self::scan_many(&self.roots,cancelled)?;
+        Ok(self.source_items==current.source_items && self.destination_items==current.destination_items)
     }
     pub fn files(&self) -> usize {
         self.source_items.values().filter(|i| !i.directory).count()
@@ -250,14 +246,9 @@ impl Inventory {
             new_directories: HashSet::new(),
         };
         let mut reserved = HashSet::new();
-        self.plan_item(
-            &self.source,
-            &self.destination,
-            &mut plan,
-            &mut reserved,
-            &mut decide,
-            cancelled,
-        )?;
+        for (source,destination) in &self.roots {
+            self.plan_item(source,destination,&mut plan,&mut reserved,&mut decide,cancelled)?;
+        }
         Ok(plan)
     }
     fn plan_item(
@@ -283,6 +274,7 @@ impl Inventory {
         // not been visited yet. Keep Both must not steal an incoming filename.
         let occupied = || {
             let mut occupied = reserved.clone();
+            occupied.extend(self.roots.iter().map(|(_,target)| path_key(target)));
             if let Some(siblings) = source.parent().and_then(|parent| self.children.get(parent)) {
                 occupied.extend(
                     siblings
@@ -348,7 +340,11 @@ impl Inventory {
 fn path_key(path: &Path) -> String {
     path.to_string_lossy().to_ascii_lowercase()
 }
-fn unused_name(
+
+pub(crate) fn snapshot(roots: &[PathBuf], cancelled: &impl Fn()->bool) -> Result<BTreeMap<PathBuf,Fingerprint>,String> {
+    let mut result=BTreeMap::new(); for root in roots {result.extend(tree(root,cancelled)?);} Ok(result)
+}
+pub(crate) fn unused_name(
     path: &Path,
     directory: bool,
     reserved: &HashSet<String>,
@@ -388,6 +384,7 @@ pub(crate) struct Plan {
     new_directories: HashSet<PathBuf>,
 }
 impl Plan {
+    pub fn target_folder(&self,source:&Path)->Option<&Path> {self.source_directories.iter().position(|path|path==source).map(|index|self.directories[index].as_path())}
     pub fn vacant_targets(&self) -> Result<bool, String> {
         for path in self
             .new_directories
@@ -414,6 +411,18 @@ pub(crate) struct Transaction {
     finished: bool,
 }
 impl Transaction {
+    /// Preserve every original before deleting any member of a batch.
+    pub fn delete_items(&mut self, roots: &[PathBuf], mut preserve: impl FnMut(&Path)->Result<(),String>) -> Result<(),String> {
+        let mut items = BTreeMap::new();
+        for root in roots { items.extend(tree(root,&||false)?); }
+        for (path,info) in &items { if !info.directory { self.remember(path)?; } }
+        for (path,info) in &items { if !info.directory { preserve(path)?; } }
+        for (path,info) in &items { if !info.directory { self.changed.insert(path.clone()); fs::remove_file(path).map_err(|e|format!("Could not delete {}: {e}",path.display()))?; } }
+        let mut dirs: Vec<_> = items.into_iter().filter(|(_,info)|info.directory).map(|(path,_)|path).collect();
+        dirs.sort_by_key(|path|std::cmp::Reverse(path.components().count()));
+        for path in dirs { fs::remove_dir(&path).map_err(|e|e.to_string())?; self.removed_directories.push(path); }
+        Ok(())
+    }
     pub fn new() -> Result<Self, String> {
         let directory = std::env::temp_dir().join(format!("baboon-merge-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&directory).map_err(|e| e.to_string())?;
@@ -616,6 +625,15 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn failed_multi_delete_preservation_rolls_back_every_member() {
+        let tree=Tree::new();tree.write("source/a",b"a");tree.write("target/b",b"b");
+        let mut journal=Transaction::new().unwrap();let mut preserved=0;
+        let result=journal.delete_items(&[tree.0.join("source"),tree.0.join("target")],|_|{preserved+=1;if preserved==2{Err("recovery unavailable".into())}else{Ok(())}});
+        assert!(result.is_err());journal.rollback("failed".into());
+        assert_eq!(fs::read(tree.0.join("source/a")).unwrap(),b"a");assert_eq!(fs::read(tree.0.join("target/b")).unwrap(),b"b");
     }
 
     #[test]

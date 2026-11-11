@@ -211,6 +211,20 @@ fn is_legacy_run(name: &str) -> bool {
     parts.next().is_some_and(digits) && parts.next().is_none_or(digits) && parts.next().is_none()
 }
 
+/// Reserve one files/ tree and record every selected root in its manifest.
+pub(crate) fn prepare_batch_paths(base:&Path,origin:&RecoveryOrigin,paths:&[PathBuf],operation:&str,now:u64)->Result<PathBuf,String> {
+    if paths.is_empty() || paths.iter().any(|path|path.as_os_str().is_empty() || !path.components().all(|part|matches!(part,Component::Normal(_)))) {
+        return Err("This selection has no safe relative paths to recover".into());
+    }
+    let mut files=prepare_batch(base,origin,&paths[0],operation,now)?;
+    for _ in paths[0].components() {files.pop();}
+    let manifest=files.parent().ok_or("Invalid batch path")?.join("recovery-info.json");
+    let mut info:serde_json::Value=serde_json::from_slice(&fs::read(&manifest).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+    info["original_relative_paths"]=serde_json::to_value(paths).map_err(|e|e.to_string())?;
+    fs::write(manifest,serde_json::to_vec_pretty(&info).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+    Ok(files)
+}
+
 /// A custom location may itself be an engine folder (or a numeric folder
 /// below it). Finish that engine's migration before creating new batches there,
 /// so the next launch cannot mistake new recovery data for the legacy layout.

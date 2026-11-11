@@ -94,6 +94,39 @@ pub(in crate::app) fn run(
     context: MergeContext,
     tx: &Sender<WorkerMessage>,
 ) -> Result<FolderRefactorFinished, String> {
+    run_many(root,vec![(source,destination)],moving,label,names,game,previous_entries,previous_index,context,tx)
+}
+
+pub(in crate::app) fn run_many(
+    root: PathBuf, roots: Vec<(PathBuf,PathBuf)>, moving: bool, label: String,
+    names: TagNameIndex, game: Option<GameId>, previous_entries: Vec<TagEntry>,
+    previous_index: Option<ReverseDependencyIndex>, context: MergeContext, tx: &Sender<WorkerMessage>,
+) -> Result<FolderRefactorFinished,String> {
+    run_batch(root,roots,moving,label,names,game,previous_entries,previous_index,context,tx,false)
+}
+
+/// Rename is collision-strict: a reviewed name is never silently merged,
+/// overwritten or suffixed by a conflict choice.
+pub(in crate::app) fn run_renames(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,names:TagNameIndex,game:Option<GameId>,previous_entries:Vec<TagEntry>,previous_index:Option<ReverseDependencyIndex>,context:MergeContext,tx:&Sender<WorkerMessage>)->Result<FolderRefactorFinished,String> {
+    run_batch(root,roots,true,"Renaming Items".into(),names,game,previous_entries,previous_index,context,tx,true)
+}
+
+fn validate_rename_roots(root:&Path,roots:&[(PathBuf,PathBuf)])->Result<(),String> {
+    let canonical_root=root.canonicalize().map_err(|error|error.to_string())?;
+    let mut destinations=HashSet::new();
+    for (source,target) in roots {
+        let resolved=source.canonicalize().map_err(|error|error.to_string())?;
+        if resolved==canonical_root||!resolved.starts_with(&canonical_root)||source.parent()!=target.parent() {return Err("Rename must keep every selected item in its current folder".into());}
+        if !destinations.insert(target.to_string_lossy().to_lowercase()) {return Err("Several items would have the same name; no files changed".into());}
+        if disk::matching_path(target)?.is_some() {return Err(format!("A destination already exists: {}. No files changed.",target.display()));}
+        if roots.iter().any(|(other,_)|other!=source&&source.starts_with(other)) {return Err("Select either a folder or its contents, not both".into());}
+    }
+    Ok(())
+}
+
+fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,names:TagNameIndex,game:Option<GameId>,previous_entries:Vec<TagEntry>,previous_index:Option<ReverseDependencyIndex>,context:MergeContext,tx:&Sender<WorkerMessage>,renaming:bool)->Result<FolderRefactorFinished,String> {
+    let (source,destination)=roots.first().cloned().ok_or("No items selected")?;
+    let single_folder=roots.len()==1 && source.is_dir();
     let cancelled = || context.control.cancelled();
     let source_kind = TagSource::LooseFolder {
         root: root.clone(),
@@ -105,8 +138,9 @@ pub(in crate::app) fn run(
         if cancelled() {
             return Err("Folder operation cancelled; no files changed".into());
         }
+        if renaming {validate_rename_roots(&root,&roots)?;}
         send_folder_refactor_progress(tx, &label, "Scanning folders and checking references", None);
-        let inventory = Inventory::scan(&source, &destination, &cancelled)?;
+        let inventory = Inventory::scan_many(&roots, &cancelled)?;
         let (all_before, mut index, mut index_changes) =
             refactor::prepare_tag_refactor_index_cancellable(
                 &root,
@@ -135,7 +169,7 @@ pub(in crate::app) fn run(
         let mut referrers = HashSet::new();
         if moving {
             for entry in &all_before {
-                if matches!(&entry.location, TagEntryLocation::LooseFile(path) if path.starts_with(&source))
+                if matches!(&entry.location, TagEntryLocation::LooseFile(path) if roots.iter().any(|(source,_)| path.starts_with(source)))
                 {
                     if let Some(path) = dependency_entry_reference_path(entry, &names) {
                         referrers
@@ -175,19 +209,22 @@ pub(in crate::app) fn run(
                 _ => None,
             })
             .collect::<Result<Vec<_>, _>>()?;
+        if !renaming {
         review::ask(
             tx,
             &context.control,
-            ReviewKind::Summary {
+            if roots.len()>1 { ReviewKind::BatchSummary { sources:roots.iter().map(|(source,_)|source.clone()).collect(), destination:destination.parent().unwrap_or(&destination).to_owned(), files:inventory.files(), conflicts:inventory.conflicts(&cancelled)? } } else {            ReviewKind::Summary {
                 source: source.clone(),
                 destination: destination.clone(),
                 files: inventory.files(),
                 conflicts: inventory.conflicts(&cancelled)?,
-            },
+            } },
         )?;
+        }
         let mut remaining = None;
         let plan = inventory.plan(
             |conflict| {
+                if renaming {return Err("A destination changed after preview; no files changed".into());}
                 if let Some(choice) = remaining
                     && (choice != Choice::Replace || conflict.replace_allowed())
                 {
@@ -306,7 +343,7 @@ pub(in crate::app) fn run(
         send_folder_refactor_progress(
             tx,
             &label,
-            "Applying folder merge (Cancel unavailable)",
+            if renaming {"Applying rename (Cancel unavailable)"}else{"Applying folder merge (Cancel unavailable)"},
             None,
         );
         let mut transaction = Transaction::new()?;
@@ -328,16 +365,10 @@ pub(in crate::app) fn run(
                         &crate::core::storage::data_path("deleted-tags"),
                         base,
                     )?;
-                    let relative = destination.strip_prefix(&root).map_err(|e| e.to_string())?;
-                    recovery_tree = Some(recovery::prepare_batch(
-                        base,
-                        origin,
-                        relative,
-                        "replace during folder merge",
-                        recovery::now_secs(),
-                    )?);
+                    let relative = roots.iter().map(|(_,destination)| destination.strip_prefix(&root).map(Path::to_path_buf)).collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?;
+                    recovery_tree=Some(recovery::prepare_batch_paths(base,origin,&relative,"replace during folder merge",recovery::now_secs())?);
                 }
-                let relative = path.strip_prefix(&destination).map_err(|e| e.to_string())?;
+                let relative = path.strip_prefix(&root).map_err(|e| e.to_string())?;
                 let saved = recovery_tree.as_ref().unwrap().join(relative);
                 fs::create_dir_all(saved.parent().ok_or("Invalid recovery path")?)
                     .map_err(|e| format!("Could not create recovery subfolder: {e}"))?;
@@ -423,7 +454,7 @@ pub(in crate::app) fn run(
         } else {
             HashMap::new()
         };
-        let action = if moving { "Moved" } else { "Copied" };
+        let action = if renaming { "Renamed" } else if moving { "Moved" } else { "Copied" };
         let status = format!(
             "{action} {} file(s), updated {} reference(s) in {} tag(s)",
             plan.files.len(),
@@ -432,7 +463,7 @@ pub(in crate::app) fn run(
         );
         let mut lines = vec![
             format!(
-                "Merged folder: {} -> {}",
+                "File operation: {} -> {}",
                 source.display(),
                 destination.display()
             ),
@@ -451,7 +482,8 @@ pub(in crate::app) fn run(
             reverse_dependencies: Some(index),
             old_to_new_keys,
             moved: moving,
-            moved_folder: (moving && !source.exists()).then(|| {
+            moved_folders: if moving {roots.iter().filter(|(source,_)|!source.exists()).filter_map(|(source,_)|plan.target_folder(source).map(|target|(source.strip_prefix(&root).unwrap().to_owned(),target.strip_prefix(&root).unwrap().to_owned()))).collect()}else{Vec::new()},
+            moved_folder: (single_folder && moving && !source.exists()).then(|| {
                 (
                     source.strip_prefix(&root).unwrap().to_owned(),
                     plan.directories

@@ -52,6 +52,7 @@ pub(in crate::app) enum ButtonIcon {
     Import,
     Export,
     Clear,
+    CloseTab,
     Closed,
     CopyPath,
     Copy,
@@ -150,7 +151,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Edit => include_root_str!("assets/Button Icons/Edit.svg"),
         ButtonIcon::Import => include_root_str!("assets/Button Icons/Import.svg"),
         ButtonIcon::Export => include_root_str!("assets/Button Icons/Export.svg"),
-        ButtonIcon::Clear => include_root_str!("assets/Button Icons/Clear.svg"),
+        ButtonIcon::Clear | ButtonIcon::CloseTab => include_root_str!("assets/Button Icons/Clear.svg"),
         ButtonIcon::Closed => include_root_str!("assets/Button Icons/Closed.svg"),
         ButtonIcon::CopyPath => include_root_str!("assets/Button Icons/Copy Path.svg"),
         ButtonIcon::Copy => include_root_str!("assets/Button Icons/Copy.svg"),
@@ -466,6 +467,7 @@ fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
     }
     let color = svg_color(color);
     let source = match icon {
+        ButtonIcon::CloseTab => button_icon_svg(icon).replace("#EB4747", "currentColor"),
         ButtonIcon::AddWorkspace => button_icon_svg(icon).replace("#7EEB47", "currentColor"),
         ButtonIcon::MaterialsLookup => button_icon_svg(icon).replace("#60DF20", "currentColor"),
         _ => button_icon_svg(icon).to_owned(),
@@ -985,6 +987,15 @@ mod tests {
     //! It owns test-only characterization and does not participate in runtime application behavior.
 
     use super::*;
+
+    #[test]
+    fn tab_close_uses_the_current_color_while_clear_keeps_its_destructive_color() {
+        let color=Color32::from_rgb(17,34,51);
+        assert_eq!(icon_color(ButtonIcon::CloseTab,color),color);
+        let svg=colorized_icon_svg(ButtonIcon::CloseTab,color);
+        assert!(svg.contains("#112233"));assert!(!svg.contains("#EB4747"));
+        assert!(colorized_icon_svg(ButtonIcon::Clear,color).contains("#EB4747"));
+    }
 
     #[test]
     fn dropdown_triggers_share_open_styling_without_moving_their_contents() {
