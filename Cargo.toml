@@ -23,7 +23,7 @@ path = "src/main.rs"
 anyhow = "1"
 arboard = { version = "3.6", default-features = false }
 atomic-write-file = "0.3"
-blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "19e4c78bbc17aeb9b5fb43209cb2e5d521fe1b39", features = ["audio", "iostore", "halo5"] }
+blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "113885b12099a65481189f63e6859bd6981c6087", features = ["audio", "iostore", "halo5"] }
 directories = "6"
 display-info = "0.5"
 # 0.37 made the clipboard a feature; without it copy and paste do nothing.
