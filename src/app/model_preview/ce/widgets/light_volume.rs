@@ -6,6 +6,7 @@ use super::{
     function_slot_of, has_flag, object_block, posed_on, rgb_colors_interpolate,
     rgb_interpolation_flags,
 };
+use blam_tags::bitmap::BitmapDefinition;
 use blam_tags::{TagFile, TagStruct};
 use std::sync::Arc;
 
@@ -64,6 +65,15 @@ fn read_frame(frame: TagStruct<'_>) -> LightVolumeFrame {
     }
 }
 
+/// The first image of a bitmap's sequence `sequence`, the first image where
+/// it has no such sequence.
+pub(in crate::app::model_preview) fn sequence_first_image(bitmap: &TagFile, sequence: usize) -> usize {
+    BitmapDefinition::from_tag(bitmap)
+        .sequences
+        .get(sequence)
+        .map_or(0, |sequence| sequence.first_bitmap_index.max(0) as usize)
+}
+
 fn read_light_volume(
     reader: &TagReader,
     path: &str,
@@ -87,14 +97,7 @@ fn read_light_volume(
         Some(map) => {
             let bitmap = reader.load(&map, "bitmap", b"bitm").ok()?;
             let sequence = root.read_int_any("sequence index").unwrap_or(0).max(0) as usize;
-            let index = elements(bitmap.root(), "sequences")
-                .get(sequence)
-                .map_or(0, |sequence| {
-                    sequence
-                        .read_int_any("first bitmap index")
-                        .unwrap_or(0)
-                        .max(0) as usize
-                });
+            let index = sequence_first_image(&bitmap, sequence);
             Arc::new(decode_image(reader, &map, SamplerKind::Texture2D, index)?)
         }
         None => super::super::super::materials::read_glow(reader)?,

@@ -1,7 +1,8 @@
 //! Halo 2's particle systems: its `.particle` looks and emitters, read into
 //! the shared particle field's terms, and the LOD its tool bakes.
 
-use blam_tags::{TagFile, TagStruct};
+use blam_tags::bitmap::BitmapDefinition;
+use blam_tags::TagStruct;
 
 use super::super::TagReader;
 use super::super::common::fields::{elements, has_flag};
@@ -10,7 +11,8 @@ use super::super::gen3::shaders::Gen3Blend;
 use super::super::particles::{
     AlbedoConstants, Billboard, EmissionShape, Emitter, MOST_FRAMES, ParticleAlbedo, ParticleAxis,
     ParticleController, ParticleLook, ParticleProperty, ParticleTrigger, ParticleUpdate,
-    SeedAllocator, SpriteShader, read_collider_of, read_movement, sprite_corner,
+    SeedAllocator, SpriteShader, plate_aspect, read_collider_of, read_movement, sprite_corner,
+    sprite_frame,
 };
 use crate::core::h2_pixel_shader::SamplerKind;
 use std::sync::Arc;
@@ -70,40 +72,26 @@ fn h2_controllers(reader: &TagReader, movement: TagStruct<'_>) -> Vec<ParticleCo
 }
 
 /// Halo 2's `sequences`: the sprites of `first`, on a plate of its own shape.
-fn read_h2_frames(tag: &TagFile, first: usize) -> (Vec<[f32; 4]>, [f32; 4]) {
-    let plate_aspect = elements(tag.root(), "bitmaps")
-        .first()
-        .map_or(1.0, |image| {
-            let size = |name: &str| image.read_int_any(name).unwrap_or(1) as f32;
-            size("width") / size("height")
-        });
-    let sequences = elements(tag.root(), "sequences");
-    let sprites = sequences
-        .get(first % sequences.len().max(1))
-        .map_or(Vec::new(), |sequence| elements(*sequence, "sprites"));
-    let rect_of = |sprite: &TagStruct<'_>| {
-        ["left", "right", "top", "bottom"].map(|name| sprite.read_real(name).unwrap_or(0.0))
-    };
-    let frames: Vec<[f32; 4]> = sprites
-        .iter()
-        .take(MOST_FRAMES)
-        .map(|sprite| {
-            let [left, right, top, bottom] = rect_of(sprite);
-            [left, top, right - left, bottom - top]
-        })
-        .collect();
+pub(in crate::app::model_preview) fn read_h2_frames(
+    plate: &BitmapDefinition,
+    first: usize,
+) -> (Vec<[f32; 4]>, [f32; 4]) {
+    let sprites = plate
+        .sequences
+        .get(first % plate.sequences.len().max(1))
+        .map_or(&[][..], |sequence| &sequence.sprites);
+    let frames: Vec<[f32; 4]> = sprites.iter().take(MOST_FRAMES).map(sprite_frame).collect();
     let (rect, center) = sprites
         .first()
         .map_or(([0.0, 1.0, 0.0, 1.0], [0.5, 0.5]), |sprite| {
-            let registration = sprite.read_point2d("registration point");
-            (rect_of(sprite), [registration.x, registration.y])
+            (sprite.rect(), sprite.registration_point)
         });
     let frames = if frames.is_empty() {
         vec![[0.0, 0.0, 1.0, 1.0]]
     } else {
         frames
     };
-    (frames, sprite_corner(rect, center, [0.0; 2], plate_aspect))
+    (frames, sprite_corner(rect, center, [0.0; 2], plate_aspect(plate)))
 }
 
 /// `effect_shader_*`'s pixel stage and blend, by the template that names the
@@ -189,11 +177,12 @@ pub(in crate::app::model_preview) fn read_h2_look(
         .read_int_any("first sequence index")
         .unwrap_or(0)
         .max(0) as usize;
+    let plate = BitmapDefinition::from_tag(&plate);
     let (frames, corner) = read_h2_frames(&plate, first);
     // `sub_53CEA0`: `first + random % count`, held inside the bitmap's.
     let sequences = if flagged("select random sequence") {
         let count = root.read_int_any("sequence count").unwrap_or(1).max(1) as usize;
-        let last = elements(plate.root(), "sequences").len().saturating_sub(1);
+        let last = plate.sequences.len().saturating_sub(1);
         (0..count)
             .map(|at| read_h2_frames(&plate, (first + at).min(last)))
             .collect()

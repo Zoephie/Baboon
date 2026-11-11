@@ -34,6 +34,7 @@ pub(super) use crate::core::document::apply::*;
 pub(super) use crate::core::document::value::*;
 pub(super) use field_meta::*;
 mod bitmap;
+pub(in crate::app) mod bitmap_sprites;
 pub(in crate::app) mod bitmap_state;
 pub(super) use bitmap::*;
 mod model;
@@ -446,6 +447,8 @@ mod responsive_page_tests {
     }
 }
 
+pub(in crate::app) mod tag_path_completion;
+pub(in crate::app) use tag_path_completion::{Offer, Picked, TagPathCompletion, add_completing, completion_list_open};
 pub(in crate::app) mod fields;
 pub(in crate::app) use fields::*;
 pub(in crate::app) mod shader;

@@ -673,7 +673,7 @@ fn panel_rects_split_the_page_and_clamp_the_sidebar() {
     let wide = panel_rects(page, 5_000.0);
     assert_eq!(wide.preview.width(), MIN_MODEL_VIEWPORT_WIDTH);
     assert_eq!(
-        clamp_setup_width(f32::NAN, page.width()),
+        panel_rects(page, f32::NAN).setup.width(),
         MIN_MODEL_SETUP_WIDTH
     );
 }

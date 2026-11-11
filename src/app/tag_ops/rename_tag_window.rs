@@ -3,6 +3,8 @@
 //! [`TagOpsCommand::Rename`].
 
 use super::*;
+use crate::app::editor::{TagPathCompletion, add_completing};
+use crate::core::tag_path_completion::Wanted;
 
 impl Dialog for RenameTagState {
     fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
@@ -88,10 +90,20 @@ impl Dialog for RenameTagState {
                             .small(),
                         );
                         ui.horizontal(|ui| {
-                            ui.add(
+                            // A whole path lists the kit's folders as it is
+                            // typed; a name alone has none to list.
+                            let completion = state.whole_path_editable.then(|| {
+                                TagPathCompletion::for_model_kit(cx.model, cx.model.active, Wanted::Folders)
+                            }).flatten();
+                            let before = state.new_path_input.clone();
+                            add_completing(
+                                ui,
                                 crate::app::ui_kit::singleline_text_edit(&mut state.new_path_input)
                                     .desired_width(430.0)
                                     .font(egui::TextStyle::Monospace),
+                                egui::Id::unique("rename_tag_path"),
+                                completion.as_ref(),
+                                &before,
                             );
                             ui.label(
                                 RichText::new(format!(".{}", state.extension))

@@ -13,7 +13,8 @@ use std::sync::Arc;
 pub(in crate::app::model_preview) const PRE_ROLL: f32 = 6.0;
 
 /// `s_sprite_frame_list`'s room.
-pub(in crate::app::model_preview) const MOST_FRAMES: usize = 15;
+pub(in crate::app::model_preview) const MOST_FRAMES: usize =
+    blam_tags::bitmap::GPU_PARTICLE_MOST_FRAMES;
 
 /// What each game's particles do differently, from the game once. Each rule
 /// holds for the games named on it.

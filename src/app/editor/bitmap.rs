@@ -2,7 +2,14 @@
 //! It owns tag-editor presentation and deferred edit construction; source loading and application lifecycle coordination belong elsewhere.
 
 use super::*;
+use super::bitmap_sprites::{
+    SpriteCanvas, apply_selection, draw_sequence_sidebar, draw_sprite_view_options, frame_rect,
+    paint_image_registration, paint_sprite_overlay, pan_to, playback_selection, selected_sprite,
+    selection_rect, selection_summary, split_bitmap_page, tag_sequences,
+};
+use blam_tags::bitmap::BitmapDefinition;
 
+#[allow(clippy::too_many_arguments)]
 pub(in crate::app) fn draw_bitmap_tag(
     ui: &mut Ui,
     ctx: &egui::Context,
@@ -13,6 +20,7 @@ pub(in crate::app) fn draw_bitmap_tag(
     preview: &mut BitmapPreviewState,
     expert_mode: bool,
     edit: &mut FieldEditContext<'_>,
+    stamp: (u64, u64),
 ) {
     if expert_mode {
         draw_tag_metadata(ui, tag, entry, names);
@@ -37,7 +45,7 @@ pub(in crate::app) fn draw_bitmap_tag(
                     draw_struct_fields(ui, tag.root(), names, 0, expert_mode, "", edit);
                 });
         }
-        BitmapPanelTab::Texture => draw_bitmap_preview(ui, ctx, tag, entry, preview),
+        BitmapPanelTab::Texture => draw_bitmap_preview(ui, ctx, tag, entry, preview, stamp),
     }
 }
 
@@ -140,45 +148,55 @@ pub(in crate::app) fn bitmap_reimport_plan(game: GameId, data: &Path, data_path:
     Ok(BitmapReimport { command, recover_to })
 }
 
+/// `stamp` is the document's id and revision: the tag's sequences are read
+/// again when it moves.
 pub(in crate::app) fn draw_bitmap_preview(
     ui: &mut Ui,
     ctx: &egui::Context,
     tag: &TagFile,
     entry: &TagEntry,
     preview: &mut BitmapPreviewState,
+    stamp: (u64, u64),
 ) {
     // Decoded on a worker: a full-size block-compressed image can take a
     // noticeable time to expand to RGBA, and it used to hold the frame. The
     // level's compressed bytes are read out here, since the tag cannot leave
-    // this thread; turning them into pixels happens off it.
-    if preview.decoded.is_none() {
-        if let Some(receiver) = &preview.decoding {
-            match receiver.try_recv() {
-                Ok(result) => {
-                    preview.decoded = Some(result);
-                    preview.decoding = None;
-                    preview.texture_dirty = true;
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {}
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    preview.decoded =
-                        Some(Err("The bitmap decode stopped unexpectedly".to_owned()));
-                    preview.decoding = None;
-                }
+    // this thread; turning them into pixels happens off it. Until the image
+    // asked for lands, the one decoded before stays on screen, so stepping
+    // images or playing a sequence across pages does not flash a spinner.
+    if let Some(receiver) = &preview.decoding {
+        match receiver.try_recv() {
+            Ok(result) => {
+                preview.decoded = Some(result);
+                preview.decoded_for = preview.decoding_for.take();
+                preview.decoding = None;
+                preview.texture_dirty = true;
             }
-        } else {
-            match extract_bitmap_level(tag, preview.image_index, preview.mip_index) {
-                Ok(level) => {
-                    let (sender, receiver) = std::sync::mpsc::channel();
-                    spawn_worker(
-                        &sender,
-                        ctx,
-                        move || decode_bitmap_level(level).map_err(|error| error.to_string()),
-                        |_| Err("decoding the bitmap panicked".to_owned()),
-                    );
-                    preview.decoding = Some(receiver);
-                }
-                Err(error) => preview.decoded = Some(Err(error.to_string())),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                preview.decoded = Some(Err("The bitmap decode stopped unexpectedly".to_owned()));
+                preview.decoded_for = preview.decoding_for.take();
+                preview.decoding = None;
+            }
+        }
+    }
+    let wanted = (preview.image_index, preview.mip_index);
+    if preview.decoding.is_none() && (preview.decoded.is_none() || preview.decoded_for != Some(wanted)) {
+        match extract_bitmap_level(tag, wanted.0, wanted.1) {
+            Ok(level) => {
+                let (sender, receiver) = std::sync::mpsc::channel();
+                spawn_worker(
+                    &sender,
+                    ctx,
+                    move || decode_bitmap_level(level).map_err(|error| error.to_string()),
+                    |_| Err("decoding the bitmap panicked".to_owned()),
+                );
+                preview.decoding = Some(receiver);
+                preview.decoding_for = Some(wanted);
+            }
+            Err(error) => {
+                preview.decoded = Some(Err(error.to_string()));
+                preview.decoded_for = Some(wanted);
             }
         }
     }
@@ -190,7 +208,8 @@ pub(in crate::app) fn draw_bitmap_preview(
         return;
     }
 
-    draw_bitmap_preview_data(ui, ctx, &entry.key, preview, true, "Bitmap");
+    let sprites = tag_sequences(preview, tag, stamp);
+    draw_bitmap_preview_data(ui, ctx, &entry.key, preview, true, "Bitmap", sprites.as_deref());
 }
 
 /// Render an already-decoded RGBA preview with the same controls and canvas as
@@ -199,6 +218,8 @@ pub(in crate::app) fn draw_bitmap_preview(
 /// pixel inspection stay identical rather than drifting into parallel viewers.
 /// `image_label` names the outer selection axis: bitmap tags step through images
 /// in a sequence, while Chimp's virtual textures step through layers.
+/// `sprites` are a bitmap tag's sequences, which add the Sequences sidebar and
+/// draw over the image; none leaves the canvas the whole page.
 pub(in crate::app) fn draw_bitmap_preview_data(
     ui: &mut Ui,
     ctx: &egui::Context,
@@ -206,6 +227,7 @@ pub(in crate::app) fn draw_bitmap_preview_data(
     preview: &mut BitmapPreviewState,
     supports_image_selection: bool,
     image_label: &str,
+    sprites: Option<&BitmapDefinition>,
 ) {
     // Move the decoded payload out while the panel is drawn. This lets the
     // shared header/body callbacks mutate the rest of the preview state
@@ -222,9 +244,6 @@ pub(in crate::app) fn draw_bitmap_preview_data(
         }
     };
 
-    // Deferred re-decode: index fields are disjoint from `decoded` so we can
-    // write them now, then decide whether to restore the payload after drawing.
-    let mut redecode = false;
     if preview.texture_dirty || preview.texture.is_none() {
         let rgba = filtered_bitmap_rgba(&data, preview);
 
@@ -270,93 +289,121 @@ pub(in crate::app) fn draw_bitmap_preview_data(
     }
     let checker_texture = preview.checker_texture.clone();
     let image_size = texture.size_vec2();
-    let header_wrap_width =
-        bitmap_header_wrap_width(ui, &data, preview, supports_image_selection, image_label);
+    // A pick in the sidebar or on the canvas, which stops playback; and the
+    // frame playback is on, which does not.
+    let mut picked: Option<Option<SpriteSelection>> = None;
+    let played = sprites.and_then(|definition| playback_selection(ui, preview, definition));
+    let page = sprites.map(|_| split_bitmap_page(ui, preview));
+    if let (Some(definition), Some((_, sidebar))) = (sprites, page) {
+        draw_sequence_sidebar(ui, sidebar, preview, definition, &mut picked);
+    }
+    let canvas = sprites.map(|definition| SpriteCanvas {
+        definition,
+        image: preview.decoded_for.map_or(preview.image_index, |(image, _)| image),
+    });
+    let has_selection = preview.sprite_selection.is_some();
+    let mut draw_section = |ui: &mut Ui, preview: &mut BitmapPreviewState| {
+        let header_wrap_width =
+            bitmap_header_wrap_width(ui, &data, preview, supports_image_selection, image_label);
 
-    draw_model_preview_section_with_header_wrap(
-        ui,
-        "Bitmap Preview",
-        None,
-        header_wrap_width,
-        |ui, part| match part {
-            ModelPreviewSectionPart::Header => {
-                draw_bitmap_selection_controls(
-                    ui,
-                    &data,
-                    preview,
-                    supports_image_selection,
-                    image_label,
-                    &mut redecode,
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    draw_bitmap_view_menu(ui, preview);
-                    draw_bitmap_camera_menu(ui, preview);
-                    draw_bitmap_header_separator(ui);
-                    let previous_spacing = ui.spacing().item_spacing.x;
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    let before = (
-                        preview.show_red,
-                        preview.show_green,
-                        preview.show_blue,
-                        preview.show_alpha,
-                    );
-                    let alpha_action = draw_bitmap_channel_toggle(
+        draw_model_preview_section_with_header_wrap(
+            ui,
+            "Bitmap Preview",
+            None,
+            header_wrap_width,
+            |ui, part| match part {
+                ModelPreviewSectionPart::Header => {
+                    draw_bitmap_selection_controls(
                         ui,
-                        preview.show_alpha,
-                        ButtonIcon::ChannelAlpha,
-                        "Alpha channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
+                        &data,
+                        preview,
+                        supports_image_selection,
+                        image_label,
                     );
-                    let blue_action = draw_bitmap_channel_toggle(
-                        ui,
-                        preview.show_blue,
-                        ButtonIcon::ChannelBlue,
-                        "Blue channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
-                    );
-                    let green_action = draw_bitmap_channel_toggle(
-                        ui,
-                        preview.show_green,
-                        ButtonIcon::ChannelGreen,
-                        "Green channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
-                    );
-                    let red_action = draw_bitmap_channel_toggle(
-                        ui,
-                        preview.show_red,
-                        ButtonIcon::ChannelRed,
-                        "Red channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
-                    );
-                    ui.spacing_mut().item_spacing.x = previous_spacing;
-
-                    apply_bitmap_channel_action(preview, ButtonIcon::ChannelAlpha, alpha_action);
-                    apply_bitmap_channel_action(preview, ButtonIcon::ChannelBlue, blue_action);
-                    apply_bitmap_channel_action(preview, ButtonIcon::ChannelGreen, green_action);
-                    apply_bitmap_channel_action(preview, ButtonIcon::ChannelRed, red_action);
-                    preview.texture_dirty |= before
-                        != (
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        draw_bitmap_view_menu(ui, preview, canvas.is_some());
+                        draw_bitmap_camera_menu(ui, preview, has_selection);
+                        draw_bitmap_header_separator(ui);
+                        let previous_spacing = ui.spacing().item_spacing.x;
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        let before = (
                             preview.show_red,
                             preview.show_green,
                             preview.show_blue,
                             preview.show_alpha,
                         );
-                });
-            }
-            ModelPreviewSectionPart::Body => {
-                draw_bitmap_canvas_and_footer(
-                    ui,
-                    &texture,
-                    checker_texture.as_ref(),
-                    image_size,
-                    &data,
-                    preview,
-                );
-            }
-        },
-    );
+                        let alpha_action = draw_bitmap_channel_toggle(
+                            ui,
+                            preview.show_alpha,
+                            ButtonIcon::ChannelAlpha,
+                            "Alpha channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
+                        );
+                        let blue_action = draw_bitmap_channel_toggle(
+                            ui,
+                            preview.show_blue,
+                            ButtonIcon::ChannelBlue,
+                            "Blue channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
+                        );
+                        let green_action = draw_bitmap_channel_toggle(
+                            ui,
+                            preview.show_green,
+                            ButtonIcon::ChannelGreen,
+                            "Green channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
+                        );
+                        let red_action = draw_bitmap_channel_toggle(
+                            ui,
+                            preview.show_red,
+                            ButtonIcon::ChannelRed,
+                            "Red channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
+                        );
+                        ui.spacing_mut().item_spacing.x = previous_spacing;
 
-    if redecode && supports_image_selection {
-        preview.decoded = None;
-        preview.texture_dirty = true;
-    } else {
-        preview.decoded = Some(Ok(data));
+                        apply_bitmap_channel_action(preview, ButtonIcon::ChannelAlpha, alpha_action);
+                        apply_bitmap_channel_action(preview, ButtonIcon::ChannelBlue, blue_action);
+                        apply_bitmap_channel_action(preview, ButtonIcon::ChannelGreen, green_action);
+                        apply_bitmap_channel_action(preview, ButtonIcon::ChannelRed, red_action);
+                        preview.texture_dirty |= before
+                            != (
+                                preview.show_red,
+                                preview.show_green,
+                                preview.show_blue,
+                                preview.show_alpha,
+                            );
+                    });
+                }
+                ModelPreviewSectionPart::Body => {
+                    draw_bitmap_canvas_and_footer(
+                        ui,
+                        &texture,
+                        checker_texture.as_ref(),
+                        image_size,
+                        &data,
+                        preview,
+                        canvas.as_ref(),
+                        &mut picked,
+                    );
+                }
+            },
+        );
+    };
+    match page {
+        Some((main, _)) => crate::app::ui_kit::dock::in_rect(ui, main, "bitmap_preview_canvas_card", |ui| {
+            draw_section(ui, preview)
+        }),
+        None => draw_section(ui, preview),
+    }
+
+    // The steppers only move `image_index` and `mip_index`: the caller sees
+    // the payload no longer matches them and decodes the new one.
+    let image_count = data.image_count;
+    preview.decoded = Some(Ok(data));
+    if let Some(definition) = sprites {
+        if let Some(selection) = picked {
+            preview.sprite_playback = None;
+            apply_selection(preview, definition, selection, image_count);
+        } else if let Some(selection) = played {
+            apply_selection(preview, definition, Some(selection), image_count);
+        }
     }
 }
 
@@ -427,7 +474,6 @@ fn draw_bitmap_selection_controls(
     preview: &mut BitmapPreviewState,
     supports_image_selection: bool,
     image_label: &str,
-    redecode: &mut bool,
 ) {
     if !supports_image_selection {
         return;
@@ -450,7 +496,6 @@ fn draw_bitmap_selection_controls(
             if next != preview.image_index {
                 preview.image_index = next;
                 preview.mip_index = 0;
-                *redecode = true;
             }
         }
         if data.image_count > 1 && data.mip_count > 1 {
@@ -473,7 +518,6 @@ fn draw_bitmap_selection_controls(
                 .inner;
             if next != preview.mip_index {
                 preview.mip_index = next;
-                *redecode = true;
             }
         }
     });
@@ -547,7 +591,7 @@ fn draw_bitmap_index_control(
     next
 }
 
-fn draw_bitmap_view_menu(ui: &mut Ui, preview: &mut BitmapPreviewState) {
+fn draw_bitmap_view_menu(ui: &mut Ui, preview: &mut BitmapPreviewState, has_sprites: bool) {
     const VIEW_SETTINGS_WIDTH: f32 = 240.0;
     right_aligned_icon_text_dropdown_button(
         ui,
@@ -579,6 +623,10 @@ fn draw_bitmap_view_menu(ui: &mut Ui, preview: &mut BitmapPreviewState) {
                 );
             ui.baboon_checkbox(&mut preview.show_border, "Show Bitmap Border")
                 .on_hover_text("Draw a two-pixel contrasting outline outside the bitmap edge.");
+            if has_sprites {
+                context_menu_separator(ui);
+                draw_sprite_view_options(ui, &mut preview.sprite_view);
+            }
         },
     );
 }
@@ -693,7 +741,7 @@ fn bitmap_channel_active_colors(icon: ButtonIcon) -> (Color32, Color32) {
     }
 }
 
-fn draw_bitmap_camera_menu(ui: &mut Ui, preview: &mut BitmapPreviewState) {
+fn draw_bitmap_camera_menu(ui: &mut Ui, preview: &mut BitmapPreviewState, has_selection: bool) {
     let label = format!("Zoom: {:.0}%", preview.zoom * 100.0);
     const ZOOM_SETTINGS_WIDTH: f32 = 240.0;
     right_aligned_icon_text_dropdown_button(
@@ -706,6 +754,14 @@ fn draw_bitmap_camera_menu(ui: &mut Ui, preview: &mut BitmapPreviewState) {
             if ui.selectable_label(false, "Fit to View").clicked() {
                 preview.zoom_initialized = false;
                 preview.pan = Vec2::ZERO;
+            }
+            if has_selection
+                && ui
+                    .selectable_label(false, "Frame Selection")
+                    .on_hover_text("Zoom to the selected sprite, or the selected sequence's sprites on this image.")
+                    .clicked()
+            {
+                preview.frame_selection = true;
             }
             ui.separator();
             for pct in [25u32, 50, 100, 200, 400] {
@@ -731,6 +787,7 @@ fn draw_bitmap_camera_menu(ui: &mut Ui, preview: &mut BitmapPreviewState) {
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_bitmap_canvas_and_footer(
     ui: &mut Ui,
     texture: &egui::TextureHandle,
@@ -738,6 +795,8 @@ fn draw_bitmap_canvas_and_footer(
     image_size: Vec2,
     data: &BitmapPreviewData,
     preview: &mut BitmapPreviewState,
+    sprites: Option<&SpriteCanvas<'_>>,
+    picked: &mut Option<Option<SpriteSelection>>,
 ) {
     const FOOTER_HEIGHT: f32 = 32.0;
 
@@ -798,14 +857,40 @@ fn draw_bitmap_canvas_and_footer(
         preview.pan += canvas_resp.drag_delta();
     }
 
+    // Asked from the Camera menu: zoom to the selection.
+    if std::mem::take(&mut preview.frame_selection)
+        && let Some(canvas) = sprites
+        && let Some(selection) = preview.sprite_selection
+        && let Some(rect) = selection_rect(canvas.definition, selection, canvas.image)
+    {
+        let (zoom, pan) = frame_rect(image_size, canvas_rect.size(), rect);
+        preview.zoom = zoom;
+        preview.pan = pan;
+        preview.zoom_initialized = true;
+    }
+
+    // A playing sequence held still: its registration point stays at the
+    // canvas centre, as the game draws a sprite about it.
+    let pinned = preview.sprite_playback.is_some()
+        && preview.sprite_view.pin_registration
+        && sprites.is_some_and(|canvas| {
+            selected_sprite(canvas.definition, preview.sprite_selection).is_some_and(|sprite| {
+                preview.pan = pan_to(image_size, preview.zoom, sprite.registration_uv());
+                true
+            })
+        });
+
     // Clamp the pan so the image always covers the canvas — you can't drag
     // into empty background past the image edge. When the image is smaller
     // than the canvas on an axis (e.g. at fit zoom), it stays centered there.
+    // A pinned sequence may sit by the image's edge, so it is left be.
     let draw_size = image_size * preview.zoom;
-    let half_extra_x = ((draw_size.x - canvas_rect.width()) * 0.5).max(0.0);
-    let half_extra_y = ((draw_size.y - canvas_rect.height()) * 0.5).max(0.0);
-    preview.pan.x = preview.pan.x.clamp(-half_extra_x, half_extra_x);
-    preview.pan.y = preview.pan.y.clamp(-half_extra_y, half_extra_y);
+    if !pinned {
+        let half_extra_x = ((draw_size.x - canvas_rect.width()) * 0.5).max(0.0);
+        let half_extra_y = ((draw_size.y - canvas_rect.height()) * 0.5).max(0.0);
+        preview.pan.x = preview.pan.x.clamp(-half_extra_x, half_extra_x);
+        preview.pan.y = preview.pan.y.clamp(-half_extra_y, half_extra_y);
+    }
 
     // Draw the canvas, then the screen-space alpha checker, the image, and an
     // optional outline. The checker UVs are based on screen coordinates so
@@ -858,6 +943,26 @@ fn draw_bitmap_canvas_and_footer(
         );
     }
 
+    // The sequences over the image, and the sprite under the pointer, which a
+    // click selects.
+    let hovered = sprites.and_then(|canvas| {
+        let clipped = painter.with_clip_rect(canvas_rect);
+        if preview.sprite_view.show_image_registration {
+            paint_image_registration(&clipped, img_rect, canvas.definition, canvas.image, preview.bg);
+        }
+        paint_sprite_overlay(&clipped, img_rect, canvas, preview, canvas_resp.hover_pos())
+    });
+    if canvas_resp.clicked()
+        && let Some((sequence, sprite)) = hovered
+    {
+        preview.scroll_to_selection = true;
+        *picked = Some(Some(SpriteSelection {
+            block: SequenceBlock::Processed,
+            sequence,
+            frame: Some(sprite),
+        }));
+    }
+
     // Under-cursor pixel coordinate + RGBA readout (samples the original
     // decoded pixels, independent of the channel-view toggles).
     if let Some(ptr) = canvas_resp.hover_pos() {
@@ -868,7 +973,10 @@ fn draw_bitmap_canvas_and_footer(
             let idx = (py as usize * data.width as usize + px as usize) * 4;
             if let Some(rgba) = data.rgba.get(idx..idx + 4) {
                 let (r, g, b, a) = (rgba[0], rgba[1], rgba[2], rgba[3]);
-                let text = format!("({px}, {py})  R{r} G{g} B{b} A{a}");
+                let mut text = format!("({px}, {py})  R{r} G{g} B{b} A{a}");
+                if let Some((sequence, sprite)) = hovered {
+                    text.push_str(&format!("  ·  sequence {sequence}, sprite {sprite}"));
+                }
                 let font = egui::FontId::monospace(12.0);
                 let galley = painter.layout_no_wrap(text.clone(), font.clone(), text_dark());
                 let pad = 5.0;
@@ -901,10 +1009,19 @@ fn draw_bitmap_canvas_and_footer(
         }
     }
 
-    draw_bitmap_stats_footer(ui, data);
+    let summary = sprites.zip(preview.sprite_selection).and_then(|(canvas, selection)| {
+        let image = canvas.definition.images.get(canvas.image)?;
+        selection_summary(
+            canvas.definition,
+            selection,
+            u32::from(image.width),
+            u32::from(image.height),
+        )
+    });
+    draw_bitmap_stats_footer(ui, data, summary.as_deref());
 }
 
-fn draw_bitmap_stats_footer(ui: &mut Ui, data: &BitmapPreviewData) {
+fn draw_bitmap_stats_footer(ui: &mut Ui, data: &BitmapPreviewData, selection: Option<&str>) {
     const FOOTER_HEIGHT: f32 = 32.0;
     let (footer_rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width().max(1.0), FOOTER_HEIGHT),
@@ -915,10 +1032,16 @@ fn draw_bitmap_stats_footer(ui: &mut Ui, data: &BitmapPreviewData) {
     ui.painter().text(
         footer_rect.left_center() + Vec2::new(8.0, 0.0),
         Align2::LEFT_CENTER,
-        format!(
-            "{} × {}  ·  {}  ·  {}",
-            data.width, data.height, data.format_name, data.type_name
-        ),
+        match selection {
+            Some(selection) => format!(
+                "{} × {}  ·  {}  ·  {}    {selection}",
+                data.width, data.height, data.format_name, data.type_name
+            ),
+            None => format!(
+                "{} × {}  ·  {}  ·  {}",
+                data.width, data.height, data.format_name, data.type_name
+            ),
+        },
         FontId::proportional(10.0),
         foundation_block_text(),
     );
@@ -1289,7 +1412,7 @@ mod tests {
         let frame = |preview: &mut crate::app::BitmapPreviewState| {
             let _ = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    crate::app::editor::bitmap::draw_bitmap_preview(ui, &ctx, &tag, &entry, preview);
+                    crate::app::editor::bitmap::draw_bitmap_preview(ui, &ctx, &tag, &entry, preview, (0, 0));
                 });
             });
         };

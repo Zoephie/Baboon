@@ -3,7 +3,11 @@
 //! tag is [`TagOpsCommand::CreateNewTag`].
 
 use super::*;
-use crate::app::editor::{dropdown_wheel_delta, picker_popup_width, picker_results, picker_search_field, COMBO_POPUP_MAX_HEIGHT};
+use crate::app::editor::{
+    COMBO_POPUP_MAX_HEIGHT, TagPathCompletion, add_completing, dropdown_wheel_delta, picker_popup_width,
+    picker_results, picker_search_field,
+};
+use crate::core::tag_path_completion::Wanted;
 
 fn group_matches(group: &NewTagGroup, query: &str) -> bool {
     let query = query.trim().to_lowercase();
@@ -12,7 +16,15 @@ fn group_matches(group: &NewTagGroup, query: &str) -> bool {
         || format_group_tag(group.group_tag).to_lowercase().contains(&query)
 }
 
-fn path_name_field(ui: &mut Ui, path: &mut String, extension: &str, width: f32) -> egui::Response {
+/// The path box, with the kit's folders listed under it as a path is typed.
+/// Returns the response and whether the path changed, by typing or a pick.
+fn path_name_field(
+    ui: &mut Ui,
+    path: &mut String,
+    extension: &str,
+    width: f32,
+    completion: Option<&TagPathCompletion<'_>>,
+) -> (egui::Response, bool) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, BUTTON_HEIGHT), Sense::hover());
     let background = ui.painter().add(egui::Shape::Noop);
     let hint = ui.painter().layout_no_wrap(extension.to_owned(),
@@ -20,7 +32,8 @@ fn path_name_field(ui: &mut Ui, path: &mut String, extension: &str, width: f32) 
     let hint_width = hint.size().x.min((width - 80.0).max(0.0));
     let mut edit_rect = rect;
     edit_rect.max.x -= hint_width + 12.0;
-    let response = ui.place(edit_rect, crate::app::ui_kit::singleline_text_edit(path)
+    let before = path.clone();
+    let edit = crate::app::ui_kit::singleline_text_edit(path)
         .hint_text(placeholder_text("e.g. objects\\props\\new_tag"))
         .prefix(button_icon_image(ui, ButtonIcon::FolderOpen, text_dark(), 16.0))
         .desired_width(edit_rect.width())
@@ -28,7 +41,13 @@ fn path_name_field(ui: &mut Ui, path: &mut String, extension: &str, width: f32) 
         .vertical_align(egui::Align::Center)
         .frame(egui::Frame::NONE.inner_margin(egui::Margin {
             left: 4, right: 0, top: 0, bottom: 0,
-        })));
+        }));
+    let layout = egui::Layout::centered_and_justified(egui::Direction::TopDown);
+    let (response, changed) = ui
+        .scope_builder(egui::UiBuilder::new().max_rect(edit_rect).layout(layout), |ui| {
+            add_completing(ui, edit, egui::Id::unique("new_tag_path"), completion, &before)
+        })
+        .inner;
     let visuals = ui.style().interact(&response);
     let stroke = if response.has_focus() { ui.visuals().selection.stroke } else { visuals.bg_stroke };
     ui.painter().set(background, egui::epaint::RectShape::new(rect, visuals.corner_radius,
@@ -38,7 +57,7 @@ fn path_name_field(ui: &mut Ui, path: &mut String, extension: &str, width: f32) 
     ui.painter().with_clip_rect(hint_rect).galley(
         egui::pos2(rect.right() - 6.0 - hint.size().x, rect.center().y - hint.size().y * 0.5),
         hint, text_dark().gamma_multiply(0.5));
-    response
+    (response, changed)
 }
 
 fn group_picker(ui: &mut Ui, dialog: &mut NewTagDialog, width: f32) {
@@ -228,8 +247,11 @@ impl Dialog for NewTagDialog {
                     let extension = self.groups.get(self.selected_group)
                         .map(|group| format!(".{}", group.extension.trim_start_matches('.')))
                         .unwrap_or_default();
-                    let field = path_name_field(ui, &mut self.rel_path, &extension, field_width);
-                    if field.changed() {
+                    // The kit's folders, to type the new tag's name into.
+                    let completion = cx.model.kit_index(self.kit)
+                        .and_then(|kit| TagPathCompletion::for_model_kit(cx.model, kit, Wanted::Folders));
+                    let (_, changed) = path_name_field(ui, &mut self.rel_path, &extension, field_width, completion.as_ref());
+                    if changed {
                         self.output_path = None;
                         self.error = None;
                     }
@@ -299,7 +321,7 @@ mod tests {
         for width in [300.0, 600.0] {
             let output = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    path_name_field(ui, &mut path, ".scenery", width);
+                    path_name_field(ui, &mut path, ".scenery", width, None);
                 });
             });
             let hint = output.shapes.iter().find_map(|shape| match &shape.shape {

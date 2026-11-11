@@ -4,7 +4,11 @@
 //! leaves, and the sidebar is as wide as its edge was last dragged.
 
 use super::super::super::ui_kit::button_icons::{ButtonIcon, icon_text_button};
-use super::super::super::ui_kit::style::{foundation_group_edge, subtle_dark};
+use super::super::super::ui_kit::dock::{
+    SidebarLimits, SidebarSplit, draw_sidebar_resize_handle,
+    sidebar_scroll_gutter, split_sidebar,
+};
+use super::super::super::ui_kit::style::subtle_dark;
 use super::super::super::{GameId, TagEntry, TagNameIndex};
 use super::super::{
     FieldEditContext, MAX_MODEL_SETUP_WIDTH, MIN_MODEL_SETUP_WIDTH, ModelPreviewData,
@@ -117,21 +121,7 @@ pub(in crate::app) fn draw_model_preview_panel(
     }
 }
 
-/// Draws `contents` inside `rect`, which the panel has already allocated.
-pub(in crate::app::model_preview) fn in_rect<R>(
-    ui: &mut Ui,
-    rect: Rect,
-    salt: &str,
-    contents: impl FnOnce(&mut Ui) -> R,
-) -> R {
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .id_salt(salt)
-            .max_rect(rect)
-            .layout(egui::Layout::top_down(egui::Align::Min)),
-    );
-    contents(&mut child)
-}
+pub(in crate::app::model_preview) use crate::app::ui_kit::dock::in_rect;
 
 /// Where each card of the panel goes in `page`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -147,18 +137,13 @@ pub(in crate::app::model_preview) struct PanelRects {
     pub(in crate::app::model_preview) animation: Rect,
 }
 
-/// The sidebar's width for a panel `panel_width` wide: as asked, but never
-/// narrower than its least, nor so wide the viewport goes below its own.
-pub(in crate::app::model_preview) fn clamp_setup_width(width: f32, panel_width: f32) -> f32 {
-    let widest = (panel_width - MIN_MODEL_VIEWPORT_WIDTH - MODEL_PREVIEW_SECTION_GAP)
-        .min(MAX_MODEL_SETUP_WIDTH);
-    let width = if width.is_finite() {
-        width
-    } else {
-        MIN_MODEL_SETUP_WIDTH
-    };
-    width.min(widest).max(MIN_MODEL_SETUP_WIDTH)
-}
+/// The Model Setup sidebar's limits.
+const SETUP_LIMITS: SidebarLimits = SidebarLimits {
+    min: MIN_MODEL_SETUP_WIDTH,
+    max: MAX_MODEL_SETUP_WIDTH,
+    min_main: MIN_MODEL_VIEWPORT_WIDTH,
+    gap: MODEL_PREVIEW_SECTION_GAP,
+};
 
 /// Splits `page` into the panel's cards for a sidebar `setup_width` wide.
 pub(in crate::app::model_preview) fn panel_rects(page: Rect, setup_width: f32) -> PanelRects {
@@ -169,20 +154,12 @@ pub(in crate::app::model_preview) fn panel_rects(page: Rect, setup_width: f32) -
         page.max,
     );
     let top_bottom = (animation.top() - gap).max(page.top());
-    let setup_width = clamp_setup_width(setup_width, page.width());
-    let setup = Rect::from_min_max(
-        egui::pos2(page.right() - setup_width, page.top()),
-        egui::pos2(page.right(), top_bottom),
-    );
-    let handle = Rect::from_min_max(
-        egui::pos2(setup.left() - gap, page.top()),
-        egui::pos2(setup.left(), top_bottom),
-    );
-    let preview = Rect::from_min_max(page.min, egui::pos2(handle.left(), top_bottom));
+    let top = Rect::from_min_max(page.min, egui::pos2(page.right(), top_bottom));
+    let split = split_sidebar(top, setup_width, SETUP_LIMITS);
     PanelRects {
-        preview,
-        handle,
-        setup,
+        preview: split.main,
+        handle: split.handle,
+        setup: split.sidebar,
         animation,
     }
 }
@@ -195,28 +172,12 @@ fn draw_setup_resize_handle(
     panel_width: f32,
     setup_width: &mut f32,
 ) {
-    let response = ui.interact(
-        rects.handle,
-        ui.scope_id().with("model_setup_resize"),
-        Sense::drag(),
-    );
-    if response.hovered() || response.dragged() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-        let x = rects.handle.center().x;
-        ui.painter().line_segment(
-            [
-                egui::pos2(x, rects.handle.top() + 4.0),
-                egui::pos2(x, rects.handle.bottom() - 4.0),
-            ],
-            egui::Stroke::new(2.0, foundation_group_edge()),
-        );
-    }
-    if response.dragged() {
-        // From the width the sidebar is drawn at, so dragging back from a
-        // clamp moves it at once.
-        let shown = rects.setup.width();
-        *setup_width = clamp_setup_width(shown - response.drag_delta().x, panel_width);
-    }
+    let split = SidebarSplit {
+        main: rects.preview,
+        handle: rects.handle,
+        sidebar: rects.setup,
+    };
+    draw_sidebar_resize_handle(ui, &split, panel_width, setup_width, SETUP_LIMITS, "model_setup_resize");
 }
 
 /// What every section of a loaded preview's panel draws from.
@@ -303,8 +264,7 @@ pub(in crate::app::model_preview) fn draw_setup_cards(
 /// The room the sidebar's cards leave at their right: the scroll bar at its
 /// widest, and its margin from the cards.
 pub(in crate::app::model_preview) fn setup_scroll_gutter(ui: &Ui) -> f32 {
-    let scroll = ui.spacing().scroll;
-    (scroll.bar_width + scroll.bar_inner_margin).ceil()
+    sidebar_scroll_gutter(ui)
 }
 
 /// The Model Preview card's header, right to left: the view settings menu,

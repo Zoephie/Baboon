@@ -44,7 +44,7 @@ mod seeds;
 pub(in crate::app::model_preview) use seeds::*;
 mod shader;
 pub(in crate::app::model_preview) use shader::*;
-mod look;
+pub(in crate::app::model_preview) mod look;
 pub(in crate::app::model_preview) use look::*;
 mod emitter;
 pub(in crate::app::model_preview) use emitter::*;

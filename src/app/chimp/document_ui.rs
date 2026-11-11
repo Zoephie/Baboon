@@ -578,10 +578,13 @@ fn draw_chimp_texture_preview(
     );
     let ctx = ui.ctx().clone();
 
-    // The shared viewer clears `decoded` when the layer or mip stepper moves;
-    // refill it from the surfaces already in hand rather than re-reading the
-    // package. This mirrors `draw_bitmap_preview` for classic bitmap tags.
-    if preview.preview.decoded.is_none() {
+    // When the layer or mip stepper moves, the payload is no longer the one
+    // selected; refill it from the surfaces already in hand rather than
+    // re-reading the package. This mirrors `draw_bitmap_preview` for bitmap
+    // tags.
+    let wanted = (preview.preview.image_index, preview.preview.mip_index);
+    if preview.preview.decoded.is_none() || preview.preview.decoded_for != Some(wanted) {
+        preview.preview.decoded_for = Some(wanted);
         preview.preview.decoded = Some(match &preview.surfaces {
             Ok(surfaces) => chimp_texture_mip_data(
                 surfaces,
@@ -617,7 +620,7 @@ fn draw_chimp_texture_preview(
     }
 
     preview.preview.apply_view_settings(*view_settings);
-    draw_bitmap_preview_data(ui, &ctx, &texture_key, &mut preview.preview, true, "Layer");
+    draw_bitmap_preview_data(ui, &ctx, &texture_key, &mut preview.preview, true, "Layer", None);
     *view_settings = preview.preview.view_settings();
 }
 

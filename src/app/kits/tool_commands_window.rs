@@ -2,6 +2,8 @@
 //! It owns immediate-mode presentation and request collection; tag mutation, persistence, and source I/O belong to their owning subsystems.
 
 use super::*;
+use crate::app::editor::{TagPathCompletion, add_completing};
+use crate::core::tag_path_completion::Wanted;
 
 /// The Tool Commands window, while it is open. Its layout (list width,
 /// position, size, collapsed categories) is kept in the preferences: the
@@ -416,10 +418,26 @@ fn draw_tool_command_arg(
                 }
             }
             _ => {
+                // A tag path lists the kit's folders and tags of every group
+                // as it is typed. A picked tag goes in without its extension,
+                // as Browse gives it and most of the tools' arguments take it.
+                let completion = (arg.kind == ToolCommandArgKind::PathTag)
+                    .then(|| {
+                        TagPathCompletion::for_model_kit(cx.model, cx.model.active, Wanted::Tags(None))
+                            .map(TagPathCompletion::without_extensions)
+                    })
+                    .flatten();
+                let before = value.clone();
                 let edit = singleline_text_edit_with_error(ui, &mut value, is_invalid)
                     .desired_width(300.0)
                     .font(egui::TextStyle::Monospace);
-                ui.add(edit);
+                add_completing(
+                    ui,
+                    edit,
+                    egui::Id::unique(("tool_command_arg", &command.name, &key)),
+                    completion.as_ref(),
+                    &before,
+                );
                 if matches!(
                     arg.kind,
                     ToolCommandArgKind::PathData

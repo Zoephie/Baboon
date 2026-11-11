@@ -466,6 +466,7 @@ pub(in crate::app) fn draw_tag_pane(
             preview,
             cx.model.prefs.expert_mode,
             &mut edit_context,
+            (doc.id, doc.dirty.revision()),
         );
         if preview.view_settings() != bitmap_preview_view {
             let settings = preview.view_settings();

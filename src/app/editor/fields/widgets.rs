@@ -388,6 +388,22 @@ fn foundation_value_text_filled_with_placeholder(
     string_id_placeholder: bool,
     corners: egui::CornerRadius,
 ) -> egui::Response {
+    foundation_value_text_box(ui, rect, text, id, color, left_padding, fill, status, string_id_placeholder, corners, None)
+}
+
+fn foundation_value_text_box(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    text: &mut dyn egui::TextBuffer,
+    id: Option<egui::Id>,
+    color: Color32,
+    left_padding: f32,
+    fill: Option<Color32>,
+    status: Option<&str>,
+    string_id_placeholder: bool,
+    corners: egui::CornerRadius,
+    show: Option<ShowTextEdit<'_>>,
+) -> egui::Response {
     crate::app::ui_kit::read_only_input_scope(ui, !text.is_mutable(), |ui| {
         // Fade the whole box, preserving validation hues and selectable text.
         let read_only = !text.is_mutable();
@@ -427,7 +443,15 @@ fn foundation_value_text_filled_with_placeholder(
         // to this input to keep NONE at exactly half the normal text opacity.
         let previous_weak = ui.visuals().weak_text_color;
         if showing_placeholder { ui.visuals_mut().weak_text_color = Some(text_dark().gamma_multiply(0.5)); }
-        let response = ui.put(rect, edit);
+        let response = match show {
+            // Laid out as `put` lays out a widget.
+            Some(show) => {
+                let layout = egui::Layout::centered_and_justified(egui::Direction::TopDown);
+                let builder = egui::UiBuilder::new().max_rect(rect).layout(layout);
+                ui.scope_builder(builder, |ui| edit.show_through(ui, show).response.response).inner
+            }
+            None => ui.put(rect, edit),
+        };
         if showing_placeholder { ui.visuals_mut().weak_text_color = previous_weak; }
         let appearance = input_appearance(ui, state, read_only, response.has_focus());
         ui.painter().rect_stroke(rect, corners, appearance.stroke, egui::StrokeKind::Inside);
@@ -494,6 +518,9 @@ pub(super) fn foundation_tag_reference_input_cell_colored(
     })
 }
 
+/// A tag reference's text box, with `completion`'s list under it when the
+/// [`Offer`] holds. Returns the box's response and the row picked from the
+/// list.
 pub(super) fn foundation_tag_reference_text_edit_cell(
     ui: &mut Ui,
     text: &mut String,
@@ -502,9 +529,19 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
     icon: TagIcon,
     missing: bool,
     rejected: Option<(&str, &str)>,
-) -> egui::Response {
+    completion: Option<(&TagPathCompletion<'_>, &Offer)>,
+) -> (egui::Response, Option<Picked>) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
-    let response = foundation_value_text_filled(
+    let mut picked = None;
+    let picked_slot = &mut picked;
+    let mut show = completion.map(|(completion, offer)| {
+        move |ui: &mut Ui, edit: egui::TextEdit<'_>| {
+            let (output, row) = completion.show(ui, id, edit, offer);
+            *picked_slot = row;
+            output
+        }
+    });
+    let response = foundation_value_text_box(
         ui,
         rect,
         text,
@@ -513,15 +550,20 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
         tag_reference_icon_footprint(),
         if rejected.is_some() { Some(unapplied_value_fill()) } else { missing.then(invalid_value_fill) },
         if let Some((label, _)) = rejected { Some(label) } else { missing.then_some("missing") },
+        false,
+        crate::app::ui_kit::INPUT_CORNER_RADIUS,
+        show.as_mut().map(|show| show as ShowTextEdit<'_>),
     );
+    drop(show);
     paint_tag_reference_icon(ui, rect, icon);
-    if let Some((_, reason)) = rejected {
+    let response = if let Some((_, reason)) = rejected {
         response.on_hover_text(format!("{reason}\nThis text was not applied. Saving keeps the last accepted reference.\nCorrect the value, or press Esc in this field to restore the accepted value."))
     } else if missing {
         response.on_hover_text("Referenced tag not found on disk")
     } else {
         response
-    }
+    };
+    (response, picked)
 }
 
 pub(in crate::app) fn foundation_value_width(ui: &Ui, value: &str, available: f32) -> f32 {
@@ -1237,7 +1279,9 @@ mod tests {
                             icon,
                             false,
                             None,
+                            None,
                         )
+                        .0
                         .rect;
                     });
                 },

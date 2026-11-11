@@ -7,7 +7,8 @@ use super::rules::{MOST_FRAMES, ParticleRules, still_particles_move};
 use super::seeds::{ALLOCATED_STATES, SeedAllocator};
 use super::shader::{SpriteShader, parameter, read_sprite_shader};
 use super::{Gen3Blend, elements, has_flag, tag_function_at};
-use blam_tags::TagStruct;
+use blam_tags::bitmap::{BitmapDefinition, BitmapSprite};
+use blam_tags::{TagFile, TagStruct};
 use std::sync::Arc;
 
 /// `c_particle_definition`'s billboard styles, by option name.
@@ -265,59 +266,73 @@ fn read_frames(
     start: f32,
     one_shot: bool,
 ) -> (Vec<[f32; 4]>, [f32; 4]) {
-    let whole = vec![[0.0, 0.0, 1.0, 1.0]];
     let tag = parameter(shader, "base_map")
         .and_then(|base| base.read_tag_ref_path("bitmap"))
         .and_then(|path| reader.load(&path, "bitmap", b"bitm").ok());
     let Some(tag) = tag else {
         return (
-            whole,
+            vec![[0.0, 0.0, 1.0, 1.0]],
             sprite_corner([0.0, 1.0, 0.0, 1.0], [0.5, 0.5], offset, 1.0),
         );
     };
-    let plate_aspect = elements(tag.root(), "bitmaps")
-        .first()
-        .map_or(1.0, |image| {
-            let size = |name: &str| image.read_int_any(name).unwrap_or(1) as f32;
-            size("width") / size("height")
-        });
-    let read = |sprite: &TagStruct<'_>, name: &str| sprite.read_real(name).unwrap_or(0.0);
-    let sequences = elements(tag.root(), "sequences");
+    plate_frames(&tag, first, offset, start, one_shot)
+}
+
+/// [`read_frames`] from the plate itself.
+pub(in crate::app::model_preview) fn plate_frames(
+    tag: &TagFile,
+    first: usize,
+    offset: [f32; 2],
+    start: f32,
+    one_shot: bool,
+) -> (Vec<[f32; 4]>, [f32; 4]) {
+    let plate = BitmapDefinition::from_tag(tag);
+    let sequences = &plate.sequences;
     let (mut rect, mut center) = ([0.0, 1.0, 0.0, 1.0], [0.5, 0.5]);
     if let Some(sequence) = sequences.get(first % sequences.len().max(1)) {
-        let sprites = elements(*sequence, "sprites");
+        let sprites = &sequence.sprites;
         let count = if one_shot {
             sprites.len().saturating_sub(1)
         } else {
             sprites.len()
         };
         if count > 0 {
-            let sprite = sprites[(count as f32 * start).floor() as i32 as usize % sprites.len()];
-            rect = ["left", "right", "top", "bottom"].map(|name| read(&sprite, name));
-            let registration = sprite.read_point2d("registration point");
-            center = [registration.x, registration.y];
+            let sprite = &sprites[(count as f32 * start).floor() as i32 as usize % sprites.len()];
+            rect = sprite.rect();
+            center = sprite.registration_point;
         }
     }
-    let manual = elements(tag.root(), "manual_sequences");
-    let listed = if manual.is_empty() { sequences } else { manual };
-    let frames: Vec<[f32; 4]> = listed
-        .get((first + 1) % listed.len().max(1))
-        .map(|sequence| elements(*sequence, "sprites"))
-        .unwrap_or_default()
+    let frames: Vec<[f32; 4]> = plate
+        .gpu_frame_sequence(first)
+        .map_or(&[][..], |sequence| &sequence.sprites)
         .iter()
         .take(MOST_FRAMES)
-        .map(|sprite| {
-            let [left, right, top, bottom] =
-                ["left", "right", "top", "bottom"].map(|name| read(sprite, name));
-            [left, top, right - left, bottom - top]
-        })
+        .map(sprite_frame)
         .collect();
     let frames = if frames.is_empty() {
         vec![[rect[0], rect[2], rect[1] - rect[0], rect[3] - rect[2]]]
     } else {
         frames
     };
-    (frames, sprite_corner(rect, center, offset, plate_aspect))
+    (frames, sprite_corner(rect, center, offset, plate_aspect(&plate)))
+}
+
+/// A sprite as a frame list keeps it: left, top, width and height.
+pub(in crate::app::model_preview) fn sprite_frame(sprite: &BitmapSprite) -> [f32; 4] {
+    let [left, right, top, bottom] = sprite.rect();
+    [left, top, right - left, bottom - top]
+}
+
+/// The shape of a plate's first image, width over height; one for a plate
+/// with no images or no height.
+pub(in crate::app::model_preview) fn plate_aspect(plate: &BitmapDefinition) -> f32 {
+    plate.images.first().map_or(1.0, |image| {
+        if image.height == 0 {
+            1.0
+        } else {
+            f32::from(image.width) / f32::from(image.height)
+        }
+    })
 }
 
 /// A `particle_model`'s meshes, each a triangle list.

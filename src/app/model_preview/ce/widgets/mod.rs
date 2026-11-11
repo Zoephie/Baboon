@@ -17,9 +17,9 @@ use crate::app::model_preview::common::math::{cross, dot, nonzero_unit};
 use crate::app::model_preview::common::sprites::AntennaQuad;
 use crate::core::h2_pixel_shader::SamplerKind;
 
-mod light_volume;
+pub(in crate::app::model_preview) mod light_volume;
 pub(in crate::app::model_preview) use light_volume::*;
 mod lightning;
 pub(in crate::app::model_preview) use lightning::*;
-mod glow;
+pub(in crate::app::model_preview) mod glow;
 pub(in crate::app::model_preview) use glow::*;

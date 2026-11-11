@@ -69,6 +69,11 @@ pub(in crate::app) fn input_appearance(
 
 /// Native text editing and accessibility with Baboon's shared input frame.
 /// Explicit frames opt out for search pills and embedded tag-cell editors.
+/// Shows a [`SinglelineTextEdit`]'s inner text edit in place of
+/// [`egui::TextEdit::show`].
+pub(in crate::app) type ShowTextEdit<'s> =
+    &'s mut dyn FnMut(&mut Ui, egui::TextEdit<'_>) -> egui::text_edit::TextEditOutput;
+
 pub(in crate::app) struct SinglelineTextEdit<'a> {
     edit: egui::TextEdit<'a>,
     state: InputState,
@@ -174,18 +179,24 @@ impl<'a> SinglelineTextEdit<'a> {
     }
 
     pub(in crate::app) fn show(self, ui: &mut Ui) -> egui::text_edit::TextEditOutput {
-        read_only_input_scope(ui, self.read_only || !ui.is_enabled(), |ui| self.show_inner(ui))
+        self.show_through(ui, &mut |ui, edit| edit.show(ui))
     }
 
-    fn show_inner(mut self, ui: &mut Ui) -> egui::text_edit::TextEditOutput {
+    /// [`Self::show`], with the inner text edit shown by `show`: a list under
+    /// the box wraps it this way.
+    pub(in crate::app) fn show_through(self, ui: &mut Ui, show: ShowTextEdit<'_>) -> egui::text_edit::TextEditOutput {
+        read_only_input_scope(ui, self.read_only || !ui.is_enabled(), |ui| self.show_inner(ui, show))
+    }
+
+    fn show_inner(mut self, ui: &mut Ui, show: ShowTextEdit<'_>) -> egui::text_edit::TextEditOutput {
         if self.custom_frame {
-            let mut output = self.edit.show(ui);
+            let mut output = show(ui, self.edit);
             super::text_focus::singleline_tab_focus(ui, &mut output);
             return output;
         }
         let background = ui.painter().add(egui::Shape::Noop);
         self.edit = self.edit.frame(egui::Frame::NONE.inner_margin(self.margin));
-        let mut output = self.edit.show(ui);
+        let mut output = show(ui, self.edit);
         let style = input_appearance(ui, self.state, self.read_only, output.response.has_focus());
         let fill = if self.state == InputState::Normal {
             self.background.unwrap_or(style.fill)

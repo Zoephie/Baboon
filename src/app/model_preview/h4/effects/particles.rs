@@ -3,9 +3,12 @@
 //! `pack_particle_state` packs it for the vertex shader to unpack. See
 //! `docs/h4-preview-research/particles.md`.
 
-use super::super::super::particles::{LiveParticle, ParticleMaterial};
+use super::super::super::particles::{
+    LiveParticle, MOST_FRAMES, ParticleMaterial, plate_aspect, sprite_corner, sprite_frame,
+};
 use crate::app::model_preview::load::TagReader;
 use blam_tags::TagStruct;
+use blam_tags::bitmap::BitmapDefinition;
 
 use super::super::super::common::fields::elements;
 use super::super::super::common::named_function::tag_function_at;
@@ -291,8 +294,9 @@ pub(crate) fn read_h4_particle_render(
         .first_bitmap
         .as_deref()
         .and_then(|path| reader.load(path, "bitmap", b"bitm").ok());
+    let plate = bitmap.as_deref().map(BitmapDefinition::from_tag);
     let placement = sprite_placement(
-        bitmap.as_ref().map(|tag| tag.root()),
+        plate.as_ref(),
         first,
         start,
         one_shot,
@@ -345,10 +349,10 @@ pub(crate) fn read_h4_particle_render(
 /// What `postprocess_frame_animation` builds: the quad's placement, the
 /// frames the vertex shader picks among, and whether they animate.
 #[derive(Debug, Clone, PartialEq)]
-struct SpritePlacement {
-    offset_and_scale: [f32; 4],
-    sprites: Vec<[f32; 4]>,
-    animated: bool,
+pub(in crate::app::model_preview) struct SpritePlacement {
+    pub(in crate::app::model_preview) offset_and_scale: [f32; 4],
+    pub(in crate::app::model_preview) sprites: Vec<[f32; 4]>,
+    pub(in crate::app::model_preview) animated: bool,
 }
 
 /// `round_half_away` of `k · f`, kept within the sequence.
@@ -364,99 +368,47 @@ fn sprite_index(count: usize, one_shot: bool, start: f32) -> usize {
     ((k as f32 * start).round() as i64).rem_euclid(count as i64) as usize
 }
 
-fn sprites_of<'a>(sequence: TagStruct<'a>) -> Vec<TagStruct<'a>> {
-    elements(sequence, "sprites")
-}
-
-fn sprite_placement(
-    bitmap: Option<TagStruct<'_>>,
+pub(in crate::app::model_preview) fn sprite_placement(
+    plate: Option<&BitmapDefinition>,
     first: usize,
     start: f32,
     one_shot: bool,
     changes: bool,
     center_offset: [f32; 2],
 ) -> SpritePlacement {
-    let read = |holder: TagStruct<'_>| {
-        ["left", "right", "top", "bottom"].map(|name| holder.read_real(name).unwrap_or(0.0))
-    };
-    let sequences = bitmap
-        .map(|bitmap| elements(bitmap, "sequences"))
-        .unwrap_or_default();
-    let sequence = sequences.get(first % sequences.len().max(1)).copied();
-    let animated = changes && sequence.is_some_and(|sequence| sprites_of(sequence).len() > 1);
-    // The first image's aspect.
-    let aspect = bitmap
-        .and_then(|bitmap| elements(bitmap, "bitmaps*").first().copied())
-        .map(|image| {
-            (
-                image.read_int_any("width").unwrap_or(1) as f32,
-                image.read_int_any("height").unwrap_or(1) as f32,
-            )
-        })
-        .map_or(1.0, |(width, height)| {
-            if width != height && height > 0.0 {
-                width / height
-            } else {
-                1.0
-            }
-        });
+    let sequence = plate.and_then(|plate| {
+        plate
+            .sequences
+            .get(first % plate.sequences.len().max(1))
+    });
+    let animated = changes && sequence.is_some_and(|sequence| sequence.sprites.len() > 1);
     let (mut rect, mut registration) = ([0.0, 1.0, 0.0, 1.0], [0.5, 0.5]);
-    if let Some(sequence) = sequence {
-        let sprites = sprites_of(sequence);
-        if !sprites.is_empty() {
-            let sprite = sprites[sprite_index(sprites.len(), one_shot, start)];
-            rect = read(sprite);
-            let point = sprite.read_point2d("registration point");
-            registration = [point.x, point.y];
-        }
+    if let Some(sequence) = sequence
+        && !sequence.sprites.is_empty()
+    {
+        let sprite = &sequence.sprites[sprite_index(sequence.sprites.len(), one_shot, start)];
+        rect = sprite.rect();
+        registration = sprite.registration_point;
     }
-    registration[0] += center_offset[0];
-    registration[1] -= center_offset[1];
     let [x0, x1, y0, y1] = rect;
-    let (sx, sy) = (1.0 / (x1 - x0), 1.0 / (y1 - y0));
-    let (mut ax, mut ay) = (1.0, 1.0);
-    if x1 - x0 <= y1 - y0 {
-        ax = (x1 - x0) * sy;
-    } else {
-        ay = (y1 - y0) * sx;
-    }
-    ax *= aspect;
-    let (cx, cy) = (
-        2.0 * registration[0] * sx - 1.0,
-        2.0 * registration[1] * sy - 1.0,
-    );
-    let (left, right, bottom, top) = (
-        (-1.0 - cx) * ax,
-        (1.0 - cx) * ax,
-        (-1.0 - cy) * ay,
-        (1.0 - cy) * ay,
-    );
     // The frame list: the manual sequences first, at `first + 1`.
-    let manual = bitmap
-        .map(|bitmap| elements(bitmap, "manual_sequences"))
-        .unwrap_or_default();
-    let listed = if !manual.is_empty() {
-        manual.get((first + 1) % manual.len()).copied()
-    } else if !sequences.is_empty() {
-        sequences.get((first + 1) % sequences.len()).copied()
-    } else {
-        None
-    };
-    let mut sprites: Vec<[f32; 4]> = listed
-        .map(|sequence| {
-            sprites_of(sequence)
-                .into_iter()
-                .take(15)
-                .map(read)
-                .map(|[x0, x1, y0, y1]| [x0, y0, x1 - x0, y1 - y0])
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut sprites: Vec<[f32; 4]> = plate
+        .and_then(|plate| plate.gpu_frame_sequence(first))
+        .map_or(&[][..], |sequence| &sequence.sprites)
+        .iter()
+        .take(MOST_FRAMES)
+        .map(sprite_frame)
+        .collect();
     if sprites.is_empty() {
         sprites.push([x0, y0, x1 - x0, y1 - y0]);
     }
     SpritePlacement {
-        offset_and_scale: [left, bottom, right - left, top - bottom],
+        offset_and_scale: sprite_corner(
+            rect,
+            registration,
+            center_offset,
+            plate.map_or(1.0, plate_aspect),
+        ),
         sprites,
         animated,
     }

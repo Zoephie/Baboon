@@ -3,7 +3,9 @@
 //! writing are [`ImportCommand`]s and the workers they start.
 
 use super::*;
+use crate::app::editor::{TagPathCompletion, add_completing};
 use crate::app::shell::frame::is_file_cached;
+use crate::core::tag_path_completion::Wanted;
 use crate::app::shell::frame::recheck_cached;
 
 /// What the Import Tags window asked for this frame.
@@ -206,13 +208,23 @@ impl Dialog for TagImportDialog {
                     ui.add_space(8.0);
                     ui.label(RichText::new("Destination").color(subtle_dark()).small());
                     ui.horizontal(|ui| {
-                        let response = ui.add_enabled(
-                            !busy,
-                            crate::app::ui_kit::singleline_text_edit(&mut dialog.destination_rel)
-                                .hint_text(placeholder_text("objects/characters/masterchief"))
-                                .desired_width(440.0),
-                        );
-                        if response.changed() {
+                        // The target kit's folders, listed as a path is typed.
+                        let completion = cx.model.kit_index(dialog.kit).and_then(|kit| {
+                            TagPathCompletion::for_model_kit(cx.model, kit, Wanted::Folders)
+                        });
+                        let before = dialog.destination_rel.clone();
+                        let (_, changed) = ui.add_enabled_ui(!busy, |ui| {
+                            add_completing(
+                                ui,
+                                crate::app::ui_kit::singleline_text_edit(&mut dialog.destination_rel)
+                                    .hint_text(placeholder_text("objects\\characters\\masterchief"))
+                                    .desired_width(440.0),
+                                egui::Id::unique("tag_import_destination"),
+                                completion.as_ref(),
+                                &before,
+                            )
+                        }).inner;
+                        if changed {
                             dialog.destination_touched = true;
                         }
                     });
