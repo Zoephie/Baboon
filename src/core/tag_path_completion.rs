@@ -146,6 +146,8 @@ fn strip_folder<'p>(path: &'p str, folder: &str) -> Option<&'p str> {
 /// What an input takes.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Wanted<'a> {
+    /// Folders only.
+    Folders,
     /// Folders, and tags of these groups; `None` for tags of any group.
     Tags(Option<&'a [u32]>),
 }
@@ -234,7 +236,10 @@ pub(crate) fn suggestions(
             ));
         }
     }
-    let Wanted::Tags(groups) = wanted;
+    let groups = match wanted {
+        Wanted::Folders => return ranked_rows(ranked),
+        Wanted::Tags(groups) => groups,
+    };
     for tag in &listing.tags {
         if groups.is_some_and(|groups| !groups.contains(&tag.group_tag)) {
             continue;
@@ -254,7 +259,12 @@ pub(crate) fn suggestions(
             ));
         }
     }
-    // Stable: the listing's order holds within a rank and kind.
+    ranked_rows(ranked)
+}
+
+/// The rows best first. Stable: the listing's order holds within a rank and
+/// kind.
+fn ranked_rows(mut ranked: Vec<(u8, Suggestion)>) -> Vec<Suggestion> {
     ranked.sort_by_key(|(rank, suggestion)| (*rank, suggestion.kind != SuggestionKind::Folder));
     ranked.into_iter().map(|(_, suggestion)| suggestion).collect()
 }
@@ -332,6 +342,8 @@ mod tests {
         let listing = list_folder(Catalog::Entries(&entries), r"altis\sky\snow");
         let sky = suggestions(&listing, r"altis\sky\snow", "snow", Wanted::Tags(Some(&[SKY])));
         assert_eq!(labels(&sky), ["snow.sky", "Snowdrift", "cloud_snow.sky"]);
+        let folders = suggestions(&listing, r"altis\sky\snow", "", Wanted::Folders);
+        assert_eq!(labels(&folders), ["fx", "Snowdrift"]);
 
         // A field taking a parent group is handed its descendants: both tags
         // sharing a name are listed.

@@ -3,6 +3,8 @@
 //! conversion are [`ImportCommand::AnalyzeTag`] and [`ImportCommand::ConfirmTag`].
 
 use super::*;
+use crate::app::editor::{TagPathCompletion, add_completing};
+use crate::core::tag_path_completion::Wanted;
 
 impl Dialog for PendingImport {
     fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
@@ -92,10 +94,19 @@ impl Dialog for ImportTagDialog {
                 });
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Folder").color(subtle_dark()));
-                    ui.add(
+                    // The kit's folders, listed as a path is typed.
+                    let completion = cx.model.kit_index(dialog.kit).and_then(|kit| {
+                        TagPathCompletion::for_model_kit(cx.model, kit, Wanted::Folders)
+                    });
+                    let before = dialog.folder_rel.clone();
+                    add_completing(
+                        ui,
                         crate::app::ui_kit::singleline_text_edit(&mut dialog.folder_rel)
-                            .hint_text(placeholder_text("objects/characters/foo (blank = root)"))
+                            .hint_text(placeholder_text("objects\\characters\\foo (blank = root)"))
                             .desired_width(440.0),
+                        egui::Id::unique("import_tag_folder"),
+                        completion.as_ref(),
+                        &before,
                     );
                 });
                 ui.horizontal(|ui| {
