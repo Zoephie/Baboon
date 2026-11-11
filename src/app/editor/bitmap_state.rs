@@ -64,12 +64,25 @@ impl BitmapPreviewBg {
     }
 }
 
+/// The Sequences sidebar's width, in points, before it is dragged.
+pub(in crate::app) const DEFAULT_BITMAP_SIDEBAR_WIDTH: f32 = 300.0;
+/// The narrowest the sidebar is dragged to, and the widest it is saved at.
+pub(in crate::app) const MIN_BITMAP_SIDEBAR_WIDTH: f32 = 220.0;
+pub(in crate::app) const MAX_BITMAP_SIDEBAR_WIDTH: f32 = 800.0;
+/// The sequence playback rate before it is changed, and its range, in frames
+/// a second. The bitmap holds no rate of its own: whatever draws it sets one.
+pub(in crate::app) const DEFAULT_SPRITE_PLAYBACK_FPS: u32 = 15;
+pub(in crate::app) const MAX_SPRITE_PLAYBACK_FPS: u32 = 60;
+
 /// View choices shared by every bitmap preview and persisted between sessions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(in crate::app) struct BitmapPreviewViewSettings {
     pub(in crate::app) bg: BitmapPreviewBg,
     pub(in crate::app) show_checkerboard: bool,
     pub(in crate::app) show_border: bool,
+    /// The Sequences sidebar's width.
+    pub(in crate::app) sidebar_width: f32,
+    pub(in crate::app) sprites: SpriteOverlaySettings,
 }
 
 impl Default for BitmapPreviewViewSettings {
@@ -78,6 +91,38 @@ impl Default for BitmapPreviewViewSettings {
             bg: BitmapPreviewBg::DarkGray,
             show_checkerboard: true,
             show_border: true,
+            sidebar_width: DEFAULT_BITMAP_SIDEBAR_WIDTH,
+            sprites: SpriteOverlaySettings::default(),
+        }
+    }
+}
+
+/// What the canvas draws over a bitmap's sprites, and how a sequence plays.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) struct SpriteOverlaySettings {
+    /// A faint outline round every sprite on the shown image.
+    pub(in crate::app) show_all: bool,
+    /// The selected sprite's rect less the tag's `sprite spacing`, as the
+    /// game's HUD and antennas read it.
+    pub(in crate::app) show_content: bool,
+    /// A cross at the selected sprite's registration point.
+    pub(in crate::app) show_registration: bool,
+    /// A mark at the shown image's own `registration point`.
+    pub(in crate::app) show_image_registration: bool,
+    /// While a sequence plays, keep its registration point still on screen.
+    pub(in crate::app) pin_registration: bool,
+    pub(in crate::app) playback_fps: u32,
+}
+
+impl Default for SpriteOverlaySettings {
+    fn default() -> Self {
+        Self {
+            show_all: true,
+            show_content: false,
+            show_registration: true,
+            show_image_registration: false,
+            pin_registration: true,
+            playback_fps: DEFAULT_SPRITE_PLAYBACK_FPS,
         }
     }
 }
@@ -101,6 +146,11 @@ pub(in crate::app) struct BitmapPreviewState {
     /// the old bytes is never shown.
     pub(in crate::app) decoding:
         Option<std::sync::mpsc::Receiver<Result<BitmapPreviewData, String>>>,
+    /// The image and mip `decoded` is of. When it is not the one selected,
+    /// the caller decodes that one and shows this meanwhile.
+    pub(in crate::app) decoded_for: Option<(usize, usize)>,
+    /// The image and mip `decoding` is of.
+    pub(in crate::app) decoding_for: Option<(usize, usize)>,
     pub(in crate::app) texture: Option<egui::TextureHandle>,
     pub(in crate::app) checker_texture: Option<egui::TextureHandle>,
     pub(in crate::app) texture_dirty: bool,
@@ -115,6 +165,48 @@ pub(in crate::app) struct BitmapPreviewState {
     /// Selected image (sequence) index and mipmap level being previewed.
     pub(in crate::app) image_index: usize,
     pub(in crate::app) mip_index: usize,
+    /// The Sequences sidebar's width.
+    pub(in crate::app) sidebar_width: f32,
+    pub(in crate::app) sprite_view: SpriteOverlaySettings,
+    /// The sequence or sprite picked in the sidebar or on the canvas.
+    pub(in crate::app) sprite_selection: Option<SpriteSelection>,
+    /// When the selected sequence started playing, if it is playing.
+    pub(in crate::app) sprite_playback: Option<SpritePlayback>,
+    /// The Sequences card's filter.
+    pub(in crate::app) sequence_filter: String,
+    /// The tag's sequences, read once for each revision of the document
+    /// (its id and revision).
+    pub(in crate::app) sequences: Option<((u64, u64), std::sync::Arc<blam_tags::bitmap::BitmapDefinition>)>,
+    /// Asked from the Camera menu: zoom to the selection on the next frame.
+    pub(in crate::app) frame_selection: bool,
+    /// A sprite was picked on the canvas: the sidebar scrolls to its row.
+    pub(in crate::app) scroll_to_selection: bool,
+}
+
+/// Which block a selection is in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum SequenceBlock {
+    /// `sequences[]`, what tool built and the game reads.
+    Processed,
+    /// `manual_sequences[]`, authored windows in repeat space.
+    Manual,
+}
+
+/// A sequence, or one frame of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) struct SpriteSelection {
+    pub(in crate::app) block: SequenceBlock,
+    pub(in crate::app) sequence: usize,
+    /// The sprite, or the frame of a sequence without sprites; none for the
+    /// whole sequence.
+    pub(in crate::app) frame: Option<usize>,
+}
+
+/// A sequence playing from `frame` at `started`, in seconds of UI time.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::app) struct SpritePlayback {
+    pub(in crate::app) started: f64,
+    pub(in crate::app) frame: usize,
 }
 
 impl Default for BitmapPreviewState {
@@ -129,6 +221,8 @@ impl Default for BitmapPreviewState {
             show_border: true,
             decoded: None,
             decoding: None,
+            decoded_for: None,
+            decoding_for: None,
             texture: None,
             checker_texture: None,
             texture_dirty: true,
@@ -138,6 +232,14 @@ impl Default for BitmapPreviewState {
             bg: BitmapPreviewBg::DarkGray,
             image_index: 0,
             mip_index: 0,
+            sidebar_width: DEFAULT_BITMAP_SIDEBAR_WIDTH,
+            sprite_view: SpriteOverlaySettings::default(),
+            sprite_selection: None,
+            sprite_playback: None,
+            sequence_filter: String::new(),
+            sequences: None,
+            frame_selection: false,
+            scroll_to_selection: false,
         }
     }
 }
@@ -147,6 +249,8 @@ impl BitmapPreviewState {
         self.bg = settings.bg;
         self.show_checkerboard = settings.show_checkerboard;
         self.show_border = settings.show_border;
+        self.sidebar_width = settings.sidebar_width;
+        self.sprite_view = settings.sprites;
     }
 
     pub(in crate::app) fn view_settings(&self) -> BitmapPreviewViewSettings {
@@ -154,6 +258,8 @@ impl BitmapPreviewState {
             bg: self.bg,
             show_checkerboard: self.show_checkerboard,
             show_border: self.show_border,
+            sidebar_width: self.sidebar_width,
+            sprites: self.sprite_view,
         }
     }
 }

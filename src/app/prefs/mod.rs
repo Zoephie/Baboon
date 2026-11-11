@@ -243,6 +243,41 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
                 .get("bitmap_preview_border")
                 .and_then(Value::as_bool)
                 .unwrap_or(true),
+            sidebar_width: value
+                .get("bitmap_preview_sidebar_width")
+                .and_then(Value::as_f64)
+                .map(|value| value as f32)
+                .filter(|width| width.is_finite())
+                .unwrap_or(DEFAULT_BITMAP_SIDEBAR_WIDTH)
+                .clamp(MIN_BITMAP_SIDEBAR_WIDTH, MAX_BITMAP_SIDEBAR_WIDTH),
+            sprites: {
+                let defaults = SpriteOverlaySettings::default();
+                let flag = |key: &str, default: bool| {
+                    value.get(key).and_then(Value::as_bool).unwrap_or(default)
+                };
+                SpriteOverlaySettings {
+                    show_all: flag("bitmap_sprites_show_all", defaults.show_all),
+                    show_content: flag("bitmap_sprites_show_content", defaults.show_content),
+                    show_registration: flag(
+                        "bitmap_sprites_show_registration",
+                        defaults.show_registration,
+                    ),
+                    show_image_registration: flag(
+                        "bitmap_sprites_show_image_registration",
+                        defaults.show_image_registration,
+                    ),
+                    pin_registration: flag(
+                        "bitmap_sprites_pin_registration",
+                        defaults.pin_registration,
+                    ),
+                    playback_fps: value
+                        .get("bitmap_sprites_playback_fps")
+                        .and_then(Value::as_u64)
+                        .map_or(defaults.playback_fps, |fps| {
+                            fps.clamp(1, u64::from(MAX_SPRITE_PLAYBACK_FPS)) as u32
+                        }),
+                }
+            },
         },
         kit_shortcut_layouts: value.get("kit_shortcut_layouts").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default(),
         shortcut_order: value.get("shortcut_order").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default(),
@@ -832,6 +867,14 @@ fn prefs_to_value(
         "first_run_complete": first_run_complete,
         "terminal_open_games": games,
     });
+    let view = &prefs.bitmap_preview_view;
+    value["bitmap_preview_sidebar_width"] = json!(view.sidebar_width);
+    value["bitmap_sprites_show_all"] = json!(view.sprites.show_all);
+    value["bitmap_sprites_show_content"] = json!(view.sprites.show_content);
+    value["bitmap_sprites_show_registration"] = json!(view.sprites.show_registration);
+    value["bitmap_sprites_show_image_registration"] = json!(view.sprites.show_image_registration);
+    value["bitmap_sprites_pin_registration"] = json!(view.sprites.pin_registration);
+    value["bitmap_sprites_playback_fps"] = json!(view.sprites.playback_fps);
     value["app_shortcuts"] = json!(prefs.app_shortcuts);
     value["editing_kit_recents"] = json!(prefs.editing_kit_recents.iter().filter(|kit| !kit.tags.is_empty()).map(|kit| {
         json!({ "tags_root": kit.tags_root.display().to_string(),
@@ -1662,6 +1705,15 @@ mod tests {
             bg: BitmapPreviewBg::Magenta,
             show_checkerboard: false,
             show_border: false,
+            sidebar_width: 420.0,
+            sprites: SpriteOverlaySettings {
+                show_all: false,
+                show_content: true,
+                show_registration: false,
+                show_image_registration: true,
+                pin_registration: false,
+                playback_fps: 24,
+            },
         };
 
         assert_eq!(

@@ -2,9 +2,7 @@
 //! collapsible with a Reset in its header, and each shown only when the
 //! object has something for it.
 
-use super::super::super::editor::fields::{BoxPart, draw_foundation_box};
-use super::super::super::ui_kit::button_icons::{ButtonIcon, icon_button};
-use super::super::super::ui_kit::style::foundation_block_text;
+use super::super::super::editor::fields::{BoxPart, draw_resettable_box};
 use super::super::{
     ModelPreviewData, ModelPreviewState, ModelRegionSelection, compute_variant_selection,
     default_permutation, frame, is_model_physics_overlay_region, reset_model_preview_selection,
@@ -138,30 +136,9 @@ pub(in crate::app::model_preview) fn setup_section(
     ui: &mut Ui,
     title: &str,
     changed: bool,
-    mut contents: impl FnMut(&mut Ui, BoxPart),
+    contents: impl FnMut(&mut Ui, BoxPart),
 ) -> bool {
-    let mut reset = false;
-    let tooltip = format!("Reset {title}");
-    draw_foundation_box(
-        ui,
-        title.to_owned(),
-        ("model_setup_section", title),
-        |ui, part| {
-            if part == BoxPart::Trailing {
-                reset = icon_button(
-                    ui,
-                    ButtonIcon::Undo,
-                    &tooltip,
-                    changed,
-                    foundation_block_text(),
-                )
-                .clicked();
-            } else {
-                contents(ui, part);
-            }
-        },
-    );
-    reset
+    draw_resettable_box(ui, title, ("model_setup_section", title), changed, contents)
 }
 
 /// Whether any region shows in the Permutations section.

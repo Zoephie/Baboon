@@ -34,6 +34,7 @@ pub(super) use crate::core::document::apply::*;
 pub(super) use crate::core::document::value::*;
 pub(super) use field_meta::*;
 mod bitmap;
+pub(in crate::app) mod bitmap_sprites;
 pub(in crate::app) mod bitmap_state;
 pub(super) use bitmap::*;
 mod model;

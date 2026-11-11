@@ -978,6 +978,29 @@ pub(in crate::app) fn draw_foundation_box(
     header.inner
 }
 
+/// A [`draw_foundation_box`] titled `title` with a Reset at the right of its
+/// header, enabled when `changed`; `contents` draws its other header controls
+/// and its body. Whether Reset was pressed.
+pub(in crate::app) fn draw_resettable_box(
+    ui: &mut Ui,
+    title: &str,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    changed: bool,
+    mut contents: impl FnMut(&mut Ui, BoxPart),
+) -> bool {
+    let mut reset = false;
+    let tooltip = format!("Reset {title}");
+    draw_foundation_box(ui, title.to_owned(), id_salt, |ui, part| {
+        if part == BoxPart::Trailing {
+            reset = icon_button(ui, ButtonIcon::Undo, &tooltip, changed, foundation_block_text())
+                .clicked();
+        } else {
+            contents(ui, part);
+        }
+    });
+    reset
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_foundation_collapsing_header_inner(
     ui: &mut Ui,
