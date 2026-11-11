@@ -122,7 +122,6 @@ impl Baboon {
             }
             let action = match request.action {
                 BulkAction::Bitmaps => BrowserAction::ExtractBitmapFolder(keys),
-                BulkAction::BitmapSources => BrowserAction::ExtractBitmapSourceFolder(keys),
                 BulkAction::Sounds => BrowserAction::ExtractSound {
                     keys,
                     all_languages: false,

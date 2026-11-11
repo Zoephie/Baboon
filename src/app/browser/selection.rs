@@ -167,7 +167,7 @@ pub(in crate::app) fn export_keys(action: BulkAction, entries: &[&TagEntry]) -> 
     entries
         .iter()
         .filter(|entry| match action {
-            BulkAction::Bitmaps | BulkAction::BitmapSources => is_bitmap_tag(entry),
+            BulkAction::Bitmaps => is_bitmap_tag(entry),
             BulkAction::Sounds => crate::app::editor::is_sound_group(entry.group_tag),
             BulkAction::Shaders => is_material_shader_browser_tag(entry),
             BulkAction::Includes => is_hlsl_include_tag(entry),
@@ -276,7 +276,6 @@ pub(in crate::app) enum BulkAction {
     Copy,
     Delete,
     Bitmaps,
-    BitmapSources,
     Sounds,
     Shaders,
     Includes,
