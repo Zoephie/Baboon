@@ -4173,7 +4173,7 @@ mod tests {
             case(
                 "bulk_rename_items", &["dialog:BulkRenameDialog"], &[], loose_kit,
                 |h| {h.app.dialogs.open(crate::app::browser::bulk_rename::BulkRenameDialog::for_smoke(h.app.model.kit_stamp()));},
-                &["Rename 2 Items","Preview","Name Pattern"],
+                &["Bulk Rename","Original","Rename","Replace With"],
             ),
             case(
                 "folder_merge_review",
@@ -4308,18 +4308,18 @@ mod tests {
                         old_display: "objects\\weapons\\rifle\\rifle.biped".to_owned(),
                         extension: "biped".to_owned(),
                         operation: TagNameOperation::Rename,
-                        new_path_input: "objects\\weapons\\rifle\\smoke_rifle".to_owned(),
+                        new_path_input: "smoke_rifle".to_owned(),
                         fixed_parent: String::new(),
                         focus_input: true,
                         referrers: Vec::new(),
                         referrers_unavailable: true,
                         is_container: false,
                         is_new_container: false,
-                        whole_path_editable: true,
+                        whole_path_editable: false,
                         in_place_pak: None,
                     });
                 },
-                &["Rename / Move Tag"],
+                &["Original", "smoke_rifle.biped", "Cancel"],
             ),
             case(
                 "duplicate_tag",
@@ -4520,7 +4520,7 @@ mod tests {
                         outside_referrers: None,
                     });
                 },
-                &["Rename Folder"],
+                &["Original", "will now have new paths"],
             ),
             case(
                 "exported_mod",

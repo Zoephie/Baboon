@@ -250,6 +250,15 @@
           ]
         },
         {
+          "title": "Renaming",
+          "blocks": [
+            {
+              "kind": "markdown",
+              "file": "renaming.md"
+            }
+          ]
+        },
+        {
           "title": "Strings Editor",
           "blocks": [
             {

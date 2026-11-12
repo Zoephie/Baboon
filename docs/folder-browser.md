@@ -63,36 +63,12 @@ Right-click a browser tab for **Reveal in Browser**, which reopens the left
 navigation pane at its current folder, or the platform file-manager action for
 a loose folder. Container folders do not have a directory on disk to open.
 
-## Bulk Rename
+## Renaming
 
-Select tags and/or folders in Flat view, or tags in Asset Browser, then choose
-**Rename** in the selection menu or press **F2**. Bulk Rename is available for
-writable loose editing kits. It keeps each parent folder and tag extension.
-Tags with the same name before different extensions can share a new name too.
+Rename and Bulk Rename have their own page, **Renaming**. The About button
+in the Bulk Rename window opens it.
 
-The preview shows each original name and its proposed result. In **Rename**
-mode, edit the Name Pattern:
-
-- `{name}` inserts the current name without its extension.
-- `test_{name}` adds a prefix; `{name}_rebalance` adds a suffix.
-- `{n}` numbers upward and `{N}` numbers downward in the displayed selection
-  order. Start Ascending At and Digits control the numbering range and zero padding.
-- Double braces produce literal braces: `{{name}}` produces `{name}`.
-
-The token buttons insert at the text cursor, replacing any highlighted text.
-**Find and Replace** matches literal text in names, not extensions or paths.
-It replaces all matches and can be case sensitive. Unmatched items stay unchanged.
-The replacement can use the same name/number tokens.
-
-Invalid names, duplicate results, case-only changes and existing destination
-names block Apply. Bulk Rename never overwrites or merges existing items, and
-does not automatically suffix a conflicting result. This includes another
-selected item's current name: choose vacant names or rename in two batches.
-
-Review the preview, then choose **Rename**, or **Save All and Rename** if there
-are unsaved workspace tags. Reference checking runs before files change. The
-whole batch shares rollback handling; tag references, open tabs and folder
-browsers follow successful renames. Renamed items stay selected.
+## Tabs and extraction
 
 Tab-menu close actions apply only to the clicked tab group in that workspace.
 **Close Tab** closes the clicked tab, **Close All** closes that group, and

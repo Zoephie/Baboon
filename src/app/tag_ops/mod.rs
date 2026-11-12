@@ -34,6 +34,7 @@ pub(in crate::app) mod delete_confirm;
 pub(in crate::app) mod container_duplicate_confirm;
 pub(in crate::app) mod container_folder_window;
 pub(in crate::app) mod loose_folder_rename_window;
+pub(in crate::app) mod single_rename;
 pub(in crate::app) mod new_tag;
 pub(in crate::app) use new_tag::*;
 pub(in crate::app) mod folder_merge_review;

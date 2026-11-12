@@ -8,27 +8,22 @@ pub(super) struct RenameItem {
     pub path: PathBuf,
     pub stem: String,
     pub extension: Option<std::ffi::OsString>,
+    /// The tag's group, for its icon. `None` for folders.
+    pub group_tag: Option<u32>,
 }
 #[derive(Clone, PartialEq, Eq)]
+/// One Find and Replace covers every rename: `{name}` stands for the current
+/// name in both fields, so finding `{name}` replaces whole names (a prefix or
+/// suffix is `test_{name}`), and finding literal text replaces just that text.
 pub(super) struct RenameOptions {
-    pub replacing: bool,
-    pub pattern: String,
     pub find: String,
     pub replacement: String,
-    pub case_sensitive: bool,
-    pub start: u32,
-    pub digits: u8,
 }
 impl Default for RenameOptions {
     fn default() -> Self {
         Self {
-            replacing: false,
-            pattern: "{name}".into(),
-            find: String::new(),
-            replacement: String::new(),
-            case_sensitive: true,
-            start: 1,
-            digits: 1,
+            find: "{name}".into(),
+            replacement: "{name}".into(),
         }
     }
 }
@@ -43,13 +38,7 @@ fn path_key(path: &Path) -> String {
 
 /// Substitutions never parse the inserted name again: a literal token in an
 /// existing filename must remain a literal part of that filename.
-fn template(
-    pattern: &str,
-    name: &str,
-    ascending: u64,
-    descending: u64,
-    digits: u8,
-) -> Result<String, String> {
+pub(in crate::app) fn template(pattern: &str, name: &str) -> Result<String, String> {
     let mut rest = pattern;
     let mut output = String::new();
     while !rest.is_empty() {
@@ -62,14 +51,8 @@ fn template(
         } else if let Some(tail) = rest.strip_prefix("{name}") {
             output.push_str(name);
             rest = tail;
-        } else if let Some(tail) = rest.strip_prefix("{n}") {
-            output.push_str(&format!("{ascending:0width$}", width = digits as usize));
-            rest = tail;
-        } else if let Some(tail) = rest.strip_prefix("{N}") {
-            output.push_str(&format!("{descending:0width$}", width = digits as usize));
-            rest = tail;
         } else if rest.starts_with('{') {
-            return Err("Use {name}, {n} or {N}; double braces for literal braces".into());
+            return Err("Use {name}; double braces for literal braces".into());
         } else {
             let character = rest.chars().next().unwrap();
             output.push(character);
@@ -88,12 +71,11 @@ fn occupied_names(items: &[RenameItem]) -> Result<HashSet<String>, String> {
     }
     Ok(occupied)
 }
-fn replace_literal(input: &str, find: &str, replacement: &str, case_sensitive: bool) -> String {
+/// Tag paths are case-insensitive to Windows and the engines, so Find ignores
+/// letter case: `Bugger` finds `bugger`.
+fn replace_literal(input: &str, find: &str, replacement: &str) -> String {
     if find.is_empty() {
         return input.to_owned();
-    }
-    if case_sensitive {
-        return input.replace(find, replacement);
     }
     let count = find.chars().count();
     let folded = find.to_lowercase();
@@ -122,28 +104,12 @@ fn preview(
     occupied: &HashSet<String>,
 ) -> Vec<PreviewRow> {
     let mut rows = Vec::new();
-    for (index, item) in items.iter().enumerate() {
+    for item in items {
         let result = (|| {
-            let pattern = if options.replacing {
-                &options.replacement
-            } else {
-                &options.pattern
-            };
-            let expanded = template(
-                pattern,
-                &item.stem,
-                options.start as u64 + index as u64,
-                options.start as u64 + (items.len() - 1 - index) as u64,
-                options.digits,
-            )?;
-            let name = if options.replacing {
-                if options.find.is_empty() {
-                    return Err("Enter text to find".into());
-                }
-                replace_literal(&item.stem, &options.find, &expanded, options.case_sensitive)
-            } else {
-                expanded
-            };
+            let find = template(&options.find, &item.stem)?;
+            let replacement = template(&options.replacement, &item.stem)?;
+            // Nothing to find leaves every name as it is.
+            let name = replace_literal(&item.stem, &find, &replacement);
             // Unmatched rows stay untouched, including unusual names that the
             // application's naming rules would reject for a newly named tag.
             if name == item.stem {
@@ -196,14 +162,325 @@ fn preview(
     rows
 }
 
+/// Known referrers for the entire selection, available before editing names.
+struct RenameReferences {
+    signature: (usize, usize, bool),
+    complete: bool,
+    /// Display path and tag group of each known referring tag.
+    paths: Vec<(String, u32)>,
+    /// For each selected folder, the tags beneath it, which get new paths
+    /// when it is renamed. Zero for selected tags.
+    inside: Vec<usize>,
+}
+impl RenameReferences {
+    fn signature(source: &LoadedSourceData) -> Option<(usize, usize, bool)> {
+        Some((
+            source.reverse_dependencies.as_ref()?.len(),
+            source.full_entry_set().len(),
+            source.complete_scan,
+        ))
+    }
+    fn new(items: &[RenameItem], source: &LoadedSourceData) -> Option<Self> {
+        let index = source.reverse_dependencies.as_ref()?;
+        let entries = source.full_entry_set();
+        let owners: HashMap<_, _> = items
+            .iter()
+            .enumerate()
+            .map(|(i, item)| (path_key(&item.path), i))
+            .collect();
+        let mut keys = vec![HashSet::new(); items.len()];
+        let mut inside = vec![0; items.len()];
+        for entry in entries {
+            let TagEntryLocation::LooseFile(path) = &entry.location else {
+                continue;
+            };
+            let selected: Vec<_> = path
+                .ancestors()
+                .filter_map(|parent| owners.get(&path_key(parent)).copied())
+                .collect();
+            if selected.is_empty() {
+                continue;
+            }
+            for &item in &selected {
+                if items[item].extension.is_none() {
+                    inside[item] += 1;
+                }
+            }
+            let Some(reference) =
+                crate::app::references::dependency_entry_reference_path(entry, &source.names)
+            else {
+                continue;
+            };
+            for item in selected {
+                keys[item].extend(
+                    index
+                        .dependents_for(entry.group_tag, &reference)
+                        .iter()
+                        .map(String::as_str),
+                );
+            }
+        }
+        let display: HashMap<_, _> = entries
+            .iter()
+            .map(|entry| (entry.key.as_str(), (entry.display_path.as_str(), entry.group_tag)))
+            .collect();
+        let mut complete =
+            source.complete_scan && entries.iter().all(|entry| index.contains_tag(&entry.key));
+        let by_item: Vec<Vec<(String, u32)>> = keys
+            .into_iter()
+            .map(|keys| {
+                keys.into_iter()
+                    .filter_map(|key| {
+                        if let Some((path, group)) = display.get(key) {
+                            Some(((*path).to_owned(), *group))
+                        } else {
+                            complete = false;
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut paths: Vec<_> = by_item
+            .into_iter()
+            .flatten()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        paths.sort_by_cached_key(|(path, _)| crate::core::source::natural_key(path));
+        Some(Self {
+            signature: Self::signature(source)?,
+            complete,
+            paths,
+            inside,
+        })
+    }
+    /// The boxed "N References to Fix" list: each referring tag with its
+    /// icon and a muted folder path, scrolling within `height`.
+    /// Like the list, the note covers every selected folder: the list shows
+    /// what the rename could reach, and applying renames only the items whose
+    /// names change, checking their references again first.
+    fn draw(ui: &mut Ui, references: Option<&Self>, refreshing: bool, game: Option<GameId>, height: f32) {
+        let mut notes = Vec::new();
+        let moved: usize = references.map_or(0, |references| references.inside.iter().sum());
+        if moved > 0 {
+            notes.push(folder_tags_note(moved, "renamed folders"));
+        }
+        match references {
+            None => notes.push("Reference list is not ready yet. References are still checked and fixed when renaming.".to_owned()),
+            Some(_) if refreshing => notes.push("Refreshing references; showing the last known list.".to_owned()),
+            Some(references) if !references.complete => notes.push("This list is incomplete; it shows the references currently known.".to_owned()),
+            _ => {}
+        }
+        let paths = references.map_or(&[][..], |references| &references.paths[..]);
+        draw_references_box(ui, paths, &notes, game, height);
+    }
+}
+
+const ROW_ICON_SIZE: f32 = 18.0;
+const REFERENCE_ROW_HEIGHT: f32 = 28.0;
+const PREVIEW_ROW_HEIGHT: f32 = 32.0;
+
+const SELECTION_FOOTER_HEIGHT: f32 = 34.0;
+
+/// The note under References to Fix when renamed folders hold tags: their
+/// paths change too. `within` names the folders, e.g. "renamed folders".
+pub(in crate::app) fn folder_tags_note(tags: usize, within: &str) -> String {
+    if tags == 1 {
+        format!("Includes references to 1 tag within {within} that will now have a new path.")
+    } else {
+        format!("Includes references to {tags} tags within {within} that will now have new paths.")
+    }
+}
+
+/// The height a references box needs to show `rows` rows without scrolling,
+/// capped at `max`: its title, its notes, and the rows.
+pub(in crate::app) fn references_box_height(rows: usize, notes: usize, max: f32) -> f32 {
+    let title = 52.0 + notes as f32 * 40.0;
+    (title + rows as f32 * REFERENCE_ROW_HEIGHT).min(max)
+}
+
+/// The boxed "N References to Fix" list shared by every Rename window: each
+/// referring tag with its icon and a muted folder path, scrolling within
+/// `height`. `rows` are display paths and tag groups.
+pub(in crate::app) fn draw_references_box(ui: &mut Ui, rows: &[(String, u32)], notes: &[String], game: Option<GameId>, height: f32) {
+    let title = match rows.len() {
+        0 => "No References to Fix".to_owned(),
+        1 => "1 Reference to Fix".to_owned(),
+        count => format!("{count} References to Fix"),
+    };
+    rename_box(ui, height, |ui| {
+        ui.add_space(4.0);
+        ui.label(RichText::new(title).strong());
+        for note in notes {
+            ui.label(RichText::new(note).italics().color(subtle_dark()));
+        }
+        ui.add_space(4.0);
+        if rows.is_empty() { return }
+        ScrollArea::vertical()
+            .id_salt("rename_references")
+            .auto_shrink([false, false])
+            .show_rows(ui, REFERENCE_ROW_HEIGHT, rows.len(), |ui, visible| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (path, group) in &rows[visible] {
+                    let (row, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), REFERENCE_ROW_HEIGHT), Sense::hover());
+                    let icon = egui::Rect::from_center_size(egui::pos2(row.left() + 18.0, row.center().y), Vec2::splat(ROW_ICON_SIZE));
+                    paint_tag_icon_at(ui, Some(*group), game, icon);
+                    let text = egui::Rect::from_min_max(egui::pos2(icon.right() + 10.0, row.top()), row.max);
+                    if crate::app::compare::tag_compare::paint_path_label(ui, path, text) {
+                        response.on_hover_text(path);
+                    }
+                    ui.painter().hline(row.x_range(), row.bottom() - 0.5, Stroke::new(1.0, foundation_block_edge()));
+                }
+            });
+    });
+}
+
+/// The band along the bottom of the preview box: how many items are selected,
+/// and which of them the rename changes.
+fn draw_selection_footer(ui: &mut Ui, selected: usize, folders: usize, tags: usize, invalid: usize) {
+    let (band, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), SELECTION_FOOTER_HEIGHT), Sense::hover());
+    // Edge to edge across the box, under its last row.
+    let fill = egui::Rect::from_min_max(egui::pos2(band.left() - 10.0, band.top()), egui::pos2(band.right() + 10.0, band.bottom() + 8.0));
+    ui.painter().rect_filled(fill, egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 }, foundation_block_bar());
+    ui.painter().hline(fill.x_range(), fill.top(), Stroke::new(1.0, foundation_block_edge()));
+    let plural = |count: usize, one: &str, many: &str| format!("{count} {}", if count == 1 { one } else { many });
+    let mut job = egui::text::LayoutJob::default();
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let mut add = |text: &str, color: Color32| job.append(text, 0.0, egui::TextFormat::simple(font.clone(), color));
+    add(&plural(selected, "item selected", "items selected"), subtle_dark());
+    add("  •  ", subtle_dark());
+    let parts: Vec<String> = [(folders, "folder", "folders"), (tags, "tag", "tags")].into_iter()
+        .filter(|(count, ..)| *count > 0)
+        .map(|(count, one, many)| plural(count, one, many))
+        .collect();
+    if parts.is_empty() {
+        add("nothing to rename yet", subtle_dark());
+    } else {
+        add(&format!("renaming {}", parts.join(" & ")), foundation_blue());
+    }
+    if invalid > 0 {
+        add("  •  ", subtle_dark());
+        add(&plural(invalid, "invalid name", "invalid names"), ui.visuals().error_fg_color);
+    }
+    let galley = ui.painter().layout_job(job);
+    let at = egui::pos2(band.left() + 8.0, band.center().y + 4.0 - galley.size().y * 0.5);
+    ui.painter().galley(at, galley, text_dark());
+}
+
+/// What a rename row's icon shows: the browser's closed folder, or a tag
+/// group's own icon.
+#[derive(Clone, Copy)]
+pub(in crate::app) enum RenameIcon {
+    Folder,
+    Tag(Option<u32>),
+}
+
+/// The Original | Rename heading of a rename table `width` wide. Where the
+/// Rename column starts, from the table's left edge.
+pub(in crate::app) fn rename_table_header(ui: &mut Ui, width: f32) -> f32 {
+    let column = (width / 2.0).floor();
+    let (header, _) = ui.allocate_exact_size(Vec2::new(width, TABLE_HEADER_HEIGHT + 6.0), Sense::hover());
+    for (offset, title) in [(0.0, "Original"), (column, "Rename")] {
+        ui.painter().text(header.left_center() + Vec2::new(offset + 8.0, 0.0), egui::Align2::LEFT_CENTER,
+            title, table_header_font(ui), subtle_dark());
+    }
+    ui.painter().vline(header.left() + column, header.y_range(), Stroke::new(1.0, foundation_block_edge()));
+    paint_table_header_rule(ui, header);
+    column
+}
+
+/// One row of a rename table: the icon and original name, then the result
+/// in `color` (blue when it changes, red for a problem).
+#[allow(clippy::too_many_arguments)]
+pub(in crate::app) fn rename_table_row(
+    ui: &mut Ui, width: f32, column: f32, icon: RenameIcon, game: Option<GameId>,
+    original: &str, original_hover: &str, renamed: &str, color: Color32,
+) {
+    let (line, _) = ui.allocate_exact_size(Vec2::new(width, PREVIEW_ROW_HEIGHT), Sense::hover());
+    let icon_rect = egui::Rect::from_center_size(egui::pos2(line.left() + 8.0 + ROW_ICON_SIZE * 0.5, line.center().y), Vec2::splat(ROW_ICON_SIZE));
+    match icon {
+        RenameIcon::Folder => paint_button_icon_at(ui, ButtonIcon::FolderClosed, icon_rect, text_dark()),
+        RenameIcon::Tag(group) => paint_tag_icon_at(ui, group, game, icon_rect),
+    }
+    let cells = [
+        (egui::Rect::from_min_max(egui::pos2(icon_rect.right() + 10.0, line.top()), egui::pos2(line.left() + column - 4.0, line.bottom())), original, text_dark(), original_hover),
+        (egui::Rect::from_min_max(egui::pos2(line.left() + column + 8.0, line.top()), egui::pos2(line.right() - 4.0, line.bottom())), renamed, color, renamed),
+    ];
+    for (rect, text, color, hover) in cells {
+        let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        cell.add(egui::Label::new(RichText::new(text).color(color)).truncate()).on_hover_text(hover);
+    }
+    ui.painter().hline(line.x_range(), line.bottom() - 0.5, Stroke::new(1.0, foundation_block_edge()));
+}
+
+/// Display paths with their tag groups, read from each path's extension.
+pub(in crate::app) fn referrer_rows(paths: &[String], names: &crate::core::format::TagNameIndex) -> Vec<(String, u32)> {
+    paths.iter().map(|path| {
+        let group = path.rsplit_once('.').and_then(|(_, extension)| names.group_tag_for(extension)).unwrap_or(0);
+        (path.clone(), group)
+    }).collect()
+}
+
+/// The outlined, rounded containers that hold the references and the preview.
+pub(in crate::app) fn rename_box(ui: &mut Ui, height: f32, contents: impl FnOnce(&mut Ui)) {
+    egui::Frame::NONE
+        .stroke(Stroke::new(1.0, foundation_block_edge()))
+        .corner_radius(4)
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.set_height((height - 16.0).max(0.0));
+            contents(ui);
+        });
+}
+
+/// The folder the selection lives in, as a display path under the kit's root:
+/// the deepest folder holding every selected item, or the root's own name.
+fn selection_folder(items: &[RenameItem], root: &Path) -> String {
+    let mut common: Option<PathBuf> = None;
+    for parent in items.iter().filter_map(|item| item.path.parent()) {
+        common = Some(match common {
+            None => parent.to_path_buf(),
+            Some(common) => common.ancestors().find(|ancestor| parent.starts_with(ancestor)).unwrap_or(Path::new("")).to_path_buf(),
+        });
+    }
+    let common = common.unwrap_or_default();
+    match common.strip_prefix(root) {
+        Ok(relative) if !relative.as_os_str().is_empty() => relative.to_string_lossy().replace('/', "\\"),
+        _ => root.file_name().unwrap_or(root.as_os_str()).to_string_lossy().into_owned(),
+    }
+}
+
 pub(in crate::app) struct BulkRenameDialog {
     request: bulk::BulkRequest,
+    source_identity: (PathBuf, Option<GameId>),
     items: Vec<RenameItem>,
     occupied: HashSet<String>,
     options: RenameOptions,
+    references: Option<RenameReferences>,
+    references_revision: Option<(u64, bool)>,
     error: Option<String>,
     focus: bool,
 }
+impl BulkRenameDialog {
+    /// Index refreshes advance generation without replacing the editing kit.
+    /// Stay attached to its stable identity, root and engine; apply revalidates
+    /// the selected paths and reference index before changing any files.
+    fn kit_index(&self, model: &Model) -> Option<usize> {
+        let index = model.kit_index(self.request.stamp.kit)?;
+        let source = model.kits[index].source.as_ref()?;
+        match &source.source {
+            TagSource::LooseFolder { root, game, .. }
+                if root == &self.source_identity.0 && game == &self.source_identity.1 =>
+            {
+                Some(index)
+            }
+            _ => None,
+        }
+    }
+}
+
 fn insert_token(ui: &Ui, id: egui::Id, text: &mut String, token: &str) {
     let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
     let range = state.cursor.char_range();
@@ -240,72 +517,117 @@ impl Dialog for BulkRenameDialog {
             .filter(|row| row.changed && row.error.is_none())
             .count();
         let invalid = rows.iter().filter(|row| row.error.is_some()).count();
-        let dirty = cx
-            .model
-            .resolve_stamp(self.request.stamp)
-            .is_some_and(|index| {
-                cx.model.kits[index]
-                    .parsed_tags
-                    .values()
-                    .any(|doc| doc.dirty.is_set())
-            });
+        let kit_index = self.kit_index(cx.model);
+        let mut refreshing_references = false;
+        if let Some(index) = kit_index {
+            let kit = &cx.model.kits[index];
+            let source = kit.source.as_ref().unwrap();
+            let revision = (kit.generation, kit.index_jobs.building_references);
+            if let Some(signature) = RenameReferences::signature(source) {
+                if self.references_revision != Some(revision)
+                    || self.references.as_ref().map(|references| references.signature) != Some(signature)
+                {
+                    self.references = RenameReferences::new(&self.items, source);
+                    self.references_revision = Some(revision);
+                }
+            } else {
+                // Keep the last known list while a new index is being built.
+                self.references_revision = None;
+            }
+            refreshing_references = source.reverse_dependencies.is_none()
+                || kit.index_jobs.building_references;
+        } else {
+            self.references = None;
+            self.references_revision = None;
+        }
+        let dirty = kit_index.is_some_and(|index| cx.model.kits[index]
+            .parsed_tags.values().any(|doc| doc.dirty.is_set()));
+        let game = self.source_identity.1;
+        let folder = selection_folder(&self.items, &self.source_identity.0);
         let modal=egui::Modal::new(egui::Id::unique("bulk_rename_items"))
             .frame(egui::Frame::window(&cx.egui.global_style())).show(cx.egui,|ui| {
-                ui.set_width(window_width(cx.egui,760.0));
-                crate::app::search::draw_icon_window_header(ui,&format!("Rename {} Items",self.items.len()),ButtonIcon::Rename,&mut open);
-                ui.add_space(12.0);
-                ui.columns(2,|columns| {
-                    columns[0].label(RichText::new("Preview").strong());
-                    let height=(window_work_area(cx.egui).height()-270.0).clamp(140.0,340.0);
-                    ScrollArea::vertical().id_salt("rename_preview").max_height(height).auto_shrink([false,false]).show_rows(&mut columns[0],64.0,rows.len(),|ui,visible| {
-                        for index in visible {
-                            ui.allocate_ui_with_layout(Vec2::new(ui.available_width(),64.0),egui::Layout::top_down(egui::Align::Min),|ui| {
-                            ui.set_min_height(64.0);
-                            let item=&self.items[index];let row=&rows[index];
-                            ui.add(egui::Label::new(RichText::new(item.path.file_name().unwrap_or_default().to_string_lossy()).monospace().color(subtle_dark())).truncate()).on_hover_text(item.path.display().to_string());
-                            let label=row.error.as_deref().map(str::to_owned).unwrap_or_else(||row.target.file_name().unwrap_or_default().to_string_lossy().into_owned());
-                            ui.add(egui::Label::new(RichText::new(format!("→ {label}")).monospace().color(if row.error.is_some(){ui.visuals().error_fg_color}else if row.changed{text_dark()}else{subtle_dark()})).truncate()).on_hover_text(label);
-                            ui.add_space(8.0);
-                            });
+                ui.set_width(window_width(cx.egui,880.0));
+                if crate::app::search::draw_icon_window_header_with_help(ui,"Bulk Rename",ButtonIcon::Rename,&mut open,
+                    ("About Renaming",egui::Id::unique("bulk_rename_about"))) {
+                    cx.send(crate::app::help::HelpCommand::ShowDocSection(crate::app::help::RENAMING_HELP_SECTION));
+                }
+                // The folder being renamed in, on a band running edge to edge.
+                let (band, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 36.0), Sense::hover());
+                let margin = ui.spacing().window_margin;
+                let fill = egui::Rect::from_min_max(egui::pos2(band.left() - f32::from(margin.left), band.top() - ui.spacing().item_spacing.y * 0.5),
+                    egui::pos2(band.right() + f32::from(margin.right), band.bottom()));
+                ui.painter().rect_filled(fill, 0.0, foundation_group_bg());
+                let icon = egui::Rect::from_center_size(egui::pos2(band.left() + 2.0 + ROW_ICON_SIZE * 0.5, band.center().y), Vec2::splat(ROW_ICON_SIZE));
+                paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon, text_dark());
+                let text = egui::Rect::from_min_max(egui::pos2(icon.right() + 10.0, band.top()), band.max);
+                crate::app::compare::tag_compare::paint_path_label(ui, &folder, text);
+                ui.add_space(14.0);
+                let body_height = (window_work_area(cx.egui).height() - 260.0).clamp(300.0, 440.0);
+                let gap = 20.0;
+                let column_width = ((ui.available_width() - gap) / 2.0).floor();
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    // Left: Find and Replace With, then the references to fix.
+                    ui.allocate_ui_with_layout(Vec2::new(column_width, body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.set_width(column_width);
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        let find_id=egui::Id::unique(("bulk_rename_find",self.request.stamp.kit));
+                        let replace_id=egui::Id::unique(("bulk_rename_replace",self.request.stamp.kit));
+                        ui.label("Find");
+                        ui.add(crate::app::ui_kit::singleline_text_edit(&mut self.options.find).id(find_id).desired_width(f32::INFINITY).font(egui::TextStyle::Monospace));
+                        if ui.button("Current Name").on_hover_text("Insert {name}, the current name, into Find").clicked() {
+                            insert_token(ui,find_id,&mut self.options.find,"{name}");
                         }
-                    });
-                    let ui=&mut columns[1];
-                    ui.horizontal(|ui| {
-                        if selectable_icon_text_button(ui,ButtonIcon::Rename,"Rename",!self.options.replacing).clicked() {self.options.replacing=false;}
-                        if selectable_icon_text_button(ui,ButtonIcon::Replace,"Find and Replace",self.options.replacing).clicked() {self.options.replacing=true;}
-                    });
-                    ui.add_space(10.0);
-                    if self.options.replacing {
-                        ui.label("Find (literal text)");
-                        ui.add(crate::app::ui_kit::singleline_text_edit(&mut self.options.find).desired_width(f32::INFINITY));
-                        ui.baboon_checkbox(&mut self.options.case_sensitive,"Case Sensitive");
+                        ui.add_space(8.0);
                         ui.label("Replace With");
-                    } else {ui.label("Name Pattern");}
-                    let id=egui::Id::unique(("bulk_rename_pattern",self.request.stamp.kit,self.options.replacing));
-                    let text=if self.options.replacing {&mut self.options.replacement}else{&mut self.options.pattern};
-                    let response=ui.add(crate::app::ui_kit::singleline_text_edit(text).id(id).desired_width(f32::INFINITY).font(egui::TextStyle::Monospace));
-                    if self.focus {response.request_focus();self.focus=false;}
-                    ui.horizontal_wrapped(|ui| {
-                        for (label,token) in [("Current Name","{name}"),("Number ↑","{n}"),("Number ↓","{N}")] {
-                            if ui.button(label).clicked() {insert_token(ui,id,text,token);}
+                        let replace=ui.add(crate::app::ui_kit::singleline_text_edit(&mut self.options.replacement).id(replace_id).desired_width(f32::INFINITY).font(egui::TextStyle::Monospace));
+                        if self.focus {replace.request_focus();self.focus=false;}
+                        if ui.button("Current Name").on_hover_text("Insert {name}, the current name, into Replace With").clicked() {
+                            insert_token(ui,replace_id,&mut self.options.replacement,"{name}");
                         }
+                        if let Some(error)=&self.error {ui.colored_label(ui.visuals().error_fg_color,error);}
+                        if kit_index.is_none() {
+                            ui.colored_label(ui.visuals().error_fg_color, "The workspace changed. Reopen Rename for this selection.");
+                        }
+                        ui.add_space(12.0);
+                        let remaining = ui.available_rect_before_wrap().height().max(120.0);
+                        RenameReferences::draw(ui,self.references.as_ref(),refreshing_references,game,remaining);
                     });
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        ui.label("Start Ascending At");ui.add(egui::DragValue::new(&mut self.options.start));
+                    // Right: each item's Original name beside its Rename result.
+                    ui.allocate_ui_with_layout(Vec2::new(column_width, body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.set_width(column_width);
+                        rename_box(ui, body_height, |ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            let width = ui.available_width();
+                            let column = rename_table_header(ui, width);
+                            let list_height = (ui.available_height() - SELECTION_FOOTER_HEIGHT).max(PREVIEW_ROW_HEIGHT);
+                            ScrollArea::vertical().id_salt("rename_preview").max_height(list_height).auto_shrink([false,false]).show_rows(ui,PREVIEW_ROW_HEIGHT,rows.len(),|ui,visible| {
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                for index in visible {
+                                    let item=&self.items[index];let row=&rows[index];
+                                    let label=row.error.as_deref().map(str::to_owned).unwrap_or_else(||row.target.file_name().unwrap_or_default().to_string_lossy().into_owned());
+                                    let color=if row.error.is_some(){ui.visuals().error_fg_color}else if row.changed{foundation_blue()}else{subtle_dark()};
+                                    let icon = if item.extension.is_none() { RenameIcon::Folder } else { RenameIcon::Tag(item.group_tag) };
+                                    let original = item.path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                                    rename_table_row(ui, width, column, icon, game, &original, &item.path.display().to_string(), &label, color);
+                                }
+                            });
+                            let renaming = |folders: bool| rows.iter().zip(&self.items)
+                                .filter(|(row, item)| row.changed && row.error.is_none() && item.extension.is_none() == folders)
+                                .count();
+                            draw_selection_footer(ui, rows.len(), renaming(true), renaming(false), invalid);
+                        });
                     });
-                    ui.horizontal(|ui| {ui.label("Digits");ui.add(egui::DragValue::new(&mut self.options.digits).range(1..=12));});
-                    ui.add_space(10.0);
-                    ui.label(RichText::new("{name} keeps the current name. Add text before or after it for a prefix or suffix. Extensions and parent folders stay unchanged.").small().color(subtle_dark()));
-                    ui.label(RichText::new("Numbers follow the displayed selection order. Existing names and duplicate results must be resolved before renaming.").small().color(subtle_dark()));
-                    if let Some(error)=&self.error {ui.colored_label(ui.visuals().error_fg_color,error);}
                 });
                 ui.add_space(12.0);
                 popup_footer(ui,|ui| {ui.horizontal(|ui| {
-                    ui.label(if invalid>0 {format!("{invalid} invalid names")}else{format!("{changes} to rename · {} unchanged",rows.len()-changes)});
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui| {
                         if icon_text_button(ui,ButtonIcon::Clear,"Cancel",true).clicked(){open=false;}
-                        if icon_text_button(ui,ButtonIcon::Rename,if dirty{"Save All and Rename"}else{"Rename"},invalid==0&&changes>0).clicked() {
+                        let rename = icon_text_button(ui,ButtonIcon::Rename,if dirty{"Save All and Rename"}else{"Rename"},invalid==0&&changes>0&&kit_index.is_some());
+                        let rename = if invalid > 0 {
+                            rename.on_disabled_hover_text(format!("{invalid} invalid {}; see the Rename column", if invalid == 1 { "name" } else { "names" }))
+                        } else { rename };
+                        if rename.clicked() {
                             cx.send(BrowserCommand::ApplyBulkRename {save:dirty});
                         }
                     });
@@ -332,18 +654,21 @@ impl Baboon {
                 .source
                 .as_ref()
                 .ok_or("No workspace is loaded")?;
-            let TagSource::LooseFolder { root, .. } = &source.source else {
+            let TagSource::LooseFolder { root, game, .. } = &source.source else {
                 return Err("Bulk rename requires loose tags and folders".into());
             };
             let mut items = Vec::new();
             for key in &request.keys {
                 let folder = key.strip_prefix(FOLDER_PANE_PREFIX);
-                let path = if let Some(path) = folder {
-                    root.join(tag_path::to_relative(path))
+                let (path, group_tag) = if let Some(path) = folder {
+                    (root.join(tag_path::to_relative(path)), None)
                 } else {
-                    match source.entry_for_key(key).map(|entry| &entry.location) {
-                        Some(TagEntryLocation::LooseFile(path)) => path.clone(),
-                        _ => return Err("Every selected item must support Rename".into()),
+                    match source.entry_for_key(key) {
+                        Some(entry) => match &entry.location {
+                            TagEntryLocation::LooseFile(path) => (path.clone(), Some(entry.group_tag)),
+                            _ => return Err("Every selected item must support Rename".into()),
+                        },
+                        None => return Err("Every selected item must support Rename".into()),
                     }
                 };
                 if path == *root || !path.starts_with(root) || !path.exists() {
@@ -366,6 +691,7 @@ impl Baboon {
                     path,
                     stem,
                     extension,
+                    group_tag,
                 });
             }
             if items.is_empty() {
@@ -374,9 +700,12 @@ impl Baboon {
             let occupied = occupied_names(&items)?;
             Ok(BulkRenameDialog {
                 request,
+                source_identity: (root.clone(), *game),
                 items,
                 occupied,
                 options: RenameOptions::default(),
+                references: None,
+                references_revision: None,
                 error: None,
                 focus: true,
             })
@@ -395,9 +724,7 @@ impl Baboon {
             let request = dialog.request.clone();
             let items = dialog.items.clone();
             let options = dialog.options.clone();
-            let index = self
-                .model
-                .resolve_stamp(request.stamp)
+            let index = dialog.kit_index(&self.model)
                 .ok_or("The workspace changed; select the items again")?;
             if self.tag_ops.folder_refactor.is_some() {
                 return Err("A file operation is already running".into());
@@ -442,7 +769,7 @@ impl Baboon {
             let dependencies = source.reverse_dependencies.clone();
             let context = self.new_merge_context();
             let tx = self.tx.clone();
-            let stamp = request.stamp;
+            let stamp = self.model.kit_stamp();
             let pane = request.pane;
             self.tag_ops.folder_refactor = Some(FolderRefactorUiState {
                 label: "Renaming Items".into(),
@@ -502,6 +829,7 @@ impl BulkRenameDialog {
                 RenameItem {
                     stem: path.file_stem().unwrap().to_string_lossy().into_owned(),
                     extension: path.extension().map(std::ffi::OsStr::to_os_string),
+                    group_tag: None,
                     path,
                 }
             })
@@ -513,9 +841,12 @@ impl BulkRenameDialog {
                 keys: Vec::new(),
                 action: BulkAction::Rename,
             },
+            source_identity: (PathBuf::from("tags"), None),
             items,
             occupied: HashSet::new(),
             options: RenameOptions::default(),
+            references: None,
+            references_revision: None,
             error: None,
             focus: true,
         }
@@ -525,10 +856,16 @@ impl BulkRenameDialog {
 mod tests {
     use super::*;
     use crate::app::loose_fixture::*;
+    /// The referring tags the dialog lists in its count.
+    fn known_references(app: &Baboon) -> Vec<String> {
+        app.dialogs.get::<BulkRenameDialog>().unwrap().references.as_ref()
+            .map(|references| references.paths.iter().map(|(path, _)| path.clone()).collect()).unwrap_or_default()
+    }
     fn item(path: PathBuf) -> RenameItem {
         RenameItem {
             stem: path.file_stem().unwrap().to_string_lossy().into_owned(),
             extension: path.extension().map(std::ffi::OsStr::to_os_string),
+            group_tag: None,
             path,
         }
     }
@@ -539,7 +876,7 @@ mod tests {
             item("ui/banshee.weapon".into()),
         ];
         let settings = RenameOptions {
-            pattern: "test_{name}_rebalance".into(),
+            replacement: "test_{name}_rebalance".into(),
             ..Default::default()
         };
         let rows = preview(&items, &settings, &HashSet::new());
@@ -555,7 +892,7 @@ mod tests {
         let rows = preview(
             &items,
             &RenameOptions {
-                pattern: "new_common_name".into(),
+                replacement: "new_common_name".into(),
                 ..Default::default()
             },
             &HashSet::new(),
@@ -563,34 +900,23 @@ mod tests {
         assert!(rows.iter().all(|row| row.error.is_none()));
     }
     #[test]
-    fn numbers_follow_selection_order_and_names_are_not_reparsed() {
-        let items = vec![item("z.model".into()), item("a.model".into())];
-        let rows = preview(
-            &items,
-            &RenameOptions {
-                pattern: "{n}_{name}_{N}".into(),
-                start: 7,
-                digits: 3,
-                ..Default::default()
-            },
-            &HashSet::new(),
-        );
-        assert_eq!(rows[0].target, PathBuf::from("007_z_008.model"));
-        assert_eq!(rows[1].target, PathBuf::from("008_a_007.model"));
+    fn current_names_are_not_reparsed_and_number_tokens_are_rejected() {
         assert_eq!(
-            template("prefix_{name}", "literal{n}", 1, 2, 1).unwrap(),
+            template("prefix_{name}", "literal{n}").unwrap(),
             "prefix_literal{n}"
         );
-        assert_eq!(template("{{name}}", "ignored", 1, 2, 1).unwrap(), "{name}");
-        assert!(template("{typo}", "name", 1, 2, 1).is_err());
+        assert_eq!(template("{{name}}", "ignored").unwrap(), "{name}");
+        for token in ["{n}", "{N}", "{typo}"] {
+            assert!(template(token, "name").is_err());
+        }
     }
+
     #[test]
-    fn replacement_is_literal_optional_case_sensitive_and_leaves_unmatched_names_alone() {
+    fn replacement_is_literal_ignores_case_and_leaves_unmatched_names_alone() {
         let items = vec![item("old_old.model".into()), item("other.model".into())];
         let rows = preview(
             &items,
             &RenameOptions {
-                replacing: true,
                 find: "old".into(),
                 replacement: "new".into(),
                 ..Default::default()
@@ -599,12 +925,33 @@ mod tests {
         );
         assert_eq!(rows[0].target, PathBuf::from("new_new.model"));
         assert!(!rows[1].changed);
-        assert_eq!(
-            replace_literal("ÉQUIPE_équipe", "équipe", "team", false),
-            "team_team"
+        let rows = preview(
+            &items,
+            &RenameOptions { find: "OLD".into(), replacement: "new".into() },
+            &HashSet::new(),
         );
-        assert_eq!(replace_literal("a.b_a_b", "a.b", "new", true), "new_a_b");
-        assert_eq!(replace_literal("old", "old", "$1", true), "$1");
+        assert_eq!(rows[0].target, PathBuf::from("new_new.model"), "Find ignores letter case");
+        assert_eq!(replace_literal("ÉQUIPE_équipe", "équipe", "team"), "team_team");
+        assert_eq!(replace_literal("a.b_a_b", "a.b", "new"), "new_a_b");
+        assert_eq!(replace_literal("old", "old", "$1"), "$1");
+    }
+    #[test]
+    fn finding_the_current_name_renames_whole_names_and_empty_find_changes_nothing() {
+        let items = vec![item("crate.model".into()), item("Barrel.model".into())];
+        let options = |find: &str, replacement: &str| RenameOptions {
+            find: find.into(),
+            replacement: replacement.into(),
+        };
+        // The defaults change nothing until Replace With does.
+        assert!(preview(&items, &RenameOptions::default(), &HashSet::new()).iter().all(|row| !row.changed && row.error.is_none()));
+        let rows = preview(&items, &options("{name}", "old_{name}"), &HashSet::new());
+        assert_eq!(rows[0].target, PathBuf::from("old_crate.model"));
+        assert_eq!(rows[1].target, PathBuf::from("old_Barrel.model"));
+        // {name} in Find is the literal current name, so it can sit inside other text.
+        let rows = preview(&items, &options("{name}", "{name}_{name}"), &HashSet::new());
+        assert_eq!(rows[0].target, PathBuf::from("crate_crate.model"));
+        assert!(preview(&items, &options("", "anything"), &HashSet::new()).iter().all(|row| !row.changed && row.error.is_none()));
+        assert!(preview(&items, &options("{typo}", "x"), &HashSet::new()).iter().all(|row| row.error.is_some()));
     }
     #[test]
     fn collisions_and_invalid_names_disable_apply_without_suffixing() {
@@ -612,7 +959,7 @@ mod tests {
         let rows = preview(
             &items,
             &RenameOptions {
-                pattern: "same".into(),
+                replacement: "same".into(),
                 ..Default::default()
             },
             &HashSet::new(),
@@ -623,7 +970,7 @@ mod tests {
                 preview(
                     &items,
                     &RenameOptions {
-                        pattern: name.into(),
+                        replacement: name.into(),
                         ..Default::default()
                     },
                     &HashSet::new()
@@ -637,7 +984,7 @@ mod tests {
             preview(
                 &items[..1],
                 &RenameOptions {
-                    pattern: "taken".into(),
+                    replacement: "taken".into(),
                     ..Default::default()
                 },
                 &occupied
@@ -649,7 +996,7 @@ mod tests {
             preview(
                 &items[..1],
                 &RenameOptions {
-                    pattern: "A".into(),
+                    replacement: "A".into(),
                     ..Default::default()
                 },
                 &HashSet::new()
@@ -658,6 +1005,55 @@ mod tests {
             .is_some()
         );
     }
+    #[test]
+    fn reference_preview_includes_all_selected_roots_before_names_change() {
+        let kit = LooseKit::new("rename-reference-preview", "halo3_mcc");
+        for path in ["group/a", "b"] {
+            kit.write_mcc(path, "render_model", |_| {});
+        }
+        for path in ["group/internal", "outside/shared", "outside/only_b"] {
+            kit.write_mcc(path, "model", |_| {});
+        }
+        let mut source = kit.source();
+        assert!(RenameReferences::new(&[], &source).is_none());
+        // The preview consumes the reference catalogue, independently of how
+        // many fields in a referring tag point at each target.
+        let group = group_tag(kit.game, "render_model");
+        let dependency = |path: &str| crate::core::source::DependencyRef {
+            group_tag: group,
+            rel_path: path.into(),
+        };
+        let mut index = kit.index();
+        index.set_tag_dependencies(kit.key("group/internal.model"), [dependency(r"group\a")]);
+        index.set_tag_dependencies(
+            kit.key("outside/shared.model"),
+            [dependency(r"group\a"), dependency("b")],
+        );
+        index.set_tag_dependencies(kit.key("outside/only_b.model"), [dependency("b")]);
+        source.reverse_dependencies = Some(index);
+        let items = vec![
+            RenameItem {
+                path: kit.path("group"),
+                stem: "group".into(),
+                extension: None,
+                group_tag: None,
+            },
+            item(kit.path("b.render_model")),
+        ];
+        let references = RenameReferences::new(&items, &source).unwrap();
+        assert!(references.complete);
+        assert_eq!(references.inside, [2, 0], "the folder's two tags get new paths; a selected tag counts none");
+        assert_eq!(folder_tags_note(1, "renamed folders"), "Includes references to 1 tag within renamed folders that will now have a new path.");
+        assert_eq!(folder_tags_note(4, "renamed folders"), "Includes references to 4 tags within renamed folders that will now have new paths.");
+        assert_eq!(references.paths.iter().map(|(path, _)| path.as_str()).collect::<Vec<_>>(), [r"group\internal.model", r"outside\only_b.model", r"outside\shared.model"]);
+        source
+            .reverse_dependencies
+            .as_mut()
+            .unwrap()
+            .clear_tag(&kit.key("outside/only_b.model"));
+        assert!(!RenameReferences::new(&items, &source).unwrap().complete);
+    }
+
     fn run(
         kit: &LooseKit,
         roots: Vec<(PathBuf, PathBuf)>,
@@ -726,36 +1122,232 @@ mod tests {
     #[test]
     fn dialog_preview_is_live_and_cancel_changes_nothing() {
         let kit = LooseKit::new("bulk-rename-dialog", "halo3_mcc");
-        kit.write_mcc("crate", "model", |_| {});
+        let group = group_tag(kit.game, "render_model");
+        kit.write_mcc("crate", "model", |tag| set_reference(tag, "render model", group, "crate"));
+        kit.write_mcc("other/uses_crate", "model", |tag| set_reference(tag, "render model", group, "crate"));
         kit.write_mcc("crate", "render_model", |_| {});
         let mut app = app();
-        kit.install(&mut app);
+        kit.install_indexed(&mut app);
         let keys = vec![kit.key("crate.model"), kit.key("crate.render_model")];
         app.begin_browser_bulk("pane".into(), keys, BulkAction::Rename, &ctx());
+        let mut driver = PromptDriver::new();
+        driver.frame(&mut app, Vec::new());
+        let initial = driver.frame(&mut app, Vec::new());
+        assert!(initial.iter().any(|(text, _)| text == "2 References to Fix"));
         app.dialogs
             .get_mut::<BulkRenameDialog>()
             .unwrap()
             .options
-            .pattern = "prefix_{name}_suffix".into();
-        let mut driver = PromptDriver::new();
+            .replacement = "prefix_{name}_suffix".into();
         driver.frame(&mut app, Vec::new());
         let page = driver.frame(&mut app, Vec::new());
         for label in [
-            "Rename 2 Items",
-            "Preview",
-            "→ prefix_crate_suffix.model",
-            "→ prefix_crate_suffix.render_model",
+            "Bulk Rename",
+            "Original",
+            "Rename",
+            "2 References to Fix",
+            "prefix_crate_suffix.model",
+            "prefix_crate_suffix.render_model",
+            "2 items selected  •  renaming 2 tags",
         ] {
             assert!(
                 page.iter().any(|(text, _)| text == label),
                 "missing {label}: {page:?}"
             );
         }
+        assert!(!page.iter().any(|(text, _)| matches!(text.as_str(),
+            "Number ↑" | "Number ↓" | "Start Ascending At" | "Digits")));
+        assert!(known_references(&app).iter().any(|path| path == r"other\uses_crate.model"));
         driver.click(&mut app, "Cancel");
         assert!(app.dialogs.get::<BulkRenameDialog>().is_none());
         assert!(kit.path("crate.model").exists());
         assert!(!kit.path("prefix_crate_suffix.model").exists());
     }
+    #[test]
+    fn about_opens_renaming_help_above_the_locked_rename_window() {
+        let kit = LooseKit::new("bulk-rename-about", "halo3_mcc");
+        kit.write_mcc("crate", "model", |_| {});
+        let mut app = app();
+        kit.install_indexed(&mut app);
+        app.begin_browser_bulk("pane".into(), vec![kit.key("crate.model")], BulkAction::Rename, &ctx());
+        let mut driver = PromptDriver::new();
+        driver.frame(&mut app, Vec::new());
+        // What the header's About button sends.
+        app.apply_help_command(crate::app::help::HelpCommand::ShowDocSection(crate::app::help::RENAMING_HELP_SECTION));
+        driver.frame(&mut app, Vec::new());
+        let page = driver.frame(&mut app, Vec::new());
+        let help = app.dialogs.get::<crate::app::help::HelpWindow>().unwrap();
+        assert_eq!(help.doc_section.as_deref(), Some("Renaming"));
+        assert!(help.above_dialogs);
+        assert!(page.iter().any(|(text, _)| text.contains("Find and Replace match names only")), "Renaming page not shown: {page:?}");
+        let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("baboon_help"));
+        assert!(driver.ctx.memory(|memory| memory.allows_interaction(layer)), "Help is locked under the rename window");
+        assert!(app.dialogs.get::<BulkRenameDialog>().is_some(), "opening About keeps Bulk Rename open");
+    }
+    #[test]
+    fn refresh_tolerance_does_not_allow_a_different_editing_kit_or_engine() {
+        let original = LooseKit::new("rename-source-guard", "halo3_mcc");
+        let replacement = LooseKit::new("rename-source-replacement", "halo3_mcc");
+        original.write_mcc("crate", "model", |_| {});
+        replacement.write_mcc("crate", "model", |_| {});
+        let mut app = app();
+        original.install_indexed(&mut app);
+        app.begin_browser_bulk(
+            "pane".into(),
+            vec![original.key("crate.model")],
+            BulkAction::Rename,
+            &ctx(),
+        );
+        app.dialogs
+            .get_mut::<BulkRenameDialog>()
+            .unwrap()
+            .options
+            .replacement = "new_{name}".into();
+        app.model.kits[0].source = Some(replacement.source());
+        app.model.kits[0].generation += 1;
+        app.apply_bulk_rename(false, &ctx());
+        assert!(app.tag_ops.folder_refactor.is_none());
+        assert!(
+            app.dialogs
+                .get::<BulkRenameDialog>()
+                .unwrap()
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("workspace changed")
+        );
+        // The same path reopened with another engine is a different source too.
+        let mut source = original.source();
+        if let TagSource::LooseFolder { game, .. } = &mut source.source {
+            *game = GameId::from_id("halo2_mcc");
+        }
+        app.model.kits[0].source = Some(source);
+        app.apply_bulk_rename(false, &ctx());
+        assert!(app.tag_ops.folder_refactor.is_none());
+        for kit in [&original, &replacement] {
+            assert!(kit.path("crate.model").exists());
+            assert!(!kit.path("new_crate.model").exists());
+        }
+    }
+
+    #[test]
+    fn index_refresh_keeps_the_reference_list_and_allows_rename_afterward() {
+        let kit = LooseKit::new("rename-during-index-refresh", "halo3_mcc");
+        let group = group_tag(kit.game, "render_model");
+        kit.write_mcc("crate", "render_model", |_| {});
+        kit.write_mcc("crate", "model", |tag| {
+            set_reference(tag, "render model", group, "crate")
+        });
+        kit.write_mcc("a_user", "model", |tag| {
+            set_reference(tag, "render model", group, "crate")
+        });
+        kit.write_mcc("b_user", "model", |_| {});
+        let mut app = app();
+        kit.install_indexed(&mut app);
+        let ctx = ctx();
+        app.begin_browser_bulk(
+            "pane".into(),
+            vec![kit.key("crate.model"), kit.key("crate.render_model")],
+            BulkAction::Rename,
+            &ctx,
+        );
+        app.dialogs
+            .get_mut::<BulkRenameDialog>()
+            .unwrap()
+            .options
+            .replacement = "new_{name}".into();
+        let mut driver = PromptDriver::new();
+        driver.frame(&mut app, Vec::new());
+        driver.frame(&mut app, Vec::new());
+        assert!(known_references(&app).iter().any(|path| path == "a_user.model"));
+        // A real periodic refresh patches references and advances generation,
+        // even when the entry and reference counts remain exactly the same.
+        kit.write_mcc("a_user", "model", |_| {});
+        kit.write_mcc("b_user", "model", |tag| {
+            set_reference(tag, "render model", group, "crate")
+        });
+        let refreshed = kit.index();
+        let entries = kit.entries();
+        let touched: Vec<_> = entries
+            .iter()
+            .filter(|entry| {
+                entry.display_path == "a_user.model" || entry.display_path == "b_user.model"
+            })
+            .cloned()
+            .collect();
+        let dependencies = touched
+            .iter()
+            .map(|entry| {
+                (
+                    entry.key.clone(),
+                    refreshed.dependencies_of(&entry.key).to_vec(),
+                )
+            })
+            .collect();
+        let stamp = app.model.kit_stamp();
+        app.handle_entry_index_refreshed(
+            stamp,
+            Ok(crate::core::source::EntryIndexRefresh {
+                entries,
+                changed: true,
+                added: 0,
+                updated: 2,
+                removed: 0,
+                touched,
+                removed_keys: Vec::new(),
+                touched_dependencies: dependencies,
+                errors: Vec::new(),
+            }),
+            &ctx,
+        );
+        let page = driver.frame(&mut app, Vec::new());
+        assert!(
+            page.iter()
+                .any(|(text, _)| text == "2 References to Fix"),
+            "reference list vanished after refresh: {page:?}"
+        );
+        assert!(known_references(&app).iter().any(|path| path == "b_user.model"));
+        assert!(!known_references(&app).iter().any(|path| path == "a_user.model"));
+        assert_eq!(
+            app.dialogs
+                .get::<BulkRenameDialog>()
+                .unwrap()
+                .options
+                .replacement,
+            "new_{name}"
+        );
+        // While a rebuild is in flight, retain the last known list.
+        app.model.kits[0]
+            .source
+            .as_mut()
+            .unwrap()
+            .reverse_dependencies = None;
+        let page = driver.frame(&mut app, Vec::new());
+        assert!(page.iter().any(|(text, _)| text == "2 References to Fix"));
+        assert!(known_references(&app).iter().any(|path| path == "b_user.model"));
+        let stamp = app.model.kit_stamp();
+        app.handle_reverse_dependencies_built(stamp, refreshed, 0);
+        driver.frame(&mut app, Vec::new());
+        app.apply_bulk_rename(false, &ctx);
+        assert!(
+            app.tag_ops.folder_refactor.is_some(),
+            "{}",
+            app.model.status
+        );
+        pump_until(&mut app, "rename after index refresh", |app| {
+            app.tag_ops.folder_refactor.is_none()
+        });
+        assert!(kit.path("new_crate.render_model").exists());
+        assert_eq!(
+            reference_of(
+                &TagFile::read(kit.path("b_user.model")).unwrap(),
+                "render model"
+            )
+            .as_deref(),
+            Some("new_crate")
+        );
+    }
+
     #[test]
     fn mixed_folder_and_tag_rename_preserves_contents_and_rewrites_referrers() {
         let kit = LooseKit::new("rename-mixed-roots", "halo3_mcc");
@@ -763,6 +1355,10 @@ mod tests {
         kit.write_mcc("group/part", "render_model", |_| {});
         kit.write_mcc("loose", "render_model", |_| {});
         kit.write_mcc("outside/uses_group", "model", |tag| {
+            set_reference(tag, "render model", group, "group\\part")
+        });
+        // A reference between two tags inside the renamed folder.
+        kit.write_mcc("group/inner/uses_part", "model", |tag| {
             set_reference(tag, "render model", group, "group\\part")
         });
         fs::create_dir_all(kit.path("group/empty")).unwrap();
@@ -794,6 +1390,15 @@ mod tests {
             )
             .as_deref(),
             Some("new_group\\part")
+        );
+        assert_eq!(
+            reference_of(
+                &TagFile::read(kit.path("new_group/inner/uses_part.model")).unwrap(),
+                "render model"
+            )
+            .as_deref(),
+            Some("new_group\\part"),
+            "a reference inside the renamed folder follows it too"
         );
     }
     #[test]

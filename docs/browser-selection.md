@@ -74,10 +74,11 @@ multi-root operations. Recovery batches also record `original_relative_paths`.
 Tests use isolated temporary editing kits and headless egui frames; they never
 move files in a user's editing kit.
 
-Bulk Rename uses a preview dialog with current-name/number tokens and literal
-find/replace, preserving extensions and parents. It runs a collision-strict
-variant of the shared multi-root refactor: no merge, Replace or Keep Both path
-can change the reviewed names. Collisions with existing selected names must be
+Bulk Rename uses a preview dialog with one literal find/replace, where a
+current-name token in Find renames whole names, preserving extensions and
+parents. It runs a collision-strict variant of the shared multi-root
+refactor: no merge, Replace or Keep Both path can change the reviewed names.
+Collisions with existing selected names must be
 resolved in separate batches. Completion remaps the owning pane's selection.
 Type-to-select only changes the viewport when the target is outside it, avoiding
 a list jump for already-visible matches. Flat folder/tag selections use the

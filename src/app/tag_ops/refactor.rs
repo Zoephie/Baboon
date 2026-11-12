@@ -194,15 +194,9 @@ impl Baboon {
         let leaf = tag_path::name(&stem).to_owned();
         let fixed_parent = tag_path::parent(&stem).unwrap_or_default().to_owned();
         let duplicate_parts = duplicate::duplicate_dialog_parts(&display);
-        // A new tag edits its whole path (rename and move are the same in-memory
-        // operation for it); everything else edits the leaf name only.
-        // Any tag that lives in a pak edits its whole path, whether it got here
-        // through Rename or through Move. Inside a container those are one
-        // operation -- a move is a rename to a different parent -- and the two
-        // dialogs are indistinguishable on screen, so splitting the behaviour
-        // between them only produced "use Move to choose a folder" from a dialog
-        // that looked exactly like the one being recommended.
-        let whole_path_editable = is_container;
+        // Rename keeps the parent fixed. Container Move explicitly opts into
+        // editing a whole path; Save As still chooses a copy's destination.
+        let whole_path_editable = is_container && operation == TagNameOperation::SaveAsOverlay;
         // Resolved here rather than at apply time, so the text the user reads
         // and the branch that runs come from one answer. It depends on Baboon's
         // ledger, which cannot change while the dialog is open.
@@ -252,7 +246,9 @@ impl Baboon {
             } else {
                 fixed_parent
             },
-            focus_input: matches!(operation, TagNameOperation::Duplicate),
+            // Duplicate and Rename start with the name selected, so typing replaces it.
+            focus_input: matches!(operation, TagNameOperation::Duplicate)
+                || (operation == TagNameOperation::Rename && !whole_path_editable),
             referrers,
             referrers_unavailable,
             is_container,
@@ -318,10 +314,7 @@ impl Baboon {
             self.model.status = "Enter a new tag name".to_owned();
             return;
         }
-        // Where the whole path is editable a separator is the move half of the
-        // operation rather than a mistake. That is every tag in a pak, not just
-        // an unsaved one — the field says so, and this has to agree with it or
-        // the dialog invites a path and then refuses it.
+        // Only Move and destination-copy dialogs accept a relative path.
         if !whole_path_editable && tag_path::from_input(&new_name).contains(tag_path::SEPARATOR) {
             self.model.status = "Enter a name only; use Move to choose a folder".to_owned();
             return;
@@ -427,6 +420,13 @@ impl Baboon {
             Some(TagEntryLocation::NewContainer { .. } | TagEntryLocation::Container { .. })
         ) {
             self.open_rename_tag(key);
+            if let Some(state) = self.dialogs.get_mut::<RenameTagState>()
+                && state.key == key && state.is_container
+            {
+                state.whole_path_editable = true;
+                state.new_path_input = state.old_display.rsplit_once('.')
+                    .map(|(stem, _)| stem).unwrap_or(&state.old_display).to_owned();
+            }
             return;
         }
         if self.tag_ops.folder_refactor.is_some() {
@@ -1662,6 +1662,55 @@ mod tests {
     }
 
     #[test]
+    fn container_rename_keeps_the_parent_and_move_explicitly_edits_the_path() {
+        let kit = kit("container-rename-vs-move");
+        let mut source = kit.source();
+        let key = kit.key(RENDER);
+        for entry in source
+            .entries
+            .iter_mut()
+            .chain(source.all_entries.iter_mut())
+        {
+            if entry.key == key {
+                entry.location = TagEntryLocation::NewContainer {
+                    template: crate::core::source::NewContainerTemplate::Derived {
+                        group: "render_model".into(),
+                    },
+                    package: "/Game/Tags/objects/props/crate-render_model".into(),
+                    group_tag: entry.group_tag,
+                };
+            }
+        }
+        source.source = TagSource::IoStoreContainerSet {
+            root: kit.base.clone(),
+            containers: Vec::new(),
+            index: Default::default(),
+            packages: Default::default(),
+            shipped: Default::default(),
+        };
+        let mut app = app();
+        app.install_loaded_source(source);
+        app.open_rename_tag(&key);
+        let state = app.dialogs.get::<RenameTagState>().unwrap();
+        assert!(!state.whole_path_editable);
+        assert_eq!(state.new_path_input, "crate");
+        assert!(state.focus_input, "Rename opens with the current name selected");
+        app.dialogs
+            .get_mut::<RenameTagState>()
+            .unwrap()
+            .new_path_input = r"elsewhere\crate".into();
+        app.begin_rename_tag(&ctx());
+        assert_eq!(
+            app.model.status,
+            "Enter a name only; use Move to choose a folder"
+        );
+        app.begin_move_tag(&key);
+        let state = app.dialogs.get::<RenameTagState>().unwrap();
+        assert!(state.whole_path_editable);
+        assert_eq!(state.new_path_input, r"objects\props\crate");
+    }
+
+    #[test]
     fn cancelling_a_merge_interrupts_the_metadata_index_scan() {
         let kit = LooseKit::new("merge-cancel-metadata", "halo2_mcc");
         let first = kit.write_mcc("ui/hud_test/hud/example", "new_hud_definition", |_| {});
@@ -2029,6 +2078,7 @@ mod tests {
         for (input, refusal) in [
             ("", "Enter a new tag name"),
             ("sub/keg", "Enter a name only; use Move to choose a folder"),
+            (r"sub\keg", "Enter a name only; use Move to choose a folder"),
             ("keg.model", "Enter a name without an extension"),
         ] {
             app.dialogs
