@@ -130,7 +130,7 @@ pub(in crate::app) fn draw_single_rename(cx: &Ctx, ui: &mut Ui, open: &mut bool,
             ui.add_space(14.0);
             let max = (window_work_area(ui.ctx()).height() * 0.4).clamp(120.0, 320.0);
             let scripts = &rename.scripts;
-            let height = references_box_height(scripts.total(rows.len()), notes.len() + scripts.notes.len(), max);
+            let height = references_box_height(scripts.total(rows.len()), notes.len() + scripts.note_lines(), max);
             draw_references_box(ui, &references_to_fix_title(scripts.total(rows.len())), rows, scripts, notes, rename.game, height);
         }
 
@@ -138,7 +138,10 @@ pub(in crate::app) fn draw_single_rename(cx: &Ctx, ui: &mut Ui, open: &mut bool,
     });
     let new_name = expanded.as_ref().ok().filter(|name| name.as_str() != rename.current);
     ui.add_space(12.0);
-    let can_apply = new_name.is_some();
+    // Held until the scripts are checked, so the window has said what the
+    // rename changes before it can run.
+    let checking = rename.scripts.checking;
+    let can_apply = new_name.is_some() && !checking;
     popup_footer(ui, |ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if icon_text_button(ui, ButtonIcon::Clear, "Cancel", true).clicked() {
@@ -146,6 +149,7 @@ pub(in crate::app) fn draw_single_rename(cx: &Ctx, ui: &mut Ui, open: &mut bool,
             }
             if icon_text_button(ui, ButtonIcon::Rename, "Rename", can_apply)
                 .on_hover_text(rename.apply_hover)
+                .on_disabled_hover_text(if checking { ScriptRows::WAITING } else { rename.apply_hover })
                 .clicked()
             {
                 result.apply = true;

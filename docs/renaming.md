@@ -84,6 +84,11 @@ uses it as. A note explains that scripts are updated in their `.hsc` file in
 Fixing the `.hsc` file means re-importing or recompiling it cannot bring the old
 path back.
 
+The Rename windows check scripts in the background as they open: the box shows a
+small spinner beside "Checking scripts…", and **Rename** stays unavailable until
+the check finishes (its hover hint says so), so the window always says what will
+change before it can run. Scripts are checked again when the rename runs.
+
 Script paths have no extension: `objects\characters\grunt\grunt` can mean the
 biped, the render model or the animation graph, depending on what the script
 passes it to. Baboon reads that from the script documentation, so moving just the

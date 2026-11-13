@@ -354,7 +354,9 @@ mod tests {
         assert_eq!((rows.rows[0].count.as_str(), rows.rows[0].problem.as_deref()), ("2 paths", Some("· 1 may break")));
         assert!(rows.notes[0].starts_with("These scripts won't compile"));
 
-        assert_eq!(ScriptRows::new(Some(GameId::Halo2), ChangeKind::Rename, None).notes, [ScriptRows::CHECKING]);
+        let checking = ScriptRows::new(Some(GameId::Halo2), ChangeKind::Rename, None);
+        assert!(checking.checking && checking.notes.is_empty());
+        assert_eq!(checking.note_lines(), 1, "the spinner line takes room in the box");
         assert_eq!(
             ScriptRows::new(Some(GameId::Halo4), ChangeKind::Rename, Some(&report)).notes,
             [crate::core::script_paths::NOT_CHECKED_NOTE]

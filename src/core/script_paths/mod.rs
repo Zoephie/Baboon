@@ -269,9 +269,11 @@ pub(crate) fn fix_scripts(
         summary.fixed += fixed;
         summary.cant_fix += impact.count(Outcome::CantFix);
     }
-    // One write per file: a tag can hold several copies.
+    // One write per file: a tag can hold several copies, each its element
+    // (see [`Location::Tag`]) and new text.
+    type TagTexts = (TagEntry, Vec<(Option<usize>, Vec<u8>)>);
     let mut data_files = Vec::new();
-    let mut tags: BTreeMap<PathBuf, (TagEntry, Vec<(Option<usize>, Vec<u8>)>)> = BTreeMap::new();
+    let mut tags: BTreeMap<PathBuf, TagTexts> = BTreeMap::new();
     for copy in copies {
         if copy.edits.is_empty() {
             continue;

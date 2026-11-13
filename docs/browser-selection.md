@@ -82,6 +82,9 @@ right away. While Baboon checks references, the references box shows a spinner
 and the check's progress, and Delete stays unavailable until the check finishes.
 Both of the review's boxes show eight rows and scroll past that, so the window
 keeps its size when the check fills in.
+The single Delete Tag? and Delete Folder? windows check scripts in the
+background as they open, with a small spinner beside "Checking scripts…", and
+hold Delete until that check finishes.
 Every delete window's Delete button has a red accent fill (the Delete icon's
 red at 25%, 50% with a solid red border on hover) as a cue to take care.
 

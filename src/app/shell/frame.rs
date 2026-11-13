@@ -4216,6 +4216,7 @@ mod tests {
                                     tooltip: "Line 4: objects/props/crate — missing".into(),
                                 }],
                                 notes: vec!["These scripts won't compile until the paths are fixed.".into()],
+                                checking: false,
                             },
                             game: None, tags: 4, files: 1, folders: 2,
                         }, answer, apply_remaining: false }),

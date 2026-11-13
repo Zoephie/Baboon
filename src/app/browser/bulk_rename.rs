@@ -355,7 +355,7 @@ pub(in crate::app) fn draw_references_box(
     height: f32,
 ) {
     let notes: Vec<String> = notes.iter().chain(&scripts.notes).cloned().collect();
-    boxed_rows(ui, "rename_references", title, &notes, rows.len() + scripts.rows.len(), height, |ui, row| {
+    boxed_rows(ui, "rename_references", title, &notes, scripts.checking, rows.len() + scripts.rows.len(), height, |ui, row| {
         match rows.get(row) {
             Some((path, group)) => draw_item_row(ui, RenameIcon::Tag(Some(*group)), game, path, REFERENCE_ROW_HEIGHT),
             None => draw_script_row(ui, &scripts.rows[row - rows.len()], game),
@@ -369,6 +369,9 @@ pub(in crate::app) fn draw_references_box(
 pub(in crate::app) struct ScriptRows {
     pub rows: Vec<ScriptRow>,
     pub notes: Vec<String>,
+    /// The check is still running: the box shows a spinner, and the window
+    /// holds its Rename or Delete button until it finishes.
+    pub checking: bool,
 }
 
 /// One affected script.
@@ -388,26 +391,36 @@ pub(in crate::app) struct ScriptRow {
 const SCRIPT_TOOLTIP_LINES: usize = 20;
 
 impl ScriptRows {
-    /// The note while the script check runs.
+    /// The line beside the spinner while the script check runs.
     pub const CHECKING: &'static str = "Checking scripts…";
+    /// The hint on a Rename or Delete button held for the check.
+    pub const WAITING: &'static str = "Available once the script check finishes.";
 
     /// A box's row count: its tags plus these scripts.
     pub fn total(&self, tags: usize) -> usize {
         tags + self.rows.len()
     }
 
-    /// The rows for `report`, or (`None`) the note that scripts are still
+    /// How many lines these add under the box's title: the notes, and the
+    /// spinner while checking.
+    pub fn note_lines(&self) -> usize {
+        self.notes.len() + usize::from(self.checking)
+    }
+
+    /// The rows for `report`, or (`None`) a spinner while scripts are still
     /// being checked. Games whose scripts Baboon does not check get the note
     /// saying so instead.
     pub fn new(game: Option<GameId>, kind: ChangeKind, report: Option<&ScriptReport>) -> Self {
         use crate::core::script_paths::{NOT_CHECKED_NOTE, ScriptSupport, script_support};
         match script_support(game) {
             None => return Self::default(),
-            Some(ScriptSupport::NotChecked) => return Self { rows: Vec::new(), notes: vec![NOT_CHECKED_NOTE.to_owned()] },
+            Some(ScriptSupport::NotChecked) => {
+                return Self { rows: Vec::new(), notes: vec![NOT_CHECKED_NOTE.to_owned()], checking: false };
+            }
             Some(ScriptSupport::Checked) => {}
         }
         let Some(report) = report else {
-            return Self { rows: Vec::new(), notes: vec![Self::CHECKING.to_owned()] };
+            return Self { rows: Vec::new(), notes: Vec::new(), checking: true };
         };
         let rows: Vec<_> = report.scripts.iter().map(|script| script_row(script, kind)).collect();
         let notes = if rows.is_empty() {
@@ -417,7 +430,7 @@ impl ScriptRows {
         } else {
             vec!["Scripts are updated in their .hsc file in data\\ and in the copy saved in their scenario.".to_owned()]
         };
-        Self { rows, notes }
+        Self { rows, notes, checking: false }
     }
 }
 
@@ -482,18 +495,25 @@ fn draw_script_row(ui: &mut Ui, script: &ScriptRow, game: Option<GameId>) {
 /// The same box for a mix of folders and files, such as the items a bulk
 /// delete removes. `id` keeps its scroll position apart from other boxes.
 pub(in crate::app) fn draw_items_box(ui: &mut Ui, id: &str, title: &str, rows: &[(String, RenameIcon)], notes: &[String], game: Option<GameId>, height: f32) {
-    boxed_rows(ui, id, title, notes, rows.len(), height, |ui, row| {
+    boxed_rows(ui, id, title, notes, false, rows.len(), height, |ui, row| {
         let (path, icon) = &rows[row];
         draw_item_row(ui, *icon, game, path, REFERENCE_ROW_HEIGHT);
     });
 }
 
-fn boxed_rows(ui: &mut Ui, id: &str, title: &str, notes: &[String], rows: usize, height: f32, mut draw: impl FnMut(&mut Ui, usize)) {
+#[allow(clippy::too_many_arguments)]
+fn boxed_rows(ui: &mut Ui, id: &str, title: &str, notes: &[String], checking: bool, rows: usize, height: f32, mut draw: impl FnMut(&mut Ui, usize)) {
     rename_box(ui, height, |ui| {
         ui.add_space(4.0);
         ui.label(RichText::new(title).strong());
         for note in notes {
             ui.label(RichText::new(note).italics().color(subtle_dark()));
+        }
+        if checking {
+            ui.horizontal(|ui| {
+                ui.add(egui::Spinner::new().size(12.0));
+                ui.label(RichText::new(ScriptRows::CHECKING).italics().color(subtle_dark()));
+            });
         }
         ui.add_space(4.0);
         if rows == 0 { return }
@@ -866,9 +886,11 @@ impl Dialog for BulkRenameDialog {
                 popup_footer(ui,|ui| {ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui| {
                         if icon_text_button(ui,ButtonIcon::Clear,"Cancel",true).clicked(){open=false;}
-                        let rename = icon_text_button(ui,ButtonIcon::Rename,if dirty{"Save All and Rename"}else{"Rename"},invalid==0&&changes>0&&kit_index.is_some());
+                        let rename = icon_text_button(ui,ButtonIcon::Rename,if dirty{"Save All and Rename"}else{"Rename"},invalid==0&&changes>0&&kit_index.is_some()&&!scripts.checking);
                         let rename = if invalid > 0 {
                             rename.on_disabled_hover_text(format!("{invalid} invalid {}; see the Rename column", if invalid == 1 { "name" } else { "names" }))
+                        } else if scripts.checking {
+                            rename.on_disabled_hover_text(ScriptRows::WAITING)
                         } else { rename };
                         if rename.clicked() {
                             cx.send(BrowserCommand::ApplyBulkRename {save:dirty});

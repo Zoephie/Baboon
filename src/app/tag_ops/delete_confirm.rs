@@ -86,14 +86,16 @@ impl Dialog for DeleteConfirm {
                     }
                     ui.add_space(14.0);
                     let max = (window_work_area(ctx).height() * 0.4).clamp(120.0, 320.0);
-                    let height = references_box_height(scripts.total(rows.len()), notes.len() + scripts.notes.len(), max);
+                    let height = references_box_height(scripts.total(rows.len()), notes.len() + scripts.note_lines(), max);
                     draw_references_box(ui, &missing_references_title(scripts.total(rows.len())), &rows, &scripts, &notes, game, height);
                 });
                 ui.add_space(12.0);
                 popup_footer(ui, |ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         cancel = icon_text_button(ui, ButtonIcon::Clear, "Cancel", true).clicked();
-                        delete = accent_icon_text_button(ui, ButtonAccent::Destructive, ButtonIcon::Garbage, "Delete Tag", true).clicked();
+                        delete = accent_icon_text_button(ui, ButtonAccent::Destructive, ButtonIcon::Garbage, "Delete Tag", !scripts.checking)
+                            .on_disabled_hover_text(ScriptRows::WAITING)
+                            .clicked();
                     });
                 });
             });
