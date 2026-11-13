@@ -724,8 +724,9 @@ fn delete_files(
             scan_folder_subtree_entries(root, Path::new(""), names).map_err(|e| e.to_string())?;
         let shown = |path: &Path| path.strip_prefix(root).map(tag_path::relative_tag_path).unwrap_or_else(|_| path.display().to_string());
         let mut reasons = Vec::new();
-        let now: HashSet<_> = current_entries.iter().map(|entry| &entry.key).collect();
-        let before: HashSet<_> = entries.iter().map(|entry| &entry.key).collect();
+        // Compared as files: letter case and separators aside.
+        let now: HashSet<_> = current_entries.iter().map(|entry| crate::core::tag_key::key_identity(&entry.key)).collect();
+        let before: HashSet<_> = entries.iter().map(|entry| crate::core::tag_key::key_identity(&entry.key)).collect();
         if now != before {
             let new: Vec<_> = now.difference(&before).collect();
             let gone: Vec<_> = before.difference(&now).collect();

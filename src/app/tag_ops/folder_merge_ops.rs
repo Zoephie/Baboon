@@ -322,8 +322,10 @@ fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,
         send_folder_refactor_progress(tx, &label, "Verifying reviewed files", None);
         let current_entries =
             scan_folder_subtree_entries(&root, Path::new(""), &names).map_err(|e| e.to_string())?;
-        let current_keys: HashSet<_> = current_entries.iter().map(|entry| &entry.key).collect();
-        let previous_keys: HashSet<_> = all_before.iter().map(|entry| &entry.key).collect();
+        // Compared as files: letter case and separators aside, which is how
+        // Windows tells them apart too.
+        let current_keys: HashSet<_> = current_entries.iter().map(|entry| crate::core::tag_key::key_identity(&entry.key)).collect();
+        let previous_keys: HashSet<_> = all_before.iter().map(|entry| crate::core::tag_key::key_identity(&entry.key)).collect();
         let mut changed_reference_keys = Vec::new();
         for (path, contents, info) in &reference_files {
             if cancelled() {

@@ -609,7 +609,7 @@ fn refresh_entry_index_from_cache_with_progress(
                         && cached_fingerprints
                             .get(&rel_key)
                             .is_some_and(|cached_fp| cached_fp == current)
-                        && cached.key == crate::core::tag_key::file_entry_key(path)
+                        && crate::core::tag_key::same_spelling(&cached.key, &crate::core::tag_key::file_entry_key(path))
                     {
                         resolved.push((rel_key, Some(cached.clone()), false));
                         continue;

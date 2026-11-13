@@ -831,8 +831,8 @@ pub(in crate::app) fn prepare_tag_refactor_index_cancellable(
     // must remain a rewrite candidate, rather than looking safely deleted.
     // Compared ignoring case: a remembered tag spelled differently from the
     // refreshed one is the same file, not one the refresh missed.
-    let current_keys: HashSet<_> = entries.iter().map(|entry| entry.key.to_ascii_lowercase()).collect();
-    for entry in previous_entries.iter().filter(|entry| !current_keys.contains(&entry.key.to_ascii_lowercase())) {
+    let current_keys: HashSet<_> = entries.iter().map(|entry| crate::core::tag_key::key_identity(&entry.key)).collect();
+    for entry in previous_entries.iter().filter(|entry| !current_keys.contains(&crate::core::tag_key::key_identity(&entry.key))) {
         if let TagEntryLocation::LooseFile(path) = &entry.location
             && path.try_exists().unwrap_or(true)
         {
