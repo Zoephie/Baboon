@@ -4186,7 +4186,7 @@ mod tests {
                     h.app.tag_ops.folder_merge = Some(MergeUi {
                         control: std::sync::Arc::new(MergeControl::default()),
                         items_preview: None,
-                        review: Some(MergeReview { kind: ReviewKind::Summary {
+                        review: Some(MergeReview { notice: None, kind: ReviewKind::Summary {
                             source: "objects/props".into(), destination: "levels/props".into(), files: 3, conflicts: 1,
                         }, answer, apply_remaining: false }),
                     });
@@ -4205,7 +4205,7 @@ mod tests {
                     h.app.tag_ops.folder_merge = Some(MergeUi {
                         control: std::sync::Arc::new(MergeControl::default()),
                         items_preview: None,
-                        review: Some(MergeReview { kind: ReviewKind::Delete {
+                        review: Some(MergeReview { notice: None, kind: ReviewKind::Delete {
                             selected: vec![("objects/props".into(), RenameIcon::Folder), ("smoke.scenario".into(), RenameIcon::Tag(None))],
                             referrers: vec![("levels/test.scenario".into(), 0)],
                             scripts: crate::app::browser::bulk_rename::ScriptRows {
@@ -4256,7 +4256,7 @@ mod tests {
                     h.app.tag_ops.folder_merge = Some(MergeUi {
                         control: std::sync::Arc::new(MergeControl::default()),
                         items_preview: None,
-                        review: Some(MergeReview { kind: ReviewKind::Move {
+                        review: Some(MergeReview { notice: Some("Files changed while this was open, so it was checked again: the selected items changed.".into()), kind: ReviewKind::Move {
                             selected: vec![("objects/props".into(), RenameIcon::Folder), ("smoke.scenario".into(), RenameIcon::Tag(None))],
                             referrers: vec![("levels/test.scenario".into(), 0)],
                             scripts: Default::default(),

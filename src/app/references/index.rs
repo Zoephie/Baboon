@@ -128,6 +128,16 @@ impl Baboon {
         let done = match result {
             Ok(done) => done,
             Err(error) => {
+                // A failure straight out of a review window is easy to miss in
+                // the status line, so it gets a window of its own. Cancelling
+                // is the user's own doing and needs no notice.
+                if !error.contains("cancelled") {
+                    self.dialogs.open(crate::app::shell::OperationNotice {
+                        title: "File Operation Stopped".to_owned(),
+                        message: error.clone(),
+                        failed: true,
+                    });
+                }
                 self.model.status = error;
                 return false;
             }

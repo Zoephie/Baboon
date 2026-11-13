@@ -196,8 +196,10 @@ fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,
         definitions_root: locate_definitions_root(),
     };
     let mut previous_index = previous_index;
-    // Reviews rebuilt in a row because files changed meanwhile.
+    // Reviews rebuilt in a row because files changed meanwhile, and why the
+    // last one was.
     let mut rebuilds = 0;
+    let mut rebuilt: Option<String> = None;
     loop {
         if cancelled() {
             return Err("Folder operation cancelled; no files changed".into());
@@ -274,7 +276,7 @@ fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,
             })
             .collect::<Result<Vec<_>, _>>()?;
         if mode == BatchMode::ItemsReview {
-            review::ask(tx, &context.control, move_review(&root, &roots, &all_before, &referrers, game, inventory.conflicts(&cancelled)?, &cancelled))?;
+            review::ask_again(tx, &context.control, move_review(&root, &roots, &all_before, &referrers, game, inventory.conflicts(&cancelled)?, &cancelled), rebuilt.take())?;
         } else if !renaming {
         review::ask(
             tx,
@@ -370,6 +372,7 @@ fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,
             for key in changed_reference_keys {
                 index.clear_tag(&key);
             }
+            rebuilt = Some(format!("Files changed while this was open, so it was checked again: {reason}."));
             previous_index = Some(index);
             // From what is on disk now: a remembered tag that is no longer
             // quite what the disk says (one move's stale entry, say) must

@@ -65,6 +65,9 @@ struct ItemsCheck<'a> {
 }
 pub(in crate::app) struct MergeReview {
     pub kind: ReviewKind,
+    /// Why this review is being asked again, when files changed while the
+    /// last one was open. Shown as a warning in the window.
+    pub notice: Option<String>,
     pub answer: Sender<Option<MergeAnswer>>,
     pub apply_remaining: bool,
 }
@@ -122,9 +125,20 @@ pub(in crate::app) fn ask(
     control: &MergeControl,
     kind: ReviewKind,
 ) -> Result<MergeAnswer, String> {
+    ask_again(tx, control, kind, None)
+}
+
+/// [`ask`], saying why when the review is asked again (`notice`).
+pub(in crate::app) fn ask_again(
+    tx: &Sender<WorkerMessage>,
+    control: &MergeControl,
+    kind: ReviewKind,
+    notice: Option<String>,
+) -> Result<MergeAnswer, String> {
     let (answer, rx) = mpsc::channel();
     tx.send(WorkerMessage::FolderMergeReview(MergeReview {
         kind,
+        notice,
         answer,
         apply_remaining: false,
     }))
@@ -201,6 +215,7 @@ fn draw_items_review(
     check: Option<ItemsCheck>,
     game: Option<GameId>,
     phase: Option<&str>,
+    notice: Option<&str>,
 ) -> Option<bool> {
     use crate::app::browser::bulk_rename::{draw_folder_band, draw_items_box, draw_references_box, missing_references_title, references_box_height, references_to_fix_title, rename_box};
     let moving = matches!(action, ItemsAction::Move { .. });
@@ -211,6 +226,10 @@ fn draw_items_review(
     }
     ui.add_space(12.0);
     crate::app::browser::bulk_rename::padded_body(ui, |ui| {
+        if let Some(notice) = notice {
+            ui.label(RichText::new(notice).color(ui.visuals().warn_fg_color));
+            ui.add_space(8.0);
+        }
         if moving {
             ui.label("Moves the selected items into this folder.");
             ui.label(RichText::new("Tags that reference them are updated to their new paths.").color(subtle_dark()));
@@ -317,7 +336,7 @@ pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi, phase: Opti
             .frame(egui::Frame::window(&ctx.global_style()))
             .show(ctx, |ui| {
                 ui.set_width(window_width(ctx, 880.0));
-                cancel = draw_items_review(ui, ctx, &preview.action, &preview.selected, None, preview.game, phase) == Some(false);
+                cancel = draw_items_review(ui, ctx, &preview.action, &preview.selected, None, preview.game, phase, None) == Some(false);
             });
         if cancel || modal.should_close() {
             state.control.cancel();
@@ -342,7 +361,7 @@ pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi, phase: Opti
             };
             if let Some((action, selected, game, check)) = items {
                 ui.set_width(window_width(ctx, 880.0));
-                response = draw_items_review(ui, ctx, &action, selected, Some(check), game, None)
+                response = draw_items_review(ui, ctx, &action, selected, Some(check), game, None, review.notice.as_deref())
                     .map(|go| go.then_some(MergeAnswer { choice: None, apply_remaining: false }));
                 return;
             }
@@ -472,7 +491,7 @@ mod tests {
         let mut state = MergeUi {
             items_preview: None,
             control: Arc::new(MergeControl::default()),
-            review: Some(MergeReview {
+            review: Some(MergeReview { notice: None,
                 kind: ReviewKind::Conflict {
                     conflict: Conflict {
                         incoming_info: crate::core::folder_merge::fingerprint(&incoming).unwrap(),

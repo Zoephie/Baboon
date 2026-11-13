@@ -666,7 +666,7 @@ fn delete_files(
     paths: &[(String, PathBuf)],
     names: &TagNameIndex,
     game: Option<GameId>,
-    previous: Vec<TagEntry>,
+    mut previous: Vec<TagEntry>,
     index: Option<ReverseDependencyIndex>,
     context: &folder_merge_ops::MergeContext,
     tx: &Sender<WorkerMessage>,
@@ -680,6 +680,10 @@ fn delete_files(
     let cancelled = || context.control.cancelled();
     let roots: Vec<_> = paths.iter().map(|(_, path)| path.clone()).collect();
     let mut previous_index = index;
+    // Reviews rebuilt in a row because files changed meanwhile, and why the
+    // last one was.
+    let mut rebuilds = 0;
+    let mut rebuilt: Option<String> = None;
     loop {
         let (entries, mut index, mut changes) = refactor::prepare_tag_refactor_index_cancellable(
             root,
@@ -715,28 +719,49 @@ fn delete_files(
             review::ReviewKind::Delete { tags, files, .. } => (*tags, *files),
             _ => (0, 0),
         };
-        review::ask(tx, &context.control, review)?;
+        review::ask_again(tx, &context.control, review, rebuilt.take())?;
         let current_entries =
             scan_folder_subtree_entries(root, Path::new(""), names).map_err(|e| e.to_string())?;
-        let mut changed = current_entries
-            .iter()
-            .map(|entry| &entry.key)
-            .collect::<HashSet<_>>()
-            != entries
-                .iter()
-                .map(|entry| &entry.key)
-                .collect::<HashSet<_>>();
+        let shown = |path: &Path| path.strip_prefix(root).map(tag_path::relative_tag_path).unwrap_or_else(|_| path.display().to_string());
+        let mut reasons = Vec::new();
+        let now: HashSet<_> = current_entries.iter().map(|entry| &entry.key).collect();
+        let before: HashSet<_> = entries.iter().map(|entry| &entry.key).collect();
+        if now != before {
+            let new: Vec<_> = now.difference(&before).collect();
+            let gone: Vec<_> = before.difference(&now).collect();
+            let example = new.first().or(gone.first()).map(|key| key.strip_prefix("file:").unwrap_or(key)).map(|path| shown(Path::new(path))).unwrap_or_default();
+            reasons.push(format!("the kit's tags changed ({} new, {} gone, such as {example})", new.len(), gone.len()));
+        }
+        let mut edited = Vec::new();
         for (path, info) in metadata {
             if cancelled() {
                 return Err("Folder operation cancelled; no files changed".into());
             }
             if !disk::metadata_fingerprint(&path).is_ok_and(|current| current == info) {
                 index.clear_tag(&crate::core::source::file_entry_key(&path));
-                changed = true;
+                edited.push(path);
             }
         }
-        if changed || snapshot != disk::snapshot(&roots, &cancelled)? {
+        if let Some(first) = edited.first() {
+            reasons.push(format!("{} tag(s) were edited, such as {}", edited.len(), shown(first)));
+        }
+        if snapshot != disk::snapshot(&roots, &cancelled)? {
+            reasons.push("the selected items changed".to_owned());
+        }
+        if !reasons.is_empty() {
+            let reason = reasons.join("; ");
+            rebuilds += 1;
+            if rebuilds >= 3 {
+                return Err(format!(
+                    "Files kept changing while the review was open ({reason}). Nothing was deleted; try again, or reload the kit if it repeats."
+                ));
+            }
+            let _ = tx.send(WorkerMessage::TerminalLine(format!("Rebuilding the review: {reason}")));
+            rebuilt = Some(format!("Files changed while this was open, so it was checked again: {reason}."));
             previous_index = Some(index);
+            // From what is on disk now, so a stale remembered tag can't make
+            // every rebuild disagree again.
+            previous = current_entries;
             continue;
         }
         context.control.begin_apply()?;
