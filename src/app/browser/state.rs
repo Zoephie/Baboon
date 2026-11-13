@@ -225,6 +225,9 @@ pub(in crate::app) struct LooseFolderRenameState {
     /// `None` when no dependency index is loaded: the job still finds and
     /// rewrites them, it just cannot be counted up front.
     pub(in crate::app) outside_referrers: Option<Vec<String>>,
+    /// Scripts that name this item's tags, checked in the background once
+    /// the window first draws.
+    pub(in crate::app) scripts: Option<crate::app::tag_ops::script_fixes::ScriptCheck>,
 }
 
 /// The name dialog's product-level operation. Storage details such as whether
@@ -287,6 +290,9 @@ pub(in crate::app) struct RenameTagState {
     /// to promise one thing and do another — which is exactly what it did while
     /// the text was hard-coded to describe the overlay route.
     pub(in crate::app) in_place_pak: Option<String>,
+    /// Scripts that name this item's tags, checked in the background once
+    /// the window first draws.
+    pub(in crate::app) scripts: Option<crate::app::tag_ops::script_fixes::ScriptCheck>,
 }
 
 /// Results of a tag query (find-references / unreferenced), shown in a floating

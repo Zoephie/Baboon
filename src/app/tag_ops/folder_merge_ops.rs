@@ -149,7 +149,24 @@ fn move_review(
     referrers: &HashSet<String>,
     game: Option<GameId>,
     conflicts: usize,
+    cancelled: &dyn Fn() -> bool,
 ) -> ReviewKind {
+    // Where each selected tag would go. A clash settled by Keep Both changes
+    // that afterwards; applying checks the scripts again.
+    let planned: Vec<(String, String)> = entries
+        .iter()
+        .filter_map(|entry| {
+            let TagEntryLocation::LooseFile(path) = &entry.location else { return None };
+            let (source, target) = roots.iter().find(|(source, _)| path.starts_with(source))?;
+            let new = target.join(path.strip_prefix(source).ok()?);
+            Some((entry.display_path.clone(), tag_path::relative_tag_path(new.strip_prefix(root).ok()?)))
+        })
+        .collect();
+    let changes = crate::core::script_paths::ScriptChanges::renaming(
+        planned.iter().map(|(old, new)| (old.as_str(), Some(new.as_str()))),
+    );
+    let report = super::script_fixes::check(root, game, entries, &changes, cancelled);
+    let scripts = crate::app::browser::bulk_rename::ScriptRows::new(game, changes.kind(), Some(&report));
     let sources: Vec<_> = roots.iter().map(|(source, _)| source.clone()).collect();
     let folder = roots.first().and_then(|(_, target)| target.parent()).unwrap_or(root);
     let mut rows: Vec<_> = entries
@@ -161,6 +178,7 @@ fn move_review(
     ReviewKind::Move {
         selected: crate::app::browser::bulk::selection_rows(root, &sources, entries),
         referrers: rows,
+        scripts,
         game,
         destination: crate::app::browser::bulk_rename::folder_display(folder, root),
         conflicts,
@@ -254,7 +272,7 @@ fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,
             })
             .collect::<Result<Vec<_>, _>>()?;
         if mode == BatchMode::ItemsReview {
-            review::ask(tx, &context.control, move_review(&root, &roots, &all_before, &referrers, game, inventory.conflicts(&cancelled)?))?;
+            review::ask(tx, &context.control, move_review(&root, &roots, &all_before, &referrers, game, inventory.conflicts(&cancelled)?, &cancelled))?;
         } else if !renaming {
         review::ask(
             tx,
@@ -436,14 +454,30 @@ fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,
                 &label,
                 &mut transaction,
             )?;
+            // Script paths, in the same transaction: a script that can't be
+            // written undoes the whole batch. Scenarios that moved are
+            // edited where the plan put them.
+            let scripts = if moving {
+                send_folder_refactor_progress(tx, &label, "Updating script paths", None);
+                super::script_fixes::fix(
+                    &root,
+                    game,
+                    &all_before,
+                    &super::script_fixes::renames(&old_entries, &new_entries),
+                    &|path| targets.get(path).cloned().unwrap_or_else(|| path.to_path_buf()),
+                    &mut transaction,
+                )?
+            } else {
+                Default::default()
+            };
             if moving {
                 transaction.remove_sources(&plan)?;
             }
             let tree = crate::core::source::build_folder_directory_tree(&root)
                 .map_err(|e| e.to_string())?;
-            Ok::<_, String>((rewritten, tree))
+            Ok::<_, String>((rewritten, scripts, tree))
         })();
-        let (rewritten, tree) = match applied {
+        let (rewritten, scripts, tree) = match applied {
             Ok(done) => done,
             Err(error) => {
                 let error = transaction.rollback(error);
@@ -501,12 +535,14 @@ fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,
             HashMap::new()
         };
         let action = if renaming { "Renamed" } else if moving { "Moved" } else { "Copied" };
-        let status = format!(
+        let mut status = format!(
             "{action} {} file(s), updated {} reference(s) in {} tag(s)",
             plan.files.len(),
             rewritten.references_changed,
             rewritten.tags_changed
         );
+        let mut script_lines = Vec::new();
+        super::script_fixes::report(&scripts, &mut status, &mut script_lines);
         let mut lines = vec![
             format!(
                 "File operation: {} -> {}",
@@ -515,6 +551,7 @@ fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,
             ),
             status.clone(),
         ];
+        lines.extend(script_lines);
         lines.extend(
             recovery_paths
                 .iter()

@@ -45,6 +45,15 @@ fn show_rename(state: &mut RenameTagState, cx: &Ctx) -> bool {
         let notes = state.referrers_unavailable.then(|| "Reference index unavailable. References are still found and fixed when renaming.".to_owned());
         (rows, notes.into_iter().collect())
     });
+    // Scripts name the tag by path: listed with the references.
+    let scripts = if state.is_container {
+        Default::default()
+    } else {
+        let old = state.old_display.clone();
+        super::script_fixes::ScriptCheck::rows_for(&mut state.scripts, cx, state.kit, |_| {
+            crate::core::script_paths::ScriptChanges::renaming([(old.as_str(), None)])
+        })
+    };
     egui::Window::new("Rename Tag")
         .constrain_to(window_work_area(ctx))
         .id(egui::Id::unique("rename_tag"))
@@ -67,6 +76,7 @@ fn show_rename(state: &mut RenameTagState, cx: &Ctx) -> bool {
                 error: None,
                 notes,
                 references,
+                scripts,
                 apply_hover: if state.is_new_container {
                     "Rename this unsaved tag (nothing is written yet)"
                 } else {

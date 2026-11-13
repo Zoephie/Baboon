@@ -2,6 +2,7 @@
 use super::*;
 use crate::app::shell::{FolderRefactorUiState, WorkerMessage};
 use crate::app::tag_ops::{duplicate::validate_leaf_characters, folder_merge_ops};
+use crate::core::script_paths::{ChangeKind, Outcome, ScriptImpact, ScriptReport};
 
 #[derive(Clone)]
 pub(super) struct RenameItem {
@@ -260,7 +261,7 @@ impl RenameReferences {
     /// Like the list, the note covers every selected folder: the list shows
     /// what the rename could reach, and applying renames only the items whose
     /// names change, checking their references again first.
-    fn draw(ui: &mut Ui, references: Option<&Self>, refreshing: bool, game: Option<GameId>, height: f32) {
+    fn draw(ui: &mut Ui, references: Option<&Self>, scripts: &ScriptRows, refreshing: bool, game: Option<GameId>, height: f32) {
         let mut notes = Vec::new();
         let moved: usize = references.map_or(0, |references| references.inside.iter().sum());
         if moved > 0 {
@@ -273,7 +274,7 @@ impl RenameReferences {
             _ => {}
         }
         let paths = references.map_or(&[][..], |references| &references.paths[..]);
-        draw_references_box(ui, &references_to_fix_title(paths.len()), paths, &notes, game, height);
+        draw_references_box(ui, &references_to_fix_title(scripts.total(paths.len())), paths, scripts, &notes, game, height);
     }
 }
 
@@ -341,13 +342,141 @@ pub(in crate::app) fn draw_item_row(ui: &mut Ui, icon: RenameIcon, game: Option<
 
 /// The boxed list of referring tags shared by the Rename and Delete windows:
 /// `title`, any notes, then each referring tag with its icon and a muted
-/// folder path, scrolling within `height`. `rows` are display paths and tag
-/// groups.
-pub(in crate::app) fn draw_references_box(ui: &mut Ui, title: &str, rows: &[(String, u32)], notes: &[String], game: Option<GameId>, height: f32) {
-    boxed_rows(ui, "rename_references", title, notes, rows.len(), height, |ui, row| {
-        let (path, group) = &rows[row];
-        draw_item_row(ui, RenameIcon::Tag(Some(*group)), game, path, REFERENCE_ROW_HEIGHT);
+/// folder path, then each affected script, scrolling within `height`. `rows`
+/// are display paths and tag groups. The title counts both; build it with
+/// [`ScriptRows::total`].
+pub(in crate::app) fn draw_references_box(
+    ui: &mut Ui,
+    title: &str,
+    rows: &[(String, u32)],
+    scripts: &ScriptRows,
+    notes: &[String],
+    game: Option<GameId>,
+    height: f32,
+) {
+    let notes: Vec<String> = notes.iter().chain(&scripts.notes).cloned().collect();
+    boxed_rows(ui, "rename_references", title, &notes, rows.len() + scripts.rows.len(), height, |ui, row| {
+        match rows.get(row) {
+            Some((path, group)) => draw_item_row(ui, RenameIcon::Tag(Some(*group)), game, path, REFERENCE_ROW_HEIGHT),
+            None => draw_script_row(ui, &scripts.rows[row - rows.len()], game),
+        }
     });
+}
+
+/// The scripts a references box lists after its tags, and the notes about
+/// them. Empty when no script is affected.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(in crate::app) struct ScriptRows {
+    pub rows: Vec<ScriptRow>,
+    pub notes: Vec<String>,
+}
+
+/// One affected script.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::app) struct ScriptRow {
+    /// `scenarios\solo\03a\scripts\03a_mission.hsc`, folder muted when drawn.
+    pub path: String,
+    /// "12 paths", at the right.
+    pub count: String,
+    /// "· 3 can't fix" after the count, in the error colour.
+    pub problem: Option<String>,
+    /// The affected lines, shown on hover.
+    pub tooltip: String,
+}
+
+/// How many lines a script row's tooltip lists before "+N more".
+const SCRIPT_TOOLTIP_LINES: usize = 20;
+
+impl ScriptRows {
+    /// The note while the script check runs.
+    pub const CHECKING: &'static str = "Checking scripts…";
+
+    /// A box's row count: its tags plus these scripts.
+    pub fn total(&self, tags: usize) -> usize {
+        tags + self.rows.len()
+    }
+
+    /// The rows for `report`, or (`None`) the note that scripts are still
+    /// being checked. Games whose scripts Baboon does not check get the note
+    /// saying so instead.
+    pub fn new(game: Option<GameId>, kind: ChangeKind, report: Option<&ScriptReport>) -> Self {
+        use crate::core::script_paths::{NOT_CHECKED_NOTE, ScriptSupport, script_support};
+        match script_support(game) {
+            None => return Self::default(),
+            Some(ScriptSupport::NotChecked) => return Self { rows: Vec::new(), notes: vec![NOT_CHECKED_NOTE.to_owned()] },
+            Some(ScriptSupport::Checked) => {}
+        }
+        let Some(report) = report else {
+            return Self { rows: Vec::new(), notes: vec![Self::CHECKING.to_owned()] };
+        };
+        let rows: Vec<_> = report.scripts.iter().map(|script| script_row(script, kind)).collect();
+        let notes = if rows.is_empty() {
+            Vec::new()
+        } else if kind == ChangeKind::Delete {
+            vec!["These scripts won't compile until the paths are fixed, so their missions load without scripts.".to_owned()]
+        } else {
+            vec!["Scripts are updated in their .hsc file in data\\ and in the copy saved in their scenario.".to_owned()]
+        };
+        Self { rows, notes }
+    }
+}
+
+fn plural_paths(count: usize) -> String {
+    if count == 1 { "1 path".to_owned() } else { format!("{count} paths") }
+}
+
+fn script_row(script: &ScriptImpact, kind: ChangeKind) -> ScriptRow {
+    let (main, problem) = match kind {
+        ChangeKind::Rename => (Outcome::Fixed, Outcome::CantFix),
+        ChangeKind::Delete => (Outcome::Missing, Outcome::MayBreak),
+    };
+    let problems = script.count(problem);
+    let problem = (problems > 0).then(|| match kind {
+        ChangeKind::Rename => format!("· {problems} can't fix"),
+        ChangeKind::Delete => format!("· {problems} may break"),
+    });
+    let mut tooltip = vec![script.path()];
+    for hit in script.hits.iter().take(SCRIPT_TOOLTIP_LINES) {
+        let what = match (hit.outcome, &hit.new) {
+            (Outcome::Fixed, Some(new)) => format!("{} → {new}", hit.old),
+            (Outcome::Fixed, None) => format!("{} (updated to the new path)", hit.old),
+            (Outcome::CantFix, _) => format!("{} — can't fix: it could mean more than one tag", hit.old),
+            (Outcome::Missing, _) => format!("{} — missing", hit.old),
+            (Outcome::MayBreak, _) => format!("{} — may be missing: it could mean more than one tag", hit.old),
+        };
+        let expected = hit.expected.as_deref().map(|expected| format!(" ({expected})")).unwrap_or_default();
+        tooltip.push(format!("Line {}: {what}{expected}", hit.line));
+    }
+    if script.hits.len() > SCRIPT_TOOLTIP_LINES {
+        tooltip.push(format!("+{} more", script.hits.len() - SCRIPT_TOOLTIP_LINES));
+    }
+    ScriptRow { path: script.path(), count: plural_paths(script.count(main)), problem, tooltip: tooltip.join("\n") }
+}
+
+/// The script source tag group, for the script rows' icon.
+const SCRIPT_GROUP: u32 = u32::from_be_bytes(*b"hsc*");
+
+/// A script as a row: the script icon, its path with the folder muted, and
+/// how many of its paths change at the right. Hover lists the lines.
+fn draw_script_row(ui: &mut Ui, script: &ScriptRow, game: Option<GameId>) {
+    let (row, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), REFERENCE_ROW_HEIGHT), Sense::hover());
+    let icon_rect = egui::Rect::from_center_size(egui::pos2(row.left() + 18.0, row.center().y), Vec2::splat(ROW_ICON_SIZE));
+    paint_tag_icon_at(ui, Some(SCRIPT_GROUP), game, icon_rect);
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let mut right = row.right() - 8.0;
+    if let Some(problem) = &script.problem {
+        let galley = ui.painter().layout_no_wrap(problem.clone(), font.clone(), ui.visuals().error_fg_color);
+        right -= galley.size().x;
+        ui.painter().galley(egui::pos2(right, row.center().y - galley.size().y * 0.5), galley, ui.visuals().error_fg_color);
+        right -= 6.0;
+    }
+    let galley = ui.painter().layout_no_wrap(script.count.clone(), font, subtle_dark());
+    right -= galley.size().x;
+    ui.painter().galley(egui::pos2(right, row.center().y - galley.size().y * 0.5), galley, subtle_dark());
+    let text = egui::Rect::from_min_max(egui::pos2(icon_rect.right() + 10.0, row.top()), egui::pos2(right - 12.0, row.bottom()));
+    crate::app::compare::tag_compare::paint_path_label(ui, &script.path, text);
+    response.on_hover_text(&script.tooltip);
+    ui.painter().hline(row.x_range(), row.bottom() - 0.5, Stroke::new(1.0, foundation_block_edge()));
 }
 
 /// The same box for a mix of folders and files, such as the items a bulk
@@ -561,6 +690,8 @@ pub(in crate::app) struct BulkRenameDialog {
     options: RenameOptions,
     references: Option<RenameReferences>,
     references_revision: Option<(u64, bool)>,
+    /// Scripts that name the selected tags, checked once in the background.
+    scripts: Option<crate::app::tag_ops::script_fixes::ScriptCheck>,
     error: Option<String>,
     focus: bool,
 }
@@ -641,6 +772,21 @@ impl Dialog for BulkRenameDialog {
             self.references = None;
             self.references_revision = None;
         }
+        // Every tag in the selection could get a new path. The new names are
+        // still being typed, so the rows say how many paths each script has.
+        let selected: Vec<PathBuf> = self.items.iter().map(|item| item.path.clone()).collect();
+        let scripts = if kit_index.is_some() {
+            crate::app::tag_ops::script_fixes::ScriptCheck::rows_for(&mut self.scripts, cx, self.request.stamp.kit, |entries| {
+                crate::core::script_paths::ScriptChanges::renaming(entries.iter().filter_map(|entry| match &entry.location {
+                    TagEntryLocation::LooseFile(path) if selected.iter().any(|item| path.starts_with(item)) => {
+                        Some((entry.display_path.as_str(), None))
+                    }
+                    _ => None,
+                }))
+            })
+        } else {
+            ScriptRows::default()
+        };
         let dirty = kit_index.is_some_and(|index| cx.model.kits[index]
             .parsed_tags.values().any(|doc| doc.dirty.is_set()));
         let game = self.source_identity.1;
@@ -685,7 +831,7 @@ impl Dialog for BulkRenameDialog {
                         }
                         ui.add_space(12.0);
                         let remaining = ui.available_rect_before_wrap().height().max(120.0);
-                        RenameReferences::draw(ui,self.references.as_ref(),refreshing_references,game,remaining);
+                        RenameReferences::draw(ui,self.references.as_ref(),&scripts,refreshing_references,game,remaining);
                     });
                     // Right: each item's Original name beside its Rename result.
                     ui.allocate_ui_with_layout(Vec2::new(column_width, body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
@@ -802,6 +948,7 @@ impl Baboon {
                 occupied,
                 options: RenameOptions::default(),
                 references: None,
+            scripts: None,
                 references_revision: None,
                 error: None,
                 focus: true,
@@ -943,6 +1090,7 @@ impl BulkRenameDialog {
             occupied: HashSet::new(),
             options: RenameOptions::default(),
             references: None,
+            scripts: None,
             references_revision: None,
             error: None,
             focus: true,

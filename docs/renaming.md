@@ -67,3 +67,35 @@ rename runs.
 Background index refreshes preserve the Bulk Rename form and its known-reference
 list. A reference rebuild keeps the last known list until the new index is
 ready; Rename checks the current index again before changing files.
+
+## Scripts
+
+Mission scripts name tags by path, such as `"objects\characters\grunt\grunt"`.
+The editing kit compiles a scenario's scripts each time it loads the scenario,
+and one path to a tag that no longer exists stops the whole mission's scripts
+from compiling, so the mission loads with none. Rename and Move therefore fix
+script paths along with tag references.
+
+**References to Fix** lists each affected script after the referring tags, as
+one row with a script icon, its folder muted, and how many of its paths change.
+Hover a row to see each line: the path, what it becomes, and the type the script
+uses it as. A note explains that scripts are updated in their `.hsc` file in
+`data\` and in the copy saved in their scenario (and in any script source tags).
+Fixing the `.hsc` file means re-importing or recompiling it cannot bring the old
+path back.
+
+Script paths have no extension: `objects\characters\grunt\grunt` can mean the
+biped, the render model or the animation graph, depending on what the script
+passes it to. Baboon reads that from the script documentation, so moving just the
+biped fixes only the lines that want an object. When a line could mean a moved
+tag or one that stays, and the documentation can't tell which, the line is left
+unchanged and counted in red as **can't fix**. Comments that mention a path are
+updated too, but not counted.
+
+Scripts are fixed in the same batch as the tags: if a script can't be written
+(it is read-only, say), nothing is renamed or moved. The compiled script data
+saved in a scenario is left as it is; the tools rebuild it from the text.
+
+Halo CE, Halo 2, Halo 3, ODST and Reach are checked. Halo 2 Anniversary
+Multiplayer and Halo 4 keep their scripts in script tags that Baboon doesn't
+check yet, so their Rename, Move and Delete windows say so.

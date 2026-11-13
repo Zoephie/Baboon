@@ -8,6 +8,7 @@ pub(in crate::app) struct DeleteFolderConfirm {
     relative: PathBuf,
     entries: Vec<TagEntry>,
     outside_referrers: Option<Vec<String>>,
+    scripts: Option<super::script_fixes::ScriptCheck>,
 }
 
 pub(in crate::app) struct DeletedFolder {
@@ -57,6 +58,11 @@ impl Dialog for DeleteFolderConfirm {
         // A modal blocks editing. Cache a completed preview instead of
         // repeatedly walking a large folder's references during every repaint.
         if self.outside_referrers.is_none() { self.outside_referrers = referrers(cx.model, self); }
+        // Scripts that name the folder's tags lose them too.
+        let deleted: Vec<String> = self.entries.iter().map(|entry| entry.display_path.clone()).collect();
+        let scripts = super::script_fixes::ScriptCheck::rows_for(&mut self.scripts, cx, self.kit, |_| {
+            crate::core::script_paths::ScriptChanges::deleting(deleted.iter().map(String::as_str))
+        });
         let outside = &self.outside_referrers;
         let unsaved = self.entries.iter().filter(|entry| cx.model.kits[index].parsed_tags.get(&entry.key)
             .is_some_and(|document| document.dirty.is_set())).count();
@@ -95,8 +101,8 @@ impl Dialog for DeleteFolderConfirm {
                     }
                     ui.add_space(14.0);
                     let max = (window_work_area(cx.egui).height() * 0.4).clamp(120.0, 320.0);
-                    let height = references_box_height(rows.len(), notes.len(), max);
-                    draw_references_box(ui, &missing_references_title(rows.len()), &rows, &notes, game, height);
+                    let height = references_box_height(scripts.total(rows.len()), notes.len() + scripts.notes.len(), max);
+                    draw_references_box(ui, &missing_references_title(scripts.total(rows.len())), &rows, &scripts, &notes, game, height);
                 });
                 ui.add_space(12.0);
                 popup_footer(ui, |ui| {
@@ -125,7 +131,7 @@ impl Baboon {
             } else {
                 scan_folder_subtree_entries(&root, &relative, &source.names).map_err(|error| error.to_string())?
             };
-            Ok(DeleteFolderConfirm { kit: self.model.active_kit_id(), root, relative, entries, outside_referrers: None })
+            Ok(DeleteFolderConfirm { kit: self.model.active_kit_id(), root, relative, entries, outside_referrers: None, scripts: None })
         })();
         match result {
             Ok(confirm) => {

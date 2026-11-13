@@ -58,6 +58,8 @@ pub(in crate::app) struct ItemsPreview {
 /// other files, folders) and how many moved items clash with the destination.
 struct ItemsCheck<'a> {
     referrers: &'a [(String, u32)],
+    /// The scripts with paths to the moved or deleted tags.
+    scripts: &'a crate::app::browser::bulk_rename::ScriptRows,
     counts: (usize, usize, usize),
     conflicts: usize,
 }
@@ -73,6 +75,8 @@ pub(in crate::app) enum ReviewKind {
     Delete {
         selected: Vec<(String, crate::app::browser::bulk_rename::RenameIcon)>,
         referrers: Vec<(String, u32)>,
+        /// The scripts that will have missing paths.
+        scripts: crate::app::browser::bulk_rename::ScriptRows,
         game: Option<GameId>,
         tags: usize,
         files: usize,
@@ -84,6 +88,8 @@ pub(in crate::app) enum ReviewKind {
     Move {
         selected: Vec<(String, crate::app::browser::bulk_rename::RenameIcon)>,
         referrers: Vec<(String, u32)>,
+        /// The scripts whose paths the move fixes.
+        scripts: crate::app::browser::bulk_rename::ScriptRows,
         game: Option<GameId>,
         destination: String,
         conflicts: usize,
@@ -254,9 +260,9 @@ fn draw_items_review(
                 ui.set_width(column_width);
                 match &check {
                     Some(check) => {
-                        let count = check.referrers.len();
+                        let count = check.scripts.total(check.referrers.len());
                         let title = if moving { references_to_fix_title(count) } else { missing_references_title(count) };
-                        draw_references_box(ui, &title, check.referrers, &notes, game, height);
+                        draw_references_box(ui, &title, check.referrers, check.scripts, &notes, game, height);
                     }
                     None => rename_box(ui, height, |ui| {
                         ui.add_space(4.0);
@@ -324,13 +330,13 @@ pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi, phase: Opti
         .frame(egui::Frame::window(&ctx.global_style()))
         .show(ctx, |ui| {
             let items = match &review.kind {
-                ReviewKind::Delete { selected, referrers, game, tags, files, folders } => Some((
+                ReviewKind::Delete { selected, referrers, scripts, game, tags, files, folders } => Some((
                     ItemsAction::Delete, selected, *game,
-                    ItemsCheck { referrers, counts: (*tags, *files, *folders), conflicts: 0 },
+                    ItemsCheck { referrers, scripts, counts: (*tags, *files, *folders), conflicts: 0 },
                 )),
-                ReviewKind::Move { selected, referrers, game, destination, conflicts } => Some((
+                ReviewKind::Move { selected, referrers, scripts, game, destination, conflicts } => Some((
                     ItemsAction::Move { destination: destination.clone() }, selected, *game,
-                    ItemsCheck { referrers, counts: (0, 0, 0), conflicts: *conflicts },
+                    ItemsCheck { referrers, scripts, counts: (0, 0, 0), conflicts: *conflicts },
                 )),
                 _ => None,
             };

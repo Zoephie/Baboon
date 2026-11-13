@@ -4,13 +4,23 @@
 
 use super::*;
 use crate::app::browser::bulk_rename::{
-    ITEM_ROW_HEIGHT, RenameIcon, draw_item_row, draw_references_box, missing_references_title,
+    ITEM_ROW_HEIGHT, RenameIcon, ScriptRows, draw_item_row, draw_references_box, missing_references_title,
     references_box_height, referrer_rows,
 };
 
 impl Dialog for DeleteConfirm {
     fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
+        // Scripts that name the tag lose it too. A container tag has none.
+        let scripts = match self.kind {
+            DeleteKind::Loose => {
+                let path = self.display_path.clone();
+                super::script_fixes::ScriptCheck::rows_for(&mut self.scripts, cx, self.kit, |_| {
+                    crate::core::script_paths::ScriptChanges::deleting([path.as_str()])
+                })
+            }
+            DeleteKind::Container { .. } => ScriptRows::default(),
+        };
         let confirm = &*self;
         let source = cx.model.kit_index(confirm.kit).and_then(|index| cx.model.kits[index].source.as_ref());
         let game = source.and_then(|source| source.source.game());
@@ -76,8 +86,8 @@ impl Dialog for DeleteConfirm {
                     }
                     ui.add_space(14.0);
                     let max = (window_work_area(ctx).height() * 0.4).clamp(120.0, 320.0);
-                    let height = references_box_height(rows.len(), notes.len(), max);
-                    draw_references_box(ui, &missing_references_title(rows.len()), &rows, &notes, game, height);
+                    let height = references_box_height(scripts.total(rows.len()), notes.len() + scripts.notes.len(), max);
+                    draw_references_box(ui, &missing_references_title(scripts.total(rows.len())), &rows, &scripts, &notes, game, height);
                 });
                 ui.add_space(12.0);
                 popup_footer(ui, |ui| {

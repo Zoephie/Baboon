@@ -231,6 +231,7 @@ impl Baboon {
             None => (Vec::new(), true),
         };
         self.dialogs.open(RenameTagState {
+            scripts: None,
             kit: self.model.active_kit_id(),
             key: entry.key.clone(),
             old_display: display,
@@ -662,6 +663,14 @@ pub(in crate::app) fn run_tag_rename_job(
     let old_entries = vec![entry.clone()];
     let new_entries = vec![new_entry.clone()];
 
+    // Script paths first, so a script that can't be written stops the move
+    // before anything changes. Dropping `scripts` undoes them if the move
+    // fails.
+    send_folder_refactor_progress(tx, &label, "Checking scripts", None);
+    let (scripts, script_summary) = super::script_fixes::fix_before_move(
+        &root, game, &all_entries_before, &super::script_fixes::renames(&old_entries, &new_entries),
+    )?;
+
     // Move the file on disk.
     if let Some(parent) = new_path.parent() {
         fs::create_dir_all(parent)
@@ -674,6 +683,7 @@ pub(in crate::app) fn run_tag_rename_job(
             new_path.display()
         )
     })?;
+    scripts.commit();
 
     // Rewrite references in the affected (referring) tags.
     let rewrite_entries = affected_move_rewrite_entries(
@@ -744,6 +754,7 @@ pub(in crate::app) fn run_tag_rename_job(
         format!("Updated {references_changed} reference(s) in {tags_changed} tag(s)"),
     ];
     lines.extend(rewrite_failure_lines(&rewrite_result.failed));
+    super::script_fixes::report(&script_summary, &mut status, &mut lines);
     Ok(FolderRefactorFinished {
         status,
         lines,
@@ -1019,7 +1030,16 @@ pub(in crate::app) fn run_folder_refactor_job_inner(
         fs::create_dir_all(parent)
             .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
     }
+    let new_entries = transform_folder_entries(&root, &source, &old_entries, &destination);
+    let mut script_summary = Default::default();
     if move_folder {
+        // Script paths first, as for one tag: dropping `scripts` undoes them
+        // if the move fails.
+        send_folder_refactor_progress(tx, &label, "Checking scripts", Some(0.1));
+        let (scripts, summary) = super::script_fixes::fix_before_move(
+            &root, game, &all_entries_before, &super::script_fixes::renames(&old_entries, &new_entries),
+        )?;
+        script_summary = summary;
         send_folder_refactor_progress(tx, &label, "Moving files", Some(0.15));
         fs::rename(&source, &destination).map_err(|error| {
             format!(
@@ -1028,11 +1048,11 @@ pub(in crate::app) fn run_folder_refactor_job_inner(
                 destination.display()
             )
         })?;
+        scripts.commit();
     } else {
         copy_folder_recursive_progress(&source, &destination, &label, tx)?;
     }
 
-    let new_entries = transform_folder_entries(&root, &source, &old_entries, &destination);
     let rewrite_result = if move_folder {
         let rewrite_entries = affected_move_rewrite_entries(
             &all_entries_before,
@@ -1142,6 +1162,7 @@ pub(in crate::app) fn run_folder_refactor_job_inner(
         "Updated {references_changed} reference(s) in {tags_changed} tag(s)"
     ));
     lines.extend(rewrite_failure_lines(&failed));
+    super::script_fixes::report(&script_summary, &mut status, &mut lines);
 
     Ok(FolderRefactorFinished {
         status,

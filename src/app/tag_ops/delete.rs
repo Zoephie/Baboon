@@ -332,6 +332,7 @@ impl Baboon {
             _ => DeleteKind::Loose,
         };
         self.dialogs.open(DeleteConfirm {
+            scripts: None,
             kit,
             key: key.to_owned(),
             display_path: entry.display_path.clone(),

@@ -17,6 +17,7 @@ pub(crate) mod index_targets;
 pub(crate) mod keywords;
 pub(crate) mod process;
 pub(crate) mod recovery;
+pub(crate) mod script_paths;
 pub(crate) mod source;
 pub(crate) mod storage;
 pub(crate) mod tag_key;

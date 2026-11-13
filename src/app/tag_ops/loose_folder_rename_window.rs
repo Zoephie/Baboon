@@ -27,6 +27,16 @@ impl Dialog for LooseFolderRenameState {
                 Vec::new()
             }
         };
+        // Every tag in the folder gets a new path; scripts may name them.
+        let prefix = format!("{}{}", tag_path::relative_tag_path(&self.rel_path), tag_path::SEPARATOR).to_ascii_lowercase();
+        let scripts = super::script_fixes::ScriptCheck::rows_for(&mut self.scripts, cx, self.kit, |entries| {
+            crate::core::script_paths::ScriptChanges::renaming(
+                entries
+                    .iter()
+                    .filter(|entry| entry.display_path.to_ascii_lowercase().starts_with(&prefix))
+                    .map(|entry| (entry.display_path.as_str(), None)),
+            )
+        });
         let state = &mut *self;
         egui::Window::new("Rename Folder")
             .constrain_to(window_work_area(ctx))
@@ -51,6 +61,7 @@ impl Dialog for LooseFolderRenameState {
                     error: state.error.as_deref(),
                     notes: None,
                     references: Some((rows, notes)),
+                    scripts,
                     apply_hover: "Rename the folder on disk and fix every reference",
                 });
                 if state.name_input != before {

@@ -4208,11 +4208,20 @@ mod tests {
                         review: Some(MergeReview { kind: ReviewKind::Delete {
                             selected: vec![("objects/props".into(), RenameIcon::Folder), ("smoke.scenario".into(), RenameIcon::Tag(None))],
                             referrers: vec![("levels/test.scenario".into(), 0)],
+                            scripts: crate::app::browser::bulk_rename::ScriptRows {
+                                rows: vec![crate::app::browser::bulk_rename::ScriptRow {
+                                    path: "levels/scripts/test_mission.hsc".into(),
+                                    count: "2 paths".into(),
+                                    problem: Some("· 1 may break".into()),
+                                    tooltip: "Line 4: objects/props/crate — missing".into(),
+                                }],
+                                notes: vec!["These scripts won't compile until the paths are fixed.".into()],
+                            },
                             game: None, tags: 4, files: 1, folders: 2,
                         }, answer, apply_remaining: false }),
                     });
                 },
-                &["Delete Selected Items?", "2 Items to Delete", "1 Tag Will Have Missing References", "Delete"],
+                &["Delete Selected Items?", "2 Items to Delete", "2 Tags Will Have Missing References", "test_mission.hsc", "2 paths", "Delete"],
             ),
             case(
                 "bulk_delete_review_checking",
@@ -4249,6 +4258,7 @@ mod tests {
                         review: Some(MergeReview { kind: ReviewKind::Move {
                             selected: vec![("objects/props".into(), RenameIcon::Folder), ("smoke.scenario".into(), RenameIcon::Tag(None))],
                             referrers: vec![("levels/test.scenario".into(), 0)],
+                            scripts: Default::default(),
                             game: None, destination: "levels\\props".into(), conflicts: 1,
                         }, answer, apply_remaining: false }),
                     });
@@ -4333,6 +4343,7 @@ mod tests {
                 |h| {
                     let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
                     h.app.dialogs.open(DeleteConfirm {
+                        scripts: None,
                         kit: active_id(h),
                         key: file_entry_key(&path),
                         display_path: "objects\\weapons\\rifle\\rifle.biped".to_owned(),
@@ -4359,6 +4370,7 @@ mod tests {
                 container_kit,
                 |h| {
                     h.app.dialogs.open(DeleteConfirm {
+                        scripts: None,
                         kit: active_id(h),
                         key: ce_key(),
                         display_path: CE_TAG.to_owned(),
@@ -4380,6 +4392,7 @@ mod tests {
                 |h| {
                     let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
                     h.app.dialogs.open(RenameTagState {
+                        scripts: None,
                         kit: active_id(h),
                         key: file_entry_key(&path),
                         old_display: "objects\\weapons\\rifle\\rifle.biped".to_owned(),
@@ -4405,6 +4418,7 @@ mod tests {
                 container_kit,
                 |h| {
                     h.app.dialogs.open(RenameTagState {
+                        scripts: None,
                         kit: active_id(h),
                         key: ce_key(),
                         old_display: CE_TAG.to_owned(),
@@ -4586,6 +4600,7 @@ mod tests {
                 loose_kit,
                 |h| {
                     h.app.dialogs.open(LooseFolderRenameState {
+                        scripts: None,
                         kit: active_id(h),
                         rel_path: PathBuf::from("objects/weapons/rifle"),
                         parent_display: "objects\\weapons".to_owned(),

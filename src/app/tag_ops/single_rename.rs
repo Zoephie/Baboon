@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::app::browser::bulk_rename::{
-    RenameIcon, draw_references_box, padded_body, references_box_height, references_to_fix_title, rename_table_header,
+    RenameIcon, ScriptRows, draw_references_box, padded_body, references_box_height, references_to_fix_title, rename_table_header,
     rename_table_row, template,
 };
 
@@ -38,6 +38,8 @@ pub(in crate::app) struct SingleRename<'a> {
     /// The known referring tags (display path, tag group) and a note about
     /// the list, or `None` to leave the references box out.
     pub references: Option<(ReferenceRows, Vec<String>)>,
+    /// The scripts with paths to fix, listed after the referring tags.
+    pub scripts: ScriptRows,
     pub apply_hover: &'a str,
 }
 
@@ -127,8 +129,9 @@ pub(in crate::app) fn draw_single_rename(cx: &Ctx, ui: &mut Ui, open: &mut bool,
         if let Some((rows, notes)) = &rename.references {
             ui.add_space(14.0);
             let max = (window_work_area(ui.ctx()).height() * 0.4).clamp(120.0, 320.0);
-            let height = references_box_height(rows.len(), notes.len(), max);
-            draw_references_box(ui, &references_to_fix_title(rows.len()), rows, notes, rename.game, height);
+            let scripts = &rename.scripts;
+            let height = references_box_height(scripts.total(rows.len()), notes.len() + scripts.notes.len(), max);
+            draw_references_box(ui, &references_to_fix_title(scripts.total(rows.len())), rows, scripts, notes, rename.game, height);
         }
 
         (entered, expanded)

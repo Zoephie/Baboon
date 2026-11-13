@@ -581,6 +581,7 @@ fn delete_review(
     index: &ReverseDependencyIndex,
     names: &TagNameIndex,
     game: Option<GameId>,
+    cancelled: &dyn Fn() -> bool,
 ) -> review::ReviewKind {
     let entry_at = |path: &Path| {
         entries
@@ -614,9 +615,14 @@ fn delete_review(
         .map(|entry| (entry.display_path.clone(), entry.group_tag))
         .collect();
     referrers.sort_by_cached_key(|(path, _)| crate::core::source::natural_key(path));
+    let changes = crate::core::script_paths::ScriptChanges::deleting(
+        entries.iter().filter(|entry| deleting.contains(&entry.key)).map(|entry| entry.display_path.as_str()),
+    );
+    let report = crate::app::tag_ops::script_fixes::check(root, game, entries, &changes, cancelled);
     review::ReviewKind::Delete {
         selected,
         referrers,
+        scripts: super::bulk_rename::ScriptRows::new(game, changes.kind(), Some(&report)),
         game,
         tags,
         files,
@@ -673,7 +679,7 @@ fn delete_files(
             })
             .collect::<Result<Vec<_>, _>>()?;
         let deleting:HashSet<_>=entries.iter().filter(|entry|matches!(&entry.location,TagEntryLocation::LooseFile(path) if snapshot.contains_key(path))).map(|entry|entry.key.clone()).collect();
-        let review = delete_review(root, &roots, &snapshot, &entries, &deleting, &index, names, game);
+        let review = delete_review(root, &roots, &snapshot, &entries, &deleting, &index, names, game, &cancelled);
         let (tags, other_files) = match &review {
             review::ReviewKind::Delete { tags, files, .. } => (*tags, *files),
             _ => (0, 0),
@@ -1140,5 +1146,100 @@ mod tests {
         app.begin_browser_bulk("test".into(), keys, BulkAction::Open, &ctx);
         assert!(app.dialogs.get::<BulkPrompt>().is_none());
         assert_eq!(app.model.kits[0].open_tabs.len(), 10);
+    }
+
+    /// Run a bulk Move or Delete of `folders` and `tags` in the script
+    /// fixture, answering its review with `go`. Returns the result and the
+    /// script rows the review showed.
+    fn run_scripts(
+        kit: &LooseKit,
+        folders: &[&str],
+        tags: &[&str],
+        destination: Option<&str>,
+        go: bool,
+    ) -> (Result<FolderRefactorFinished, String>, Option<super::bulk_rename::ScriptRows>) {
+        let mut paths: Vec<(String, PathBuf)> = folders.iter().map(|folder| (folder_pane_key(Path::new(folder)), kit.path(folder))).collect();
+        paths.extend(tags.iter().map(|tag| (kit.key(tag), kit.path(tag))));
+        let (tx, rx) = mpsc::channel();
+        let responder = std::thread::spawn(move || {
+            let mut seen = None;
+            while let Ok(message) = rx.recv() {
+                if let WorkerMessage::FolderMergeReview(request) = message {
+                    match &request.kind {
+                        review::ReviewKind::Move { scripts, .. } | review::ReviewKind::Delete { scripts, .. } => {
+                            seen = Some(scripts.clone());
+                        }
+                        _ => {}
+                    }
+                    let _ = request.answer.send(go.then_some(review::MergeAnswer { choice: None, apply_remaining: false }));
+                }
+            }
+            seen
+        });
+        let req = BulkRequest {
+            stamp: KitStamp { kit: KitId(0), generation: 0 },
+            pane: "test".into(),
+            keys: paths.iter().map(|(key, _)| key.clone()).collect(),
+            action: if destination.is_some() { BulkAction::Move } else { BulkAction::Delete },
+        };
+        let result = run_files(
+            kit.root.clone(), paths, destination.map(|folder| kit.path(folder)), req, kit.names(), GameId::from_id(kit.game),
+            kit.entries(), Some(kit.index()), context(kit), &tx,
+        );
+        drop(tx);
+        (result.map(|outcome| outcome.done), responder.join().unwrap())
+    }
+
+    #[test]
+    fn a_bulk_move_lists_the_script_and_fixes_it_where_the_scenario_now_is() {
+        use crate::app::tag_ops::script_fixes::fixture::*;
+        let kit = kit("bulk-move-scripts");
+        fs::create_dir_all(kit.path("moved")).unwrap();
+        // The scenario moves too: its saved copy is fixed where it lands.
+        let (result, scripts) = run_scripts(&kit, &["objects/characters/grunt", "scenarios/solo/03a"], &[], Some("moved"), true);
+        let done = result.unwrap();
+        let scripts = scripts.expect("a move review");
+        assert_eq!(scripts.rows.len(), 1);
+        assert_eq!(scripts.rows[0].count, "5 paths");
+        assert_eq!(scripts.rows[0].problem, None);
+        assert!(scripts.notes[0].starts_with("Scripts are updated"));
+        let expected = SCRIPT.replace(OLD, r"moved\grunt\grunt");
+        assert_eq!(data_text(&kit), expected);
+        assert_eq!(saved_copy(&kit, "moved/03a/03a.scenario"), expected);
+        assert!(done.status.contains("5 path(s) in 1 script(s)"), "{}", done.status);
+    }
+
+    #[test]
+    fn a_script_that_cannot_be_written_rolls_back_the_whole_bulk_move() {
+        use crate::app::tag_ops::script_fixes::fixture::*;
+        let kit = kit("bulk-move-scripts-read-only");
+        fs::create_dir_all(kit.path("moved")).unwrap();
+        let data = data_script(&kit);
+        let mut permissions = fs::metadata(&data).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&data, permissions.clone()).unwrap();
+        let (result, _) = run_scripts(&kit, &["objects/characters/grunt", "scenarios/solo/03a"], &[], Some("moved"), true);
+        let error = result.err().expect("the read-only script stops the move");
+        assert!(error.contains("read-only"), "{error}");
+        assert!(kit.path("objects/characters/grunt/grunt.biped").exists(), "the tags are back");
+        assert!(!kit.path("moved/grunt").exists());
+        assert_eq!(saved_copy(&kit, SCENARIO), SCRIPT);
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        fs::set_permissions(&data, permissions).unwrap();
+        assert_eq!(data_text(&kit), SCRIPT);
+    }
+
+    #[test]
+    fn the_bulk_delete_review_lists_scripts_that_will_lose_their_tags() {
+        use crate::app::tag_ops::script_fixes::fixture::*;
+        let kit = kit("bulk-delete-scripts");
+        let (result, scripts) = run_scripts(&kit, &[], &["objects/characters/grunt/grunt.biped"], None, false);
+        assert!(result.is_err(), "cancelled");
+        let scripts = scripts.expect("a delete review");
+        assert_eq!(scripts.rows[0].count, "2 paths");
+        assert_eq!(scripts.rows[0].problem.as_deref(), Some("· 1 may break"));
+        assert!(scripts.notes[0].starts_with("These scripts won't compile"));
+        assert_eq!(data_text(&kit), SCRIPT, "deleting never rewrites scripts");
     }
 }

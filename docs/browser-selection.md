@@ -53,7 +53,9 @@ After you pick its destination, a bulk Move opens the Move Selected Items? revie
 at once, styled like the delete windows. The destination folder is shown on a band
 under the title. The selected items ("N Items to Move") sit beside the tags whose
 references the move fixes ("N References to Fix"), which fill in when the
-reference check finishes. A line says whether any item has the same name as
+reference check finishes. Mission scripts that name the moved tags are listed
+after the tags, one row per script, and are fixed with them (see Renaming,
+Scripts). A line says whether any item has the same name as
 something already in the folder; those are still decided one by one afterwards.
 Move stays unavailable until the check finishes. Copy keeps its summary review,
 since copying fixes no references.
@@ -70,6 +72,11 @@ many tags and other files the selection holds, then shows the selected items
 ("N Items to Delete") beside the tags that will have missing references. All of them end with a boxed list of the tags that will have
 missing references, styled like Rename's References to Fix. Tags that are being
 deleted too (inside the folder or the selection) are left out of that list.
+Mission scripts that name a deleted tag follow the tags, one row per script with
+how many of its paths will be missing, and a note that those missions load
+without scripts until the paths are fixed. Delete never edits scripts, and a
+path that another tag of the right type still answers to is not counted. A line
+whose meaning can't be told is counted as "may break".
 The bulk review opens as soon as you choose Delete, listing the selected items
 right away. While Baboon checks references, the references box shows a spinner
 and the check's progress, and Delete stays unavailable until the check finishes.
@@ -90,7 +97,9 @@ skipped roots remain selected. Copy leaves the source selection intact.
 `browser/bulk.rs` coordinates prompts, whole-selection jobs and completion.
 `core/folder_merge.rs` and `tag_ops/folder_merge_ops.rs` share the filesystem
 plan, recovery and rollback journal between existing single-folder and new
-multi-root operations. Recovery batches also record `original_relative_paths`.
+multi-root operations. `core/script_paths` finds and rewrites tag paths in
+mission scripts; `tag_ops/script_fixes.rs` runs it for the windows (a background
+check each window owns) and the jobs (inside their rollback transaction). Recovery batches also record `original_relative_paths`.
 
 Tests use isolated temporary editing kits and headless egui frames; they never
 move files in a user's editing kit.
