@@ -185,7 +185,7 @@ fn move_review(
     }
 }
 
-fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,names:TagNameIndex,game:Option<GameId>,previous_entries:Vec<TagEntry>,previous_index:Option<ReverseDependencyIndex>,context:MergeContext,tx:&Sender<WorkerMessage>,mode:BatchMode)->Result<FolderRefactorFinished,String> {
+fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,names:TagNameIndex,game:Option<GameId>,mut previous_entries:Vec<TagEntry>,previous_index:Option<ReverseDependencyIndex>,context:MergeContext,tx:&Sender<WorkerMessage>,mode:BatchMode)->Result<FolderRefactorFinished,String> {
     let renaming = mode == BatchMode::Renaming;
     let (source,destination)=roots.first().cloned().ok_or("No items selected")?;
     let single_folder=roots.len()==1 && source.is_dir();
@@ -196,6 +196,8 @@ fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,
         definitions_root: locate_definitions_root(),
     };
     let mut previous_index = previous_index;
+    // Reviews rebuilt in a row because files changed meanwhile.
+    let mut rebuilds = 0;
     loop {
         if cancelled() {
             return Err("Folder operation cancelled; no files changed".into());
@@ -334,21 +336,45 @@ fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,
                 changed_reference_keys.push(file_entry_key(path));
             }
         }
-        let unchanged = current_keys == previous_keys
-            && plan.vacant_targets()?
-            && inventory.unchanged(&cancelled)?
-            && changed_reference_keys.is_empty();
-        if !unchanged {
-            send_folder_refactor_progress(
-                tx,
-                &label,
-                "Files changed during review; rebuilding review",
-                None,
-            );
+        // What changed while the review was open, if anything, in words.
+        let shown = |key: &str| {
+            let path = key.strip_prefix("file:").unwrap_or(key);
+            Path::new(path).strip_prefix(&root).map(tag_path::relative_tag_path).unwrap_or_else(|_| path.to_owned())
+        };
+        let mut reasons = Vec::new();
+        if current_keys != previous_keys {
+            let new: Vec<_> = current_keys.difference(&previous_keys).collect();
+            let gone: Vec<_> = previous_keys.difference(&current_keys).collect();
+            let example = new.first().or(gone.first()).map(|key| shown(key)).unwrap_or_default();
+            reasons.push(format!("the kit's tags changed ({} new, {} gone, such as {example})", new.len(), gone.len()));
+        }
+        if !plan.vacant_targets()? {
+            reasons.push("something now exists where an item would go".to_owned());
+        }
+        if !inventory.unchanged(&cancelled)? {
+            reasons.push("the selected items changed".to_owned());
+        }
+        if let Some(first) = changed_reference_keys.first() {
+            reasons.push(format!("{} referring tag(s) changed, such as {}", changed_reference_keys.len(), shown(first)));
+        }
+        if !reasons.is_empty() {
+            let reason = reasons.join("; ");
+            rebuilds += 1;
+            if rebuilds >= 3 {
+                return Err(format!(
+                    "Files kept changing while the review was open ({reason}). No files changed; try again, or reload the kit if it repeats."
+                ));
+            }
+            let _ = tx.send(WorkerMessage::TerminalLine(format!("Rebuilding the review: {reason}")));
+            send_folder_refactor_progress(tx, &label, &format!("Files changed during review; rebuilding review: {reason}"), None);
             for key in changed_reference_keys {
                 index.clear_tag(&key);
             }
             previous_index = Some(index);
+            // From what is on disk now: a remembered tag that is no longer
+            // quite what the disk says (one move's stale entry, say) must
+            // not make every rebuild disagree again.
+            previous_entries = current_entries;
             continue;
         }
         if cancelled() {
@@ -775,6 +801,67 @@ mod tests {
         );
         assert!(!kit.path("levels/props/crate.model").exists());
         assert!(!kit.base.join("recovery").exists());
+    }
+    /// A tag remembered under a path that differs from the disk's only in
+    /// case (as an earlier move can leave) still "exists" on a case-
+    /// insensitive file system, so it was kept, every check after the review
+    /// disagreed with the disk, and the review came back forever.
+    #[test]
+    fn a_stale_remembered_tag_rebuilds_the_review_once_not_forever() {
+        let kit = kit();
+        let mut entries = kit.entries();
+        let mut stale = entries
+            .iter()
+            .find(|entry| entry.display_path.replace('\\', "/") == "levels/test/user.model")
+            .unwrap()
+            .clone();
+        let TagEntryLocation::LooseFile(path) = &stale.location else { unreachable!() };
+        let shouted = PathBuf::from(path.to_string_lossy().replace("levels", "LEVELS"));
+        stale.key = file_entry_key(&shouted);
+        stale.location = TagEntryLocation::LooseFile(shouted);
+        entries.push(stale);
+
+        let reviews = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (tx, rx) = mpsc::channel();
+        let counted = reviews.clone();
+        let responder = std::thread::spawn(move || {
+            while let Ok(message) = rx.recv() {
+                if let WorkerMessage::FolderMergeReview(request) = message {
+                    counted.fetch_add(1, Ordering::SeqCst);
+                    let _ = request.answer.send(Some(review::MergeAnswer { choice: None, apply_remaining: false }));
+                }
+            }
+        });
+        let result = run_many(
+            kit.root.clone(),
+            vec![(kit.path("objects/props"), kit.path("moved/props"))],
+            true,
+            "Moving Items".into(),
+            kit.names(),
+            Some(GameId::Halo3),
+            entries,
+            Some(kit.index()),
+            MergeContext {
+                recovery: Ok((
+                    kit.base.join("recovery"),
+                    RecoveryOrigin {
+                        source: recovery::RecoverySource::TagsFolder,
+                        tags_root: kit.root.clone(),
+                        game: Some(kit.game.into()),
+                        kit_id: None,
+                        kit_name: None,
+                    },
+                )),
+                control: Arc::new(MergeControl::default()),
+            },
+            &tx,
+            true,
+        );
+        drop(tx);
+        responder.join().unwrap();
+        result.unwrap();
+        assert!(reviews.load(Ordering::SeqCst) <= 2, "asked {} times", reviews.load(Ordering::SeqCst));
+        assert!(kit.path("moved/props/crate.model").exists());
     }
     #[test]
     fn failed_move_rolls_back_already_rewritten_referrers_and_copied_files() {
