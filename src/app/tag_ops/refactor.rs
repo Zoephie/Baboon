@@ -829,8 +829,10 @@ pub(in crate::app) fn prepare_tag_refactor_index_cancellable(
     };
     // Refresh skips locked files. A previously known tag that still exists
     // must remain a rewrite candidate, rather than looking safely deleted.
-    let current_keys: HashSet<_> = entries.iter().map(|entry| entry.key.clone()).collect();
-    for entry in previous_entries.iter().filter(|entry| !current_keys.contains(&entry.key)) {
+    // Compared ignoring case: a remembered tag spelled differently from the
+    // refreshed one is the same file, not one the refresh missed.
+    let current_keys: HashSet<_> = entries.iter().map(|entry| entry.key.to_ascii_lowercase()).collect();
+    for entry in previous_entries.iter().filter(|entry| !current_keys.contains(&entry.key.to_ascii_lowercase())) {
         if let TagEntryLocation::LooseFile(path) = &entry.location
             && path.try_exists().unwrap_or(true)
         {

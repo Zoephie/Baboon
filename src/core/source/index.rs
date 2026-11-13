@@ -598,11 +598,18 @@ fn refresh_entry_index_from_cache_with_progress(
                         Err(error) if crate::core::source::skippable_file_error(&error) => continue,
                         Err(error) => return Err(error),
                     };
+                    // Matched ignoring case, but reused only when its key is
+                    // spelled as the file is now. A saved entry whose folder
+                    // differs in case (an earlier move can leave one) would
+                    // otherwise keep that spelling for good: Windows still finds
+                    // the file, so nothing ever corrected it, and every move's
+                    // check against the disk disagreed.
                     if let (Some(cached), Some(current)) =
                         (cached_by_rel.get(&rel_key), fingerprint.as_ref())
                         && cached_fingerprints
                             .get(&rel_key)
                             .is_some_and(|cached_fp| cached_fp == current)
+                        && cached.key == crate::core::tag_key::file_entry_key(path)
                     {
                         resolved.push((rel_key, Some(cached.clone()), false));
                         continue;
@@ -1496,5 +1503,33 @@ mod tests {
             )
             .is_none()
         );
+    }
+    /// A saved entry whose folder is spelled in another case than on disk
+    /// (as an earlier move can leave) comes back spelled as the disk has it,
+    /// not as saved. Reused as saved, it kept the old spelling for good and
+    /// every move's check against the disk disagreed.
+    #[test]
+    fn a_saved_entry_spelled_differently_from_the_disk_is_corrected() {
+        let definitions = crate::core::bundled::locate_definitions_root();
+        let names = crate::core::format::TagNameIndex::load_game(&definitions, crate::core::game::GameId::Halo3).unwrap();
+        let root = scratch("case-heal");
+        let path = root.join("objects").join("crate.render_model");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        blam_tags::TagFile::new(definitions.join("halo3_mcc").join("render_model.json"))
+            .unwrap()
+            .write(&path)
+            .unwrap();
+        let mut saved = loose_file_entry(&root, &path, &names).unwrap().expect("a tag");
+        let right = saved.key.clone();
+        let shouted = root.join("OBJECTS").join("crate.render_model");
+        saved.key = file_entry_key(&shouted);
+        saved.location = TagEntryLocation::LooseFile(shouted);
+        let fingerprints = HashMap::from([(
+            normalize_rel_path(Path::new("objects/crate.render_model")),
+            file_fingerprint(&path).unwrap().unwrap(),
+        )]);
+        let refreshed = refresh_entry_index_from_cache_with_progress(&root, &names, &[saved], &fingerprints, &|_| Ok(())).unwrap();
+        assert_eq!(refreshed.entries.iter().map(|entry| entry.key.clone()).collect::<Vec<_>>(), [right]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
