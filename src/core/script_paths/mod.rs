@@ -489,16 +489,13 @@ impl<'a> Resolver<'a> {
         Self { changes, catalog, signatures: Signatures::for_game(kit.game), objects: types::object_groups(kit.game) }
     }
 
-    /// Lowercased byte strings any affected script must contain.
+    /// Lowercased byte strings any affected script must contain: the folders
+    /// the changed tags sit in, each once, and only the outermost of nested
+    /// ones. A whole folder's tags are one search (`objects\characters\
+    /// heretic\`), not one per tag; a script that mentions the folder is then
+    /// read in full.
     fn needles(&self) -> Vec<Vec<u8>> {
-        let mut needles = Vec::new();
-        for base in self.changes.by_base.keys() {
-            needles.push(base.as_bytes().to_vec());
-            if base.contains('\\') {
-                needles.push(base.replace('\\', "/").into_bytes());
-            }
-        }
-        needles
+        needles_for(self.changes.by_base.keys().map(String::as_str))
     }
 
     fn accepts(&self, kind: &TagKind, group: &str) -> bool {
@@ -636,9 +633,39 @@ fn apply_edits(text: &[u8], edits: &[(usize, usize, String)]) -> Vec<u8> {
     out
 }
 
+/// The search strings for tags at `bases` (lowercased paths without
+/// extensions): each tag's folder with its trailing separator, or the path
+/// itself for a tag at the root. Folders inside another one already searched
+/// for are dropped. Each also in `/` form, which scripts may use.
+fn needles_for<'a>(bases: impl Iterator<Item = &'a str>) -> Vec<Vec<u8>> {
+    let mut prefixes: Vec<String> = bases
+        .map(|base| match base.rfind('\\') {
+            Some(separator) => base[..=separator].to_owned(),
+            None => base.to_owned(),
+        })
+        .collect();
+    prefixes.sort();
+    prefixes.dedup();
+    // Sorted, a folder comes straight before the folders inside it.
+    let mut kept: Vec<String> = Vec::new();
+    for prefix in prefixes {
+        if !kept.last().is_some_and(|outer| outer.ends_with('\\') && prefix.starts_with(outer.as_str())) {
+            kept.push(prefix);
+        }
+    }
+    let mut needles = Vec::new();
+    for prefix in kept {
+        if prefix.contains('\\') {
+            needles.push(prefix.replace('\\', "/").into_bytes());
+        }
+        needles.push(prefix.into_bytes());
+    }
+    needles
+}
+
 fn contains_any(bytes: &[u8], needles: &[Vec<u8>]) -> bool {
     let lowered = bytes.to_ascii_lowercase();
-    needles.iter().any(|needle| !needle.is_empty() && lowered.windows(needle.len()).any(|window| window == needle.as_slice()))
+    needles.iter().any(|needle| !needle.is_empty() && memchr::memmem::find(&lowered, needle).is_some())
 }
 
 /// Every `.hsc` file under `data`.

@@ -252,3 +252,25 @@ fn games_without_checked_scripts_report_nothing() {
     assert_eq!(script_support(Some(GameId::Halo2Amp)), Some(ScriptSupport::NotChecked));
     assert_eq!(script_support(Some(GameId::HaloReach)), Some(ScriptSupport::Checked));
 }
+
+#[test]
+fn a_folder_of_tags_is_searched_for_once_by_its_folder() {
+    let needles = |bases: &[&str]| -> Vec<String> {
+        needles_for(bases.iter().copied()).into_iter().map(|needle| String::from_utf8(needle).unwrap()).collect()
+    };
+    assert_eq!(
+        needles(&[
+            r"objects\characters\heretic\heretic",
+            r"objects\characters\heretic\fp\fp_arms",
+            r"objects\characters\heretic\heretic_grunt",
+            "root_tag",
+        ]),
+        ["objects/characters/heretic/", r"objects\characters\heretic\", "root_tag"],
+        "one search for the folder, none for the folders inside it"
+    );
+    // A folder whose name merely starts like another is its own search.
+    assert_eq!(
+        needles(&[r"objects\heretic\a", r"objects\heretic_grunt\b"]),
+        ["objects/heretic/", r"objects\heretic\", "objects/heretic_grunt/", r"objects\heretic_grunt\"]
+    );
+}
