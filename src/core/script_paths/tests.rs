@@ -237,6 +237,8 @@ fn a_read_only_script_stops_the_fix_before_anything_is_written() {
     assert!(error.contains("read-only"), "{error}");
     let _ = transaction.rollback(error);
     assert_eq!(fs::read_to_string(kit.data_script()).unwrap(), SCRIPT);
+    // Only so the temporary kit can be removed.
+    #[allow(clippy::permissions_set_readonly_false)]
     permissions.set_readonly(false);
     fs::set_permissions(kit.data_script(), permissions).unwrap();
 }
