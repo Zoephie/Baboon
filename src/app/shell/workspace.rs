@@ -334,10 +334,20 @@ impl Baboon {
         // window reads them.
         self.refresh_ref_jump_occurrences(ctx);
         self.dialogs.draw(&cx!(self, ctx), &app_reads!(self));
-        draw_folder_refactor_lock(ctx, self.tag_ops.folder_refactor.as_ref(), self.tag_ops.folder_merge.as_ref().map(|merge| merge.control.as_ref()));
+        // While a review is open, it is what the user sees and answers; the
+        // lock returns once the operation runs.
+        let reviewing = self.tag_ops.folder_merge.as_ref()
+            .is_some_and(|merge| merge.review.is_some() || merge.items_preview.is_some());
+        if !reviewing {
+            draw_folder_refactor_lock(ctx, self.tag_ops.folder_refactor.as_ref(), self.tag_ops.folder_merge.as_ref().map(|merge| merge.control.as_ref()));
+        }
+        let phase = self.tag_ops.folder_refactor.as_ref().map(|progress| progress.phase.as_str());
         if let Some(merge) = &mut self.tag_ops.folder_merge {
-            if merge.review.is_some() {
-                crate::app::tag_ops::folder_merge_review::draw(ctx, merge);
+            if reviewing {
+                crate::app::tag_ops::folder_merge_review::draw(ctx, merge, phase);
+                if merge.items_preview.is_some() {
+                    ctx.request_repaint_after(PROGRESS_REPAINT);
+                }
             }
         }
         end_wheel_gesture(ctx);
@@ -928,7 +938,11 @@ pub(in crate::app) fn draw_folder_refactor_lock(ctx: &egui::Context, folder_refa
                         "Renaming tag" => "Renaming Tag",
                         label => label,
                     };
-                    crate::app::search::draw_icon_window_header_without_close(ui, title, ButtonIcon::FolderClosed);
+                    // Preparing the bulk delete review only reads; say so, so it
+                    // doesn't look like the delete has already started.
+                    let reviewing_delete = title == crate::app::tag_ops::folder_merge_review::DELETE_REVIEW_TITLE;
+                    let icon = if reviewing_delete { ButtonIcon::Garbage } else { ButtonIcon::FolderClosed };
+                    crate::app::search::draw_icon_window_header_without_close(ui, title, icon);
                     ui.add_space(4.0);
                     let bar = match progress.progress {
                         Some(value) => egui::ProgressBar::new(value.clamp(0.0, 1.0)),
@@ -937,9 +951,13 @@ pub(in crate::app) fn draw_folder_refactor_lock(ctx: &egui::Context, folder_refa
                     ui.add(bar.text(RichText::new(&progress.phase).color(text_dark())));
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("Baboon is locked until the folder operation finishes.")
-                            .color(subtle_dark())
-                            .small(),
+                        RichText::new(if reviewing_delete {
+                            "Finding the tags that reference these items. Nothing is deleted until you confirm."
+                        } else {
+                            "Baboon is locked until the folder operation finishes."
+                        })
+                        .color(subtle_dark())
+                        .small(),
                     );
                     if let Some(control) = control.filter(|control| !control.is_applying()) {
                         ui.add_space(12.0);

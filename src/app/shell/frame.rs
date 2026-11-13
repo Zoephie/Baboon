@@ -4185,12 +4185,75 @@ mod tests {
                     let (answer, _rx) = mpsc::channel();
                     h.app.tag_ops.folder_merge = Some(MergeUi {
                         control: std::sync::Arc::new(MergeControl::default()),
+                        items_preview: None,
                         review: Some(MergeReview { kind: ReviewKind::Summary {
                             source: "objects/props".into(), destination: "levels/props".into(), files: 3, conflicts: 1,
                         }, answer, apply_remaining: false }),
                     });
                 },
                 &["Merge Folders", "3 incoming file(s), 1 conflict(s)"],
+            ),
+            case(
+                "bulk_delete_review",
+                &["tag_ops.folder_merge"],
+                &[],
+                loose_kit,
+                |h| {
+                    use crate::app::browser::bulk_rename::RenameIcon;
+                    use crate::app::tag_ops::folder_merge_review::{MergeControl, MergeUi, MergeReview, ReviewKind};
+                    let (answer, _rx) = mpsc::channel();
+                    h.app.tag_ops.folder_merge = Some(MergeUi {
+                        control: std::sync::Arc::new(MergeControl::default()),
+                        items_preview: None,
+                        review: Some(MergeReview { kind: ReviewKind::Delete {
+                            selected: vec![("objects/props".into(), RenameIcon::Folder), ("smoke.scenario".into(), RenameIcon::Tag(None))],
+                            referrers: vec![("levels/test.scenario".into(), 0)],
+                            game: None, tags: 4, files: 1, folders: 2,
+                        }, answer, apply_remaining: false }),
+                    });
+                },
+                &["Delete Selected Items?", "2 Items to Delete", "1 Tag Will Have Missing References", "Delete"],
+            ),
+            case(
+                "bulk_delete_review_checking",
+                &["tag_ops.folder_merge"],
+                &[],
+                loose_kit,
+                |h| {
+                    use crate::app::browser::bulk_rename::RenameIcon;
+                    use crate::app::tag_ops::folder_merge_review::{ItemsPreview, MergeControl, MergeUi};
+                    h.app.tag_ops.folder_merge = Some(MergeUi {
+                        control: std::sync::Arc::new(MergeControl::default()),
+                        review: None,
+                        items_preview: Some(ItemsPreview {
+                            action: crate::app::tag_ops::folder_merge_review::ItemsAction::Delete,
+                            selected: vec![("objects/props".into(), RenameIcon::Folder), ("smoke.scenario".into(), RenameIcon::Tag(None))],
+                            game: None,
+                        }),
+                    });
+                },
+                &["Delete Selected Items?", "2 Items to Delete", "Checking for Missing References…", "Checking references", "Delete"],
+            ),
+            case(
+                "bulk_move_review",
+                &["tag_ops.folder_merge"],
+                &[],
+                loose_kit,
+                |h| {
+                    use crate::app::browser::bulk_rename::RenameIcon;
+                    use crate::app::tag_ops::folder_merge_review::{MergeControl, MergeUi, MergeReview, ReviewKind};
+                    let (answer, _rx) = mpsc::channel();
+                    h.app.tag_ops.folder_merge = Some(MergeUi {
+                        control: std::sync::Arc::new(MergeControl::default()),
+                        items_preview: None,
+                        review: Some(MergeReview { kind: ReviewKind::Move {
+                            selected: vec![("objects/props".into(), RenameIcon::Folder), ("smoke.scenario".into(), RenameIcon::Tag(None))],
+                            referrers: vec![("levels/test.scenario".into(), 0)],
+                            game: None, destination: "levels\\props".into(), conflicts: 1,
+                        }, answer, apply_remaining: false }),
+                    });
+                },
+                &["Move Selected Items?", "props", "2 Items to Move", "1 Reference to Fix", "1 item has the same name", "Move"],
             ),
             case(
                 "folder_refactor_lock",
@@ -4205,6 +4268,20 @@ mod tests {
                     });
                 },
                 &["Renaming smoke to fog", "Baboon is locked until the folder operation finishes."],
+            ),
+            case(
+                "bulk_delete_check",
+                &["tag_ops.folder_refactor"],
+                &[],
+                memory_kit,
+                |h| {
+                    h.app.tag_ops.folder_refactor = Some(FolderRefactorUiState {
+                        label: crate::app::tag_ops::folder_merge_review::DELETE_REVIEW_TITLE.to_owned(),
+                        phase: "Checking references".to_owned(),
+                        progress: None,
+                    });
+                },
+                &["Delete Selected Items?", "Nothing is deleted until you confirm."],
             ),
             // --- ui/dialogs/ ---
             case(
@@ -4265,7 +4342,7 @@ mod tests {
                         has_unsaved_edits: true,
                     });
                 },
-                &["Delete Tag?", "Delete Tag", "Cancel", "levels\\smoke\\smoke.scenario"],
+                &["Delete Tag?", "Delete Tag", "Cancel", "smoke.scenario", "1 Tag Will Have Missing References"],
             ),
             case(
                 "delete_folder_confirm",

@@ -60,44 +60,49 @@ impl Dialog for DeleteFolderConfirm {
         let outside = &self.outside_referrers;
         let unsaved = self.entries.iter().filter(|entry| cx.model.kits[index].parsed_tags.get(&entry.key)
             .is_some_and(|document| document.dirty.is_set())).count();
+        let kit = &cx.model.kits[index];
+        let source = kit.source.as_ref();
+        let game = source.and_then(|source| source.source.game());
+        let rows = match (outside, source) {
+            (Some(paths), Some(source)) => crate::app::browser::bulk_rename::referrer_rows(paths, &source.names),
+            _ => Vec::new(),
+        };
+        let mut notes = vec!["Tags inside this folder aren't listed, since they're deleted too.".to_owned()];
+        if outside.is_none() {
+            notes.push(if kit.index_jobs.building_references || kit.scanning_entries {
+                "Checking references before deletion…".to_owned()
+            } else {
+                "The reference count is unavailable. Build the reference index before deleting this folder.".to_owned()
+            });
+        }
+        let tags = self.entries.len();
         let mut delete = false;
         let mut cancel = false;
         let response = egui::Modal::new(egui::Id::unique("delete_folder_confirm"))
             .frame(egui::Frame::window(&cx.egui.global_style()))
             .show(cx.egui, |ui| {
-                ui.set_width(window_width(cx.egui, 520.0));
+                use crate::app::browser::bulk_rename::{ITEM_ROW_HEIGHT, RenameIcon, draw_item_row, draw_references_box, missing_references_title, references_box_height};
+                ui.set_width(window_width(cx.egui, 480.0));
                 crate::app::search::draw_icon_window_header_without_close(ui, "Delete Folder?", ButtonIcon::Garbage);
                 ui.add_space(12.0);
-                ui.label(RichText::new(tag_path::relative_tag_path(&self.relative)).monospace());
-                ui.label(format!("This folder contains {} tag(s). The entire folder, including subfolders and other files, will be moved to Baboon's deleted-tags folder so it can be recovered by hand.", self.entries.len()));
-                if unsaved > 0 {
-                    ui.add_space(8.0);
-                    ui.label(format!("{unsaved} tag(s) have unsaved edits that will be discarded."));
-                }
-                ui.add_space(8.0);
-                match outside {
-                    Some(paths) => {
-                        ui.label(format!("{} tag(s) outside this folder reference its tags.", paths.len()));
-                        ui.label(RichText::new("References from tags inside this folder are excluded.").color(subtle_dark()));
-                        if !paths.is_empty() {
-                            ui.label("These references will be left pointing at missing tags:");
-                            crate::app::ScrollArea::vertical().id_salt("delete_folder_referrers")
-                                .max_height(160.0).show(ui, |ui| {
-                                    for path in paths.iter().take(100) { ui.label(RichText::new(path).monospace()); }
-                                    if paths.len() > 100 { ui.label(format!("And {} more…", paths.len() - 100)); }
-                                });
-                        }
+                crate::app::browser::bulk_rename::padded_body(ui, |ui| {
+                    draw_item_row(ui, RenameIcon::Folder, game, &tag_path::relative_tag_path(&self.relative), ITEM_ROW_HEIGHT);
+                    ui.add_space(10.0);
+                    ui.label(format!("This folder contains {tags} {}. The entire folder, including subfolders and other files, will be moved to Baboon's deleted-tags folder so it can be recovered by hand.", if tags == 1 { "tag" } else { "tags" }));
+                    if unsaved > 0 {
+                        ui.add_space(6.0);
+                        ui.label(format!("{unsaved} {} unsaved edits that will be discarded.", if unsaved == 1 { "tag has" } else { "tags have" }));
                     }
-                    None if cx.model.kits[index].index_jobs.building_references || cx.model.kits[index].scanning_entries => {
-                        ui.horizontal(|ui| { ui.spinner(); ui.label("Checking references before deletion…"); });
-                    }
-                    None => { ui.label("The reference count is unavailable. Build the reference index before deleting this folder."); }
-                }
+                    ui.add_space(14.0);
+                    let max = (window_work_area(cx.egui).height() * 0.4).clamp(120.0, 320.0);
+                    let height = references_box_height(rows.len(), notes.len(), max);
+                    draw_references_box(ui, &missing_references_title(rows.len()), &rows, &notes, game, height);
+                });
                 ui.add_space(12.0);
                 popup_footer(ui, |ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         cancel = icon_text_button(ui, ButtonIcon::Clear, "Cancel", true).clicked();
-                        delete = icon_text_button(ui, ButtonIcon::Garbage, "Delete Folder", outside.is_some()).clicked();
+                        delete = accent_icon_text_button(ui, ButtonAccent::Destructive, ButtonIcon::Garbage, "Delete Folder", outside.is_some()).clicked();
                     });
                 });
             });

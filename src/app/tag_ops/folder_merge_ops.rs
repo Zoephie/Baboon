@@ -51,6 +51,7 @@ impl Baboon {
         self.tag_ops.folder_merge = Some(MergeUi {
             control: control.clone(),
             review: None,
+            items_preview: None,
         });
         MergeContext {
             recovery: self.loose_recovery_context(self.model.active),
@@ -94,21 +95,36 @@ pub(in crate::app) fn run(
     context: MergeContext,
     tx: &Sender<WorkerMessage>,
 ) -> Result<FolderRefactorFinished, String> {
-    run_many(root,vec![(source,destination)],moving,label,names,game,previous_entries,previous_index,context,tx)
+    run_many(root,vec![(source,destination)],moving,label,names,game,previous_entries,previous_index,context,tx,false)
 }
 
 pub(in crate::app) fn run_many(
     root: PathBuf, roots: Vec<(PathBuf,PathBuf)>, moving: bool, label: String,
     names: TagNameIndex, game: Option<GameId>, previous_entries: Vec<TagEntry>,
     previous_index: Option<ReverseDependencyIndex>, context: MergeContext, tx: &Sender<WorkerMessage>,
+    // A bulk move from the browser: reviewed in the Move Selected Items?
+    // window, with the references it fixes.
+    items_review: bool,
 ) -> Result<FolderRefactorFinished,String> {
-    run_batch(root,roots,moving,label,names,game,previous_entries,previous_index,context,tx,false)
+    let mode = if items_review && moving { BatchMode::ItemsReview } else { BatchMode::Summary };
+    run_batch(root,roots,moving,label,names,game,previous_entries,previous_index,context,tx,mode)
+}
+
+/// How a batch is reviewed before it changes files.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BatchMode {
+    /// The From/To summary.
+    Summary,
+    /// The Move Selected Items? window.
+    ItemsReview,
+    /// No review: a rename was already reviewed, and is collision-strict.
+    Renaming,
 }
 
 /// Rename is collision-strict: a reviewed name is never silently merged,
 /// overwritten or suffixed by a conflict choice.
 pub(in crate::app) fn run_renames(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,names:TagNameIndex,game:Option<GameId>,previous_entries:Vec<TagEntry>,previous_index:Option<ReverseDependencyIndex>,context:MergeContext,tx:&Sender<WorkerMessage>)->Result<FolderRefactorFinished,String> {
-    run_batch(root,roots,true,"Renaming Items".into(),names,game,previous_entries,previous_index,context,tx,true)
+    run_batch(root,roots,true,"Renaming Items".into(),names,game,previous_entries,previous_index,context,tx,BatchMode::Renaming)
 }
 
 fn validate_rename_roots(root:&Path,roots:&[(PathBuf,PathBuf)])->Result<(),String> {
@@ -124,7 +140,35 @@ fn validate_rename_roots(root:&Path,roots:&[(PathBuf,PathBuf)])->Result<(),Strin
     Ok(())
 }
 
-fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,names:TagNameIndex,game:Option<GameId>,previous_entries:Vec<TagEntry>,previous_index:Option<ReverseDependencyIndex>,context:MergeContext,tx:&Sender<WorkerMessage>,renaming:bool)->Result<FolderRefactorFinished,String> {
+/// The Move Selected Items? review: the moved items, the folder they move
+/// to, and every tag whose references the move fixes (`referrers`, as keys).
+fn move_review(
+    root: &Path,
+    roots: &[(PathBuf, PathBuf)],
+    entries: &[TagEntry],
+    referrers: &HashSet<String>,
+    game: Option<GameId>,
+    conflicts: usize,
+) -> ReviewKind {
+    let sources: Vec<_> = roots.iter().map(|(source, _)| source.clone()).collect();
+    let folder = roots.first().and_then(|(_, target)| target.parent()).unwrap_or(root);
+    let mut rows: Vec<_> = entries
+        .iter()
+        .filter(|entry| referrers.contains(&entry.key))
+        .map(|entry| (entry.display_path.clone(), entry.group_tag))
+        .collect();
+    rows.sort_by_cached_key(|(path, _)| crate::core::source::natural_key(path));
+    ReviewKind::Move {
+        selected: crate::app::browser::bulk::selection_rows(root, &sources, entries),
+        referrers: rows,
+        game,
+        destination: crate::app::browser::bulk_rename::folder_display(folder, root),
+        conflicts,
+    }
+}
+
+fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,names:TagNameIndex,game:Option<GameId>,previous_entries:Vec<TagEntry>,previous_index:Option<ReverseDependencyIndex>,context:MergeContext,tx:&Sender<WorkerMessage>,mode:BatchMode)->Result<FolderRefactorFinished,String> {
+    let renaming = mode == BatchMode::Renaming;
     let (source,destination)=roots.first().cloned().ok_or("No items selected")?;
     let single_folder=roots.len()==1 && source.is_dir();
     let cancelled = || context.control.cancelled();
@@ -209,7 +253,9 @@ fn run_batch(root:PathBuf,roots:Vec<(PathBuf,PathBuf)>,moving:bool,label:String,
                 _ => None,
             })
             .collect::<Result<Vec<_>, _>>()?;
-        if !renaming {
+        if mode == BatchMode::ItemsReview {
+            review::ask(tx, &context.control, move_review(&root, &roots, &all_before, &referrers, game, inventory.conflicts(&cancelled)?))?;
+        } else if !renaming {
         review::ask(
             tx,
             &context.control,

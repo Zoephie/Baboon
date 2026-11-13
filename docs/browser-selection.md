@@ -49,13 +49,34 @@ Matching folders merge, and Replace, Skip and Keep Both can apply to remaining
 conflicts. Incoming roots with duplicate destination names are rejected before
 writing. A same-folder Move is a no-op; Copy assigns an available numbered name.
 
+After you pick its destination, a bulk Move opens the Move Selected Items? review
+at once, styled like the delete windows. The destination folder is shown on a band
+under the title. The selected items ("N Items to Move") sit beside the tags whose
+references the move fixes ("N References to Fix"), which fill in when the
+reference check finishes. A line says whether any item has the same name as
+something already in the folder; those are still decided one by one afterwards.
+Move stays unavailable until the check finishes. Copy keeps its summary review,
+since copying fixes no references.
+
 Unsaved workspace tags require Save All and Continue or cancellation. Decisions
 are collected before applying; ordinary file changes during review trigger a
 fresh review. Cancellation is available during preflight/review. Applying locks
 editing and attempts to roll back the entire selection if a write or reference
 rewrite fails. Replaced or deleted files share one recovery batch with their
 original tags-root-relative paths. Empty deleted folders are preserved too.
-Delete review shows tag/non-tag counts and references from outside the selection.
+Every delete window shares Rename's style. Deleting one tag or folder shows it as
+an icon row with its folder muted. The bulk Delete Selected Items? review says how
+many tags and other files the selection holds, then shows the selected items
+("N Items to Delete") beside the tags that will have missing references. All of them end with a boxed list of the tags that will have
+missing references, styled like Rename's References to Fix. Tags that are being
+deleted too (inside the folder or the selection) are left out of that list.
+The bulk review opens as soon as you choose Delete, listing the selected items
+right away. While Baboon checks references, the references box shows a spinner
+and the check's progress, and Delete stays unavailable until the check finishes.
+Both of the review's boxes show eight rows and scroll past that, so the window
+keeps its size when the check fills in.
+Every delete window's Delete button has a red accent fill (the Delete icon's
+red at 25%, 50% with a solid red border on hover) as a cue to take care.
 
 Move completion remaps open tag paths, folder browsers, favorites and references,
 and refreshes documents and the browser. Completed roots leave the selection;

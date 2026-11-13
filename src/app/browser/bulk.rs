@@ -290,20 +290,36 @@ impl Baboon {
         let names = self.model.names().clone();
         let game = source.game;
         let context = self.new_merge_context();
+        let reviewed = match (&request.action, &destination) {
+            (BulkAction::Delete, _) => Some(review::ItemsAction::Delete),
+            (BulkAction::Move, Some(folder)) => Some(review::ItemsAction::Move {
+                destination: crate::app::browser::bulk_rename::folder_display(folder, &root),
+            }),
+            _ => None,
+        };
+        if let Some(action) = reviewed {
+            // Open the review at once with what is selected; the check fills
+            // in the rest.
+            let roots: Vec<_> = paths.iter().map(|(_, path)| path.clone()).collect();
+            if let Some(merge) = &mut self.tag_ops.folder_merge {
+                merge.items_preview = Some(review::ItemsPreview {
+                    action,
+                    selected: selection_rows(&root, &roots, &previous),
+                    game,
+                });
+            }
+        }
         let stamp = request.stamp;
         let tx = self.tx.clone();
+        // A delete first only checks what it would remove, so it is shown as
+        // the question it leads to rather than as a delete in progress.
         self.tag_ops.folder_refactor = Some(FolderRefactorUiState {
-            label: format!(
-                "{} Items",
-                if request.action == BulkAction::Delete {
-                    "Deleting"
-                } else if request.action == BulkAction::Move {
-                    "Moving"
-                } else {
-                    "Copying"
-                }
-            ),
-            phase: "Preparing".into(),
+            label: match request.action {
+                BulkAction::Delete => review::DELETE_REVIEW_TITLE.into(),
+                BulkAction::Move => "Moving Items".into(),
+                _ => "Copying Items".into(),
+            },
+            phase: if request.action == BulkAction::Copy { "Preparing" } else { "Checking references" }.into(),
             progress: None,
         });
         self.spawn_job(
@@ -497,6 +513,7 @@ fn run_files(
             index,
             context,
             tx,
+            true,
         )?
     };
     let completed = if request.action == BulkAction::Copy {
@@ -526,6 +543,87 @@ fn run_files(
     })
 }
 
+/// The selected items of a bulk delete or move as review rows: folders with a folder
+/// icon, tags with their group's icon, other files with the generic icon.
+pub(in crate::app) fn selection_rows(
+    root: &Path,
+    roots: &[PathBuf],
+    entries: &[TagEntry],
+) -> Vec<(String, crate::app::browser::bulk_rename::RenameIcon)> {
+    use crate::app::browser::bulk_rename::RenameIcon;
+    let relative = |path: &Path| tag_path::relative_tag_path(path.strip_prefix(root).unwrap_or(path));
+    let mut selected: Vec<_> = roots
+        .iter()
+        .map(|path| {
+            let entry = entries
+                .iter()
+                .find(|entry| matches!(&entry.location, TagEntryLocation::LooseFile(p) if p == path));
+            match entry {
+                _ if path.is_dir() => (relative(path), RenameIcon::Folder),
+                Some(entry) => (entry.display_path.clone(), RenameIcon::Tag(Some(entry.group_tag))),
+                None => (relative(path), RenameIcon::Tag(None)),
+            }
+        })
+        .collect();
+    selected.sort_by_cached_key(|(path, _)| crate::core::source::natural_key(path));
+    selected
+}
+
+/// The bulk delete review: each selected item with its icon, what the
+/// selection holds, and every tag outside it that references a deleted tag.
+#[allow(clippy::too_many_arguments)]
+fn delete_review(
+    root: &Path,
+    roots: &[PathBuf],
+    snapshot: &std::collections::BTreeMap<PathBuf, disk::Fingerprint>,
+    entries: &[TagEntry],
+    deleting: &HashSet<String>,
+    index: &ReverseDependencyIndex,
+    names: &TagNameIndex,
+    game: Option<GameId>,
+) -> review::ReviewKind {
+    let entry_at = |path: &Path| {
+        entries
+            .iter()
+            .find(|entry| matches!(&entry.location, TagEntryLocation::LooseFile(p) if p == path))
+    };
+    let selected = selection_rows(root, roots, entries);
+    let mut referrer_keys = HashSet::new();
+    let (mut tags, mut files) = (0, 0);
+    for (path, info) in snapshot {
+        if info.directory {
+            continue;
+        }
+        let Some(entry) = entry_at(path) else {
+            files += 1;
+            continue;
+        };
+        tags += 1;
+        if let Some(target) = dependency_entry_reference_path(entry, names) {
+            referrer_keys.extend(
+                index
+                    .dependents_for(entry.group_tag, &target)
+                    .iter()
+                    .filter(|key| !deleting.contains(*key)),
+            );
+        }
+    }
+    let mut referrers: Vec<_> = entries
+        .iter()
+        .filter(|entry| referrer_keys.contains(&entry.key))
+        .map(|entry| (entry.display_path.clone(), entry.group_tag))
+        .collect();
+    referrers.sort_by_cached_key(|(path, _)| crate::core::source::natural_key(path));
+    review::ReviewKind::Delete {
+        selected,
+        referrers,
+        game,
+        tags,
+        files,
+        folders: snapshot.values().filter(|info| info.directory).count(),
+    }
+}
+
 fn delete_files(
     root: &Path,
     paths: &[(String, PathBuf)],
@@ -553,7 +651,7 @@ fn delete_files(
             names,
             &previous,
             previous_index.take(),
-            "Deleting Items",
+            review::DELETE_REVIEW_TITLE,
             tx,
             &cancelled,
         )?;
@@ -575,42 +673,12 @@ fn delete_files(
             })
             .collect::<Result<Vec<_>, _>>()?;
         let deleting:HashSet<_>=entries.iter().filter(|entry|matches!(&entry.location,TagEntryLocation::LooseFile(path) if snapshot.contains_key(path))).map(|entry|entry.key.clone()).collect();
-        let mut reviewed = Vec::new();
-        let mut tags = 0;
-        for (path, info) in &snapshot {
-            if info.directory {
-                continue;
-            }
-            let entry = entries
-                .iter()
-                .find(|entry| matches!(&entry.location,TagEntryLocation::LooseFile(p) if p==path));
-            let refs = entry.map(|entry| {
-                tags += 1;
-                dependency_entry_reference_path(entry, names)
-                    .map(|target| {
-                        index
-                            .dependents_for(entry.group_tag, &target)
-                            .iter()
-                            .filter(|key| !deleting.contains(*key))
-                            .count()
-                    })
-                    .unwrap_or(0)
-            });
-            reviewed.push((path.strip_prefix(root).unwrap().to_owned(), refs));
-        }
-        review::ask(
-            tx,
-            &context.control,
-            review::ReviewKind::Delete {
-                items: reviewed,
-                folders: snapshot
-                    .iter()
-                    .filter(|(_, info)| info.directory)
-                    .map(|(path, _)| path.strip_prefix(root).unwrap().to_owned())
-                    .collect(),
-                tags,
-            },
-        )?;
+        let review = delete_review(root, &roots, &snapshot, &entries, &deleting, &index, names, game);
+        let (tags, other_files) = match &review {
+            review::ReviewKind::Delete { tags, files, .. } => (*tags, *files),
+            _ => (0, 0),
+        };
+        review::ask(tx, &context.control, review)?;
         let current_entries =
             scan_folder_subtree_entries(root, Path::new(""), names).map_err(|e| e.to_string())?;
         let mut changed = current_entries
@@ -689,8 +757,7 @@ fn delete_files(
         refactor::persist_refactor_indexes(root, game, &all_entries, Some(&index), &changes, tx);
         return Ok(FolderRefactorFinished {
             status: format!(
-                "Deleted {tags} tags and {} other files",
-                snapshot.values().filter(|info| !info.directory).count() - tags
+                "Deleted {tags} tags and {other_files} other files"
             ),
             lines: vec![format!("Deleted items preserved at {}", files.display())],
             tree,
@@ -926,6 +993,90 @@ mod tests {
                 .len(),
             3
         );
+    }
+    #[test]
+    fn the_delete_review_lists_the_selection_and_every_tag_left_with_missing_references() {
+        let kit = mixed_kit();
+        let paths = vec![
+            (kit.key("from/a.render_model"), kit.path("from/a.render_model")),
+            (folder_pane_key(Path::new("from/group")), kit.path("from/group")),
+        ];
+        let (tx, rx) = mpsc::channel();
+        let responder = std::thread::spawn(move || {
+            let mut seen = None;
+            while let Ok(message) = rx.recv() {
+                if let WorkerMessage::FolderMergeReview(request) = message {
+                    if let review::ReviewKind::Delete { selected, referrers, tags, files, folders, .. } = &request.kind {
+                        let selected: Vec<_> = selected.iter().map(|(path, icon)| {
+                            (path.replace('\\', "/"), matches!(icon, crate::app::browser::bulk_rename::RenameIcon::Folder))
+                        }).collect();
+                        let referrers: Vec<_> = referrers.iter().map(|(path, _)| path.replace('\\', "/")).collect();
+                        seen = Some((selected, referrers, *tags, *files, *folders));
+                    }
+                    let _ = request.answer.send(None);
+                }
+            }
+            seen
+        });
+        let req = BulkRequest {
+            stamp: KitStamp { kit: KitId(0), generation: 0 },
+            pane: "test".into(),
+            keys: paths.iter().map(|(key, _)| key.clone()).collect(),
+            action: BulkAction::Delete,
+        };
+        let result = run_files(
+            kit.root.clone(), paths, None, req, kit.names(), GameId::from_id(kit.game),
+            kit.entries(), Some(kit.index()), context(&kit), &tx,
+        );
+        drop(tx);
+        assert!(result.is_err(), "cancelling the review deletes nothing");
+        let (selected, referrers, tags, files, folders) = responder.join().unwrap().expect("a delete review");
+        assert_eq!(selected, vec![("from/a.render_model".to_owned(), false), ("from/group".to_owned(), true)]);
+        assert_eq!(referrers, vec!["outside/uses_a.model".to_owned(), "outside/uses_b.model".to_owned()]);
+        assert_eq!((tags, files, folders), (2, 1, 2));
+        assert!(kit.path("from/a.render_model").exists());
+    }
+    #[test]
+    fn the_move_review_lists_the_selection_its_destination_and_every_reference_to_fix() {
+        let kit = mixed_kit();
+        let paths = vec![
+            (kit.key("from/a.render_model"), kit.path("from/a.render_model")),
+            (folder_pane_key(Path::new("from/group")), kit.path("from/group")),
+        ];
+        let (tx, rx) = mpsc::channel();
+        let responder = std::thread::spawn(move || {
+            let mut seen = None;
+            while let Ok(message) = rx.recv() {
+                if let WorkerMessage::FolderMergeReview(request) = message {
+                    if let review::ReviewKind::Move { selected, referrers, destination, conflicts, .. } = &request.kind {
+                        let selected: Vec<_> = selected.iter().map(|(path, icon)| {
+                            (path.replace('\\', "/"), matches!(icon, crate::app::browser::bulk_rename::RenameIcon::Folder))
+                        }).collect();
+                        let referrers: Vec<_> = referrers.iter().map(|(path, _)| path.replace('\\', "/")).collect();
+                        seen = Some((selected, referrers, destination.clone(), *conflicts));
+                    }
+                    let _ = request.answer.send(None);
+                }
+            }
+            seen
+        });
+        let req = BulkRequest {
+            stamp: KitStamp { kit: KitId(0), generation: 0 },
+            pane: "test".into(),
+            keys: paths.iter().map(|(key, _)| key.clone()).collect(),
+            action: BulkAction::Move,
+        };
+        let result = run_files(
+            kit.root.clone(), paths, Some(kit.path("dest")), req, kit.names(), GameId::from_id(kit.game),
+            kit.entries(), Some(kit.index()), context(&kit), &tx,
+        );
+        drop(tx);
+        assert!(result.is_err(), "cancelling the review moves nothing");
+        let (selected, referrers, destination, conflicts) = responder.join().unwrap().expect("a move review");
+        assert_eq!(selected, vec![("from/a.render_model".to_owned(), false), ("from/group".to_owned(), true)]);
+        assert_eq!(referrers, vec!["outside/uses_a.model".to_owned(), "outside/uses_b.model".to_owned()]);
+        assert_eq!((destination.as_str(), conflicts), ("dest", 0));
+        assert!(kit.path("from/a.render_model").exists());
     }
     #[test]
     fn cancelling_a_batch_review_leaves_sources_and_recovery_untouched() {

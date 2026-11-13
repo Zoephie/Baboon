@@ -273,15 +273,20 @@ impl RenameReferences {
             _ => {}
         }
         let paths = references.map_or(&[][..], |references| &references.paths[..]);
-        draw_references_box(ui, paths, &notes, game, height);
+        draw_references_box(ui, &references_to_fix_title(paths.len()), paths, &notes, game, height);
     }
 }
 
 const ROW_ICON_SIZE: f32 = 18.0;
 const REFERENCE_ROW_HEIGHT: f32 = 28.0;
 const PREVIEW_ROW_HEIGHT: f32 = 32.0;
+pub(in crate::app) const ITEM_ROW_HEIGHT: f32 = 32.0;
 
-const SELECTION_FOOTER_HEIGHT: f32 = 34.0;
+/// The selection footer: a button-height row with 6px above and below, like
+/// the Folder and String tables' footers.
+const SELECTION_FOOTER_HEIGHT: f32 = BUTTON_HEIGHT + 12.0;
+/// The corners of every Rename and Delete box, matching the tables'.
+const BOX_RADIUS: u8 = crate::app::editor::fields::FOUNDATION_CONTAINER_RADIUS as u8;
 
 /// The note under References to Fix when renamed folders hold tags: their
 /// paths change too. `within` names the folders, e.g. "renamed folders".
@@ -300,15 +305,61 @@ pub(in crate::app) fn references_box_height(rows: usize, notes: usize, max: f32)
     (title + rows as f32 * REFERENCE_ROW_HEIGHT).min(max)
 }
 
-/// The boxed "N References to Fix" list shared by every Rename window: each
-/// referring tag with its icon and a muted folder path, scrolling within
-/// `height`. `rows` are display paths and tag groups.
-pub(in crate::app) fn draw_references_box(ui: &mut Ui, rows: &[(String, u32)], notes: &[String], game: Option<GameId>, height: f32) {
-    let title = match rows.len() {
+/// The Rename windows' references title: "N References to Fix".
+pub(in crate::app) fn references_to_fix_title(count: usize) -> String {
+    match count {
         0 => "No References to Fix".to_owned(),
         1 => "1 Reference to Fix".to_owned(),
         count => format!("{count} References to Fix"),
-    };
+    }
+}
+
+/// The Delete windows' references title: the tags a delete leaves pointing
+/// at something missing.
+pub(in crate::app) fn missing_references_title(count: usize) -> String {
+    match count {
+        0 => "No Tags Will Have Missing References".to_owned(),
+        1 => "1 Tag Will Have Missing References".to_owned(),
+        count => format!("{count} Tags Will Have Missing References"),
+    }
+}
+
+/// One item as a row: its icon, then its path with the folder muted.
+pub(in crate::app) fn draw_item_row(ui: &mut Ui, icon: RenameIcon, game: Option<GameId>, path: &str, height: f32) {
+    let (row, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+    let icon_rect = egui::Rect::from_center_size(egui::pos2(row.left() + 18.0, row.center().y), Vec2::splat(ROW_ICON_SIZE));
+    match icon {
+        RenameIcon::Folder => paint_button_icon_at(ui, ButtonIcon::FolderClosed, icon_rect, text_dark()),
+        RenameIcon::Tag(group) => paint_tag_icon_at(ui, group, game, icon_rect),
+    }
+    let text = egui::Rect::from_min_max(egui::pos2(icon_rect.right() + 10.0, row.top()), row.max);
+    if crate::app::compare::tag_compare::paint_path_label(ui, path, text) {
+        response.on_hover_text(path);
+    }
+    ui.painter().hline(row.x_range(), row.bottom() - 0.5, Stroke::new(1.0, foundation_block_edge()));
+}
+
+/// The boxed list of referring tags shared by the Rename and Delete windows:
+/// `title`, any notes, then each referring tag with its icon and a muted
+/// folder path, scrolling within `height`. `rows` are display paths and tag
+/// groups.
+pub(in crate::app) fn draw_references_box(ui: &mut Ui, title: &str, rows: &[(String, u32)], notes: &[String], game: Option<GameId>, height: f32) {
+    boxed_rows(ui, "rename_references", title, notes, rows.len(), height, |ui, row| {
+        let (path, group) = &rows[row];
+        draw_item_row(ui, RenameIcon::Tag(Some(*group)), game, path, REFERENCE_ROW_HEIGHT);
+    });
+}
+
+/// The same box for a mix of folders and files, such as the items a bulk
+/// delete removes. `id` keeps its scroll position apart from other boxes.
+pub(in crate::app) fn draw_items_box(ui: &mut Ui, id: &str, title: &str, rows: &[(String, RenameIcon)], notes: &[String], game: Option<GameId>, height: f32) {
+    boxed_rows(ui, id, title, notes, rows.len(), height, |ui, row| {
+        let (path, icon) = &rows[row];
+        draw_item_row(ui, *icon, game, path, REFERENCE_ROW_HEIGHT);
+    });
+}
+
+fn boxed_rows(ui: &mut Ui, id: &str, title: &str, notes: &[String], rows: usize, height: f32, mut draw: impl FnMut(&mut Ui, usize)) {
     rename_box(ui, height, |ui| {
         ui.add_space(4.0);
         ui.label(RichText::new(title).strong());
@@ -316,21 +367,17 @@ pub(in crate::app) fn draw_references_box(ui: &mut Ui, rows: &[(String, u32)], n
             ui.label(RichText::new(note).italics().color(subtle_dark()));
         }
         ui.add_space(4.0);
-        if rows.is_empty() { return }
+        if rows == 0 { return }
+        // `show_rows` sizes its content from the spacing in force here, so
+        // zero it first or a list that fits still scrolls.
+        ui.spacing_mut().item_spacing.y = 0.0;
         ScrollArea::vertical()
-            .id_salt("rename_references")
+            .id_salt(id)
             .auto_shrink([false, false])
-            .show_rows(ui, REFERENCE_ROW_HEIGHT, rows.len(), |ui, visible| {
+            .show_rows(ui, REFERENCE_ROW_HEIGHT, rows, |ui, visible| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                for (path, group) in &rows[visible] {
-                    let (row, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), REFERENCE_ROW_HEIGHT), Sense::hover());
-                    let icon = egui::Rect::from_center_size(egui::pos2(row.left() + 18.0, row.center().y), Vec2::splat(ROW_ICON_SIZE));
-                    paint_tag_icon_at(ui, Some(*group), game, icon);
-                    let text = egui::Rect::from_min_max(egui::pos2(icon.right() + 10.0, row.top()), row.max);
-                    if crate::app::compare::tag_compare::paint_path_label(ui, path, text) {
-                        response.on_hover_text(path);
-                    }
-                    ui.painter().hline(row.x_range(), row.bottom() - 0.5, Stroke::new(1.0, foundation_block_edge()));
+                for row in visible {
+                    draw(ui, row);
                 }
             });
     });
@@ -338,18 +385,16 @@ pub(in crate::app) fn draw_references_box(ui: &mut Ui, rows: &[(String, u32)], n
 
 /// The band along the bottom of the preview box: how many items are selected,
 /// and which of them the rename changes.
+/// Styled like the Folder and String tables' footers, and joined to the box
+/// above it.
 fn draw_selection_footer(ui: &mut Ui, selected: usize, folders: usize, tags: usize, invalid: usize) {
-    let (band, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), SELECTION_FOOTER_HEIGHT), Sense::hover());
-    // Edge to edge across the box, under its last row.
-    let fill = egui::Rect::from_min_max(egui::pos2(band.left() - 10.0, band.top()), egui::pos2(band.right() + 10.0, band.bottom() + 8.0));
-    ui.painter().rect_filled(fill, egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 }, foundation_block_bar());
-    ui.painter().hline(fill.x_range(), fill.top(), Stroke::new(1.0, foundation_block_edge()));
     let plural = |count: usize, one: &str, many: &str| format!("{count} {}", if count == 1 { one } else { many });
     let mut job = egui::text::LayoutJob::default();
-    let font = egui::TextStyle::Body.resolve(ui.style());
-    let mut add = |text: &str, color: Color32| job.append(text, 0.0, egui::TextFormat::simple(font.clone(), color));
+    let style = ui.style().clone();
+    let mut add = |text: &str, color: Color32| RichText::new(text).color(color)
+        .append_to(&mut job, &style, egui::FontSelection::Default, egui::Align::Center);
     add(&plural(selected, "item selected", "items selected"), subtle_dark());
-    add("  •  ", subtle_dark());
+    add(" · ", subtle_dark());
     let parts: Vec<String> = [(folders, "folder", "folders"), (tags, "tag", "tags")].into_iter()
         .filter(|(count, ..)| *count > 0)
         .map(|(count, one, many)| plural(count, one, many))
@@ -360,12 +405,46 @@ fn draw_selection_footer(ui: &mut Ui, selected: usize, folders: usize, tags: usi
         add(&format!("renaming {}", parts.join(" & ")), foundation_blue());
     }
     if invalid > 0 {
-        add("  •  ", subtle_dark());
+        add(" · ", subtle_dark());
         add(&plural(invalid, "invalid name", "invalid names"), ui.visuals().error_fg_color);
     }
-    let galley = ui.painter().layout_job(job);
-    let at = egui::pos2(band.left() + 8.0, band.center().y + 4.0 - galley.size().y * 0.5);
-    ui.painter().galley(at, galley, text_dark());
+    let background = ui.painter().add(egui::Shape::Noop);
+    let footer = egui::Frame::NONE
+        .inner_margin(egui::Margin { left: 10, right: 10, top: 6, bottom: 6 })
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.set_height(BUTTON_HEIGHT);
+                ui.add(egui::Label::new(job).truncate());
+            });
+        });
+    // Its top edge lies on the box's bottom border, so the two share one line.
+    let rect = footer.response.rect;
+    ui.painter().set(background, egui::epaint::RectShape::new(
+        rect.with_min_y(rect.min.y - 1.0),
+        egui::CornerRadius { nw: 0, ne: 0, sw: BOX_RADIUS, se: BOX_RADIUS },
+        foundation_block_bar(),
+        Stroke::new(1.0, foundation_block_edge()),
+        egui::StrokeKind::Inside,
+    ));
+}
+
+/// Rename and Delete windows inset their content this far from the window's
+/// sides.
+pub(in crate::app) const CONTENT_SIDE_PADDING: i8 = 20;
+
+/// The body of a Rename or Delete window, between its header and its footer
+/// buttons, inset [`CONTENT_SIDE_PADDING`] from the window's sides.
+pub(in crate::app) fn padded_body<R>(ui: &mut Ui, contents: impl FnOnce(&mut Ui) -> R) -> R {
+    let margin = ui.spacing().window_margin;
+    let side = |window: i8| (CONTENT_SIDE_PADDING - window).max(0);
+    egui::Frame::NONE
+        .inner_margin(egui::Margin { left: side(margin.left), right: side(margin.right), top: 0, bottom: 0 })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            contents(ui)
+        })
+        .inner
 }
 
 /// What a rename row's icon shows: the browser's closed folder, or a tag
@@ -424,15 +503,41 @@ pub(in crate::app) fn referrer_rows(paths: &[String], names: &crate::core::forma
 
 /// The outlined, rounded containers that hold the references and the preview.
 pub(in crate::app) fn rename_box(ui: &mut Ui, height: f32, contents: impl FnOnce(&mut Ui)) {
+    framed_box(ui, height, egui::CornerRadius::same(BOX_RADIUS), contents);
+}
+
+fn framed_box(ui: &mut Ui, height: f32, radius: egui::CornerRadius, contents: impl FnOnce(&mut Ui)) {
     egui::Frame::NONE
         .stroke(Stroke::new(1.0, foundation_block_edge()))
-        .corner_radius(4)
+        .corner_radius(radius)
         .inner_margin(egui::Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.set_height((height - 16.0).max(0.0));
             contents(ui);
         });
+}
+
+/// `folder` on a band running edge to edge under a window's header, as Bulk
+/// Rename shows the folder it renames in and Move the folder it moves to.
+pub(in crate::app) fn draw_folder_band(ui: &mut Ui, folder: &str) {
+    let (band, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 36.0), Sense::hover());
+    let margin = ui.spacing().window_margin;
+    let fill = egui::Rect::from_min_max(egui::pos2(band.left() - f32::from(margin.left), band.top() - ui.spacing().item_spacing.y * 0.5),
+        egui::pos2(band.right() + f32::from(margin.right), band.bottom()));
+    ui.painter().rect_filled(fill, 0.0, foundation_group_bg());
+    let icon = egui::Rect::from_center_size(egui::pos2(band.left() + 2.0 + ROW_ICON_SIZE * 0.5, band.center().y), Vec2::splat(ROW_ICON_SIZE));
+    paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon, text_dark());
+    let text = egui::Rect::from_min_max(egui::pos2(icon.right() + 10.0, band.top()), band.max);
+    crate::app::compare::tag_compare::paint_path_label(ui, folder, text);
+}
+
+/// `folder` as a display path under the tags root, or the root's own name.
+pub(in crate::app) fn folder_display(folder: &Path, root: &Path) -> String {
+    match folder.strip_prefix(root) {
+        Ok(relative) if !relative.as_os_str().is_empty() => relative.to_string_lossy().replace('/', "\\"),
+        _ => root.file_name().unwrap_or(root.as_os_str()).to_string_lossy().into_owned(),
+    }
 }
 
 /// The folder the selection lives in, as a display path under the kit's root:
@@ -445,11 +550,7 @@ fn selection_folder(items: &[RenameItem], root: &Path) -> String {
             Some(common) => common.ancestors().find(|ancestor| parent.starts_with(ancestor)).unwrap_or(Path::new("")).to_path_buf(),
         });
     }
-    let common = common.unwrap_or_default();
-    match common.strip_prefix(root) {
-        Ok(relative) if !relative.as_os_str().is_empty() => relative.to_string_lossy().replace('/', "\\"),
-        _ => root.file_name().unwrap_or(root.as_os_str()).to_string_lossy().into_owned(),
-    }
+    folder_display(&common.unwrap_or_default(), root)
 }
 
 pub(in crate::app) struct BulkRenameDialog {
@@ -551,17 +652,10 @@ impl Dialog for BulkRenameDialog {
                     ("About Renaming",egui::Id::unique("bulk_rename_about"))) {
                     cx.send(crate::app::help::HelpCommand::ShowDocSection(crate::app::help::RENAMING_HELP_SECTION));
                 }
-                // The folder being renamed in, on a band running edge to edge.
-                let (band, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 36.0), Sense::hover());
-                let margin = ui.spacing().window_margin;
-                let fill = egui::Rect::from_min_max(egui::pos2(band.left() - f32::from(margin.left), band.top() - ui.spacing().item_spacing.y * 0.5),
-                    egui::pos2(band.right() + f32::from(margin.right), band.bottom()));
-                ui.painter().rect_filled(fill, 0.0, foundation_group_bg());
-                let icon = egui::Rect::from_center_size(egui::pos2(band.left() + 2.0 + ROW_ICON_SIZE * 0.5, band.center().y), Vec2::splat(ROW_ICON_SIZE));
-                paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon, text_dark());
-                let text = egui::Rect::from_min_max(egui::pos2(icon.right() + 10.0, band.top()), band.max);
-                crate::app::compare::tag_compare::paint_path_label(ui, &folder, text);
+                // The folder being renamed in.
+                draw_folder_band(ui, &folder);
                 ui.add_space(14.0);
+                padded_body(ui, |ui| {
                 let body_height = (window_work_area(cx.egui).height() - 260.0).clamp(300.0, 440.0);
                 let gap = 20.0;
                 let column_width = ((ui.available_width() - gap) / 2.0).floor();
@@ -596,11 +690,13 @@ impl Dialog for BulkRenameDialog {
                     // Right: each item's Original name beside its Rename result.
                     ui.allocate_ui_with_layout(Vec2::new(column_width, body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
                         ui.set_width(column_width);
-                        rename_box(ui, body_height, |ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        let square_bottom = egui::CornerRadius { nw: BOX_RADIUS, ne: BOX_RADIUS, sw: 0, se: 0 };
+                        framed_box(ui, body_height - SELECTION_FOOTER_HEIGHT, square_bottom, |ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
                             let width = ui.available_width();
                             let column = rename_table_header(ui, width);
-                            let list_height = (ui.available_height() - SELECTION_FOOTER_HEIGHT).max(PREVIEW_ROW_HEIGHT);
+                            let list_height = ui.available_height().max(PREVIEW_ROW_HEIGHT);
                             ScrollArea::vertical().id_salt("rename_preview").max_height(list_height).auto_shrink([false,false]).show_rows(ui,PREVIEW_ROW_HEIGHT,rows.len(),|ui,visible| {
                                 ui.spacing_mut().item_spacing.y = 0.0;
                                 for index in visible {
@@ -612,12 +708,13 @@ impl Dialog for BulkRenameDialog {
                                     rename_table_row(ui, width, column, icon, game, &original, &item.path.display().to_string(), &label, color);
                                 }
                             });
-                            let renaming = |folders: bool| rows.iter().zip(&self.items)
-                                .filter(|(row, item)| row.changed && row.error.is_none() && item.extension.is_none() == folders)
-                                .count();
-                            draw_selection_footer(ui, rows.len(), renaming(true), renaming(false), invalid);
                         });
+                        let renaming = |folders: bool| rows.iter().zip(&self.items)
+                            .filter(|(row, item)| row.changed && row.error.is_none() && item.extension.is_none() == folders)
+                            .count();
+                        draw_selection_footer(ui, rows.len(), renaming(true), renaming(false), invalid);
                     });
+                });
                 });
                 ui.add_space(12.0);
                 popup_footer(ui,|ui| {ui.horizontal(|ui| {
@@ -1148,7 +1245,7 @@ mod tests {
             "2 References to Fix",
             "prefix_crate_suffix.model",
             "prefix_crate_suffix.render_model",
-            "2 items selected  •  renaming 2 tags",
+            "2 items selected · renaming 2 tags",
         ] {
             assert!(
                 page.iter().any(|(text, _)| text == label),

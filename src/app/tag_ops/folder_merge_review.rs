@@ -32,6 +32,34 @@ impl MergeControl {
 pub(in crate::app) struct MergeUi {
     pub control: Arc<MergeControl>,
     pub review: Option<MergeReview>,
+    /// A bulk delete or move whose review is still being checked: the review
+    /// window opens at once with the selected items, and fills in the rest
+    /// when the check sends its [`ReviewKind::Delete`] or [`ReviewKind::Move`].
+    pub items_preview: Option<ItemsPreview>,
+}
+
+/// Which selection review: a bulk delete, or a bulk move into `destination`
+/// (a display path).
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::app) enum ItemsAction {
+    Delete,
+    Move { destination: String },
+}
+
+/// What a bulk delete or move review shows before its check finishes.
+pub(in crate::app) struct ItemsPreview {
+    pub action: ItemsAction,
+    pub selected: Vec<(String, crate::app::browser::bulk_rename::RenameIcon)>,
+    pub game: Option<GameId>,
+}
+
+/// What the check adds to the review: the referring tags (left with missing
+/// references by a delete, fixed by a move), what a delete removes (tags,
+/// other files, folders) and how many moved items clash with the destination.
+struct ItemsCheck<'a> {
+    referrers: &'a [(String, u32)],
+    counts: (usize, usize, usize),
+    conflicts: usize,
 }
 pub(in crate::app) struct MergeReview {
     pub kind: ReviewKind,
@@ -40,7 +68,26 @@ pub(in crate::app) struct MergeReview {
 }
 pub(in crate::app) enum ReviewKind {
     BatchSummary { sources: Vec<PathBuf>, destination: PathBuf, files: usize, conflicts: usize },
-    Delete { items: Vec<(PathBuf,Option<usize>)>, folders: Vec<PathBuf>, tags: usize },
+    /// A bulk delete: the selected items as icon rows, how much they hold,
+    /// and every tag outside the selection that will lose a reference.
+    Delete {
+        selected: Vec<(String, crate::app::browser::bulk_rename::RenameIcon)>,
+        referrers: Vec<(String, u32)>,
+        game: Option<GameId>,
+        tags: usize,
+        files: usize,
+        folders: usize,
+    },
+    /// A bulk move: the selected items, the folder they move to, every tag
+    /// whose references the move fixes, and how many items clash with what
+    /// is already there.
+    Move {
+        selected: Vec<(String, crate::app::browser::bulk_rename::RenameIcon)>,
+        referrers: Vec<(String, u32)>,
+        game: Option<GameId>,
+        destination: String,
+        conflicts: usize,
+    },
     Summary {
         source: PathBuf,
         destination: PathBuf,
@@ -53,6 +100,12 @@ pub(in crate::app) enum ReviewKind {
         existing_references: Option<usize>,
     },
 }
+/// The bulk delete review's title, also shown while the review is prepared:
+/// nothing is deleted until the user answers it.
+pub(in crate::app) const DELETE_REVIEW_TITLE: &str = "Delete Selected Items?";
+/// The bulk move review's title.
+pub(in crate::app) const MOVE_REVIEW_TITLE: &str = "Move Selected Items?";
+
 pub(in crate::app) struct MergeAnswer {
     pub choice: Option<Choice>,
     pub apply_remaining: bool,
@@ -112,34 +165,189 @@ fn file_details(
     );
 }
 
+fn plural(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
+}
+
+/// What a bulk delete removes, as a sentence: "3 tags and 1 other file, in
+/// 2 folders".
+fn delete_contents(tags: usize, files: usize, folders: usize) -> String {
+    let mut parts = vec![plural(tags, "tag", "tags")];
+    if files > 0 {
+        parts.push(plural(files, "other file", "other files"));
+    }
+    let mut text = parts.join(" and ");
+    if folders > 0 {
+        text.push_str(&format!(", in {}", plural(folders, "folder", "folders")));
+    }
+    text
+}
+
+/// The bulk delete and move reviews, in the Rename and Delete windows'
+/// style. Until the check is in (`check` is `None`) the references box shows
+/// a spinner with the check's `phase`, and the action is unavailable. Returns
+/// `Some(true)` to go ahead and `Some(false)` for Cancel.
+fn draw_items_review(
+    ui: &mut Ui,
+    ctx: &egui::Context,
+    action: &ItemsAction,
+    selected: &[(String, crate::app::browser::bulk_rename::RenameIcon)],
+    check: Option<ItemsCheck>,
+    game: Option<GameId>,
+    phase: Option<&str>,
+) -> Option<bool> {
+    use crate::app::browser::bulk_rename::{draw_folder_band, draw_items_box, draw_references_box, missing_references_title, references_box_height, references_to_fix_title, rename_box};
+    let moving = matches!(action, ItemsAction::Move { .. });
+    let (title, icon) = if moving { (MOVE_REVIEW_TITLE, ButtonIcon::Move) } else { (DELETE_REVIEW_TITLE, ButtonIcon::Garbage) };
+    crate::app::search::draw_icon_window_header_without_close(ui, title, icon);
+    if let ItemsAction::Move { destination } = action {
+        draw_folder_band(ui, destination);
+    }
+    ui.add_space(12.0);
+    crate::app::browser::bulk_rename::padded_body(ui, |ui| {
+        if moving {
+            ui.label("Moves the selected items into this folder.");
+            ui.label(RichText::new("Tags that reference them are updated to their new paths.").color(subtle_dark()));
+            // Always one line, so the window keeps its size when the check
+            // fills in.
+            match check.as_ref().map(|check| check.conflicts) {
+                None => ui.label(RichText::new("Checking for name conflicts…").color(subtle_dark())),
+                Some(0) => ui.label(RichText::new("Nothing in this folder has the same name.").color(subtle_dark())),
+                Some(conflicts) => ui.label(RichText::new(format!(
+                    "{} the same name as something already here. You'll choose to keep both, skip or replace each one before anything moves.",
+                    if conflicts == 1 { "1 item has".to_owned() } else { format!("{conflicts} items have") }
+                )).color(ui.visuals().warn_fg_color)),
+            };
+        } else {
+            let contents = match &check {
+                Some(ItemsCheck { counts: (tags, files, folders), .. }) => delete_contents(*tags, *files, *folders),
+                None => "the selected items".to_owned(),
+            };
+            ui.label(format!("This deletes {contents}, including subfolders and empty folders."));
+            // Muted, like the single Delete windows' note about recovery.
+            ui.label(
+                RichText::new("Everything is moved together into Baboon's deleted-tags folder so it can be recovered by hand.")
+                    .color(subtle_dark()),
+            );
+        }
+        ui.add_space(14.0);
+        // Side by side like Bulk Rename: the selected items on the left, the
+        // referring tags on the right. Both show 8 rows and scroll past that,
+        // so the window keeps its size when the check fills in.
+        let notes: [String; 0] = [];
+        let fits = (window_work_area(ctx).height() - 300.0).max(120.0);
+        let height = references_box_height(8, 0, fits);
+        let gap = 20.0;
+        let column_width = ((ui.available_width() - gap) / 2.0).floor();
+        let title = if moving {
+            plural(selected.len(), "Item to Move", "Items to Move")
+        } else {
+            plural(selected.len(), "Item to Delete", "Items to Delete")
+        };
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            ui.allocate_ui_with_layout(Vec2::new(column_width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_width(column_width);
+                draw_items_box(ui, "bulk_review_items", &title, selected, &[], game, height);
+            });
+            ui.allocate_ui_with_layout(Vec2::new(column_width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_width(column_width);
+                match &check {
+                    Some(check) => {
+                        let count = check.referrers.len();
+                        let title = if moving { references_to_fix_title(count) } else { missing_references_title(count) };
+                        draw_references_box(ui, &title, check.referrers, &notes, game, height);
+                    }
+                    None => rename_box(ui, height, |ui| {
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(if moving { "Checking References to Fix…" } else { "Checking for Missing References…" }).strong());
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(RichText::new(phase.unwrap_or("Checking references")).color(subtle_dark()));
+                        });
+                    }),
+                }
+            });
+        });
+    });
+    ui.add_space(12.0);
+    let mut choice = None;
+    popup_footer(ui, |ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if icon_text_button(ui, ButtonIcon::Clear, "Cancel", true).clicked() {
+                choice = Some(false);
+            }
+            let go = if moving {
+                icon_text_button(ui, ButtonIcon::Move, "Move", check.is_some())
+            } else {
+                accent_icon_text_button(ui, ButtonAccent::Destructive, ButtonIcon::Garbage, "Delete", check.is_some())
+            };
+            if go.on_disabled_hover_text("Available once the reference check finishes.").clicked() {
+                choice = Some(true);
+            }
+        });
+    });
+    choice
+}
+
 fn date_label(seconds: u64) -> String {
     // Use the folder browser's platform-aware local date formatter.
     crate::app::browser::local_date(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
         .unwrap_or_else(|| "Unavailable".into())
 }
 
-pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi) {
+/// The open review, or a bulk delete review still being checked. `phase` is
+/// the check's progress, shown while it runs.
+pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi, phase: Option<&str>) {
     let Some(review) = state.review.as_mut() else {
+        let Some(preview) = &state.items_preview else {
+            return;
+        };
+        // The same window as the finished review (same id), so it fills in
+        // place when the check arrives.
+        let mut cancel = false;
+        let modal = egui::Modal::new(egui::Id::unique("folder_merge_review"))
+            .frame(egui::Frame::window(&ctx.global_style()))
+            .show(ctx, |ui| {
+                ui.set_width(window_width(ctx, 880.0));
+                cancel = draw_items_review(ui, ctx, &preview.action, &preview.selected, None, preview.game, phase) == Some(false);
+            });
+        if cancel || modal.should_close() {
+            state.control.cancel();
+            state.items_preview = None;
+        }
         return;
     };
     let mut response = None;
     let modal = egui::Modal::new(egui::Id::unique("folder_merge_review"))
         .frame(egui::Frame::window(&ctx.global_style()))
         .show(ctx, |ui| {
+            let items = match &review.kind {
+                ReviewKind::Delete { selected, referrers, game, tags, files, folders } => Some((
+                    ItemsAction::Delete, selected, *game,
+                    ItemsCheck { referrers, counts: (*tags, *files, *folders), conflicts: 0 },
+                )),
+                ReviewKind::Move { selected, referrers, game, destination, conflicts } => Some((
+                    ItemsAction::Move { destination: destination.clone() }, selected, *game,
+                    ItemsCheck { referrers, counts: (0, 0, 0), conflicts: *conflicts },
+                )),
+                _ => None,
+            };
+            if let Some((action, selected, game, check)) = items {
+                ui.set_width(window_width(ctx, 880.0));
+                response = draw_items_review(ui, ctx, &action, selected, Some(check), game, None)
+                    .map(|go| go.then_some(MergeAnswer { choice: None, apply_remaining: false }));
+                return;
+            }
             ui.set_width(window_width(ctx, 560.0));
-            crate::app::search::draw_icon_window_header_without_close(ui, match &review.kind { ReviewKind::Delete {..} => "Delete Selected Items", ReviewKind::BatchSummary {..} => "Review Selected Items", _ => "Merge Folders" }, ButtonIcon::FolderClosed);
+            crate::app::search::draw_icon_window_header_without_close(ui, match &review.kind { ReviewKind::BatchSummary {..} => "Review Selected Items", _ => "Merge Folders" }, ButtonIcon::FolderClosed);
             ui.add_space(12.0);
             ScrollArea::vertical().id_salt("folder_merge_review_scroll")
                 .max_height((window_work_area(ctx).height() - 180.0).max(100.0))
                 .show(ui, |ui| {
                     match &review.kind {
-                        ReviewKind::Delete { items, folders, tags } => {
-                            ui.label(format!("Delete {tags} tags and {} other files?",items.len()-tags));
-                            ui.label(format!("{} folder(s), including their contents and empty subfolders", folders.len()));
-                            ui.label("Files will be preserved together in Deleted Tags. Reference counts below exclude tags in this deletion.");
-                            for folder in folders { ui.label(RichText::new(format!("{}{}", folder.display(), std::path::MAIN_SEPARATOR)).monospace()); }
-                            for (path,references) in items { ui.label(RichText::new(path.display().to_string()).monospace()); if let Some(count)=references { if *count>0 {ui.label(format!("Referenced by {count} tags outside this selection"));} } }
-                        }
+                        ReviewKind::Delete { .. } | ReviewKind::Move { .. } => {}
                         ReviewKind::BatchSummary { sources, destination, files, conflicts } => {
                             ui.label(format!("{files} incoming files, {conflicts} conflicts"));
                             ui.label("From:"); for source in sources { ui.label(RichText::new(source.display().to_string()).monospace()); }
@@ -176,8 +384,8 @@ pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if icon_text_button(ui, ButtonIcon::Clear, "Cancel", true).clicked() { response = Some(None); }
                     match &review.kind {
-                        ReviewKind::Summary { .. } | ReviewKind::BatchSummary { .. } | ReviewKind::Delete { .. } => {
-                            if icon_text_button(ui, ButtonIcon::Confirm, if matches!(&review.kind,ReviewKind::Delete{..}) {"Delete"} else {"Continue"}, true).clicked() {
+                        ReviewKind::Summary { .. } | ReviewKind::BatchSummary { .. } | ReviewKind::Delete { .. } | ReviewKind::Move { .. } => {
+                            if icon_text_button(ui, ButtonIcon::Confirm, "Continue", true).clicked() {
                                 response = Some(Some(MergeAnswer { choice: None, apply_remaining: false }));
                             }
                         }
@@ -201,6 +409,8 @@ pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi) {
         }
         let review = state.review.take().unwrap();
         let _ = review.answer.send(answer);
+        // Answered: from here the delete runs, or stops, under the lock.
+        state.items_preview = None;
     }
 }
 
@@ -254,6 +464,7 @@ mod tests {
         fs::write(&existing, b"existing bytes").unwrap();
         let (answer, rx) = mpsc::channel();
         let mut state = MergeUi {
+            items_preview: None,
             control: Arc::new(MergeControl::default()),
             review: Some(MergeReview {
                 kind: ReviewKind::Conflict {
@@ -286,7 +497,7 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |_| draw(&ctx, state),
+                |_| draw(&ctx, state, None),
             );
             output
                 .shapes
