@@ -285,6 +285,27 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         if button_response.middle_clicked() {
             self.close_requests.push(key.clone());
         }
+        // A folder tab takes Flat view items dropped onto it, into the folder
+        // it shows.
+        if let Some(pane) = self.parts.views[self.kit].browser.folder_browsers.get(&key) {
+            let ctx = &button_response.ctx;
+            let writable = self.cx.model.kits[self.kit_index]
+                .source
+                .as_ref()
+                .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }))
+                && !self.cx.model.editing_kit_is_read_only(self.kit_index);
+            if let Some(action) = crate::app::browser::drag_move::drop_target(
+                ctx,
+                &ctx.layer_painter(button_response.layer_id),
+                button_response.contains_pointer(),
+                button_response.rect,
+                self.kit,
+                &pane.rel_path,
+                writable,
+            ) {
+                self.cx.send(crate::app::browser::BrowserCommand::Action { kit: self.kit, action });
+            }
+        }
         // Clicking a tab focuses its tag, by the same rule as a press inside
         // its pane: `selected_key` is what Save and Save As act on, and a tab
         // brought forward by its title used to leave them on the tag before,

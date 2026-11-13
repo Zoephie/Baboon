@@ -345,6 +345,7 @@ impl Baboon {
     pub(in crate::app) fn handle_browser_action(&mut self, action: BrowserAction, ctx: egui::Context) {
         match action {
             BrowserAction::Bulk { pane, keys, action } => self.begin_browser_bulk(pane,keys,action,&ctx),
+            BrowserAction::DropItems { pane, keys, copy, folder } => self.begin_browser_drop(pane, keys, copy, folder, &ctx),
             BrowserAction::OpenFolderBrowser {
                 rel_path,
                 label,
@@ -1229,6 +1230,7 @@ mod tests {
         use BrowserAction as A;
         match action {
             A::Bulk { .. } => 50, // Dedicated batch tests cover this compound action.
+            A::DropItems { .. } => 51, // So do drop tests: it is a Move or Copy.
             A::OpenFolderBrowser { .. } => 0,
             A::ToggleFolderFavorite(_) => 1,
             A::Select(_) => 2,

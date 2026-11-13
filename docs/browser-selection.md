@@ -92,12 +92,41 @@ Move completion remaps open tag paths, folder browsers, favorites and references
 and refreshes documents and the browser. Completed roots leave the selection;
 skipped roots remain selected. Copy leaves the source selection intact.
 
+## Drag and drop
+
+In Flat view, drag tags and folders onto a folder to move them there; hold
+**Ctrl** when you let go to copy them instead. A drag carries the whole selection,
+or just the item you grabbed if it wasn't selected (it becomes the selection).
+You can drop onto:
+
+- a folder row in the same view,
+- another folder tab of the same kit (its tab header), or
+- another folder pane open beside it, anywhere in its listing.
+
+A blue outline marks where the items will land, and a label beside the pointer
+says what will happen ("Move 3 items to covenant"). Where a drop isn't allowed,
+the cursor shows "not allowed" and the label says why: a folder can't go inside
+itself, a plain drop onto the folder the items are already in does nothing, and
+drops into another kit or a read-only kit are refused. Ctrl-dropping into the
+items' own folder duplicates them with numbered names, as Copy does.
+
+A drop changes nothing by itself: it opens the same **Move Selected Items?**
+review as Move (or Copy's review), with the folder already chosen, and nothing
+moves until you confirm.
+
+Dragging a single tag still fills tag reference fields and shader bitmap slots,
+and hands the tag to Sapien or Guerilla. A drag of several items, or of a
+folder, is refused there.
+
 ## Implementation boundaries
 
 `browser/selection.rs` owns ordered selection and menu eligibility.
 `browser/flat.rs` owns cached immediate listings and virtualized rows.
 `browser/navigation.rs` owns keyboard ordering and type-to-select.
 `browser/bulk.rs` coordinates prompts, whole-selection jobs and completion.
+`browser/drag_move.rs` owns the Flat view drag payload, drop targets (folder
+rows, folder panes, folder tab headers in `shell/tag_tiles.rs`) and the label
+beside the pointer; a drop becomes a bulk Move or Copy with its destination set.
 `core/folder_merge.rs` and `tag_ops/folder_merge_ops.rs` share the filesystem
 plan, recovery and rollback journal between existing single-folder and new
 multi-root operations. `core/script_paths` finds and rewrites tag paths in

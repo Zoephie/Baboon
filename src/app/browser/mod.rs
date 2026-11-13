@@ -21,6 +21,7 @@ pub(in crate::app) mod selection;
 mod flat;
 pub(in crate::app) mod bulk;
 pub(in crate::app) mod bulk_rename;
+pub(in crate::app) mod drag_move;
 use selection::*;
 mod recents;
 use recents::draw_recents;

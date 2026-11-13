@@ -493,11 +493,10 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                 .as_ref()
                 .is_none_or(|accepted| accepted.contains(&payload.group_tag))
         };
-        if let Some(payload) = row_response.dnd_hover_payload::<DraggedTagRef>() {
-            let color = if accepts(&payload) {
-                Color32::from_rgb(120, 170, 90)
-            } else {
-                REFERENCE_MISSING_COLOR
+        if let Some(drag) = crate::app::browser::drag_move::hovered_tag(&row_response) {
+            let color = match drag {
+                crate::app::browser::drag_move::TagDrag::Tag(payload) if accepts(&payload) => Color32::from_rgb(120, 170, 90),
+                _ => REFERENCE_MISSING_COLOR,
             };
             ui.painter()
                 .rect_stroke(
@@ -507,7 +506,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     egui::StrokeKind::Middle,
                 );
         }
-        if let Some(payload) = row_response.dnd_release_payload::<DraggedTagRef>() {
+        if let Some(payload) = crate::app::browser::drag_move::released_tag(&row_response) {
             if accepts(&payload) {
                 draft.set_clean(payload.input.clone());
                 edit.pending.push(PendingFieldEdit {

@@ -6,6 +6,26 @@ that picking one up does not mean rediscovering it first.
 
 ---
 
+## Drag and drop: spring-loaded folders and more drop targets
+
+**Status:** not implemented. Flat view drags drop onto folder rows, folder tab
+headers and other open folder panes of the same kit.
+
+Two things were left out on purpose:
+
+- **Spring-loading.** Hovering a folder row (or a tab) for about a second while
+  dragging would open it, so a drop can go deeper than what is on screen. It
+  changes panes under the pointer mid-drag, so it wants its own design pass.
+  The hover time and a short visual countdown on the row are the open questions.
+- **The left navigation tree as a target.** It is a long, dense tree where a
+  slip drops onto the wrong folder. If added, it wants a hover delay before a
+  folder counts as the target, and auto-scroll near the tree's edges.
+
+Both go through `browser/drag_move.rs`: a target is `drop_target` with the
+target's rect, its folder and whether the pointer is over it.
+
+---
+
 ## Script paths in Halo 2 Anniversary Multiplayer and Halo 4
 
 **Status:** not implemented. Their Rename, Move and Delete windows say scripts

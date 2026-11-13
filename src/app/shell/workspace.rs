@@ -51,6 +51,7 @@ impl Baboon {
             .show(ui, |ui| {
                 self.draw_workspace_tiles(ui, ctx);
             });
+        crate::app::browser::drag_move::draw_drag_label(ctx);
         self.draw_auxiliary_windows(ctx);
         crate::app::ui_kit::autoscroll::draw_blocker(ui);
         // The draws' commands land first: some of them queue the very requests

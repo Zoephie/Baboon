@@ -203,6 +203,8 @@ pub(super) fn draw(
         .collect();
     pane.selection.retain_rows();
     begin_multi(ui, pane_key, kit, &pane.selection, false);
+    // Whether drops may change this kit's files.
+    let writable = matches!(source.source, TagSource::LooseFolder { .. }) && !operation_read_only(ui);
     let row_height = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
     let mut scroll = ScrollArea::vertical()
         .id_salt(("flat_folder", pane_key))
@@ -268,16 +270,25 @@ pub(super) fn draw(
                         ),
                         egui::Sense::hover(),
                     );
+                    // Dragged to move or copy it, and a place to drop others.
                     let response = ui.interact(
                         rect,
                         ui.make_persistent_id(("flat_folder", key)),
-                        egui::Sense::click(),
+                        egui::Sense::click_and_drag(),
                     );
                     #[cfg(test)]
                     TREE_ROW_TOPS.with(|tops| tops.borrow_mut().push((key.clone(), rect.top())));
                     register_browser_folder(ui, response.id, None, &node.rel_path, label, false);
                     register_browser_name(ui, key, label);
                     let selected = select_browser_tag(ui, &response, key);
+                    if response.drag_started() {
+                        super::drag_move::start(ui, &response, key, None);
+                    }
+                    if let Some(drop) = super::drag_move::drop_target(
+                        ui.ctx(), ui.painter(), ui.rect_contains_pointer(rect), rect, kit, &node.rel_path, writable,
+                    ) {
+                        *action = Some(drop);
+                    }
                     if let Some(shape) = browser_row_hover_shape(ui, &response, rect, false) {
                         ui.painter().add(shape);
                     }
@@ -359,6 +370,14 @@ pub(super) fn draw(
             (output.state.clamped_offset().y, output.inner_rect.height()),
         )
     });
+    // Anywhere else in the pane drops into the folder it shows. Rows drawn
+    // above have already claimed a drop onto a folder row.
+    let area = output.inner_rect;
+    if let Some(drop) = super::drag_move::drop_target(
+        ui.ctx(), ui.painter(), ui.rect_contains_pointer(area), area, kit, &pane.rel_path, writable,
+    ) {
+        *action = Some(drop);
+    }
     if let Some(state) = end_multi(ui) {
         pane.selection = state.selection;
     }
@@ -375,6 +394,8 @@ mod tests {
         source: LoadedSourceData,
         time: f64,
         keywords: Arc<std::collections::BTreeMap<String, Vec<String>>>,
+        /// What the last frame's draw asked for.
+        action: Option<BrowserAction>,
     }
     impl Harness {
         fn new(kit: &LooseKit) -> Self {
@@ -398,6 +419,7 @@ mod tests {
                 source: kit.source(),
                 time: 1.0,
                 keywords: Arc::default(),
+                action: None,
             }
         }
         fn frame(&mut self, events: Vec<egui::Event>) -> HashMap<String, egui::Pos2> {
@@ -426,6 +448,8 @@ mod tests {
                             .unwrap();
                         set_browser_is_folder_pane(ui, true);
                         set_browser_loose_source(ui, true);
+                        // As the pane does: the kit's tags, and that it can change.
+                        set_operation_entries(ui, kit, 1, self.source.full_entry_set(), false, true);
                         ui.data_mut(|data| {
                             data.insert_temp(
                                 browser_selection_owner_id().with("drawing"),
@@ -451,7 +475,7 @@ mod tests {
                             &self.keywords,
                             &mut false,
                             &mut Vec::new(),
-                            &mut None,
+                            &mut self.action,
                         );
                         finish_browser_navigation(ui);
                         pane.selected_tag = browser_selected_tag(ui);
@@ -487,12 +511,90 @@ mod tests {
                 modifiers: mods,
             }]);
         }
+        /// Press at `from`, drag past the threshold to `to`, and release there
+        /// holding `mods`. Returns what the drop asked for.
+        fn drag(&mut self, from: egui::Pos2, to: egui::Pos2, mods: egui::Modifiers) -> Option<BrowserAction> {
+            self.action = None;
+            self.frame(vec![egui::Event::PointerMoved(from)]);
+            self.frame(vec![egui::Event::PointerButton {
+                pos: from,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            self.frame(vec![egui::Event::PointerMoved(from + egui::vec2(0.0, 6.0))]);
+            self.frame(vec![egui::Event::PointerMoved(to)]);
+            assert!(egui::DragAndDrop::has_any_payload(&self.ctx), "the drag never started");
+            self.frame(vec![egui::Event::ModifiersChanged(mods), egui::Event::PointerMoved(to)]);
+            self.frame(vec![egui::Event::PointerButton {
+                pos: to,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: mods,
+            }]);
+            self.frame(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+            self.action.take()
+        }
         fn selected(&self) -> &BrowserSelection {
             &self.app.views[self.app.model.active_kit_id()]
                 .browser
                 .folder_browsers[&self.pane]
                 .selection
         }
+    }
+    fn dropped(action: Option<BrowserAction>) -> Option<(Vec<String>, bool, PathBuf)> {
+        match action? {
+            BrowserAction::DropItems { keys, copy, folder, .. } => Some((keys, copy, folder)),
+            _ => None,
+        }
+    }
+    fn drag_kit(name: &str) -> LooseKit {
+        let kit = LooseKit::new(name, "halo3_mcc");
+        kit.write_mcc("alpha", "model", |_| {});
+        kit.write_mcc("beta", "model", |_| {});
+        kit.write_mcc("dest/inside", "model", |_| {});
+        kit.write_mcc("src/inside", "model", |_| {});
+        kit
+    }
+    #[test]
+    fn dragging_a_folder_onto_another_moves_it_there() {
+        let kit = drag_kit("flat-drag-folder");
+        let mut h = Harness::new(&kit);
+        let rows = h.frame(Vec::new());
+        let (src, dest) = (folder_pane_key(Path::new("src")), folder_pane_key(Path::new("dest")));
+        let dropped = dropped(h.drag(rows[&src], rows[&dest], egui::Modifiers::NONE));
+        assert_eq!(dropped, Some((vec![src.clone()], false, PathBuf::from("dest"))));
+        assert!(h.selected().keys.contains(&src), "the dragged folder became the selection");
+    }
+    #[test]
+    fn dragging_the_selection_with_ctrl_copies_every_selected_item() {
+        let kit = drag_kit("flat-drag-copy");
+        let mut h = Harness::new(&kit);
+        let rows = h.frame(Vec::new());
+        let (alpha, beta) = (kit.key("alpha.model"), kit.key("beta.model"));
+        h.click(rows[&alpha], egui::Modifiers::NONE);
+        h.click(rows[&beta], egui::Modifiers::CTRL);
+        let dest = folder_pane_key(Path::new("dest"));
+        let (keys, copy, folder) = dropped(h.drag(rows[&beta], rows[&dest], egui::Modifiers::CTRL)).expect("a drop");
+        assert_eq!((copy, folder), (true, PathBuf::from("dest")));
+        assert_eq!(keys.len(), 2, "both selected tags go: {keys:?}");
+        assert!(keys.contains(&alpha) && keys.contains(&beta));
+    }
+    #[test]
+    fn a_folder_dropped_on_itself_or_its_own_folder_does_nothing() {
+        let kit = drag_kit("flat-drag-refused");
+        let mut h = Harness::new(&kit);
+        let rows = h.frame(Vec::new());
+        let src = folder_pane_key(Path::new("src"));
+        // Back onto its own row: a folder can't go inside itself.
+        assert!(dropped(h.drag(rows[&src], rows[&src] + egui::vec2(30.0, 0.0), egui::Modifiers::NONE)).is_none());
+        // Onto a tag beside it, which drops into the folder this pane shows,
+        // where it already is.
+        let alpha = kit.key("alpha.model");
+        assert!(dropped(h.drag(rows[&src], rows[&alpha], egui::Modifiers::NONE)).is_none());
+        // With Ctrl the same drop duplicates it in place.
+        let (keys, copy, folder) = dropped(h.drag(rows[&src], rows[&alpha], egui::Modifiers::CTRL)).expect("a copy");
+        assert_eq!((keys, copy, folder), (vec![src], true, PathBuf::new()));
     }
     #[test]
     fn flat_listing_selects_mixed_siblings_and_never_selects_hidden_descendants() {

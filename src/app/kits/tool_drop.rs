@@ -24,7 +24,7 @@ impl Baboon {
     /// the way Explorer would. Sapien then adds the tag to its scenario's
     /// matching palette; Guerilla opens it.
     pub(in crate::app) fn track_kit_tool_drop(&mut self, ctx: &egui::Context) {
-        let payload = egui::DragAndDrop::payload::<DraggedTagRef>(ctx);
+        let payload = crate::app::browser::drag_move::dragged_tag(ctx);
         // The tool under the cursor is only worth asking Windows about while
         // something is being dragged. egui keeps the payload through the frame
         // the pointer is released in, which is the frame the drop happens.

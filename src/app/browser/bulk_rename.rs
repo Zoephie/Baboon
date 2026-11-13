@@ -1101,7 +1101,7 @@ impl BulkRenameDialog {
             })
             .collect();
         Self {
-            request: bulk::BulkRequest {
+            request: bulk::BulkRequest { destination: None,
                 stamp,
                 pane: String::new(),
                 keys: Vec::new(),

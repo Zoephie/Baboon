@@ -2814,13 +2814,18 @@ pub(in crate::app) fn draw_entry(
     // reference. Payload is our `DraggedTagRef` (what the ref-cell + shader-row
     // drop targets expect); the row paints a tag icon + a cursor drag-preview.
     // egui takes the payload only on the frame the drag starts.
+    // In Flat view the drag carries the selection, to move it onto a folder;
+    // a single tag still sets references.
     if response.drag_started() {
-        response.dnd_set_drag_payload(DraggedTagRef {
+        let tag = DraggedTagRef {
             group_tag: entry.group_tag,
             input: entry_reference_input(entry),
             rel_path: entry_rel_path(entry),
             file_path: entry_loose_file(entry),
-        });
+        };
+        if !super::drag_move::start(ui, &response, &entry.key, Some(tag.clone())) {
+            response.dnd_set_drag_payload(tag);
+        }
     }
     if reveal_key == Some(entry.key.as_str()) {
         response.scroll_to_me(reveal_align(ui));

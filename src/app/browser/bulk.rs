@@ -11,6 +11,9 @@ pub(in crate::app) struct BulkRequest {
     pub pane: String,
     pub keys: Vec<String>,
     pub action: BulkAction,
+    /// Where a Move or Copy goes when it is already chosen (a drop onto a
+    /// folder); `None` asks with a folder picker.
+    pub destination: Option<PathBuf>,
 }
 pub(in crate::app) struct BulkPrompt {
     pub request: BulkRequest,
@@ -80,6 +83,32 @@ impl Baboon {
                 pane,
                 keys,
                 action,
+                destination: None,
+            },
+            false,
+            ctx,
+        );
+    }
+    /// Items dropped onto `folder` (relative to the tags folder): the same
+    /// Move or Copy as the selection menu's, with the folder already chosen.
+    pub(in crate::app) fn begin_browser_drop(
+        &mut self,
+        pane: String,
+        keys: Vec<String>,
+        copy: bool,
+        folder: PathBuf,
+        ctx: &egui::Context,
+    ) {
+        let Some(root) = self.model.loaded_tags_root_for(self.model.active) else {
+            return;
+        };
+        self.run_browser_bulk(
+            BulkRequest {
+                stamp: self.model.kit_stamp(),
+                pane,
+                keys,
+                action: if copy { BulkAction::Copy } else { BulkAction::Move },
+                destination: Some(root.join(folder)),
             },
             false,
             ctx,
@@ -258,15 +287,17 @@ impl Baboon {
             None
         } else {
             let start = paths[0].1.parent().unwrap_or(&root);
-            let Some(parent) = rfd::FileDialog::new()
-                .set_title(if request.action == BulkAction::Move {
-                    "Move Selected Items To"
-                } else {
-                    "Copy Selected Items To"
-                })
-                .set_directory(start)
-                .pick_folder()
-            else {
+            let chosen = request.destination.clone().or_else(|| {
+                rfd::FileDialog::new()
+                    .set_title(if request.action == BulkAction::Move {
+                        "Move Selected Items To"
+                    } else {
+                        "Copy Selected Items To"
+                    })
+                    .set_directory(start)
+                    .pick_folder()
+            });
+            let Some(parent) = chosen else {
                 return;
             };
             let resolved = match recovery::resolved_path(&parent) {
@@ -824,7 +855,7 @@ mod tests {
                 }
             }
         });
-        let req = BulkRequest {
+        let req = BulkRequest { destination: None,
             stamp: KitStamp {
                 kit: KitId(0),
                 generation: 0,
@@ -1024,7 +1055,7 @@ mod tests {
             }
             seen
         });
-        let req = BulkRequest {
+        let req = BulkRequest { destination: None,
             stamp: KitStamp { kit: KitId(0), generation: 0 },
             pane: "test".into(),
             keys: paths.iter().map(|(key, _)| key.clone()).collect(),
@@ -1066,7 +1097,7 @@ mod tests {
             }
             seen
         });
-        let req = BulkRequest {
+        let req = BulkRequest { destination: None,
             stamp: KitStamp { kit: KitId(0), generation: 0 },
             pane: "test".into(),
             keys: paths.iter().map(|(key, _)| key.clone()).collect(),
@@ -1176,7 +1207,7 @@ mod tests {
             }
             seen
         });
-        let req = BulkRequest {
+        let req = BulkRequest { destination: None,
             stamp: KitStamp { kit: KitId(0), generation: 0 },
             pane: "test".into(),
             keys: paths.iter().map(|(key, _)| key.clone()).collect(),
@@ -1207,6 +1238,27 @@ mod tests {
         assert_eq!(data_text(&kit), expected);
         assert_eq!(saved_copy(&kit, "moved/03a/03a.scenario"), expected);
         assert!(done.status.contains("5 path(s) in 1 script(s)"), "{}", done.status);
+    }
+
+    #[test]
+    fn a_drop_opens_the_move_review_for_its_folder_without_asking_where() {
+        let kit = mixed_kit();
+        fs::create_dir_all(kit.path("dest")).unwrap();
+        let mut app = app();
+        kit.install_indexed(&mut app);
+        let key = kit.key("from/a.render_model");
+        app.handle_browser_action(
+            BrowserAction::DropItems { pane: "test".into(), keys: vec![key], copy: false, folder: PathBuf::from("dest") },
+            ctx(),
+        );
+        let merge = app.tag_ops.folder_merge.as_ref().expect("a review");
+        let preview = merge.items_preview.as_ref().expect("the review opens at once");
+        assert_eq!(preview.action, review::ItemsAction::Move { destination: "dest".into() });
+        // Nothing moves until the review is answered; cancelling leaves it.
+        merge.control.cancel();
+        pump_until(&mut app, "the cancelled move to finish", |app| app.tag_ops.folder_refactor.is_none());
+        assert!(kit.path("from/a.render_model").exists());
+        assert!(!kit.path("dest/a.render_model").exists());
     }
 
     #[test]

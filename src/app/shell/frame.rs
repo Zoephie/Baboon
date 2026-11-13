@@ -4167,7 +4167,7 @@ mod tests {
             ),
             case(
                 "bulk_browser_prompt", &["dialog:BulkPrompt"], &[], loose_kit,
-                |h| {h.app.dialogs.open(crate::app::browser::bulk::BulkPrompt {request:crate::app::browser::bulk::BulkRequest { stamp:h.app.model.kit_stamp(),pane:String::new(),keys:Vec::new(),action:crate::app::browser::selection::BulkAction::Open },message:"Open 10 tag tabs?".into()});},
+                |h| {h.app.dialogs.open(crate::app::browser::bulk::BulkPrompt {request:crate::app::browser::bulk::BulkRequest { destination:None, stamp:h.app.model.kit_stamp(),pane:String::new(),keys:Vec::new(),action:crate::app::browser::selection::BulkAction::Open },message:"Open 10 tag tabs?".into()});},
                 &["Confirm Selection Action","Continue"],
             ),
             case(

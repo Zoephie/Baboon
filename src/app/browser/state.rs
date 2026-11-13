@@ -5,6 +5,10 @@ use super::*;
 
 pub(in crate::app) enum BrowserAction {
     Bulk { pane: String, keys: Vec<String>, action: BulkAction },
+    /// Flat view items from `pane` dropped onto `folder` (relative to the
+    /// tags folder): Move them there, or Copy with Ctrl held. The usual review
+    /// asks before anything changes.
+    DropItems { pane: String, keys: Vec<String>, copy: bool, folder: PathBuf },
     /// Open a docked browser pane rooted at one real folder.
     OpenFolderBrowser {
         rel_path: PathBuf,

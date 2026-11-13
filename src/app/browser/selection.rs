@@ -100,6 +100,24 @@ pub(super) fn begin_multi(
         )
     });
 }
+/// For a drag starting on the Flat view row at `key`: its kit, its pane and
+/// the keys it carries, in listed order. A row outside the selection becomes
+/// the selection and goes alone. `None` outside Flat view.
+pub(super) fn drag_selection(ui: &Ui, key: &str) -> Option<(KitId, String, Vec<String>)> {
+    let shared = ui.data(|data| data.get_temp::<Arc<std::sync::Mutex<MultiDraw>>>(slot()))?;
+    let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+    if state.assets {
+        return None;
+    }
+    if !state.selection.keys.contains(key) {
+        state.selection.click(key, false, false, false);
+    }
+    Some((state.kit, state.pane.clone(), state.selection.ordered_keys()))
+}
+/// Whether the kit drawing these rows can't be changed.
+pub(super) fn operation_read_only(ui: &Ui) -> bool {
+    ui.data(|data| data.get_temp::<bool>(slot().with("readonly"))).unwrap_or(true)
+}
 pub(super) fn end_multi(ui: &Ui) -> Option<MultiDraw> {
     let result = multi(ui);
     ui.data_mut(|data| data.remove::<Arc<std::sync::Mutex<MultiDraw>>>(slot()));
