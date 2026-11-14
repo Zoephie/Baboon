@@ -3,8 +3,12 @@
 
 use super::*;
 
-use crate::app::search::result_windows::fixed_height_row;
-use crate::app::shell::frame::explorer_entry_row;
+use crate::app::browser::bulk_rename::{draw_links_box, draw_tag_band, padded_body};
+
+/// Each list's box height: about a dozen rows, then it scrolls.
+const EXPLORER_BOX_HEIGHT: f32 = 380.0;
+/// The tooltip line under a row's path.
+const EXPLORE_HINT: &str = "Click to explore this tag's references";
 
 /// The Content Explorer window, while it is open.
 impl Dialog for ContentExplorer {
@@ -18,6 +22,7 @@ impl Dialog for ContentExplorer {
             .resolve_kit(explorer_kit)
             .unwrap_or(cx.model.active);
         let mut filter = self.filter.clone();
+        let game = cx.model.kits[explorer_kit_index].source.as_ref().and_then(|source| source.source.game());
         {
             let explorer = &*self;
             egui::Window::new("Content Explorer")
@@ -26,123 +31,108 @@ impl Dialog for ContentExplorer {
                 .open(&mut open)
                 .default_width(window_width(ctx, 720.0))
                 .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(!explorer.back.is_empty(), egui::Button::new("← Back"))
-                            .clicked()
-                        {
-                            act = Some(ExplorerAct::Back);
+                    // The tag being explored, on the band the Move and Rename
+                    // windows show their folder on.
+                    draw_tag_band(ui, explorer.focus.group_tag, game, &explorer.focus.display_path);
+                    ui.add_space(10.0);
+                    padded_body(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_enabled(!explorer.back.is_empty(), egui::Button::new("← Back"))
+                                .clicked()
+                            {
+                                act = Some(ExplorerAct::Back);
+                            }
+                            if ui
+                                .add_enabled(
+                                    !explorer.forward.is_empty(),
+                                    egui::Button::new("Forward →"),
+                                )
+                                .clicked()
+                            {
+                                act = Some(ExplorerAct::Forward);
+                            }
+                            ui.separator();
+                            if ui.button("Open in editor").clicked() {
+                                act = Some(ExplorerAct::Open(explorer.focus.key.clone()));
+                            }
+                            if ui.button("Reveal in browser").clicked() {
+                                act = Some(ExplorerAct::Reveal(explorer.focus.key.clone()));
+                            }
+                            ui.separator();
+                            ui.add(
+                                crate::app::ui_kit::singleline_text_edit(&mut filter)
+                                    .hint_text(placeholder_text("filter"))
+                                    .desired_width(140.0),
+                            );
+                        });
+                        if explorer.index_unavailable {
+                            let note = if cx.model.kits[cx.model.active]
+                                .index_jobs
+                                .building_references
+                                || cx.model.kits[explorer_kit_index].scanning_entries
+                            {
+                                "Reference index is building — reopen this in a moment."
+                            } else {
+                                "Reference index unavailable — run Tools → Build Reference Index."
+                            };
+                            ui.add_space(6.0);
+                            ui.label(RichText::new(note).color(subtle_dark()));
                         }
-                        if ui
-                            .add_enabled(
-                                !explorer.forward.is_empty(),
-                                egui::Button::new("Forward →"),
-                            )
-                            .clicked()
-                        {
-                            act = Some(ExplorerAct::Forward);
-                        }
-                        ui.separator();
-                        if ui.button("Open in editor").clicked() {
-                            act = Some(ExplorerAct::Open(explorer.focus.key.clone()));
-                        }
-                        if ui.button("Reveal in browser").clicked() {
-                            act = Some(ExplorerAct::Reveal(explorer.focus.key.clone()));
-                        }
-                        ui.separator();
-                        ui.add(
-                            crate::app::ui_kit::singleline_text_edit(&mut filter)
-                                .hint_text(placeholder_text("filter"))
-                                .desired_width(140.0),
-                        );
-                    });
-                    ui.separator();
-                    ui.label(
-                        RichText::new(&explorer.focus.display_path)
-                            .strong()
-                            .color(text_dark()),
-                    );
-                    if explorer.index_unavailable {
-                        let note = if cx.model.kits[cx.model.active]
-                            .index_jobs
-                            .building_references
-                            || cx.model.kits[explorer_kit_index].scanning_entries
-                        {
-                            "Reference index is building — reopen this in a moment."
-                        } else {
-                            "Reference index unavailable — run Tools → Build Reference Index."
+                        ui.add_space(12.0);
+                        let query = filter.trim();
+                        let shown = |entries: &[TagEntry]| -> Vec<TagEntry> {
+                            entries
+                                .iter()
+                                .filter(|entry| contains_ignore_ascii_case(&entry.display_path, query))
+                                .cloned()
+                                .collect()
                         };
-                        ui.label(RichText::new(note).color(subtle_dark()));
-                    }
-                    ui.separator();
-                    let query = filter.trim();
-                    let matches =
-                        |entry: &TagEntry| contains_ignore_ascii_case(&entry.display_path, query);
-                    let parents: Vec<&TagEntry> =
-                        explorer.parents.iter().filter(|e| matches(e)).collect();
-                    let children: Vec<&TagEntry> =
-                        explorer.children.iter().filter(|e| matches(e)).collect();
-                    let count_label = |shown: usize, total: usize| {
-                        if shown == total {
-                            format!("({total})")
-                        } else {
-                            format!("({shown}/{total})")
-                        }
-                    };
-                    ui.columns(2, |cols| {
-                        cols[0].label(
-                            RichText::new(format!(
-                                "Referenced by {}",
-                                count_label(parents.len(), explorer.parents.len())
-                            ))
-                            .strong()
-                            .color(text_dark()),
-                        );
-                        if parents.is_empty() {
-                            cols[0].label(RichText::new("(none)").color(subtle_dark()));
-                        }
-                        // A widely used tag has thousands of referrers: only
-                        // the rows in view are drawn.
-                        let row_height = cols[0].spacing().interact_size.y;
-                        crate::app::ScrollArea::vertical()
-                            .id_salt("ce_parents")
-                            .max_height(380.0)
-                            .show_rows(&mut cols[0], row_height, parents.len(), |ui, rows| {
-                                for entry in &parents[rows] {
-                                    if fixed_height_row(ui, row_height, |ui| {
-                                        explorer_entry_row(ui, entry)
-                                    }) {
-                                        act = Some(ExplorerAct::Navigate((*entry).clone()));
-                                    }
-                                }
-                            });
-                        cols[1].label(
-                            RichText::new(format!(
-                                "References {}",
-                                count_label(children.len(), explorer.children.len())
-                            ))
-                            .strong()
-                            .color(text_dark()),
-                        );
-                        if children.is_empty() {
-                            cols[1].label(RichText::new("(none)").color(subtle_dark()));
-                        }
-                        // A widely used tag has thousands of referrers: only
-                        // the rows in view are drawn.
-                        let row_height = cols[1].spacing().interact_size.y;
-                        crate::app::ScrollArea::vertical()
-                            .id_salt("ce_children")
-                            .max_height(380.0)
-                            .show_rows(&mut cols[1], row_height, children.len(), |ui, rows| {
-                                for entry in &children[rows] {
-                                    if fixed_height_row(ui, row_height, |ui| {
-                                        explorer_entry_row(ui, entry)
-                                    }) {
-                                        act = Some(ExplorerAct::Navigate((*entry).clone()));
-                                    }
-                                }
-                            });
+                        let parents = shown(&explorer.parents);
+                        let children = shown(&explorer.children);
+                        let gap = 20.0;
+                        let column = ((ui.available_width() - gap) / 2.0).floor();
+                        ui.horizontal_top(|ui| {
+                            ui.spacing_mut().item_spacing.x = gap;
+                            for (id, title, list, total, empty) in [
+                                ("ce_parents", "Referenced By", &parents, explorer.parents.len(), "No tags reference this tag."),
+                                ("ce_children", "References", &children, explorer.children.len(), "This tag references no other tags."),
+                            ] {
+                                ui.allocate_ui_with_layout(
+                                    Vec2::new(column, EXPLORER_BOX_HEIGHT),
+                                    egui::Layout::top_down(egui::Align::Min),
+                                    |ui| {
+                                        ui.set_width(column);
+                                        let rows: Vec<(String, u32)> =
+                                            list.iter().map(|entry| (entry.display_path.clone(), entry.group_tag)).collect();
+                                        let count = if list.len() == total {
+                                            format!("({total})")
+                                        } else {
+                                            format!("({} of {total})", list.len())
+                                        };
+                                        let notes = match (list.len(), total) {
+                                            (0, 0) => vec![empty.to_owned()],
+                                            (0, _) => vec!["None match the filter.".to_owned()],
+                                            _ => Vec::new(),
+                                        };
+                                        if let Some(row) = draw_links_box(
+                                            ui,
+                                            id,
+                                            &format!("{title} {count}"),
+                                            &notes,
+                                            &rows,
+                                            EXPLORE_HINT,
+                                            game,
+                                            EXPLORER_BOX_HEIGHT,
+                                        ) {
+                                            act = Some(ExplorerAct::Navigate(list[row].clone()));
+                                        }
+                                    },
+                                );
+                            }
+                        });
                     });
+                    ui.add_space(8.0);
                 });
         }
         self.filter = filter;

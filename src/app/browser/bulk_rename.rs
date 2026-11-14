@@ -328,13 +328,34 @@ pub(in crate::app) fn missing_references_title(count: usize) -> String {
 /// One item as a row: its icon, then its path with the folder muted.
 pub(in crate::app) fn draw_item_row(ui: &mut Ui, icon: RenameIcon, game: Option<GameId>, path: &str, height: f32) {
     let (row, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+    paint_item_row(ui, row, Some(response), icon, game, path);
+}
+
+/// [`draw_item_row`] as a button: it highlights under the pointer, and
+/// `hint` follows the path in its tooltip. True when clicked.
+pub(in crate::app) fn draw_link_row(ui: &mut Ui, icon: RenameIcon, game: Option<GameId>, path: &str, hint: &str, height: f32) -> bool {
+    let (row, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(row, ui.visuals().widgets.hovered.corner_radius, ui.visuals().widgets.hovered.weak_bg_fill);
+    }
+    let clicked = response.clicked();
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(format!("{path}\n{hint}"));
+    paint_item_row(ui, row, None, icon, game, path);
+    clicked
+}
+
+/// Paint a row's icon, path and divider. `response`, when given, gets the
+/// whole path as its tooltip if the path had to be shortened.
+fn paint_item_row(ui: &mut Ui, row: egui::Rect, response: Option<egui::Response>, icon: RenameIcon, game: Option<GameId>, path: &str) {
     let icon_rect = egui::Rect::from_center_size(egui::pos2(row.left() + 18.0, row.center().y), Vec2::splat(ROW_ICON_SIZE));
     match icon {
         RenameIcon::Folder => paint_button_icon_at(ui, ButtonIcon::FolderClosed, icon_rect, text_dark()),
         RenameIcon::Tag(group) => paint_tag_icon_at(ui, group, game, icon_rect),
     }
     let text = egui::Rect::from_min_max(egui::pos2(icon_rect.right() + 10.0, row.top()), row.max);
-    if crate::app::compare::tag_compare::paint_path_label(ui, path, text) {
+    if crate::app::compare::tag_compare::paint_path_label(ui, path, text)
+        && let Some(response) = response
+    {
         response.on_hover_text(path);
     }
     ui.painter().hline(row.x_range(), row.bottom() - 0.5, Stroke::new(1.0, foundation_block_edge()));
@@ -499,6 +520,22 @@ pub(in crate::app) fn draw_items_box(ui: &mut Ui, id: &str, title: &str, rows: &
         let (path, icon) = &rows[row];
         draw_item_row(ui, *icon, game, path, REFERENCE_ROW_HEIGHT);
     });
+}
+
+/// The same box with each tag as a [`draw_link_row`] button. The index of
+/// the row clicked, if any.
+#[allow(clippy::too_many_arguments)]
+pub(in crate::app) fn draw_links_box(
+    ui: &mut Ui, id: &str, title: &str, notes: &[String], rows: &[(String, u32)], hint: &str, game: Option<GameId>, height: f32,
+) -> Option<usize> {
+    let mut clicked = None;
+    boxed_rows(ui, id, title, notes, false, rows.len(), height, |ui, row| {
+        let (path, group) = &rows[row];
+        if draw_link_row(ui, RenameIcon::Tag(Some(*group)), game, path, hint, REFERENCE_ROW_HEIGHT) {
+            clicked = Some(row);
+        }
+    });
+    clicked
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -670,15 +707,25 @@ fn framed_box(ui: &mut Ui, height: f32, radius: egui::CornerRadius, contents: im
 /// `folder` on a band running edge to edge under a window's header, as Bulk
 /// Rename shows the folder it renames in and Move the folder it moves to.
 pub(in crate::app) fn draw_folder_band(ui: &mut Ui, folder: &str) {
+    draw_band(ui, folder, |ui, icon| paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon, text_dark()));
+}
+
+/// The same band for one tag, led by its group's icon, as the Content
+/// Explorer shows the tag it is exploring.
+pub(in crate::app) fn draw_tag_band(ui: &mut Ui, group: u32, game: Option<GameId>, path: &str) {
+    draw_band(ui, path, |ui, icon| paint_tag_icon_at(ui, Some(group), game, icon));
+}
+
+fn draw_band(ui: &mut Ui, path: &str, paint_icon: impl FnOnce(&Ui, egui::Rect)) {
     let (band, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 36.0), Sense::hover());
     let margin = ui.spacing().window_margin;
     let fill = egui::Rect::from_min_max(egui::pos2(band.left() - f32::from(margin.left), band.top() - ui.spacing().item_spacing.y * 0.5),
         egui::pos2(band.right() + f32::from(margin.right), band.bottom()));
     ui.painter().rect_filled(fill, 0.0, foundation_group_bg());
     let icon = egui::Rect::from_center_size(egui::pos2(band.left() + 2.0 + ROW_ICON_SIZE * 0.5, band.center().y), Vec2::splat(ROW_ICON_SIZE));
-    paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon, text_dark());
+    paint_icon(ui, icon);
     let text = egui::Rect::from_min_max(egui::pos2(icon.right() + 10.0, band.top()), band.max);
-    crate::app::compare::tag_compare::paint_path_label(ui, folder, text);
+    crate::app::compare::tag_compare::paint_path_label(ui, path, text);
 }
 
 /// `folder` as a display path under the tags root, or the root's own name.
@@ -1123,6 +1170,33 @@ impl BulkRenameDialog {
 mod tests {
     use super::*;
     use crate::app::loose_fixture::*;
+
+    /// A link row (the Content Explorer's lists) answers a click anywhere on
+    /// it, not only on its text; a plain item row has nothing to click.
+    #[test]
+    fn a_link_row_answers_a_click_across_its_width() {
+        let ctx = egui::Context::default();
+        let frame = |events: Vec<egui::Event>| {
+            let mut clicked = false;
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 200.0))),
+                events,
+                ..Default::default()
+            };
+            let _ = crate::app::run_ui_test(&ctx, input, |ui| {
+                clicked = draw_link_row(ui, RenameIcon::Tag(None), None, "objects\\weapons\\rifle.weapon", "Explore", 28.0);
+            });
+            clicked
+        };
+        assert!(!frame(Vec::new()));
+        // Well right of the text, still on the row.
+        let point = egui::pos2(380.0, 20.0);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: point, button: egui::PointerButton::Primary, pressed, modifiers: Default::default(),
+        };
+        assert!(!frame(vec![egui::Event::PointerMoved(point), press(true)]));
+        assert!(frame(vec![press(false)]), "a click on the row's empty end opens it");
+    }
     /// The referring tags the dialog lists in its count.
     fn known_references(app: &Baboon) -> Vec<String> {
         app.dialogs.get::<BulkRenameDialog>().unwrap().references.as_ref()

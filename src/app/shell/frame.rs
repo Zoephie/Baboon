@@ -716,16 +716,6 @@ pub(in crate::app) fn monitor_commands_for_game(game: Option<GameId>) -> &'stati
         .map_or(&[], GameFacts::monitor_commands)
 }
 
-/// A clickable tag entry row in the Content Explorer. Returns true on click.
-pub(in crate::app) fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
-    ui.add(
-        egui::Label::new(RichText::new(&entry.display_path).color(text_dark()))
-            .sense(Sense::click()),
-    )
-    .on_hover_text("Click to navigate here")
-    .clicked()
-}
-
 /// `probe`'s answer, re-asked at most once a second.
 ///
 /// For file-system questions the UI asks every frame — is a tool there, does
@@ -3953,16 +3943,12 @@ mod tests {
                 &["references/explorer.rs"],
                 memory_kit,
                 |h| {
-                    let focus = h.app.model.kits[h.app.model.active]
-                        .source
-                        .as_ref()
-                        .unwrap()
-                        .entries[0]
-                        .clone();
+                    let entries = &h.app.model.kits[h.app.model.active].source.as_ref().unwrap().entries;
+                    let (focus, parents) = (entries[0].clone(), entries[1..3].to_vec());
                     h.app.dialogs.open(ContentExplorer {
                         kit: active_id(h),
                         focus,
-                        parents: Vec::new(),
+                        parents,
                         children: Vec::new(),
                         filter: String::new(),
                         index_unavailable: true,
@@ -3970,7 +3956,7 @@ mod tests {
                         forward: Vec::new(),
                     });
                 },
-                &["Content Explorer"],
+                &["Content Explorer", "Referenced By (2)", "References (0)", "This tag references no other tags."],
             ),
             case(
                 "query_results",
