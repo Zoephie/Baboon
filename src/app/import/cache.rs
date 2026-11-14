@@ -734,6 +734,7 @@ mod tests {
     fn a_read_only_destination_refuses_the_import() {
         let mut app = importing_into_a_loose_kit();
         app.model.prefs.custom_editing_kit_profiles = vec![crate::app::prefs::CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: true,
             git_tracked: false,
             id: "00000000-0000-4000-8000-000000000001".to_owned(),

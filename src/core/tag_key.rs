@@ -17,6 +17,19 @@ pub(crate) fn file_entry_key(path: &Path) -> String {
     format!("file:{}", path.display())
 }
 
+/// Which file a key names, for telling whether two keys are the same tag:
+/// tag paths and Windows paths ignore letter case, and a key can spell its
+/// separators either way. Only for comparing; never saved.
+pub(crate) fn key_identity(key: &str) -> String {
+    key.replace('/', "\\").to_ascii_lowercase()
+}
+
+/// Whether two keys are spelled the same, separators aside: a saved key is
+/// reused only when it still matches the file's letter case.
+pub(crate) fn same_spelling(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.replace('/', "\\") == b.replace('/', "\\")
+}
+
 /// A monolithic cache tag's key: its group with trailing spaces trimmed (`rm`
 /// for `rm  `) and its name as the cache stores it, backslashes included.
 pub(crate) fn cache_entry_key(group_tag: u32, name: &str) -> String {

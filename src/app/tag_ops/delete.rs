@@ -15,45 +15,6 @@ use super::*;
 use crate::core::created_tags::CreatedTagOrigin;
 
 use super::duplicate::{backup_paths_text, create_duplicate_backup};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-const DELETED_TAGS_DIR: &str = "deleted-tags";
-
-/// Where a deleted loose tag is moved to, under the installation's own storage.
-///
-/// A tag is deleted far more often by mistake than by intent, and Baboon has no
-/// undo that reaches across a restart — so the file is moved somewhere findable
-/// rather than unlinked. The timestamped run folder keeps repeated deletions of
-/// the same path from colliding.
-pub(super) fn loose_trash_destination(
-    game: Option<&str>,
-    display_path: &str,
-    now_unix_secs: u64,
-) -> Result<PathBuf, String> {
-    let relative = tag_path::to_relative(display_path);
-    if relative.as_os_str().is_empty() {
-        return Err("This tag has no path to delete".to_owned());
-    }
-    // Judged on the path it becomes, so no spelling of `..` or of a root,
-    // whatever separator it uses, can lead the move out of the trash folder.
-    if !relative
-        .components()
-        .all(|part| matches!(part, std::path::Component::Normal(_)))
-    {
-        return Err("This tag's path is not safe to move".to_owned());
-    }
-    let mut destination = crate::core::storage::data_path(DELETED_TAGS_DIR);
-    destination.push(game.unwrap_or("unknown-game"));
-    // Both tag and folder deletion use seconds. Repeated deletion of the same
-    // path within a second gets a suffix rather than a different time unit.
-    let mut suffix = 0u64;
-    loop {
-        let run = if suffix == 0 { now_unix_secs.to_string() } else { format!("{now_unix_secs}-{suffix}") };
-        let candidate = destination.join(run).join(&relative);
-        if !candidate.try_exists().map_err(|error| error.to_string())? { return Ok(candidate); }
-        suffix += 1;
-    }
-}
 
 /// Drop every per-kit trace of a tag that no longer exists.
 ///
@@ -107,12 +68,6 @@ fn move_to_trash(path: &Path, destination: &Path) -> Result<(), String> {
     })
 }
 
-fn now_unix_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs())
-        .unwrap_or_default()
-}
 
 /// What a container delete needs to know about one tag: where its chunks live,
 /// and the evidence that Baboon is the one that put them there.
@@ -377,6 +332,7 @@ impl Baboon {
             _ => DeleteKind::Loose,
         };
         self.dialogs.open(DeleteConfirm {
+            scripts: None,
             kit,
             key: key.to_owned(),
             display_path: entry.display_path.clone(),
@@ -437,9 +393,12 @@ impl Baboon {
     }
 
     fn delete_loose_tag(&mut self, entry: &TagEntry, path: &Path) -> Result<PathBuf, String> {
-        let game = self.model.source().and_then(|source| source.game);
-        let destination =
-            loose_trash_destination(game.map(GameId::as_str), &entry.display_path, now_unix_secs())?;
+        let (base, origin) = self.prepare_loose_recovery_target(self.model.active)?;
+        let physical_path = path.canonicalize().map_err(|e| e.to_string())?;
+        let physical_root = origin.tags_root.canonicalize().map_err(|e| e.to_string())?;
+        let relative = physical_path.strip_prefix(&physical_root)
+            .map_err(|_| "This tag is outside its source folder")?.to_path_buf();
+        let destination = crate::core::recovery::prepare_batch(&base, &origin, &relative, "delete tag", crate::core::recovery::now_secs())?;
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
@@ -756,6 +715,27 @@ mod tests {
     use super::*;
     use crate::app::kits::{KitMut, KitView};
 
+    #[test]
+    fn single_file_recovery_preserves_the_physical_extension_and_original_parent() {
+        let kit = crate::app::loose_fixture::LooseKit::new("single-file-recovery", "halo3_mcc");
+        let original = kit.write_mcc("single", "model", |_| {});
+        let raw = original.with_extension("hlmt");
+        fs::rename(original, &raw).unwrap();
+        let mut app = Baboon::for_test();
+        let source = crate::core::source::load_single_file(raw.clone(), app.model.names()).unwrap();
+        let entry = source.entries[0].clone();
+        assert!(entry.display_path.ends_with(".model"));
+        app.model.kits[0].source = Some(source);
+        let destination = app.delete_loose_tag(&entry, &raw).unwrap();
+        assert!(!raw.exists());
+        assert_eq!(destination.file_name().unwrap(), "single.hlmt");
+        assert!(destination.ancestors().any(|p| p.file_name().is_some_and(|n| n == "misc")));
+        let batch = destination.parent().unwrap().parent().unwrap();
+        let info: serde_json::Value = serde_json::from_slice(&fs::read(batch.join("recovery-info.json")).unwrap()).unwrap();
+        assert_eq!(info["origin"]["source"], "single_file");
+        fs::remove_dir_all(batch).unwrap();
+    }
+
     fn record_at(utoc: &str, ubulk: &str) -> CreatedTagRecord {
         CreatedTagRecord {
             utoc_path: utoc.to_owned(),
@@ -987,7 +967,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!(
             "baboon-delete-trash-{}-{}",
             std::process::id(),
-            now_unix_secs()
+            crate::core::recovery::now_secs()
         ));
         fs::create_dir_all(&root).unwrap();
         let source = root.join("tag.biped");
@@ -1010,34 +990,6 @@ mod tests {
         let _ = fs::remove_file(&source);
         let _ = fs::remove_file(&destination);
         let _ = fs::remove_dir(&root);
-    }
-
-    #[test]
-    fn loose_trash_keeps_the_tag_path_and_refuses_to_escape_it() {
-        let destination =
-            loose_trash_destination(Some("haloce_evolved"), "objects\\weapons\\rifle.weapon", 99)
-                .unwrap();
-        let tail: Vec<String> = destination
-            .components()
-            .rev()
-            .take(5)
-            .map(|part| part.as_os_str().to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            tail,
-            vec![
-                "rifle.weapon".to_owned(),
-                "weapons".to_owned(),
-                "objects".to_owned(),
-                "99".to_owned(),
-                "haloce_evolved".to_owned(),
-            ]
-        );
-        assert!(loose_trash_destination(None, r"..\..\escape.weapon", 1).is_err());
-        assert!(loose_trash_destination(None, "../../escape.weapon", 1).is_err());
-        assert!(loose_trash_destination(None, r"objects\..\..\escape.weapon", 1).is_err());
-        assert!(loose_trash_destination(None, "/etc/escape.weapon", 1).is_err());
-        assert!(loose_trash_destination(None, "", 1).is_err());
     }
 
     /// A container delete holds the write lease while it runs and gives it back

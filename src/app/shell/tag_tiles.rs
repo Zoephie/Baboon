@@ -5,6 +5,29 @@ use super::*;
 use crate::app::shell::frame::centered_empty_state;
 use crate::app::shell::frame::wheel_scroll_tab_bar;
 
+/// A tab-strip control with the same silhouette and hover as the tabs.
+fn navigation_pane_button(ui: &mut Ui, kit: KitId, view: &mut KitView, divider: bool) {
+    let tooltip = if view.navigation_hidden { "Show navigation pane" } else { "Hide navigation pane" };
+    let (_, rect) = ui.allocate_space(egui::vec2(32.0, 24.0));
+    let response = ui.interact(rect, egui::Id::unique(("navigation_pane_toggle", kit.0)), Sense::click())
+        .on_hover_text(tooltip);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tooltip));
+    let fill = if response.hovered() || response.has_focus() || response.is_pointer_button_down_on() {
+        context_menu_hover()
+    } else { Color32::TRANSPARENT };
+    crate::app::shell::frame::paint_connected_tab(ui, rect, fill, false, false);
+    paint_button_icon_at(ui, ButtonIcon::NavigationPane,
+        egui::Rect::from_center_size(response.rect.center(), Vec2::splat(16.0)), text_dark());
+    if divider {
+        ui.painter().vline(rect.right() - 0.5, (rect.top() + 5.0)..=(rect.bottom() - 5.0),
+            Stroke::new(1.0, grid_line()));
+    }
+    if response.clicked() {
+        view.navigation_hidden = !view.navigation_hidden;
+        ui.ctx().request_repaint();
+    }
+}
+
 fn page_corners(page: egui::Rect, tab: Option<&egui::Rect>) -> egui::CornerRadius {
     let mut corners = egui::CornerRadius::same(6);
     // A tab at an outer edge shares that straight side with the page.
@@ -37,6 +60,7 @@ struct TagPaneBehavior<'a, 'c, 'p> {
     tab_labels: HashMap<String, (String, Option<u32>)>,
     active_tab_rects: HashMap<egui_tiles::TileId, egui::Rect>,
     inactive_dividers: HashSet<egui_tiles::TileId>,
+    primary_group: Option<egui_tiles::TileId>,
     close_requests: Vec<String>,
     /// Deferred tab context-menu choices, applied after the tree is drawn for
     /// the same reason closes are: they mutate the layout or the open set.
@@ -48,15 +72,39 @@ struct TagPaneBehavior<'a, 'c, 'p> {
     discard: Option<String>,
     /// Tag to expand or collapse throughout, and which of the two.
     expand: Option<(String, bool)>,
-    close_all: bool,
-    close_all_but: Option<String>,
+    tab_groups: HashMap<egui_tiles::TileId,std::sync::Arc<Vec<String>>>,
+    close_group: Option<(Vec<String>,Option<String>)>,
+}
+
+impl TagPaneBehavior<'_, '_, '_> {
+    fn tab_close_menu(&mut self,ui:&mut Ui,key:&str,group:&[String]) {
+        if crate::app::browser::context_menu_button(ui,"Close Tab").clicked() {
+            self.close_requests.push(key.to_owned());close_menu(ui);
+        }
+        if crate::app::browser::context_menu_button(ui,"Close All").clicked() {
+            self.close_group=Some((group.to_vec(),None));close_menu(ui);
+        }
+        if crate::app::browser::context_menu_button(ui,"Close All Other Tabs").clicked() {
+            self.close_group=Some((group.iter().filter(|other|other.as_str()!=key).cloned().collect(),Some(key.to_owned())));close_menu(ui);
+        }
+    }
 }
 
 impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
     fn tab_bar_left_ui(
-        &mut self, tiles: &egui_tiles::Tiles<String>, _ui: &mut Ui,
-        _tile_id: egui_tiles::TileId, tabs: &egui_tiles::Tabs,
+        &mut self, tiles: &egui_tiles::Tiles<String>, ui: &mut Ui,
+        tile_id: egui_tiles::TileId, tabs: &egui_tiles::Tabs,
     ) {
+        // The Tabs container is absent from Tiles while its children draw.
+        // Capture its exact membership before on_tab_button needs it.
+        let members:std::sync::Arc<Vec<String>>=std::sync::Arc::new(tabs.children.iter().filter_map(|id|match tiles.get(*id) {Some(egui_tiles::Tile::Pane(key))=>Some(key.clone()),_=>None}).collect());
+        for child in &tabs.children {self.tab_groups.insert(*child,members.clone());}
+        // Only the first (top/left) group controls this kit's navigation.
+        if *self.primary_group.get_or_insert(tile_id) == tile_id {
+            let divider = tabs.children.iter().find(|id| tiles.is_visible(**id))
+                .is_some_and(|id| !tabs.is_active(*id));
+            navigation_pane_button(ui, self.kit, &mut self.parts.views[self.kit], divider);
+        }
         // The tab container is temporarily removed from Tiles while its
         // children draw, so record neighboring inactive tabs at this hook.
         let visible = tabs.children.iter().copied().filter(|id| tiles.is_visible(*id)).collect::<Vec<_>>();
@@ -230,11 +278,33 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
             return button_response;
         };
         let key = key.clone();
+        let group=self.tab_groups.get(&tile_id).cloned().unwrap_or_else(||std::sync::Arc::new(vec![key.clone()]));
         // Queued exactly as the close button queues it, so a middle-click on a
         // tab with unsaved edits still raises the prompt instead of discarding
         // them. `tiles` is shared here, so the removal happens after the walk.
         if button_response.middle_clicked() {
             self.close_requests.push(key.clone());
+        }
+        // A folder tab takes Flat view items dropped onto it, into the folder
+        // it shows.
+        if let Some(pane) = self.parts.views[self.kit].browser.folder_browsers.get(&key) {
+            let ctx = &button_response.ctx;
+            let writable = self.cx.model.kits[self.kit_index]
+                .source
+                .as_ref()
+                .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }))
+                && !self.cx.model.editing_kit_is_read_only(self.kit_index);
+            if let Some(action) = crate::app::browser::drag_move::drop_target(
+                ctx,
+                &ctx.layer_painter(button_response.layer_id),
+                button_response.contains_pointer(),
+                button_response.rect,
+                self.kit,
+                &pane.rel_path,
+                writable,
+            ) {
+                self.cx.send(crate::app::browser::BrowserCommand::Action { kit: self.kit, action });
+            }
         }
         // Clicking a tab focuses its tag, by the same rule as a press inside
         // its pane: `selected_key` is what Save and Save As act on, and a tab
@@ -248,18 +318,15 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         }
         if is_folder_pane_key(&key) || key == GIT_REVIEW_KEY {
             context_menu(&button_response, |ui| {
-                if ui.button("Close").clicked() {
-                    self.close_requests.push(key.clone());
-                    close_menu(ui);
+                crate::app::browser::style_tag_context_menu(ui);
+                if is_folder_pane_key(&key) {
+                    if crate::app::browser::context_menu_button(ui,"Reveal in Browser").clicked() {self.reveal=Some(key.clone());close_menu(ui);}
+                    let loose=self.cx.model.kits[self.kit_index].source.as_ref().is_some_and(|source|matches!(source.source,TagSource::LooseFolder {..}));
+                    if ui.add_enabled_ui(loose,|ui|crate::app::browser::context_menu_button(ui,crate::app::browser::actions::folder_opener_label())).inner
+                        .on_disabled_hover_text("This folder is inside a container and has no folder on disk").clicked() {self.reveal_in_explorer=Some(key.clone());close_menu(ui);}
+                    ui.separator();
                 }
-                if ui.button("Close all").clicked() {
-                    self.close_all = true;
-                    close_menu(ui);
-                }
-                if ui.button("Close all but this").clicked() {
-                    self.close_all_but = Some(key.clone());
-                    close_menu(ui);
-                }
+                self.tab_close_menu(ui,&key,&group);
             });
             return button_response;
         }
@@ -268,11 +335,12 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
             .model
             .tag_has_discardable_changes(self.kit_index, &key);
         context_menu(&button_response, |ui| {
-            if ui.button("Reveal in browser").clicked() {
+            crate::app::browser::style_tag_context_menu(ui);
+            if crate::app::browser::context_menu_button(ui,"Reveal in Browser").clicked() {
                 self.reveal = Some(key.clone());
                 close_menu(ui);
             }
-            if ui.button("Open with File Explorer").clicked() {
+            if crate::app::browser::context_menu_button(ui,crate::app::browser::actions::folder_opener_label()).clicked() {
                 self.reveal_in_explorer = Some(key.clone());
                 close_menu(ui);
             }
@@ -281,7 +349,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
             // edits and re-reads the file; for a container kit it also forgets
             // what the project stashed, or the edit comes straight back.
             if ui
-                .add_enabled(discardable, egui::Button::new("Discard unsaved changes"))
+                .add_enabled_ui(discardable,|ui|crate::app::browser::context_menu_button(ui,"Discard Unsaved Changes")).inner
                 .on_disabled_hover_text("This tag has no unsaved changes")
                 .clicked()
             {
@@ -292,23 +360,16 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
             // Every container in the tag resolves its open state through one
             // place, so these reach groups, structs, blocks and arrays alike,
             // however deeply nested.
-            if ui.button("Expand all").clicked() {
+            if crate::app::browser::context_menu_button(ui,"Expand All").clicked() {
                 self.expand = Some((key.clone(), true));
                 close_menu(ui);
             }
-            if ui.button("Collapse all").clicked() {
+            if crate::app::browser::context_menu_button(ui,"Collapse All").clicked() {
                 self.expand = Some((key.clone(), false));
                 close_menu(ui);
             }
             ui.separator();
-            if ui.button("Close all").clicked() {
-                self.close_all = true;
-                close_menu(ui);
-            }
-            if ui.button("Close all but this").clicked() {
-                self.close_all_but = Some(key.clone());
-                close_menu(ui);
-            }
+            self.tab_close_menu(ui,&key,&group);
         });
         button_response
     }
@@ -400,7 +461,8 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
                     egui::pos2(inner.left() + ICON / 2.0, inner.center().y),
                     Vec2::splat(ICON),
                 );
-                paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon_rect, text_dark());
+                let flat = pane_key.and_then(|key|self.parts.views[self.kit].browser.folder_browsers.get(key)).is_some_and(|pane|pane.mode==BrowserMode::Flat);
+                paint_button_icon_at(ui, if flat {ButtonIcon::FolderClosed}else{ButtonIcon::FolderOpen}, icon_rect, text_dark());
             } else if git_icon {
                 let icon_rect = egui::Rect::from_center_size(
                     egui::pos2(inner.left() + ICON / 2.0, inner.center().y),
@@ -686,13 +748,14 @@ pub(in crate::app) fn draw_tag_tiles(
         tab_labels,
         active_tab_rects: HashMap::new(),
         inactive_dividers: HashSet::new(),
+        primary_group: None,
         close_requests: Vec::new(),
         reveal: None,
         reveal_in_explorer: None,
         discard: None,
         expand: None,
-        close_all: false,
-        close_all_but: None,
+        tab_groups: HashMap::new(),
+        close_group: None,
     };
     if super::tab_selection::with_tab_neighbour_selection(&mut tree, |tree| tree.ui(&mut behavior, ui)) {
         ui.ctx().request_repaint();
@@ -714,8 +777,7 @@ pub(in crate::app) fn draw_tag_tiles(
         reveal_in_explorer,
         discard,
         expand,
-        close_all,
-        close_all_but,
+        close_group,
         ..
     } = behavior;
     parts.views[kit].tag_tree = tree;
@@ -732,8 +794,7 @@ pub(in crate::app) fn draw_tag_tiles(
     // in the other game.
     if reveal.is_some()
         || reveal_in_explorer.is_some()
-        || close_all
-        || close_all_but.is_some()
+        || close_group.is_some()
         || !close_requests.is_empty()
     {
         cx.send(AppAction::FocusKit(kit));
@@ -744,7 +805,9 @@ pub(in crate::app) fn draw_tag_tiles(
     if let Some(key) = reveal_in_explorer {
         cx.send(BrowserCommand::Action {
             kit,
-            action: BrowserAction::OpenInExplorer(key),
+            action: if let Some(pane)=parts.views[kit].browser.folder_browsers.get(&key) {
+                BrowserAction::OpenLooseFolderInExplorer {rel_path:pane.rel_path.clone()}
+            } else {BrowserAction::OpenInExplorer(key)},
         });
     }
     if let Some(key) = discard {
@@ -753,10 +816,8 @@ pub(in crate::app) fn draw_tag_tiles(
     if let Some((key, open)) = expand {
         parts.views[kit].pending_expand.insert(key, open);
     }
-    if close_all {
-        cx.send(AppAction::Close(PendingCloseAction::CloseAllTabs));
-    } else if let Some(key) = close_all_but {
-        cx.send(AppAction::Close(PendingCloseAction::CloseAllButThis(key)));
+    if let Some((keys,keep))=close_group {
+        cx.send(AppAction::Close(PendingCloseAction::CloseTabGroup {kit,keys,keep}));
     }
     for key in close_requests {
         cx.send(AppAction::Close(PendingCloseAction::CloseTab(key)));

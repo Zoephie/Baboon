@@ -3,6 +3,8 @@
 //! [`TagOpsCommand::ApplyLooseFolderRename`].
 
 use super::*;
+use super::single_rename::{SingleRename, draw_single_rename};
+use crate::app::browser::bulk_rename::{RenameIcon, referrer_rows};
 
 /// Rename Folder for a loose folder: the new name, and what it will change
 /// counted before anything is touched.
@@ -10,152 +12,66 @@ impl Dialog for LooseFolderRenameState {
     fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let mut open = true;
-        let mut do_apply = false;
-        let mut cancel = false;
-        {
-            let state = &mut *self;
-            egui::Window::new("Rename Folder")
-                .constrain_to(window_work_area(ctx))
-                .id(egui::Id::unique("loose_folder_rename"))
-                .open(&mut open)
-                .default_width(window_width(ctx, 520.0))
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.label(RichText::new("Parent folder").color(subtle_dark()).small());
-                    let parent = if state.parent_display.is_empty() {
-                        "(root)".to_owned()
-                    } else {
-                        state.parent_display.clone()
-                    };
-                    ui.label(RichText::new(parent).color(text_dark()).monospace());
-                    ui.add_space(6.0);
-
-                    ui.label(RichText::new("Folder name").color(subtle_dark()).small());
-                    let response = ui.add(
-                        crate::app::ui_kit::singleline_text_edit(&mut state.name_input)
-                            .id(egui::Id::unique("loose_folder_rename_name"))
-                            .desired_width(480.0)
-                            .font(egui::TextStyle::Monospace),
-                    );
-                    if state.focus_input {
-                        response.request_focus();
-                        if let Some(mut text_state) = egui::TextEdit::load_state(ctx, response.id) {
-                            text_state
-                                .cursor
-                                .set_char_range(Some(egui::text::CCursorRange::two(
-                                    egui::text::CCursor::new(0),
-                                    egui::text::CCursor::new(state.name_input.chars().count()),
-                                )));
-                            text_state.store(ctx, response.id);
-                        }
-                        state.focus_input = false;
-                    }
-                    if lost_focus_once(&response) && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        do_apply = true;
-                    }
-                    if response.changed() {
-                        state.error = None;
-                    }
-                    if let Some(error) = state.error.as_deref() {
-                        ui.add_space(4.0);
-                        ui.label(RichText::new(error).color(material_delete_text()).small());
-                    }
-
-                    ui.add_space(8.0);
-                    let new_name = state.name_input.trim();
-                    let folder = |name: &str| {
-                        format!("{}{}", tag_path::join(&state.parent_display, name), tag_path::SEPARATOR)
-                    };
-                    ui.label(
-                        RichText::new(format!(
-                            "{}  →  {}",
-                            folder(&state.old_name),
-                            if new_name.is_empty() {
-                                "(enter a new name)".to_owned()
-                            } else {
-                                folder(new_name)
-                            }
-                        ))
-                        .color(text_dark())
-                        .monospace()
-                        .small(),
-                    );
-                    ui.add_space(8.0);
-
-                    ui.label(
-                        RichText::new(format!(
-                            "{} tag(s) in this folder and its subfolders will get new paths.",
-                            state.tag_count
-                        ))
-                        .color(text_dark()),
-                    );
-                    match &state.outside_referrers {
-                        None => {
-                            ui.label(
-                                RichText::new(
-                                    "Reference index unavailable: tags elsewhere that reference \
-                                     these are still found and updated on apply, but can't be \
-                                     counted here.",
-                                )
-                                .color(subtle_dark()),
-                            );
-                        }
-                        Some(referrers) if referrers.is_empty() => {
-                            ui.label(
-                                RichText::new("No tags outside this folder reference them.")
-                                    .color(subtle_dark()),
-                            );
-                        }
-                        Some(referrers) => {
-                            ui.label(
-                                RichText::new(format!(
-                                    "{} tag(s) outside this folder reference them and will be \
-                                     updated:",
-                                    referrers.len()
-                                ))
-                                .color(text_dark()),
-                            );
-                            crate::app::ScrollArea::vertical()
-                                .id_salt("loose_folder_rename_referrers")
-                                .max_height(200.0)
-                                .show(ui, |ui| {
-                                    for referrer in referrers {
-                                        ui.label(
-                                            RichText::new(referrer).color(subtle_dark()).small(),
-                                        );
-                                    }
-                                });
-                        }
-                    }
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new(
-                            "References between tags inside the folder are updated too. Baboon \
-                             is locked until the rename finishes.",
-                        )
-                        .color(subtle_dark())
-                        .small(),
-                    );
-
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(!new_name.is_empty(), egui::Button::new("Rename"))
-                            .on_hover_text("Rename the folder on disk and rewrite all references")
-                            .clicked()
-                        {
-                            do_apply = true;
-                        }
-                        if ui.button("Cancel").clicked() {
-                            cancel = true;
-                        }
-                    });
-                });
+        let mut response = Default::default();
+        let source = cx.model.kit_index(self.kit).and_then(|index| cx.model.kits[index].source.as_ref());
+        let game = source.and_then(|source| source.source.game());
+        // The folder's own tags get new paths: say so under the references.
+        let mut notes = Vec::new();
+        if self.tag_count > 0 {
+            notes.push(crate::app::browser::bulk_rename::folder_tags_note(self.tag_count, "the renamed folder"));
         }
+        let rows = match &self.outside_referrers {
+            Some(paths) => source.map(|source| referrer_rows(paths, &source.names)).unwrap_or_default(),
+            None => {
+                notes.push("Reference index unavailable. Tags elsewhere that reference this folder's tags are still found and fixed when renaming.".to_owned());
+                Vec::new()
+            }
+        };
+        // Every tag in the folder gets a new path; scripts may name them.
+        let prefix = format!("{}{}", tag_path::relative_tag_path(&self.rel_path), tag_path::SEPARATOR).to_ascii_lowercase();
+        let scripts = super::script_fixes::ScriptCheck::rows_for(&mut self.scripts, cx, self.kit, |entries| {
+            crate::core::script_paths::ScriptChanges::renaming(
+                entries
+                    .iter()
+                    .filter(|entry| entry.display_path.to_ascii_lowercase().starts_with(&prefix))
+                    .map(|entry| (entry.display_path.as_str(), None)),
+            )
+        });
+        let state = &mut *self;
+        egui::Window::new("Rename Folder")
+            .constrain_to(window_work_area(ctx))
+            .id(egui::Id::unique("loose_folder_rename"))
+            .title_bar(false)
+            .collapsible(false)
+            .frame(egui::Frame::window(&ctx.global_style()))
+            .default_width(window_width(ctx, 480.0))
+            .resizable(false)
+            .show(ctx, |ui| {
+                let before = state.name_input.clone();
+                response = draw_single_rename(cx, ui, &mut open, SingleRename {
+                    input: &mut state.name_input,
+                    focus: &mut state.focus_input,
+                    field_id: egui::Id::unique("loose_folder_rename_name"),
+                    current: &state.old_name,
+                    location: tag_path::join(&state.parent_display, &state.old_name),
+                    extension: None,
+                    icon: RenameIcon::Folder,
+                    game,
+                    noun: "Folder names",
+                    error: state.error.as_deref(),
+                    notes: None,
+                    references: Some((rows, notes)),
+                    scripts,
+                    apply_hover: "Rename the folder on disk and fix every reference",
+                });
+                if state.name_input != before {
+                    state.error = None;
+                }
+            });
         // Left open for the apply, which closes it once it succeeds.
-        if do_apply {
+        if response.apply {
             cx.send(TagOpsCommand::ApplyLooseFolderRename);
         }
-        open && !cancel
+        open && !response.cancel
     }
 }

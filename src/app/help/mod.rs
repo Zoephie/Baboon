@@ -20,8 +20,10 @@ pub(in crate::app) use map_names::*;
 pub(in crate::app) mod window;
 pub(in crate::app) use window::HelpWindow;
 
+pub(in crate::app) const FOLDER_BROWSER_HELP_SECTION: &str = "Folder Browser";
 pub(in crate::app) const STRING_EDITOR_HELP_SECTION: &str = "Strings Editor";
 pub(in crate::app) const FIND_REPLACE_HELP_SECTION: &str = "Find and Replace";
+pub(in crate::app) const RENAMING_HELP_SECTION: &str = "Renaming";
 
 /// Help: the About and help windows, tutorials, HaloScript and field docs, tag
 /// compatibility and map names.
@@ -64,6 +66,7 @@ impl Baboon {
                 help.tab = HelpPanelTab::Doc;
                 help.doc_section = Some(section.to_owned());
                 help.doc_reveal_selection = true;
+                help.above_dialogs = true;
             }
             HelpCommand::ShowTagCompat {
                 source_game,

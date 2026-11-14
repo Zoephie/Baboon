@@ -56,9 +56,11 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
         return GuiPrefs::default();
     };
     let prefs = prefs_from_value(&value);
-    if value.get("editing_kit_profiles").is_none()
+    if value.get("editing_kit_profiles").and_then(Value::as_array).is_some_and(|entries|
+        entries.iter().any(|entry| entry.get("recovery").and_then(|r| r.get("name")).and_then(Value::as_str).is_none_or(str::is_empty)))
+        || (value.get("editing_kit_profiles").is_none()
         && (value.get("editing_kit_paths").is_some()
-            || value.get("custom_editing_kit_profiles").is_some())
+            || value.get("custom_editing_kit_profiles").is_some()))
     {
         // Preserve unrelated preferences and onboarding state during the one-time upgrade.
         let mut migrated = value.clone();
@@ -712,6 +714,7 @@ fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfil
         let tags_folder = folder("tags_folder");
         let data_folder = folder("data_folder");
         profiles.push(CustomEditingKitProfile {
+            recovery: entry.get("recovery").cloned().and_then(|value| serde_json::from_value(value).ok()).unwrap_or_default(),
             read_only: !game.is_campaign_evolved()
                 && entry
                     .get("read_only")
@@ -745,6 +748,7 @@ fn custom_editing_kit_profiles_value(profiles: &[CustomEditingKitProfile]) -> Ve
                 "game": profile.game,
                 "root": profile.root.display().to_string(),
                 "icon": profile.icon.as_ref().map(|path| path.display().to_string()),
+                "recovery": profile.recovery,
             });
             // Written only when set, so a kit using its root's own folders
             // saves exactly as it did before these existed.
@@ -767,6 +771,7 @@ fn load_unified_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfi
     if value.get("editing_kit_profiles").is_none() {
         add_standard_editing_kit_profiles(&mut profiles, &load_editing_kit_paths(value));
     }
+    crate::app::kits::recovery::assign_recovery_names(&mut profiles);
     profiles
 }
 
@@ -941,6 +946,7 @@ pub(super) fn load_terminal_open_games() -> HashSet<String> {
 /// `last_session.json`. Mapped in one place so the two files cannot drift.
 pub(in crate::app) fn browser_mode_from_str(text: Option<&str>) -> Option<BrowserMode> {
     match text? {
+        "flat" => Some(BrowserMode::Flat),
         "folders" => Some(BrowserMode::Folders),
         "groups" => Some(BrowserMode::Groups),
         _ => None,
@@ -949,6 +955,7 @@ pub(in crate::app) fn browser_mode_from_str(text: Option<&str>) -> Option<Browse
 
 pub(in crate::app) fn browser_mode_str(mode: BrowserMode) -> &'static str {
     match mode {
+        BrowserMode::Flat => "flat",
         BrowserMode::Folders => "folders",
         BrowserMode::Groups => "groups",
     }
@@ -1161,6 +1168,23 @@ mod tests {
             clean_recent_path(PathBuf::from(r"D:\Games\H4EK")),
             PathBuf::from(r"D:\Games\H4EK")
         );
+    }
+
+    #[test]
+    fn recovery_preferences_preserve_assigned_names_and_custom_paths() {
+        let id = "11111111-1111-4111-8111-111111111111";
+        let mut prefs = prefs_from_value(&json!({"editing_kit_profiles": [{
+            "id": id, "name": "Halo 2 Rebalance", "game": "halo2_mcc", "root": "C:/Kits/Halo2",
+            "recovery": { "name": "stable_assigned_name", "folder": "deleted-tags" }
+        }]}));
+        let profile = prefs.custom_editing_kit_profiles.iter_mut().find(|p| p.id == id).unwrap();
+        assert_eq!(profile.recovery.folder.as_deref(), Some(Path::new("deleted-tags")));
+        profile.name = "Renamed".into();
+        let serialized = prefs_to_value(&prefs, &HashSet::new(), true);
+        let reloaded = prefs_from_value(&serialized);
+        let profile = reloaded.custom_editing_kit_profiles.iter().find(|p| p.id == id).unwrap();
+        assert_eq!(profile.recovery.name, "stable_assigned_name");
+        assert_eq!(profile.recovery.folder.as_deref(), Some(Path::new("deleted-tags")));
     }
 
     #[test]
@@ -2055,6 +2079,7 @@ mod tests {
     fn chosen_kit_folders_round_trip_and_stay_out_of_other_kits() {
         let profile = |id: &str, game: &str, tags: Option<&str>, data: Option<&str>| {
             CustomEditingKitProfile {
+                recovery: Default::default(),
                 read_only: false,
                 git_tracked: false,
                 id: id.to_owned(),

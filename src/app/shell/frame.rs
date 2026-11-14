@@ -344,6 +344,7 @@ pub(in crate::app) fn pane_header_breadcrumbs(
 }
 
 pub(in crate::app) fn navigate_folder_browser(pane: &mut FolderBrowserState, path: PathBuf, label: String) {
+    pane.selection.clear(); pane.selected_tag = None;
     if pane.rel_path == path {
         return;
     }
@@ -595,8 +596,8 @@ pub(in crate::app) fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction:
 
 /// The kit's game card: emblem, game name, and source path.
 ///
-/// Fills the sidebar width and allows long source paths to reflow as the pane
-/// narrows. Zero-width break opportunities after path separators keep Windows
+/// Fills the sidebar width with a fixed-height banner. Source paths wrap to
+/// at most three lines. Break opportunities after path separators keep Windows
 /// paths readable without changing the text the user sees.
 /// `texture` is the banner [`Baboon::workspace_banner_texture`] resolved for
 /// this game and profile; resolving it can load it, so it is done before the
@@ -649,22 +650,23 @@ pub(in crate::app) fn draw_kit_banner_tile(
     let text_width = (card_width - MARGIN * 2.0 - EMBLEM - GAP).max(1.0);
     let title = editing_kit_title_text(ui, title_label, read_only, 14.0, true).into_galley(
         ui,
-        Some(egui::TextWrapMode::Wrap),
+        Some(egui::TextWrapMode::Truncate),
         text_width,
         TextStyle::Body,
     );
     let wrappable_path = sidebar_wrappable_path_label(path_label);
-    let path = egui::WidgetText::from(RichText::new(wrappable_path).color(subtle_dark()).small())
-        .into_galley(
-            ui,
-            Some(egui::TextWrapMode::Wrap),
-            text_width,
-            TextStyle::Small,
-        );
+    let mut path_job = egui::text::LayoutJob::default();
+    RichText::new(wrappable_path).color(subtle_dark()).small().append_to(
+        &mut path_job, ui.style(), egui::FontSelection::Style(TextStyle::Small), egui::Align::Min,
+    );
+    path_job.wrap.max_width = text_width;
+    path_job.wrap.max_rows = 3;
+    path_job.wrap.break_anywhere = true;
+    let path = ui.fonts_mut(|fonts| fonts.layout_job(path_job));
 
-    let text_height = TITLE_TOP + title.size().y + path.size().y;
-    let card_height = MARGIN * 2.0 + EMBLEM.max(text_height);
-    let (full, _) = ui.allocate_exact_size(Vec2::new(card_width, card_height), Sense::hover());
+    let card_height = MARGIN * 2.0 + EMBLEM;
+    let (full, response) = ui.allocate_exact_size(Vec2::new(card_width, card_height), Sense::hover());
+    response.on_hover_text(format!("{title_label}{}\n{path_label}", if read_only { " (read-only)" } else { "" }));
 
     let painter = ui.painter_at(full);
     painter.rect_filled(full, 0.0, foundation_documentation_bg());
@@ -678,8 +680,11 @@ pub(in crate::app) fn draw_kit_banner_tile(
     }
     let text_x = full.min.x + MARGIN + EMBLEM + GAP;
     let title_y = full.min.y + MARGIN + TITLE_TOP;
-    painter.galley(egui::pos2(text_x, title_y), title.clone(), text_dark());
-    painter.galley(
+    let text_painter = painter.with_clip_rect(egui::Rect::from_min_max(
+        egui::pos2(text_x, title_y), full.max - Vec2::splat(MARGIN),
+    ).intersect(full));
+    text_painter.galley(egui::pos2(text_x, title_y), title.clone(), text_dark());
+    text_painter.galley(
         egui::pos2(text_x, title_y + title.size().y),
         path,
         subtle_dark(),
@@ -709,16 +714,6 @@ pub(in crate::app) fn sidebar_source_path_label(source: &TagSource) -> String {
 pub(in crate::app) fn monitor_commands_for_game(game: Option<GameId>) -> &'static [&'static str] {
     game
         .map_or(&[], GameFacts::monitor_commands)
-}
-
-/// A clickable tag entry row in the Content Explorer. Returns true on click.
-pub(in crate::app) fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
-    ui.add(
-        egui::Label::new(RichText::new(&entry.display_path).color(text_dark()))
-            .sense(Sense::click()),
-    )
-    .on_hover_text("Click to navigate here")
-    .clicked()
 }
 
 /// `probe`'s answer, re-asked at most once a second.
@@ -1127,6 +1122,40 @@ mod tests {
     }
 
     #[test]
+    fn kit_banner_keeps_its_height_and_caps_text_when_narrowed() {
+        let title = "An editing kit with a deliberately very long descriptive title";
+        let path = r"C:\Editing Kits\A Very Long Kit Name\nested\deep\more\directories\even\more\folders\with\a\particularly\long\final\directory\before\the\tags";
+        for width in [140.0, 220.0, 330.0, 600.0] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            let mut height = 0.0;
+            let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width + 16.0, 200.0))),
+                ..Default::default()
+            }, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    ui.set_width(width);
+                    let top = ui.cursor().top();
+                    draw_kit_banner_tile(ui, title, path, None, false);
+                    height = ui.cursor().top() - top - ui.spacing().item_spacing.y;
+                });
+            });
+            assert!((height - 88.0).abs() < 0.1, "banner height at {width}px: {height}");
+            let text: Vec<_> = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text), _ => None,
+            }).collect();
+            let heading = text.iter().find(|text| text.galley.job.text == title).unwrap();
+            let location = text.iter().find(|text| text.galley.job.text == sidebar_wrappable_path_label(path)).unwrap();
+            assert_eq!(heading.galley.rows.len(), 1);
+            assert!(location.galley.rows.len() <= 3);
+            if width == 220.0 {
+                assert_eq!(location.galley.rows.len(), 3);
+                assert!(location.galley.elided && heading.galley.elided);
+            }
+        }
+    }
+
+    #[test]
     fn shared_browser_buttons_use_standard_point_sizes() {
         for scale in [MIN_UI_SCALE, MAX_UI_SCALE] {
             let ctx = egui::Context::default();
@@ -1389,6 +1418,7 @@ mod tests {
         std::fs::create_dir_all(h2.join("tags")).unwrap();
         let profiles = vec![
             CustomEditingKitProfile {
+                recovery: Default::default(),
                 read_only: false,
                 git_tracked: false,
                 id: "one".to_owned(),
@@ -1400,6 +1430,7 @@ mod tests {
                 data_folder: None,
             },
             CustomEditingKitProfile {
+                recovery: Default::default(),
                 read_only: false,
                 git_tracked: false,
                 id: "two".to_owned(),
@@ -3586,6 +3617,15 @@ mod tests {
                         },
                         ctx,
                     );
+                    // Flat view paints rows only after its catalogue is ready.
+                    // A fixed frame count can finish before that worker under suite load.
+                    h.frame(Vec::new());
+                    crate::app::loose_fixture::pump_until(
+                        &mut h.app,
+                        "folder browser catalogue",
+                        |app| app.model.kits[app.model.active].source.as_ref()
+                            .is_some_and(|source| source.complete_scan),
+                    );
                 },
                 &["rifle.biped", "rifle.scenery"],
             ),
@@ -3903,16 +3943,12 @@ mod tests {
                 &["references/explorer.rs"],
                 memory_kit,
                 |h| {
-                    let focus = h.app.model.kits[h.app.model.active]
-                        .source
-                        .as_ref()
-                        .unwrap()
-                        .entries[0]
-                        .clone();
+                    let entries = &h.app.model.kits[h.app.model.active].source.as_ref().unwrap().entries;
+                    let (focus, parents) = (entries[0].clone(), entries[1..3].to_vec());
                     h.app.dialogs.open(ContentExplorer {
                         kit: active_id(h),
                         focus,
-                        parents: Vec::new(),
+                        parents,
                         children: Vec::new(),
                         filter: String::new(),
                         index_unavailable: true,
@@ -3920,7 +3956,7 @@ mod tests {
                         forward: Vec::new(),
                     });
                 },
-                &["Content Explorer"],
+                &["Content Explorer", "Referenced By (2)", "References (0)", "This tag references no other tags."],
             ),
             case(
                 "query_results",
@@ -4104,6 +4140,141 @@ mod tests {
                 &["Indexing"],
             ),
             case(
+                "save_before_folder_operation",
+                &["dialog:SaveBeforeFolderOperation"],
+                &["tag_ops/folder_merge_review.rs"],
+                loose_kit,
+                |h| {
+                    h.app.dialogs.open(crate::app::tag_ops::folder_merge_review::SaveBeforeFolderOperation {
+                        kit: h.app.model.kit_stamp(), rel_path: "objects/props".into(), label: "props".into(), moving: true, error: None,
+                    });
+                },
+                &["Save Before Moving or Copying", "Save All and Continue"],
+            ),
+            case(
+                "bulk_browser_prompt", &["dialog:BulkPrompt"], &[], loose_kit,
+                |h| {h.app.dialogs.open(crate::app::browser::bulk::BulkPrompt {request:crate::app::browser::bulk::BulkRequest { destination:None, stamp:h.app.model.kit_stamp(),pane:String::new(),keys:Vec::new(),action:crate::app::browser::selection::BulkAction::Open },message:"Open 10 tag tabs?".into()});},
+                &["Confirm Selection Action","Continue"],
+            ),
+            case(
+                "bulk_rename_items", &["dialog:BulkRenameDialog"], &[], loose_kit,
+                |h| {h.app.dialogs.open(crate::app::browser::bulk_rename::BulkRenameDialog::for_smoke(h.app.model.kit_stamp()));},
+                &["Bulk Rename","Original","Rename","Replace With"],
+            ),
+            case(
+                "folder_merge_review",
+                &["tag_ops.folder_merge"],
+                &[],
+                loose_kit,
+                |h| {
+                    use crate::app::tag_ops::folder_merge_review::{MergeControl, MergeUi, MergeReview, ReviewKind};
+                    let (answer, _rx) = mpsc::channel();
+                    h.app.tag_ops.folder_merge = Some(MergeUi {
+                        control: std::sync::Arc::new(MergeControl::default()),
+                        items_preview: None,
+                        review: Some(MergeReview { notice: None, kind: ReviewKind::Summary {
+                            source: "objects/props".into(), destination: "levels/props".into(), files: 3, conflicts: 1,
+                        }, answer, apply_remaining: false }),
+                    });
+                },
+                &["Merge Folders", "3 incoming file(s), 1 conflict(s)"],
+            ),
+            case(
+                "bulk_delete_review",
+                &["tag_ops.folder_merge"],
+                &[],
+                loose_kit,
+                |h| {
+                    use crate::app::browser::bulk_rename::RenameIcon;
+                    use crate::app::tag_ops::folder_merge_review::{MergeControl, MergeUi, MergeReview, ReviewKind};
+                    let (answer, _rx) = mpsc::channel();
+                    h.app.tag_ops.folder_merge = Some(MergeUi {
+                        control: std::sync::Arc::new(MergeControl::default()),
+                        items_preview: None,
+                        review: Some(MergeReview { notice: None, kind: ReviewKind::Delete {
+                            selected: vec![("objects/props".into(), RenameIcon::Folder), ("smoke.scenario".into(), RenameIcon::Tag(None))],
+                            referrers: vec![("levels/test.scenario".into(), 0)],
+                            scripts: crate::app::browser::bulk_rename::ScriptRows {
+                                rows: vec![crate::app::browser::bulk_rename::ScriptRow {
+                                    path: "levels/scripts/test_mission.hsc".into(),
+                                    count: "2 paths".into(),
+                                    problem: Some("· 1 may break".into()),
+                                    tooltip: "Line 4: objects/props/crate — missing".into(),
+                                }],
+                                notes: vec!["These scripts won't compile until the paths are fixed.".into()],
+                                checking: false,
+                            },
+                            game: None, tags: 4, files: 1, folders: 2,
+                        }, answer, apply_remaining: false }),
+                    });
+                },
+                &["Delete Selected Items?", "2 Items to Delete", "2 Tags Will Have Missing References", "test_mission.hsc", "2 paths", "Delete"],
+            ),
+            case(
+                "bulk_delete_review_checking",
+                &["tag_ops.folder_merge"],
+                &[],
+                loose_kit,
+                |h| {
+                    use crate::app::browser::bulk_rename::RenameIcon;
+                    use crate::app::tag_ops::folder_merge_review::{ItemsPreview, MergeControl, MergeUi};
+                    h.app.tag_ops.folder_merge = Some(MergeUi {
+                        control: std::sync::Arc::new(MergeControl::default()),
+                        review: None,
+                        items_preview: Some(ItemsPreview {
+                            action: crate::app::tag_ops::folder_merge_review::ItemsAction::Delete,
+                            selected: vec![("objects/props".into(), RenameIcon::Folder), ("smoke.scenario".into(), RenameIcon::Tag(None))],
+                            game: None,
+                        }),
+                    });
+                },
+                &["Delete Selected Items?", "2 Items to Delete", "Checking for Missing References…", "Checking references", "Delete"],
+            ),
+            case(
+                "bulk_move_review",
+                &["tag_ops.folder_merge"],
+                &[],
+                loose_kit,
+                |h| {
+                    use crate::app::browser::bulk_rename::RenameIcon;
+                    use crate::app::tag_ops::folder_merge_review::{MergeControl, MergeUi, MergeReview, ReviewKind};
+                    let (answer, _rx) = mpsc::channel();
+                    h.app.tag_ops.folder_merge = Some(MergeUi {
+                        control: std::sync::Arc::new(MergeControl::default()),
+                        items_preview: None,
+                        review: Some(MergeReview { notice: Some("Files changed while this was open, so it was checked again: the selected items changed.".into()), kind: ReviewKind::Move {
+                            selected: vec![("objects/props".into(), RenameIcon::Folder), ("smoke.scenario".into(), RenameIcon::Tag(None))],
+                            referrers: vec![("levels/test.scenario".into(), 0)],
+                            scripts: Default::default(),
+                            game: None, destination: "levels\\props".into(), conflicts: 1,
+                        }, answer, apply_remaining: false }),
+                    });
+                },
+                &["Move Selected Items?", "props", "2 Items to Move", "1 Reference to Fix", "1 item has the same name", "Move"],
+            ),
+            case(
+                "single_item_move_review",
+                &["tag_ops.folder_merge"],
+                &[],
+                loose_kit,
+                |h| {
+                    use crate::app::browser::bulk_rename::RenameIcon;
+                    use crate::app::tag_ops::folder_merge_review::{MergeControl, MergeUi, MergeReview, ReviewKind};
+                    let (answer, _rx) = mpsc::channel();
+                    h.app.tag_ops.folder_merge = Some(MergeUi {
+                        control: std::sync::Arc::new(MergeControl::default()),
+                        items_preview: None,
+                        review: Some(MergeReview { notice: None, kind: ReviewKind::Move {
+                            selected: vec![("smoke.scenario".into(), RenameIcon::Tag(None))],
+                            referrers: vec![("levels/test.scenario".into(), 0)],
+                            scripts: Default::default(),
+                            game: None, destination: "levels/props".into(), conflicts: 1,
+                        }, answer, apply_remaining: false }),
+                    });
+                },
+                &["Move Selected Items?", "props", "Moves this item into the folder.", "Something here has the same name", "1 Reference to Fix", "Move"],
+            ),
+            case(
                 "folder_refactor_lock",
                 &["tag_ops.folder_refactor"],
                 &[],
@@ -4116,6 +4287,20 @@ mod tests {
                     });
                 },
                 &["Renaming smoke to fog", "Baboon is locked until the folder operation finishes."],
+            ),
+            case(
+                "bulk_delete_check",
+                &["tag_ops.folder_refactor"],
+                &[],
+                memory_kit,
+                |h| {
+                    h.app.tag_ops.folder_refactor = Some(FolderRefactorUiState {
+                        label: crate::app::tag_ops::folder_merge_review::DELETE_REVIEW_TITLE.to_owned(),
+                        phase: "Checking references".to_owned(),
+                        progress: None,
+                    });
+                },
+                &["Delete Selected Items?", "Nothing is deleted until you confirm."],
             ),
             // --- ui/dialogs/ ---
             case(
@@ -4167,6 +4352,7 @@ mod tests {
                 |h| {
                     let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
                     h.app.dialogs.open(DeleteConfirm {
+                        scripts: None,
                         kit: active_id(h),
                         key: file_entry_key(&path),
                         display_path: "objects\\weapons\\rifle\\rifle.biped".to_owned(),
@@ -4176,7 +4362,7 @@ mod tests {
                         has_unsaved_edits: true,
                     });
                 },
-                &["Delete Tag?", "Delete Tag", "Cancel", "levels\\smoke\\smoke.scenario"],
+                &["Delete Tag?", "Delete Tag", "Cancel", "smoke.scenario", "1 Tag Will Have Missing References"],
             ),
             case(
                 "delete_folder_confirm",
@@ -4193,6 +4379,7 @@ mod tests {
                 container_kit,
                 |h| {
                     h.app.dialogs.open(DeleteConfirm {
+                        scripts: None,
                         kit: active_id(h),
                         key: ce_key(),
                         display_path: CE_TAG.to_owned(),
@@ -4214,23 +4401,24 @@ mod tests {
                 |h| {
                     let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
                     h.app.dialogs.open(RenameTagState {
+                        scripts: None,
                         kit: active_id(h),
                         key: file_entry_key(&path),
                         old_display: "objects\\weapons\\rifle\\rifle.biped".to_owned(),
                         extension: "biped".to_owned(),
                         operation: TagNameOperation::Rename,
-                        new_path_input: "objects\\weapons\\rifle\\smoke_rifle".to_owned(),
+                        new_path_input: "smoke_rifle".to_owned(),
                         fixed_parent: String::new(),
                         focus_input: true,
                         referrers: Vec::new(),
                         referrers_unavailable: true,
                         is_container: false,
                         is_new_container: false,
-                        whole_path_editable: true,
+                        whole_path_editable: false,
                         in_place_pak: None,
                     });
                 },
-                &["Rename / Move Tag"],
+                &["Original", "smoke_rifle.biped", "Cancel"],
             ),
             case(
                 "duplicate_tag",
@@ -4239,6 +4427,7 @@ mod tests {
                 container_kit,
                 |h| {
                     h.app.dialogs.open(RenameTagState {
+                        scripts: None,
                         kit: active_id(h),
                         key: ce_key(),
                         old_display: CE_TAG.to_owned(),
@@ -4420,6 +4609,7 @@ mod tests {
                 loose_kit,
                 |h| {
                     h.app.dialogs.open(LooseFolderRenameState {
+                        scripts: None,
                         kit: active_id(h),
                         rel_path: PathBuf::from("objects/weapons/rifle"),
                         parent_display: "objects\\weapons".to_owned(),
@@ -4431,7 +4621,7 @@ mod tests {
                         outside_referrers: None,
                     });
                 },
-                &["Rename Folder"],
+                &["Original", "will now have new paths"],
             ),
             case(
                 "exported_mod",
@@ -4786,6 +4976,39 @@ mod tests {
             .copied()
             .filter(|needle| !painted.iter().any(|text| text.contains(needle)))
             .collect()
+    }
+
+    /// The Content Explorer's lists fill its window, which can be resized:
+    /// they must not ask for more than the window has, or a resizable window
+    /// grows to fit them a little more every frame.
+    #[test]
+    fn the_content_explorer_keeps_its_height_with_long_lists() {
+        let mut h = Harness::new();
+        memory_kit(&mut h);
+        let entries = h.app.model.kits[h.app.model.active].source.as_ref().unwrap().entries.clone();
+        h.app.dialogs.open(ContentExplorer {
+            kit: active_id(&h),
+            focus: entries[0].clone(),
+            parents: entries[1..200].to_vec(),
+            children: entries[200..240].to_vec(),
+            filter: String::new(),
+            index_unavailable: false,
+            back: Vec::new(),
+            forward: Vec::new(),
+        });
+        let height = |h: &Harness| {
+            h.ctx.memory(|memory| memory.area_rect(egui::Id::unique("content_explorer"))).expect("the explorer is open").height()
+        };
+        for _ in 0..FRAMES {
+            h.frame(Vec::new());
+        }
+        let settled = height(&h);
+        for _ in 0..30 {
+            h.frame(Vec::new());
+        }
+        assert_eq!(height(&h), settled, "the window kept growing");
+        assert!(h.painted.iter().any(|text| text == "Referenced By (199)"));
+        assert!(h.painted.iter().any(|text| text == "References (40)"));
     }
 
     fn run_case(case: &Case) -> Result<(), String> {
@@ -5592,7 +5815,7 @@ mod tests {
         assert_eq!(h.app.views[kit_id].browser.folder_browsers[&key].mode, BrowserMode::Groups);
         h.click(&view_menu, view_index);
         h.idle(2);
-        h.click("Folders", 0);
+        h.click("Tree", 0);
         h.idle(2);
         let open_new = |h: &mut Harness| {
             let label = h.painted.iter().find(|text| text.trim() == "New").unwrap().clone();
@@ -5782,6 +6005,137 @@ mod tests {
             .collect();
         idle(&mut h);
         (h, keys)
+    }
+
+    /// Read the navigation control from a full application draw.
+    fn navigation_button_rect(h: &mut Harness) -> egui::Rect {
+        h.time += 1.0 / 60.0;
+        let _ = crate::app::run_ui_test(&h.ctx, egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+            time: Some(h.time),
+            focused: true,
+            ..Default::default()
+        }, |ui| h.app.run_frame(ui));
+        let kit = h.app.model.kits[0].id;
+        h.ctx.read_response(egui::Id::unique(("navigation_pane_toggle", kit.0)))
+            .expect("navigation toggle remains available").rect
+    }
+
+    // Panel IDs are scoped by the containing workspace in egui 0.37. Inspect
+    // the panel beside the control rather than duplicating egui_tiles' scopes.
+    fn navigation_panel_rect(h: &mut Harness) -> egui::Rect {
+        let toggle = navigation_button_rect(h);
+        h.ctx.data(|data| data.iter_temp_by_type::<egui::containers::panel::PanelState>()
+            .map(|state| state.outer_rect)
+            .find(|rect| rect.contains(toggle.left_center() - egui::vec2(5.0, 0.0))))
+            .expect("expanded navigation panel has persisted its size")
+    }
+
+    #[test]
+    fn navigation_toggle_restores_width_and_survives_closing_all_tags() {
+        let (mut h, keys) = three_tabs();
+        let kit = h.app.model.kits[0].id;
+        let page = |h: &Harness| {
+            let tree = &h.app.views[kit].tag_tree;
+            tree.tiles.iter().find_map(|(id, tile)|
+                matches!(tile, egui_tiles::Tile::Pane(key) if key == &keys[2])
+                    .then(|| tree.tiles.rect(*id)).flatten()).unwrap()
+        };
+        let before = page(&h);
+        let browser_rect = navigation_panel_rect(&mut h);
+        let width = browser_rect.width();
+        let toggle = navigation_button_rect(&mut h);
+        assert!((toggle.left() - browser_rect.right() - 4.0).abs() < 1.0,
+            "the main view contributes 4px to the shared 8px gutter");
+        press_at(&mut h, toggle.center(), egui::PointerButton::Primary);
+        assert!(h.app.views[kit].navigation_hidden);
+        h.idle(12);
+        assert!(page(&h).width() > before.width() + 250.0);
+        let toggle = navigation_button_rect(&mut h);
+        assert!((toggle.left() - browser_rect.left() - 8.0).abs() < 1.0,
+            "collapsed navigation leaves an 8px left gutter");
+        press_at(&mut h, toggle.center(), egui::PointerButton::Primary);
+        assert!(!h.app.views[kit].navigation_hidden);
+        h.idle(12);
+        assert!((page(&h).width() - before.width()).abs() < 1.0);
+        assert!((navigation_panel_rect(&mut h).width() - width).abs() < 1.0);
+
+        h.app.views[kit].tag_tree = egui_tiles::Tree::new_horizontal(egui::Id::unique("navigation_split"), keys.clone());
+        idle(&mut h);
+        navigation_button_rect(&mut h); // The primary split keeps the toggle reachable.
+        h.app.views[kit].navigation_hidden = true;
+        h.app.reveal_in_browser(&keys[2]);
+        assert!(!h.app.views[kit].navigation_hidden, "Reveal in Browser reopens navigation");
+
+        h.app.views[kit].navigation_hidden = true;
+        h.app.close_all_tabs();
+        assert!(!h.app.views[kit].navigation_hidden, "closing all tabs restores navigation");
+        idle(&mut h);
+        assert!(h.ctx.read_response(egui::Id::unique(("navigation_pane_toggle", kit.0))).is_none(),
+            "the empty editor has no navigation toggle");
+        h.click("View", 0);
+        h.click("Navigation Pane", 0);
+        assert!(!h.app.views[kit].navigation_hidden, "the empty editor cannot hide navigation from View");
+    }
+
+    #[test]
+    fn navigation_slide_has_intermediate_layout_and_restores_editor_width() {
+        let (mut h, keys) = three_tabs();
+        let kit = h.app.model.kits[0].id;
+        let page_width = |h: &Harness| {
+            let tree = &h.app.views[kit].tag_tree;
+            tree.tiles.iter().find_map(|(id, tile)|
+                matches!(tile, egui_tiles::Tile::Pane(key) if key == &keys[2])
+                    .then(|| tree.tiles.rect(*id)).flatten()).unwrap().width()
+        };
+        let expanded = page_width(&h);
+        h.app.views[kit].navigation_hidden = true;
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        let during = page_width(&h);
+        h.idle(12);
+        let collapsed = page_width(&h);
+        assert!(during > expanded + 1.0 && during < collapsed - 1.0,
+            "editor width slides between endpoints: {expanded}, {during}, {collapsed}");
+        h.app.views[kit].navigation_hidden = false;
+        h.idle(12);
+        assert!((page_width(&h) - expanded).abs() < 1.0, "slide restores the original panel width");
+    }
+
+    #[test]
+    fn closing_the_last_tag_restores_navigation_but_other_tabs_keep_it_hidden() {
+        let (mut h, keys) = three_tabs();
+        let kit = h.app.model.kits[0].id;
+        h.app.views[kit].navigation_hidden = true;
+        for key in &keys[..2] {
+            h.app.kit_and_view(0).close_tag_pane(key);
+            assert!(h.app.views[kit].navigation_hidden);
+        }
+        h.app.kit_and_view(0).close_tag_pane(&keys[2]);
+        assert!(!h.app.views[kit].navigation_hidden);
+        idle(&mut h);
+        assert!(h.ctx.read_response(egui::Id::unique(("navigation_pane_toggle", kit.0))).is_none());
+    }
+
+    #[test]
+    fn navigation_view_menu_and_button_share_workspace_state() {
+        let (mut h, _) = three_tabs();
+        let kit = h.app.model.kits[0].id;
+        h.click("View", 0);
+        h.click("Navigation Pane", 0);
+        assert!(h.app.views[kit].navigation_hidden);
+        h.frame(vec![egui::Event::Key {
+            key: egui::Key::Escape, physical_key: None, pressed: true,
+            repeat: false, modifiers: egui::Modifiers::NONE,
+        }]);
+        idle(&mut h);
+        let toggle = navigation_button_rect(&mut h);
+        press_at(&mut h, toggle.center(), egui::PointerButton::Primary);
+        assert!(!h.app.views[kit].navigation_hidden);
+        h.app.views[kit].navigation_hidden = true;
+        let other = h.app.add_kit();
+        assert!(!h.app.views[other].navigation_hidden, "other workspaces keep their own state");
+        assert!(h.app.views[kit].navigation_hidden);
     }
 
     /// Slide onto the first painting of `text` and press and release `button`
@@ -6163,12 +6517,79 @@ mod tests {
         }
     }
 
+    #[test]
+    fn folder_browser_footer_and_tab_menu_follow_its_current_folder() {
+        let mut h=Harness::new();
+        fixture::install_kit(&mut h.app,fixture::synthetic_entries(2,1,1));
+        h.app.handle_browser_action(BrowserAction::OpenFolderBrowser {rel_path:PathBuf::new(),label:"Tags".into(),open_in_new_tab:true},h.ctx.clone());
+        idle(&mut h);
+        let kit=h.app.model.active_kit_id();
+        let key=h.app.model.kits[0].current_pane.clone().unwrap();
+        let selected=crate::app::browser::folder_pane_key(Path::new("folder_00"));
+        h.app.views[kit].browser.folder_browsers.get_mut(&key).unwrap().selection.keys.insert(selected);
+        idle(&mut h);
+        let footers:Vec<_>=h.painted_rects.iter().filter(|(text,_)|text=="2 items · 1 folder selected").collect();
+        assert_eq!(footers.len(),1,"the count appears only inside this browser");
+        assert!(footers[0].1.bottom()<h.screen.y-20.0,"footer remains above global status");
+        let about_at=egui::pos2(footers[0].1.left()-20.0,footers[0].1.center().y);
+        press_at(&mut h,about_at,egui::PointerButton::Primary);
+        idle(&mut h);
+        let help=h.app.dialogs.get::<crate::app::help::HelpWindow>().expect("footer About opens Help");
+        assert_eq!(help.doc_section.as_deref(),Some(crate::app::help::FOLDER_BROWSER_HELP_SECTION));
+        h.app.dialogs.close::<crate::app::help::HelpWindow>();
+        h.app.views[kit].browser.folder_browsers.get_mut(&key).unwrap().filter="folder_00".into();
+        h.app.views[kit].browser.folder_browsers.get_mut(&key).unwrap().search_scope.folders=true;
+        idle(&mut h);
+        assert!(h.painted.iter().any(|text|text.starts_with("1 of 2 items · ")),"filtered footer keeps the total: {:?}",h.painted);
+        let pane=h.app.views[kit].browser.folder_browsers.get_mut(&key).unwrap();
+        navigate_folder_browser(pane,PathBuf::from("folder_01/sub_00"),"sub_00".into());
+        h.app.views[kit].navigation_hidden=true;
+        idle(&mut h);
+        press_tab(&mut h,"sub_00",egui::PointerButton::Secondary);
+        for label in ["Reveal in Browser",crate::app::browser::actions::folder_opener_label(),"Close All","Close All Other Tabs"] {
+            assert!(h.painted.iter().any(|text|text==label),"missing tab action {label}: {:?}",h.painted);
+        }
+        h.click("Reveal in Browser",0);
+        assert!(!h.app.views[kit].navigation_hidden);
+        idle(&mut h);
+        assert_eq!(h.app.views[kit].browser.mode,BrowserMode::Folders);
+        assert!(h.painted.iter().any(|text|text=="folder_01"));
+    }
+
+    #[test]
+    fn tab_menu_closes_only_the_clicked_split_in_its_workspace() {
+        for action in ["Close Tab","Close All","Close All Other Tabs"] {
+            let (mut h,keys)=three_tabs();
+            let kit=h.app.model.active_kit_id();
+            let mut tiles=egui_tiles::Tiles::default();
+            let panes:Vec<_>=keys.iter().map(|key|tiles.insert_pane(key.clone())).collect();
+            let left=tiles.insert_tab_tile(panes[..2].to_vec());
+            let right=tiles.insert_tab_tile(vec![panes[2]]);
+            let root=tiles.insert_horizontal_tile(vec![left,right]);
+            h.app.views[kit].tag_tree=egui_tiles::Tree::new(egui::Id::unique(("group-close",action)),root,tiles);
+            let other=h.app.add_kit();
+            h.app.kit_and_view(1).open_tag_pane(&keys[0]);
+            h.app.focus_kit(0);
+            h.app.kit_and_view(0).focus_pane(keys[0].clone());
+            idle(&mut h);
+            press_tab(&mut h,"tag_000.biped",egui::PointerButton::Secondary);
+            for label in ["Close Tab","Close All","Close All Other Tabs"] {assert!(h.painted.iter().any(|text|text==label));}
+            h.click(action,0);idle(&mut h);
+            let open=&h.app.model.kits[0].open_tabs;
+            assert!(open.contains(&keys[2]),"{action} closed the other split");
+            assert_eq!(open.contains(&keys[0]),action=="Close All Other Tabs");
+            assert_eq!(open.contains(&keys[1]),action=="Close Tab");
+            assert_eq!(h.app.model.kits[1].id,other);
+            assert!(h.app.model.kits[1].open_tabs.contains(&keys[0]),"{action} touched another workspace");
+        }
+    }
+
     /// The tab menu's "Close all but this" keeps the tab it was opened on.
     #[test]
     fn close_all_but_this_keeps_that_tab() {
         let (mut h, keys) = three_tabs();
         press_tab(&mut h, "tag_001.biped", egui::PointerButton::Secondary);
-        h.click("Close all but this", 0);
+        h.click("Close All Other Tabs", 0);
         idle(&mut h);
         assert_eq!(open_tabs(&h), [keys[1].clone()]);
     }

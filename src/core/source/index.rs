@@ -6,6 +6,7 @@ use super::*;
 #[cfg(test)]
 thread_local! {
     pub(crate) static ENTRY_INDEX_WRITES: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static ENTRY_REFRESH_FILE_CHECKS: std::cell::RefCell<Option<std::sync::Arc<AtomicUsize>>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Returns the legacy per-game JSON entry-index path used for migration.
@@ -414,6 +415,18 @@ pub fn refresh_entry_index(
     root: &Path,
     names: &TagNameIndex,
 ) -> Result<EntryIndexRefresh> {
+    refresh_entry_index_with_progress(game, root, names, &|_| Ok(()))
+}
+
+/// Refreshes metadata with cooperative cancellation and file-count progress.
+/// Returning an error from the callback abandons the scan without saving it.
+pub fn refresh_entry_index_with_progress(
+    game: &str,
+    root: &Path,
+    names: &TagNameIndex,
+    progress: &(impl Fn(EntryIndexScanProgress) -> Result<()> + Sync),
+) -> Result<EntryIndexRefresh> {
+    progress(EntryIndexScanProgress::default())?;
     let (cached_entries, cached_fingerprints) = load_entry_index_from_db(game, root)
         .or_else(|| {
             let value = load_legacy_entry_index_value(game)?;
@@ -422,7 +435,7 @@ pub fn refresh_entry_index(
             Some(parsed)
         })
         .unwrap_or_default();
-    refresh_entry_index_from_cache(root, names, &cached_entries, &cached_fingerprints)
+    refresh_entry_index_from_cache_with_progress(root, names, &cached_entries, &cached_fingerprints, progress)
 }
 
 fn load_legacy_entry_index_value(game: &str) -> Option<serde_json::Value> {
@@ -506,11 +519,12 @@ fn index_item_relative_path(
 /// there" is what decides which cached entries were removed.
 type ResolvedFiles = Vec<(String, Option<TagEntry>, bool)>;
 
-fn refresh_entry_index_from_cache(
+fn refresh_entry_index_from_cache_with_progress(
     root: &Path,
     names: &TagNameIndex,
     cached_entries: &[TagEntry],
     cached_fingerprints: &HashMap<String, EntryFingerprint>,
+    progress: &(impl Fn(EntryIndexScanProgress) -> Result<()> + Sync),
 ) -> Result<EntryIndexRefresh> {
     let cached_by_rel = cached_entries
         .iter()
@@ -533,6 +547,7 @@ fn refresh_entry_index_from_cache(
     // more often, did them one at a time.
     let mut paths = Vec::new();
     for item in WalkDir::new(root).follow_links(false) {
+        progress(EntryIndexScanProgress { processed: paths.len(), total: 0, matched: 0 })?;
         let Some(item) = crate::core::source::walk_item(item)? else {
             continue;
         };
@@ -549,34 +564,52 @@ fn refresh_entry_index_from_cache(
     let chunk_size = paths.len().div_ceil(worker_count).max(1);
     let added = AtomicUsize::new(0);
     let updated = AtomicUsize::new(0);
+    let checked = AtomicUsize::new(0);
+    let total = paths.len();
 
     // Each worker returns its slice in the order it walked, so the merged list
     // is deterministic before the sort below rather than dependent on which
     // thread finished first.
+    #[cfg(test)]
+    let file_checks = ENTRY_REFRESH_FILE_CHECKS.with(|checks| checks.borrow().clone());
     let chunks: Vec<ResolvedFiles> = std::thread::scope(|scope| -> Result<Vec<ResolvedFiles>> {
         let mut handles = Vec::new();
         for chunk in paths.chunks(chunk_size) {
             let cached_by_rel = &cached_by_rel;
             let added = &added;
             let updated = &updated;
+            let checked = &checked;
+            #[cfg(test)]
+            let file_checks = file_checks.clone();
             handles.push(scope.spawn(move || -> Result<ResolvedFiles> {
                 let mut resolved = Vec::with_capacity(chunk.len());
                 for path in chunk {
+                    let processed = checked.fetch_add(1, Ordering::Relaxed);
+                    progress(EntryIndexScanProgress { processed, total, matched: 0 })?;
                     let rel = path.strip_prefix(root).unwrap_or(path.as_path());
                     let rel_key = normalize_rel_path(rel);
                     // A file that vanished since the walk, or is locked, is
                     // left out rather than failing the refresh; seen-but-absent
                     // counts it as removed, which is what it now is.
+                    #[cfg(test)]
+                    if let Some(checks) = &file_checks { checks.fetch_add(1, Ordering::Relaxed); }
                     let fingerprint = match file_fingerprint(path) {
                         Ok(fingerprint) => fingerprint,
                         Err(error) if crate::core::source::skippable_file_error(&error) => continue,
                         Err(error) => return Err(error),
                     };
+                    // Matched ignoring case, but reused only when its key is
+                    // spelled as the file is now. A saved entry whose folder
+                    // differs in case (an earlier move can leave one) would
+                    // otherwise keep that spelling for good: Windows still finds
+                    // the file, so nothing ever corrected it, and every move's
+                    // check against the disk disagreed.
                     if let (Some(cached), Some(current)) =
                         (cached_by_rel.get(&rel_key), fingerprint.as_ref())
                         && cached_fingerprints
                             .get(&rel_key)
                             .is_some_and(|cached_fp| cached_fp == current)
+                        && crate::core::tag_key::same_spelling(&cached.key, &crate::core::tag_key::file_entry_key(path))
                     {
                         resolved.push((rel_key, Some(cached.clone()), false));
                         continue;
@@ -616,6 +649,7 @@ fn refresh_entry_index_from_cache(
             })
             .collect()
     })?;
+    progress(EntryIndexScanProgress { processed: total, total, matched: 0 })?;
 
     let mut seen = HashSet::with_capacity(paths.len());
     let mut entries = Vec::with_capacity(paths.len());
@@ -655,7 +689,7 @@ fn refresh_entry_index_from_cache(
             .map(|(_, entry)| entry.key.clone()),
     );
     let removed = removed_keys.len() - before;
-    entries.sort_by(|a, b| natural_key(&a.display_path).cmp(&natural_key(&b.display_path)));
+    entries.sort_by_cached_key(|entry| natural_key(&entry.display_path));
     let changed = added > 0
         || updated > 0
         || removed > 0
@@ -1469,5 +1503,33 @@ mod tests {
             )
             .is_none()
         );
+    }
+    /// A saved entry whose folder is spelled in another case than on disk
+    /// (as an earlier move can leave) comes back spelled as the disk has it,
+    /// not as saved. Reused as saved, it kept the old spelling for good and
+    /// every move's check against the disk disagreed.
+    #[test]
+    fn a_saved_entry_spelled_differently_from_the_disk_is_corrected() {
+        let definitions = crate::core::bundled::locate_definitions_root();
+        let names = crate::core::format::TagNameIndex::load_game(&definitions, crate::core::game::GameId::Halo3).unwrap();
+        let root = scratch("case-heal");
+        let path = root.join("objects").join("crate.render_model");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        blam_tags::TagFile::new(definitions.join("halo3_mcc").join("render_model.json"))
+            .unwrap()
+            .write(&path)
+            .unwrap();
+        let mut saved = loose_file_entry(&root, &path, &names).unwrap().expect("a tag");
+        let right = saved.key.clone();
+        let shouted = root.join("OBJECTS").join("crate.render_model");
+        saved.key = file_entry_key(&shouted);
+        saved.location = TagEntryLocation::LooseFile(shouted);
+        let fingerprints = HashMap::from([(
+            normalize_rel_path(Path::new("objects/crate.render_model")),
+            file_fingerprint(&path).unwrap().unwrap(),
+        )]);
+        let refreshed = refresh_entry_index_from_cache_with_progress(&root, &names, &[saved], &fingerprints, &|_| Ok(())).unwrap();
+        assert_eq!(refreshed.entries.iter().map(|entry| entry.key.clone()).collect::<Vec<_>>(), [right]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

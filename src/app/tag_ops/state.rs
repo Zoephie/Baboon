@@ -34,6 +34,9 @@ pub(in crate::app) struct DeleteConfirm {
     /// says nothing either way.
     pub(in crate::app) referrers_unavailable: bool,
     pub(in crate::app) has_unsaved_edits: bool,
+    /// Scripts that name this item's tags, checked in the background once
+    /// the window first draws.
+    pub(in crate::app) scripts: Option<crate::app::tag_ops::script_fixes::ScriptCheck>,
 }
 
 /// Paths of the immutable pre-mutation backup kept beside the target UTOC.

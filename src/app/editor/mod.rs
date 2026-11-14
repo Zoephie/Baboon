@@ -281,7 +281,7 @@ fn draw_tag_fields_scroll(
         // cells are editable inline; when the grid can't be built it falls
         // back to the standard editable field tree (inside draw_material_tag).
         let is_shader = is_shader_tag(entry, &bundled_group_hierarchy(edit.game));
-        let scope = (edit.view_scope, edit.tag_key);
+        let scope = (edit.view_scope, "fields");
         let mut contents = |ui: &mut Ui| {
             scroll_during_drag(ui);
                 if !is_shader {
@@ -315,7 +315,7 @@ fn draw_tag_fields_scroll(
     // Generic fields reflow to the pane's width. A minimum-width, horizontally
     // scrolling canvas prevents their narrow layouts from ever being reached.
     ScrollArea::vertical()
-        .id_salt(("tag_scroll", edit.view_scope, edit.tag_key))
+        .id_salt(("tag_scroll", edit.view_scope))
         .max_height(scroll_height)
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -333,6 +333,35 @@ const TAG_FIELD_SCROLL_MIN_WIDTH: f32 = 980.0;
 #[cfg(test)]
 mod responsive_page_tests {
     use super::*;
+
+    #[test]
+    fn field_page_scroll_survives_a_tag_path_change_in_the_same_pane() {
+        let tag = TagFile::new(locate_definitions_root().join("halo3_mcc/damage_effect.json")).unwrap();
+        let mut entry = TagEntry { key: "old.damage_effect".into(), display_path: "old.damage_effect".into(), group_tag: u32::from_be_bytes(*b"jpt!"), group_name: None, location: TagEntryLocation::LooseFile(PathBuf::from("old.damage_effect")) };
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        let mut time = 0.0;
+        let mut frame = |entry: &TagEntry, events| {
+            time += 0.1;
+            let output = crate::app::run_ui_test(&ctx, egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 240.0))), time: Some(time), events, ..Default::default() }, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    fields::with_test_edit_context(|edit| {
+                        edit.tag_key = if entry.key.starts_with("old") { "old.damage_effect" } else { "moved.damage_effect" };
+                        draw_tag_fields_scroll(ui, &tag, (0,0,0,0), entry, &TagNameIndex::default(), None, &mut HashMap::new(), &mut HashMap::new(), &mut H2TemplateCache::default(), &mut None, &mut None, false, edit, false, false);
+                    });
+                });
+            });
+            output.shapes.iter().find_map(|shape| match &shape.shape { egui::Shape::Text(text) if text.galley.text() == "radius" => Some(text.pos.y), _ => None }).expect("field page rendered")
+        };
+        let initial = frame(&entry, vec![]);
+        frame(&entry, vec![egui::Event::PointerMoved(egui::pos2(400.0,120.0)), egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown, phase: egui::TouchPhase::Move, unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0,-140.0), modifiers: egui::Modifiers::default() }]);
+        let mut scrolled = initial;
+        for _ in 0..12 { scrolled = frame(&entry, vec![]); }
+        assert!(scrolled < initial - 20.0, "the real field page must scroll");
+        entry.key = "moved.damage_effect".into(); entry.display_path = entry.key.clone();
+        let moved = frame(&entry, vec![]);
+        assert!((moved - scrolled).abs() < 1.0, "moving reset the field page scroll: {scrolled} -> {moved}");
+    }
 
     #[test]
     fn shader_page_wrapper_fits_split_panes() {

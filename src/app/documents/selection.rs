@@ -23,7 +23,12 @@ impl Baboon {
         }
         match result {
             Ok(tag) => {
-                self.model.status = "Tag loaded".to_owned();
+                // A user edit made while a refresh was reading wins over the
+                // older disk snapshot returned by that read.
+                if self.model.kits[index].parsed_tags.get(&key).is_some_and(|doc| doc.dirty.is_set()) { return false; }
+                if !self.model.kits[index].parsed_tags.contains_key(&key) {
+                    self.model.status = "Tag loaded".to_owned();
+                }
                 self.model.kits[index]
                     .parsed_tags
                     .insert(key.clone(), TagDocument::clean(tag));
@@ -104,6 +109,19 @@ mod tests {
         assert_eq!(line, "Could not load objects/broken.model: truncated");
         assert_eq!(app.model.status, *line);
     }
+
+    #[test]
+    fn a_pre_move_read_cannot_replace_or_clear_a_newer_reload() {
+        let mut app = Baboon::for_test();
+        let kit = app.model.kits[0].id;
+        let key = "unchanged-referrer".to_owned();
+        app.kit_and_view(0).open_tag_pane(&key);
+        app.model.kits[0].tag_load_epoch = 1;
+        app.model.kits[0].loading_tags.insert(key.clone());
+        app.apply_worker_message(WorkerMessage::TagLoaded { kit, epoch: 0, key: key.clone(), result: Err("obsolete read".into()) }, &egui::Context::default());
+        assert!(app.model.kits[0].loading_tags.contains(&key));
+        assert!(app.kit_tools.terminal.lines.is_empty());
+    }
 }
 
 impl Baboon {
@@ -124,12 +142,18 @@ impl Baboon {
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(in crate::app) fn ensure_tag_loading(&mut self, key: String, ctx: egui::Context) {
-        if self.model.kits[self.model.active].parsed_tags.contains_key(&key)
-            || self.model.kits[self.model.active].loading_tags.contains(&key)
+        self.load_tag_in(self.model.active, key, ctx, false);
+    }
+
+    /// Reload without dropping the displayed document: pane height and scroll
+    /// stay stable while the fresh bytes are read in the background.
+    pub(in crate::app) fn load_tag_in(&mut self, kit_index: usize, key: String, ctx: egui::Context, reload: bool) {
+        if (!reload && self.model.kits[kit_index].parsed_tags.contains_key(&key))
+            || self.model.kits[kit_index].loading_tags.contains(&key)
         {
             return;
         }
-        let Some(source) = self.model.source() else {
+        let Some(source) = self.model.kits[kit_index].source.as_ref() else {
             return;
         };
         // Check both the lazily-loaded entries and the full scan set (all_entries).
@@ -137,7 +161,7 @@ impl Baboon {
         let Some(entry) = source
             .entry_for_key(&key)
             .or_else(|| {
-                self.model.kits[self.model.active].active_favorite_entries
+                self.model.kits[kit_index].active_favorite_entries
                     .iter()
                     .find(|e| e.key == key)
             })
@@ -150,14 +174,15 @@ impl Baboon {
         // read — `read_entry` would only fail on the worker thread. Retire the
         // entry here instead of leaving a row that fails forever.
         if matches!(entry.location, TagEntryLocation::NewContainer { .. }) {
-            let kit = self.model.active;
+            let kit = kit_index;
             self.forget_new_container_entry(kit, &key);
             self.model.status = format!("The unsaved new tag {} was discarded", entry.display_path);
             return;
         }
         let source_kind = source.source.clone();
-        let kit = self.model.active_kit_id();
-        self.model.kits[self.model.active].loading_tags.insert(key.clone());
+        let kit = self.model.kits[kit_index].id;
+        let epoch = self.model.kits[kit_index].tag_load_epoch;
+        self.model.kits[kit_index].loading_tags.insert(key.clone());
         self.model.status = format!("Loading {}", entry.display_path);
         let panic_key = key.clone();
         spawn_worker(
@@ -165,10 +190,11 @@ impl Baboon {
             &ctx,
             move || {
                 let result = read_entry(&source_kind, &entry).map_err(|error| format!("{error:#}"));
-                WorkerMessage::TagLoaded { kit, key, result }
+                WorkerMessage::TagLoaded { kit, epoch, key, result }
             },
             move |error| WorkerMessage::TagLoaded {
                 kit,
+                epoch,
                 key: panic_key,
                 result: Err(error),
             },

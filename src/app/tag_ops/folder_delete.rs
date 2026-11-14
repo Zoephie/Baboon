@@ -8,6 +8,7 @@ pub(in crate::app) struct DeleteFolderConfirm {
     relative: PathBuf,
     entries: Vec<TagEntry>,
     outside_referrers: Option<Vec<String>>,
+    scripts: Option<super::script_fixes::ScriptCheck>,
 }
 
 pub(in crate::app) struct DeletedFolder {
@@ -57,47 +58,63 @@ impl Dialog for DeleteFolderConfirm {
         // A modal blocks editing. Cache a completed preview instead of
         // repeatedly walking a large folder's references during every repaint.
         if self.outside_referrers.is_none() { self.outside_referrers = referrers(cx.model, self); }
+        // Scripts that name the folder's tags lose them too.
+        let deleted: Vec<String> = self.entries.iter().map(|entry| entry.display_path.clone()).collect();
+        let scripts = super::script_fixes::ScriptCheck::rows_for(&mut self.scripts, cx, self.kit, |_| {
+            crate::core::script_paths::ScriptChanges::deleting(deleted.iter().map(String::as_str))
+        });
         let outside = &self.outside_referrers;
         let unsaved = self.entries.iter().filter(|entry| cx.model.kits[index].parsed_tags.get(&entry.key)
             .is_some_and(|document| document.dirty.is_set())).count();
+        let kit = &cx.model.kits[index];
+        let source = kit.source.as_ref();
+        let game = source.and_then(|source| source.source.game());
+        let rows = match (outside, source) {
+            (Some(paths), Some(source)) => crate::app::browser::bulk_rename::referrer_rows(paths, &source.names),
+            _ => Vec::new(),
+        };
+        let mut notes = vec!["Tags inside this folder aren't listed, since they're deleted too.".to_owned()];
+        if outside.is_none() {
+            notes.push(if kit.index_jobs.building_references || kit.scanning_entries {
+                "Checking references before deletion…".to_owned()
+            } else {
+                "The reference count is unavailable. Build the reference index before deleting this folder.".to_owned()
+            });
+        }
+        let tags = self.entries.len();
         let mut delete = false;
         let mut cancel = false;
         let response = egui::Modal::new(egui::Id::unique("delete_folder_confirm"))
             .frame(egui::Frame::window(&cx.egui.global_style()))
             .show(cx.egui, |ui| {
-                ui.set_width(window_width(cx.egui, 520.0));
+                use crate::app::browser::bulk_rename::{ITEM_ROW_HEIGHT, RenameIcon, draw_item_row, draw_references_box, missing_references_title, references_box_height};
+                ui.set_width(window_width(cx.egui, 480.0));
                 crate::app::search::draw_icon_window_header_without_close(ui, "Delete Folder?", ButtonIcon::Garbage);
                 ui.add_space(12.0);
-                ui.label(RichText::new(tag_path::relative_tag_path(&self.relative)).monospace());
-                ui.label(format!("This folder contains {} tag(s). The entire folder, including subfolders and other files, will be moved to Baboon's deleted-tags folder so it can be recovered by hand.", self.entries.len()));
-                if unsaved > 0 {
-                    ui.add_space(8.0);
-                    ui.label(format!("{unsaved} tag(s) have unsaved edits that will be discarded."));
-                }
-                ui.add_space(8.0);
-                match outside {
-                    Some(paths) => {
-                        ui.label(format!("{} tag(s) outside this folder reference its tags.", paths.len()));
-                        ui.label(RichText::new("References from tags inside this folder are excluded.").color(subtle_dark()));
-                        if !paths.is_empty() {
-                            ui.label("These references will be left pointing at missing tags:");
-                            crate::app::ScrollArea::vertical().id_salt("delete_folder_referrers")
-                                .max_height(160.0).show(ui, |ui| {
-                                    for path in paths.iter().take(100) { ui.label(RichText::new(path).monospace()); }
-                                    if paths.len() > 100 { ui.label(format!("And {} more…", paths.len() - 100)); }
-                                });
-                        }
+                crate::app::browser::bulk_rename::padded_body(ui, |ui| {
+                    draw_item_row(ui, RenameIcon::Folder, game, &tag_path::relative_tag_path(&self.relative), ITEM_ROW_HEIGHT);
+                    ui.add_space(10.0);
+                    ui.label(format!("This folder contains {tags} {}. The entire folder, including subfolders and other files, will be moved to Baboon's deleted-tags folder so it can be recovered by hand.", if tags == 1 { "tag" } else { "tags" }));
+                    if unsaved > 0 {
+                        ui.add_space(6.0);
+                        ui.label(format!("{unsaved} {} unsaved edits that will be discarded.", if unsaved == 1 { "tag has" } else { "tags have" }));
                     }
-                    None if cx.model.kits[index].index_jobs.building_references || cx.model.kits[index].scanning_entries => {
-                        ui.horizontal(|ui| { ui.spinner(); ui.label("Checking references before deletion…"); });
-                    }
-                    None => { ui.label("The reference count is unavailable. Build the reference index before deleting this folder."); }
-                }
+                    ui.add_space(14.0);
+                    let max = (window_work_area(cx.egui).height() * 0.4).clamp(120.0, 320.0);
+                    let height = references_box_height(scripts.total(rows.len()), notes.len() + scripts.note_lines(), max);
+                    draw_references_box(ui, &missing_references_title(scripts.total(rows.len())), &rows, &scripts, &notes, game, height);
+                });
                 ui.add_space(12.0);
                 popup_footer(ui, |ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         cancel = icon_text_button(ui, ButtonIcon::Clear, "Cancel", true).clicked();
-                        delete = icon_text_button(ui, ButtonIcon::Garbage, "Delete Folder", outside.is_some()).clicked();
+                        delete = accent_icon_text_button(ui, ButtonAccent::Destructive, ButtonIcon::Garbage, "Delete Folder", outside.is_some() && !scripts.checking)
+                            .on_disabled_hover_text(if scripts.checking {
+                                crate::app::browser::bulk_rename::ScriptRows::WAITING
+                            } else {
+                                "Available once references are checked."
+                            })
+                            .clicked();
                     });
                 });
             });
@@ -120,7 +137,7 @@ impl Baboon {
             } else {
                 scan_folder_subtree_entries(&root, &relative, &source.names).map_err(|error| error.to_string())?
             };
-            Ok(DeleteFolderConfirm { kit: self.model.active_kit_id(), root, relative, entries, outside_referrers: None })
+            Ok(DeleteFolderConfirm { kit: self.model.active_kit_id(), root, relative, entries, outside_referrers: None, scripts: None })
         })();
         match result {
             Ok(confirm) => {
@@ -145,6 +162,10 @@ impl Baboon {
         }
         let stamp = self.model.kit_stamp();
         let game = self.model.source().and_then(|source| source.game);
+        let recovery_target = match self.prepare_loose_recovery_target(self.model.active) {
+            Ok(target) => target,
+            Err(error) => { self.model.status = error; return; }
+        };
         let names = self.model.names().clone();
         let tx = self.tx.clone();
         self.tag_ops.folder_refactor = Some(FolderRefactorUiState {
@@ -152,7 +173,7 @@ impl Baboon {
             phase: "Moving folder to deleted-tags".into(), progress: None,
         });
         self.spawn_job(move || WorkerMessage::FolderDeleteFinished { stamp,
-            result: delete_folder(confirm, game, names, &tx),
+            result: delete_folder(confirm, game, names, recovery_target, &tx),
         }, move |_| WorkerMessage::FolderDeleteFinished { stamp, result: Err("Folder deletion worker crashed".into()) });
         ctx.request_repaint();
     }
@@ -206,6 +227,7 @@ fn prune_folder(children: &mut Vec<crate::core::source::TagTreeNode>, relative: 
 }
 
 fn delete_folder(confirm: DeleteFolderConfirm, game: Option<GameId>, names: TagNameIndex,
+    recovery_target: (PathBuf, crate::core::recovery::RecoveryOrigin),
     tx: &Sender<WorkerMessage>) -> Result<DeletedFolder, String> {
     checked_folder(&confirm.root, &confirm.relative)?;
     let current = scan_folder_subtree_entries(&confirm.root, &confirm.relative, &names).map_err(|error| error.to_string())?;
@@ -214,8 +236,8 @@ fn delete_folder(confirm: DeleteFolderConfirm, game: Option<GameId>, names: TagN
         return Err("Folder contents changed. Open Delete Folder again to review the new tag count.".into());
     }
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-    let destination = super::delete::loose_trash_destination(game.map(GameId::as_str),
-        &tag_path::relative_tag_path(&confirm.relative), now.as_secs())?;
+    let destination = crate::core::recovery::prepare_batch(&recovery_target.0, &recovery_target.1,
+        &confirm.relative, "delete folder", now.as_secs())?;
     move_folder_to_trash(&confirm.root, &confirm.relative, &destination, tx)?;
     // A failed cache write must not hide the completed deletion from the UI.
     let warning = game.and_then(|game| (|| -> anyhow::Result<()> {
@@ -338,7 +360,8 @@ mod tests {
         let confirm = app.dialogs.close::<DeleteFolderConfirm>().unwrap();
         kit.write_mcc("doomed/new", "model", |_| {});
         let (tx, _rx) = mpsc::channel();
-        assert!(delete_folder(confirm, Some(GameId::from_id("halo3_mcc").unwrap()), kit.names(), &tx).is_err());
+        let target = app.loose_recovery_context(0).unwrap();
+        assert!(delete_folder(confirm, Some(GameId::from_id("halo3_mcc").unwrap()), kit.names(), target, &tx).is_err());
         assert!(kit.root.join("doomed").exists());
         let occupied = kit.root.parent().unwrap().join("occupied");
         fs::create_dir_all(&occupied).unwrap();
@@ -367,6 +390,36 @@ mod tests {
     }
 
     #[test]
+    fn folder_deletion_uses_profile_recovery_and_records_non_tag_contents() {
+        let kit = fixture();
+        let mut app = app();
+        kit.install_indexed(&mut app);
+        let root = kit.root.parent().unwrap().to_path_buf();
+        let custom = root.join("deleted-tags");
+        let id = uuid::Uuid::new_v4().to_string();
+        app.model.prefs.custom_editing_kit_profiles.push(CustomEditingKitProfile {
+            recovery: crate::core::recovery::RecoveryLocation { name: "test_kit".into(), folder: Some("deleted-tags".into()) },
+            id: id.clone(), name: "Test Kit".into(), game: "halo3_mcc".into(), root,
+            read_only: false, git_tracked: false, icon: None, tags_folder: None, data_folder: None,
+        });
+        app.model.kits[0].profile = Some(EditingKitProfileIdentity { id: id.clone(), name: "Test Kit".into() });
+        fs::write(kit.root.join("doomed/readme.txt"), b"non-tag content").unwrap();
+        fs::create_dir_all(kit.root.join("doomed/empty")).unwrap();
+        app.open_delete_folder("doomed".into(), ctx());
+        app.begin_delete_folder(ctx());
+        crate::app::loose_fixture::pump_until(&mut app, "custom folder recovery", |app| app.tag_ops.folder_refactor.is_none());
+        assert!(!kit.root.join("doomed").exists(), "{}", app.model.status);
+        let destination = PathBuf::from(app.model.status.split(" — moved to ").nth(1).unwrap());
+        assert!(destination.starts_with(custom.canonicalize().unwrap()));
+        assert_eq!(fs::read(destination.join("readme.txt")).unwrap(), b"non-tag content");
+        assert!(destination.join("empty").is_dir());
+        let batch = destination.ancestors().find(|p| p.file_name().is_some_and(|n| n == "files")).unwrap().parent().unwrap();
+        let info: serde_json::Value = serde_json::from_slice(&fs::read(batch.join("recovery-info.json")).unwrap()).unwrap();
+        assert_eq!(info["origin"]["kit_id"], id);
+        assert_eq!(info["operation"], "delete folder");
+    }
+
+    #[test]
     fn confirmed_folder_deletion_runs_the_worker_and_keeps_a_recovery_copy() {
         let kit = fixture();
         let mut app = app();
@@ -377,7 +430,7 @@ mod tests {
         assert!(!kit.root.join("doomed").exists(), "{}", app.model.status);
         assert_eq!(app.model.source().unwrap().full_entry_set().len(), 1);
         let destination = PathBuf::from(app.model.status.split(" — moved to ").nth(1).expect("recovery location"));
-        assert!(destination.starts_with(crate::core::storage::data_path("deleted-tags")));
+        assert!(destination.starts_with(crate::core::storage::data_path("deleted-tags").canonicalize().unwrap()));
         assert!(destination.join("render.render_model").is_file());
         fs::remove_dir_all(destination).unwrap();
     }

@@ -251,6 +251,7 @@ pub(in crate::app) enum CellAction {
     Open(String),
     /// The cell's right-click menu item.
     MenuAction(String),
+    BrowserAction(BrowserAction),
 }
 
 /// The two thumbnail libraries.
@@ -450,7 +451,7 @@ fn draw_thumbnail_grid<S: ThumbnailSource>(
 /// every entry and lowercased each name to sort them, about 19 ms a frame at
 /// the root of the Halo 3 kit. `entries_signature` names the entries; without
 /// one nothing is kept.
-fn asset_grid_order(
+pub(super) fn asset_grid_order(
     ui: &Ui,
     pane_key: &str,
     pane: &FolderBrowserState,
@@ -523,6 +524,8 @@ pub(in crate::app) fn draw_folder_asset_grid(
 ) {
     let order = asset_grid_order(ui, pane_key, pane, entries, entries_signature);
     let visible: Vec<&TagEntry> = order.iter().map(|&index| &entries[index]).collect();
+    if let Some(mut state)=multi(ui) { state.selection.rows=visible.iter().map(|entry| (entry.key.clone(),tag_path::name(&entry.display_path).into())).collect(); state.selection.retain_rows(); begin_multi(ui,&state.pane,state.kit,&state.selection,true); }
+
     let game = cx.model.kits[kit_index]
         .source
         .as_ref()
@@ -544,6 +547,7 @@ pub(in crate::app) fn draw_folder_asset_grid(
         browser_navigation_columns(ui, columns, height + ui.spacing().item_spacing.y);
         for entry in &visible {
             register_browser_navigation(ui, &entry.key, browser_asset_navigation_id(ui, &entry.key));
+            register_browser_name(ui,&entry.key,tag_path::name(&entry.display_path));
         }
     }
     let mut scroll = ScrollArea::vertical().id_salt(("folder_assets", pane_key)).auto_shrink([false, false]);
@@ -554,6 +558,7 @@ pub(in crate::app) fn draw_folder_asset_grid(
     }
     scroll
         .show_rows(ui, height, visible.len().div_ceil(columns), |ui, rows| {
+            let at_end = rows.end == visible.len().div_ceil(columns);
             ui.spacing_mut().item_spacing = Vec2::new(CELL_GAP, 0.0);
             for row in rows {
                 ui.horizontal(|ui| {
@@ -571,8 +576,15 @@ pub(in crate::app) fn draw_folder_asset_grid(
                             action = cell_action;
                         }
                     }
+                    let blank = ui.allocate_response(egui::vec2(ui.available_width().max(0.0), height), egui::Sense::click());
+                    clear_multi_on_blank(ui, &blank);
                 });
                 ui.add_space(CELL_GAP);
+            }
+            if at_end && ui.cursor().top() < ui.clip_rect().bottom() {
+                let rect = egui::Rect::from_min_max(ui.cursor().min, ui.clip_rect().max);
+                let blank = ui.interact(rect, ui.scope_id().with("asset_blank"), egui::Sense::click());
+                clear_multi_on_blank(ui, &blank);
             }
         });
     let wanted = |keys: Vec<String>| -> Vec<TagEntry> {
@@ -667,10 +679,17 @@ fn draw_thumbnail_entry<S: ThumbnailSource>(
         file_path: entry_loose_file(entry),
     });
     let (caption, hover_hint) = (S::caption(entry), S::hover_hint(entry));
-    let image_rect = egui::Rect::from_min_size(rect.min, Vec2::splat(cell));
+    let preview_rect = egui::Rect::from_min_size(rect.min, Vec2::splat(cell));
+    let image_rect = if type_badge.is_some() {
+        // Leave a visible hover band between the image and the card's border.
+        if response.hovered() || response.highlighted() || response.has_focus() {
+            ui.painter().rect_filled(rect,ui.visuals().widgets.hovered.corner_radius,context_menu_hover());
+        }
+        preview_rect.shrink(2.0)
+    } else {preview_rect};
     ui.painter()
         .rect_filled(image_rect, 0.0, foundation_input());
-    if response.hovered() {
+    if response.hovered() && type_badge.is_none() {
         ui.painter()
             .rect_stroke(
                 image_rect,
@@ -690,7 +709,7 @@ fn draw_thumbnail_entry<S: ThumbnailSource>(
 
     match texture {
         Some(texture) => {
-            let drawn = fit_within(texture.size_vec2(), cell - 2.0);
+            let drawn = fit_within(texture.size_vec2(), image_rect.width() - 2.0);
             let at = egui::Rect::from_center_size(image_rect.center(), drawn);
             egui::Image::new(&texture).paint_at(ui, at);
         }
@@ -718,14 +737,14 @@ fn draw_thumbnail_entry<S: ThumbnailSource>(
     }
     let name = tag_leaf_name(&display_path);
     ui.painter().text(
-        egui::Pos2::new(rect.center().x, image_rect.bottom() + 8.0),
+        egui::Pos2::new(rect.center().x, preview_rect.bottom() + 8.0),
         Align2::CENTER_CENTER,
         truncate_for_cell(&name, cell),
         FontId::proportional(11.5),
         text_dark(),
     );
     ui.painter().text(
-        egui::Pos2::new(rect.center().x, image_rect.bottom() + 21.0),
+        egui::Pos2::new(rect.center().x, preview_rect.bottom() + 21.0),
         Align2::CENTER_CENTER,
         caption,
         FontId::proportional(10.0),
@@ -761,13 +780,17 @@ fn draw_thumbnail_entry<S: ThumbnailSource>(
     // too easy to do by accident, and every open parses a tag and adds a tab.
     let mut action = response
         .double_clicked()
-        .then(|| CellAction::Open(key.clone()));
+        .then_some(())
+        .filter(|_| !ui.input(|input| input.modifiers.ctrl || input.modifiers.command || input.modifiers.shift))
+        .map(|_| CellAction::Open(key.clone()));
 
     // The browser tree's own menu styling, so a right-click here looks like
     // a right-click anywhere else in Baboon.
     context_menu(&response, |ui| {
         style_tag_context_menu(ui);
-        if context_menu_button(ui, S::MENU_ITEM).clicked() {
+        if type_badge.is_some() && multi(ui).is_some() {
+            if let Some(request) = draw_multi_menu(ui) { action = Some(CellAction::BrowserAction(request)); }
+        } else if context_menu_button(ui, S::MENU_ITEM).clicked() {
             action = Some(CellAction::MenuAction(key.clone()));
             close_menu(ui);
         }
@@ -1143,7 +1166,8 @@ mod tests {
 
     fn folder_pane() -> FolderBrowserState {
         FolderBrowserState {
-            selected_tag: None,
+                        selection: BrowserSelection::default(),
+                        selected_tag: None,
             rel_path: tag_path::to_relative(r"objects\brute"),
             label: "brute".into(),
             filter: String::new(),

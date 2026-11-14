@@ -478,7 +478,19 @@ pub(in crate::app) fn draw_icon_window_header(
     icon: ButtonIcon,
     open: &mut bool,
 ) {
-    draw_icon_window_header_impl(ui, title, icon, Some(open));
+    draw_icon_window_header_impl(ui, title, icon, Some(open), None);
+}
+
+/// [`draw_icon_window_header`] with an About button beside Close, like the
+/// tabbed headers. Whether About was clicked.
+pub(in crate::app) fn draw_icon_window_header_with_help(
+    ui: &mut Ui,
+    title: &str,
+    icon: ButtonIcon,
+    open: &mut bool,
+    help: (&str, egui::Id),
+) -> bool {
+    draw_icon_window_header_impl(ui, title, icon, Some(open), Some(help))
 }
 
 pub(in crate::app) fn draw_icon_window_header_without_close(
@@ -486,7 +498,7 @@ pub(in crate::app) fn draw_icon_window_header_without_close(
     title: &str,
     icon: ButtonIcon,
 ) {
-    draw_icon_window_header_impl(ui, title, icon, None);
+    draw_icon_window_header_impl(ui, title, icon, None, None);
 }
 
 fn draw_icon_window_header_impl(
@@ -494,7 +506,8 @@ fn draw_icon_window_header_impl(
     title: &str,
     icon: ButtonIcon,
     open: Option<&mut bool>,
-) {
+    help: Option<(&str, egui::Id)>,
+) -> bool {
     const HEADER_HEIGHT: f32 = 28.0;
     const TITLE_ICON_SIZE: f32 = 18.0;
     const TITLE_GAP: f32 = 7.0;
@@ -554,6 +567,16 @@ fn draw_icon_window_header_impl(
             *open = false;
         }
     }
+    let Some((tooltip, id)) = help else { return false };
+    let help_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - 34.0, background.center().y),
+        Vec2::splat(20.0),
+    );
+    let response = ui.interact(help_rect, id, Sense::click()).on_hover_text(tooltip);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tooltip));
+    paint_button_icon_at(ui, ButtonIcon::About, help_rect.shrink(2.0),
+        if response.hovered() { text_dark() } else { subtle_dark() });
+    response.clicked()
 }
 
 #[cfg(test)]

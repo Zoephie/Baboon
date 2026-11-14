@@ -52,6 +52,7 @@ pub(in crate::app) enum ButtonIcon {
     Import,
     Export,
     Clear,
+    CloseTab,
     Closed,
     CopyPath,
     Copy,
@@ -94,6 +95,8 @@ pub(in crate::app) enum ButtonIcon {
     MaterialsLookup,
     Model,
     JumpTo,
+    /// Jump To, pointing left: going back.
+    JumpBack,
     JumpUp,
     JumpDown,
     Left,
@@ -122,6 +125,7 @@ pub(in crate::app) enum ButtonIcon {
     Bitmap,
     View,
     WindowMode,
+    NavigationPane,
     FolderClosed,
     FolderOpen,
 }
@@ -149,7 +153,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Edit => include_root_str!("assets/Button Icons/Edit.svg"),
         ButtonIcon::Import => include_root_str!("assets/Button Icons/Import.svg"),
         ButtonIcon::Export => include_root_str!("assets/Button Icons/Export.svg"),
-        ButtonIcon::Clear => include_root_str!("assets/Button Icons/Clear.svg"),
+        ButtonIcon::Clear | ButtonIcon::CloseTab => include_root_str!("assets/Button Icons/Clear.svg"),
         ButtonIcon::Closed => include_root_str!("assets/Button Icons/Closed.svg"),
         ButtonIcon::CopyPath => include_root_str!("assets/Button Icons/Copy Path.svg"),
         ButtonIcon::Copy => include_root_str!("assets/Button Icons/Copy.svg"),
@@ -196,6 +200,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::MaterialsLookup => include_root_str!("assets/tag icons/material_effects.svg"),
         ButtonIcon::Model => include_root_str!("assets/Button Icons/Model.svg"),
         ButtonIcon::JumpTo => include_root_str!("assets/Button Icons/Jump To.svg"),
+        ButtonIcon::JumpBack => include_root_str!("assets/Button Icons/Jump Back.svg"),
         ButtonIcon::JumpUp => include_root_str!("assets/Button Icons/Jump Up.svg"),
         ButtonIcon::JumpDown => include_root_str!("assets/Button Icons/Jump Down.svg"),
         ButtonIcon::Left => include_root_str!("assets/Button Icons/Left.svg"),
@@ -232,6 +237,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
             }
         }
         ButtonIcon::WindowMode => include_root_str!("assets/Button Icons/Window Mode.svg"),
+        ButtonIcon::NavigationPane => include_root_str!("assets/Button Icons/Navigation Pane.svg"),
         ButtonIcon::FolderClosed => include_root_str!("assets/Button Icons/Folder - closed.svg"),
         ButtonIcon::FolderOpen => include_root_str!("assets/Button Icons/Folder - open.svg"),
     }
@@ -345,6 +351,100 @@ pub(in crate::app) fn icon_text_button(
     )
 }
 
+/// A button's accent: a colored fill that marks what it does. Destructive is
+/// the red of the Delete icon, for actions to take with care.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum ButtonAccent {
+    Destructive,
+}
+
+impl ButtonAccent {
+    pub(in crate::app) fn color(self) -> Color32 {
+        match self {
+            // The Garbage and Close Tab icons' red.
+            ButtonAccent::Destructive => Color32::from_rgb(0xEB, 0x47, 0x47),
+        }
+    }
+
+    /// The accent at a neutral button's opacity for the same state, so an
+    /// accented button idles, hovers and presses like the others.
+    fn fill(self, alpha: u8) -> Color32 {
+        let [r, g, b, _] = self.color().to_array();
+        Color32::from_rgba_unmultiplied(r, g, b, alpha)
+    }
+}
+
+/// [`icon_text_button`] with an accent fill. Its icon is drawn in the text
+/// color, even one with a color of its own, so it reads on the fill.
+pub(in crate::app) fn accent_icon_text_button(
+    ui: &mut Ui,
+    accent: ButtonAccent,
+    icon: ButtonIcon,
+    label: impl Into<egui::WidgetText>,
+    enabled: bool,
+) -> egui::Response {
+    ui.scope(|ui| {
+        accent_visuals(ui, accent);
+        let color = text_dark();
+        let image = egui::Image::from_bytes(
+            mono_icon_uri(ui.ctx(), icon, color),
+            mono_icon_bytes(icon, color),
+        )
+        .fit_to_exact_size(Vec2::splat(BUTTON_ICON_SIZE));
+        ui.add_enabled(
+            enabled,
+            egui::Button::image_and_text(image, label).min_size(Vec2::new(0.0, BUTTON_HEIGHT)),
+        )
+    })
+    .inner
+}
+
+/// Buttons drawn in `ui` from here take `accent`'s fill and hover border.
+fn accent_visuals(ui: &mut Ui, accent: ButtonAccent) {
+    let widgets = &mut ui.visuals_mut().widgets;
+    widgets.inactive.weak_bg_fill = accent.fill(ACCENT_IDLE_ALPHA);
+    widgets.hovered.weak_bg_fill = accent.fill(ACCENT_HOVER_ALPHA);
+    widgets.active.weak_bg_fill = accent.fill(ACCENT_HOVER_ALPHA);
+    // Hovered and pressed, the border is the accent itself.
+    widgets.hovered.bg_stroke.color = accent.color();
+    widgets.active.bg_stroke.color = accent.color();
+}
+
+/// An accent button's fill: 25% idle, 50% hovered or pressed.
+const ACCENT_IDLE_ALPHA: u8 = 64;
+const ACCENT_HOVER_ALPHA: u8 = 128;
+
+/// Where [`mono_icon_bytes`] is registered. egui picks its SVG loader by the
+/// `.svg` ending, so the marker goes before it.
+fn mono_icon_uri(ctx: &egui::Context, icon: ButtonIcon, color: Color32) -> String {
+    button_icon_uri(ctx, icon, color, BUTTON_ICON_SIZE).replace(".svg", "-mono.svg")
+}
+
+/// Colorized icon SVGs, made once per icon and color.
+type IconSvgCache = std::cell::RefCell<HashMap<(ButtonIcon, Color32), Arc<[u8]>>>;
+
+/// `icon` entirely in `color`, its own accent colors included.
+fn mono_icon_bytes(icon: ButtonIcon, color: Color32) -> egui::load::Bytes {
+    thread_local! {
+        static MONO: IconSvgCache =
+            std::cell::RefCell::new(HashMap::new());
+    }
+    let bytes = MONO.with(|mono| {
+        mono.borrow_mut()
+            .entry((icon, color))
+            .or_insert_with(|| {
+                let svg = colorized_icon_svg(icon, color);
+                ["#EB4747", "#7EEB47", "#60DF20", "#00B2FF"]
+                    .into_iter()
+                    .fold(svg, |svg, accent| svg.replace(accent, &svg_color(color)))
+                    .into_bytes()
+                    .into()
+            })
+            .clone()
+    });
+    egui::load::Bytes::Shared(bytes)
+}
+
 /// Menu shortcuts share a right edge and the same subdued styling throughout the app.
 pub(in crate::app) fn shortcut_menu_button(
     ui: &mut Ui,
@@ -438,7 +538,7 @@ fn icon_color(icon: ButtonIcon, fallback: Color32) -> Color32 {
 /// a sixth of a frame with one weapon tag open.
 fn colorized_icon_bytes(icon: ButtonIcon, color: Color32) -> egui::load::Bytes {
     thread_local! {
-        static COLORIZED: std::cell::RefCell<HashMap<(ButtonIcon, Color32), Arc<[u8]>>> =
+        static COLORIZED: IconSvgCache =
             std::cell::RefCell::new(HashMap::new());
     }
     let bytes = COLORIZED.with(|colorized| {
@@ -464,6 +564,7 @@ fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
     }
     let color = svg_color(color);
     let source = match icon {
+        ButtonIcon::CloseTab => button_icon_svg(icon).replace("#EB4747", "currentColor"),
         ButtonIcon::AddWorkspace => button_icon_svg(icon).replace("#7EEB47", "currentColor"),
         ButtonIcon::MaterialsLookup => button_icon_svg(icon).replace("#60DF20", "currentColor"),
         _ => button_icon_svg(icon).to_owned(),
@@ -985,6 +1086,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_destructive_accent_fills_red_at_neutral_opacities_and_draws_its_icon_in_one_color() {
+        let accent = ButtonAccent::Destructive;
+        assert!(button_icon_svg(ButtonIcon::Garbage).contains("#EB4747"), "the accent is the icon's own red");
+        assert_eq!(accent.color(), Color32::from_rgb(0xEB, 0x47, 0x47));
+        for alpha in [ACCENT_IDLE_ALPHA, ACCENT_HOVER_ALPHA] {
+            assert_eq!(accent.fill(alpha).a(), alpha);
+        }
+        assert_eq!((ACCENT_IDLE_ALPHA, ACCENT_HOVER_ALPHA), (64, 128), "25% idle, 50% hovered");
+        let uri = mono_icon_uri(&egui::Context::default(), ButtonIcon::Garbage, Color32::WHITE);
+        assert!(uri.ends_with(".svg"), "egui loads it as an SVG: {uri}");
+        assert_ne!(uri, button_icon_uri(&egui::Context::default(), ButtonIcon::Garbage, Color32::WHITE, BUTTON_ICON_SIZE));
+        let white = Color32::WHITE;
+        let svg = String::from_utf8(mono_icon_bytes(ButtonIcon::Garbage, white).to_vec()).unwrap();
+        assert!(!svg.contains("#EB4747"));
+        assert!(svg.contains("#ffffff"));
+    }
+
+    #[test]
+    fn tab_close_uses_the_current_color_while_clear_keeps_its_destructive_color() {
+        let color=Color32::from_rgb(17,34,51);
+        assert_eq!(icon_color(ButtonIcon::CloseTab,color),color);
+        let svg=colorized_icon_svg(ButtonIcon::CloseTab,color);
+        assert!(svg.contains("#112233"));assert!(!svg.contains("#EB4747"));
+        assert!(colorized_icon_svg(ButtonIcon::Clear,color).contains("#EB4747"));
+    }
+
+    #[test]
     fn dropdown_triggers_share_open_styling_without_moving_their_contents() {
         for kind in 0..6 {
             let ctx = egui::Context::default();
@@ -1082,6 +1210,7 @@ mod tests {
             ButtonIcon::InsertRowBelow,
             ButtonIcon::Json,
             ButtonIcon::JumpTo,
+            ButtonIcon::JumpBack,
             ButtonIcon::JumpUp,
             ButtonIcon::JumpDown,
             ButtonIcon::Left,
@@ -1115,6 +1244,7 @@ mod tests {
             ButtonIcon::Pin,
             ButtonIcon::View,
             ButtonIcon::WindowMode,
+            ButtonIcon::NavigationPane,
         ];
         for icon in icons {
             assert!(button_icon_svg(icon).contains("<svg"), "missing {icon:?}");

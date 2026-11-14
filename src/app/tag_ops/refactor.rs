@@ -23,6 +23,9 @@ impl Baboon {
             .any(|doc| doc.dirty.is_set())
         {
             self.model.status = "Save or close dirty tags before moving/copying folders".to_owned();
+            self.dialogs.open(super::folder_merge_review::SaveBeforeFolderOperation {
+                kit: self.model.kit_stamp(), rel_path, label, moving: move_folder, error: None,
+            });
             return;
         }
         let Some(root) = self.model.loaded_tags_root() else {
@@ -34,9 +37,10 @@ impl Baboon {
         } else {
             format!("Copy {label} To")
         };
+        let source = root.join(&rel_path);
         let Some(destination_parent) = rfd::FileDialog::new()
             .set_title(title)
-            .set_directory(&root)
+            .set_directory(source.parent().unwrap_or(&root))
             .pick_folder()
         else {
             return;
@@ -70,6 +74,7 @@ impl Baboon {
         move_folder: bool,
         job_label: String,
     ) {
+        let merge_context = new_name.is_none().then(|| self.new_merge_context());
         let names = self.model.names().clone();
         let existing_all_entries = self
             .model.source()
@@ -92,7 +97,7 @@ impl Baboon {
         self.spawn_job(
             move || WorkerMessage::FolderRefactorFinished {
                 stamp,
-                result: run_folder_refactor_job(
+                result: run_folder_refactor_job_inner(
                     root,
                     rel_path,
                     destination_parent,
@@ -103,6 +108,7 @@ impl Baboon {
                     game,
                     existing_all_entries,
                     existing_reverse_dependencies,
+                    merge_context,
                     &tx,
                 ),
             },
@@ -188,15 +194,9 @@ impl Baboon {
         let leaf = tag_path::name(&stem).to_owned();
         let fixed_parent = tag_path::parent(&stem).unwrap_or_default().to_owned();
         let duplicate_parts = duplicate::duplicate_dialog_parts(&display);
-        // A new tag edits its whole path (rename and move are the same in-memory
-        // operation for it); everything else edits the leaf name only.
-        // Any tag that lives in a pak edits its whole path, whether it got here
-        // through Rename or through Move. Inside a container those are one
-        // operation -- a move is a rename to a different parent -- and the two
-        // dialogs are indistinguishable on screen, so splitting the behaviour
-        // between them only produced "use Move to choose a folder" from a dialog
-        // that looked exactly like the one being recommended.
-        let whole_path_editable = is_container;
+        // Rename keeps the parent fixed. Container Move explicitly opts into
+        // editing a whole path; Save As still chooses a copy's destination.
+        let whole_path_editable = is_container && operation == TagNameOperation::SaveAsOverlay;
         // Resolved here rather than at apply time, so the text the user reads
         // and the branch that runs come from one answer. It depends on Baboon's
         // ledger, which cannot change while the dialog is open.
@@ -231,6 +231,7 @@ impl Baboon {
             None => (Vec::new(), true),
         };
         self.dialogs.open(RenameTagState {
+            scripts: None,
             kit: self.model.active_kit_id(),
             key: entry.key.clone(),
             old_display: display,
@@ -246,7 +247,9 @@ impl Baboon {
             } else {
                 fixed_parent
             },
-            focus_input: matches!(operation, TagNameOperation::Duplicate),
+            // Duplicate and Rename start with the name selected, so typing replaces it.
+            focus_input: matches!(operation, TagNameOperation::Duplicate)
+                || (operation == TagNameOperation::Rename && !whole_path_editable),
             referrers,
             referrers_unavailable,
             is_container,
@@ -312,10 +315,7 @@ impl Baboon {
             self.model.status = "Enter a new tag name".to_owned();
             return;
         }
-        // Where the whole path is editable a separator is the move half of the
-        // operation rather than a mistake. That is every tag in a pak, not just
-        // an unsaved one — the field says so, and this has to agree with it or
-        // the dialog invites a path and then refuses it.
+        // Only Move and destination-copy dialogs accept a relative path.
         if !whole_path_editable && tag_path::from_input(&new_name).contains(tag_path::SEPARATOR) {
             self.model.status = "Enter a name only; use Move to choose a folder".to_owned();
             return;
@@ -421,6 +421,13 @@ impl Baboon {
             Some(TagEntryLocation::NewContainer { .. } | TagEntryLocation::Container { .. })
         ) {
             self.open_rename_tag(key);
+            if let Some(state) = self.dialogs.get_mut::<RenameTagState>()
+                && state.key == key && state.is_container
+            {
+                state.whole_path_editable = true;
+                state.new_path_input = state.old_display.rsplit_once('.')
+                    .map(|(stem, _)| stem).unwrap_or(&state.old_display).to_owned();
+            }
             return;
         }
         if self.tag_ops.folder_refactor.is_some() {
@@ -443,13 +450,13 @@ impl Baboon {
             self.model.status = "Tag no longer exists".to_owned();
             return;
         };
-        if !matches!(entry.location, TagEntryLocation::LooseFile(_)) {
+        let TagEntryLocation::LooseFile(path) = &entry.location else {
             self.model.status = "Only loose-folder tags can be moved".to_owned();
             return;
-        }
+        };
         let Some(destination_parent) = rfd::FileDialog::new()
             .set_title("Move Tag To")
-            .set_directory(&root)
+            .set_directory(path.parent().unwrap_or(&root))
             .pick_folder()
         else {
             return;
@@ -519,9 +526,9 @@ impl Baboon {
 
 #[derive(Default)]
 pub(in crate::app) struct ReferenceRewriteResult {
-    references_changed: usize,
-    tags_changed: usize,
-    changed_keys: Vec<String>,
+    pub(super) references_changed: usize,
+    pub(super) tags_changed: usize,
+    pub(super) changed_keys: Vec<String>,
     /// Tags that hold a reference to rewrite but could not be read, parsed or
     /// written, with why: `(display path, reason)`. They still point at the
     /// old path.
@@ -656,6 +663,14 @@ pub(in crate::app) fn run_tag_rename_job(
     let old_entries = vec![entry.clone()];
     let new_entries = vec![new_entry.clone()];
 
+    // Script paths first, so a script that can't be written stops the move
+    // before anything changes. Dropping `scripts` undoes them if the move
+    // fails.
+    send_folder_refactor_progress(tx, &label, "Checking scripts", None);
+    let (scripts, script_summary) = super::script_fixes::fix_before_move(
+        &root, game, &all_entries_before, &super::script_fixes::renames(&old_entries, &new_entries),
+    )?;
+
     // Move the file on disk.
     if let Some(parent) = new_path.parent() {
         fs::create_dir_all(parent)
@@ -668,6 +683,7 @@ pub(in crate::app) fn run_tag_rename_job(
             new_path.display()
         )
     })?;
+    scripts.commit();
 
     // Rewrite references in the affected (referring) tags.
     let rewrite_entries = affected_move_rewrite_entries(
@@ -738,6 +754,7 @@ pub(in crate::app) fn run_tag_rename_job(
         format!("Updated {references_changed} reference(s) in {tags_changed} tag(s)"),
     ];
     lines.extend(rewrite_failure_lines(&rewrite_result.failed));
+    super::script_fixes::report(&script_summary, &mut status, &mut lines);
     Ok(FolderRefactorFinished {
         status,
         lines,
@@ -747,18 +764,19 @@ pub(in crate::app) fn run_tag_rename_job(
         old_to_new_keys,
         moved: true,
         moved_folder: None,
+        moved_folders: Vec::new(),
     })
 }
 
 #[derive(Default)]
-struct RefactorIndexChanges {
-    removed: Vec<String>,
-    touched: HashSet<String>,
+pub(in crate::app) struct RefactorIndexChanges {
+    pub(in crate::app) removed: Vec<String>,
+    pub(in crate::app) touched: HashSet<String>,
 }
 
 /// Verify file fingerprints, then read only changed or missing dependency
 /// records. Without a saved fingerprint baseline every tag is checked once.
-fn prepare_tag_refactor_index(
+pub(super) fn prepare_tag_refactor_index(
     root: &Path,
     source: &TagSource,
     game: Option<GameId>,
@@ -768,12 +786,38 @@ fn prepare_tag_refactor_index(
     label: &str,
     tx: &Sender<WorkerMessage>,
 ) -> Result<(Vec<TagEntry>, ReverseDependencyIndex, RefactorIndexChanges), String> {
+    prepare_tag_refactor_index_cancellable(root, source, game, names, previous_entries, existing, label, tx, &|| false)
+}
+
+pub(in crate::app) fn prepare_tag_refactor_index_cancellable(
+    root: &Path,
+    source: &TagSource,
+    game: Option<GameId>,
+    names: &TagNameIndex,
+    previous_entries: &[TagEntry],
+    existing: Option<ReverseDependencyIndex>,
+    label: &str,
+    tx: &Sender<WorkerMessage>,
+    cancelled: &(impl Fn() -> bool + Sync),
+) -> Result<(Vec<TagEntry>, ReverseDependencyIndex, RefactorIndexChanges), String> {
+    if cancelled() { return Err("Folder operation cancelled; no files changed".into()); }
     send_folder_refactor_progress(tx, label, "Checking tag index for changes", None);
     let mut index = existing.or_else(|| game.and_then(|game|
         crate::core::source::load_reverse_dependency_index(game.as_str(), root))).unwrap_or_default();
     let mut changes = RefactorIndexChanges::default();
     let mut entries = if let Some(game) = game {
-        let refresh = crate::core::source::refresh_entry_index(game.as_str(), root, names)
+        let refresh = crate::core::source::refresh_entry_index_with_progress(game.as_str(), root, names, &|progress| {
+            if cancelled() { return Err(anyhow::anyhow!("Folder operation cancelled; no files changed")); }
+            if progress.processed % 100 == 0 || progress.processed == progress.total {
+                let phase = if progress.total == 0 {
+                    format!("Finding tag files: {} found", progress.processed)
+                } else {
+                    format!("Checking tag index: {}/{} files", progress.processed, progress.total)
+                };
+                send_folder_refactor_progress(tx, label, &phase, (progress.total > 0).then(|| progress.processed as f32 / progress.total as f32));
+            }
+            Ok(())
+        })
             .map_err(|error| format!("Could not verify the tag index: {error}"))?;
         changes.touched.extend(refresh.touched.iter().map(|entry| entry.key.clone()));
         changes.removed = refresh.removed_keys;
@@ -785,8 +829,10 @@ fn prepare_tag_refactor_index(
     };
     // Refresh skips locked files. A previously known tag that still exists
     // must remain a rewrite candidate, rather than looking safely deleted.
-    let current_keys: HashSet<_> = entries.iter().map(|entry| entry.key.clone()).collect();
-    for entry in previous_entries.iter().filter(|entry| !current_keys.contains(&entry.key)) {
+    // Compared ignoring case: a remembered tag spelled differently from the
+    // refreshed one is the same file, not one the refresh missed.
+    let current_keys: HashSet<_> = entries.iter().map(|entry| crate::core::tag_key::key_identity(&entry.key)).collect();
+    for entry in previous_entries.iter().filter(|entry| !current_keys.contains(&crate::core::tag_key::key_identity(&entry.key))) {
         if let TagEntryLocation::LooseFile(path) = &entry.location
             && path.try_exists().unwrap_or(true)
         {
@@ -807,6 +853,7 @@ fn prepare_tag_refactor_index(
     }
     let touched: Vec<_> = entries.iter().filter(|entry| changes.touched.contains(&entry.key)).collect();
     for (number, entry) in touched.iter().enumerate() {
+        if cancelled() { return Err("Folder operation cancelled; no files changed".into()); }
         if number % 50 == 0 {
             send_folder_refactor_progress(tx, label, &format!("Refreshing dependency records {}/{}", number + 1, touched.len()), None);
         }
@@ -820,12 +867,13 @@ fn prepare_tag_refactor_index(
             }
         }
     }
+    if cancelled() { return Err("Folder operation cancelled; no files changed".into()); }
     Ok((entries, index, changes))
 }
 
 /// Persistence belongs to the refactor worker. Existing caches receive one
 /// atomic batch of changed rows; only a missing cache needs a full snapshot.
-fn persist_refactor_indexes(
+pub(in crate::app) fn persist_refactor_indexes(
     root: &Path,
     game: Option<GameId>,
     entries: &[TagEntry],
@@ -850,6 +898,7 @@ fn persist_refactor_indexes(
     }
 }
 
+#[cfg(test)]
 pub(in crate::app) fn run_folder_refactor_job(
     root: PathBuf,
     rel_path: PathBuf,
@@ -861,6 +910,23 @@ pub(in crate::app) fn run_folder_refactor_job(
     game: Option<GameId>,
     existing_all_entries: Vec<TagEntry>,
     existing_reverse_dependencies: Option<ReverseDependencyIndex>,
+    tx: &Sender<WorkerMessage>,
+) -> Result<FolderRefactorFinished, String> {
+    run_folder_refactor_job_inner(root, rel_path, destination_parent, new_name, move_folder, label, names, game, existing_all_entries, existing_reverse_dependencies, None, tx)
+}
+
+pub(in crate::app) fn run_folder_refactor_job_inner(
+    root: PathBuf,
+    rel_path: PathBuf,
+    destination_parent: PathBuf,
+    new_name: Option<String>,
+    move_folder: bool,
+    label: String,
+    names: TagNameIndex,
+    game: Option<GameId>,
+    existing_all_entries: Vec<TagEntry>,
+    existing_reverse_dependencies: Option<ReverseDependencyIndex>,
+    merge_context: Option<super::folder_merge_ops::MergeContext>,
     tx: &Sender<WorkerMessage>,
 ) -> Result<FolderRefactorFinished, String> {
     send_folder_refactor_progress(tx, &label, "Preparing", None);
@@ -888,6 +954,34 @@ pub(in crate::app) fn run_folder_refactor_job(
     if destination.starts_with(&source) {
         return Err("Cannot move/copy a folder into itself".to_owned());
     }
+    let resolved_root = crate::core::recovery::resolved_path(&root)?;
+    let resolved_source = crate::core::recovery::resolved_path(&source)?;
+    let resolved_destination = crate::core::recovery::resolved_path(&destination)?;
+    if !resolved_source.starts_with(&resolved_root) || !resolved_destination.starts_with(&resolved_root) {
+        return Err("Choose folders inside the loaded tags folder; links cannot escape it".into());
+    }
+    if resolved_destination == resolved_source || resolved_destination.starts_with(&resolved_source) {
+        return Err("Cannot move/copy a folder into itself".into());
+    }
+    if new_name.is_none() {
+        let actual_destination = crate::core::folder_merge::matching_path(&destination)?.unwrap_or(destination.clone());
+        if actual_destination.exists() {
+            let resolved_destination = crate::core::recovery::resolved_path(&actual_destination)?;
+            if !resolved_destination.starts_with(&resolved_root) {
+                return Err("Choose folders inside the loaded tags folder; links cannot escape it".into());
+            }
+            if resolved_source.starts_with(&resolved_destination) {
+                return Err("Cannot merge folders that contain one another".into());
+            }
+            let context = merge_context.ok_or("Folder merging requires an interactive review")?;
+            return super::folder_merge_ops::run(root, source, actual_destination, move_folder, label, names, game, existing_all_entries, existing_reverse_dependencies, context, tx);
+        }
+    }
+    // The established no-conflict path has no review. Applying begins now.
+    if let Some(context) = &merge_context {
+        if context.control.cancelled() { return Err("Folder operation cancelled; no files changed".into()); }
+        context.control.begin_apply()?;
+    }
     // A case-insensitive file system answers `exists` for a sibling that
     // differs only in case, which is also a conflict as far as tag paths go:
     // they ignore case, so both folders would claim the same references.
@@ -901,8 +995,8 @@ pub(in crate::app) fn run_folder_refactor_job(
     send_folder_refactor_progress(tx, &label, "Scanning selected folder", None);
     let old_entries =
         scan_folder_subtree_entries(&root, &source_rel, &names).map_err(|e| e.to_string())?;
-    if old_entries.is_empty() {
-        return Err("No tags found in that folder".to_owned());
+    if new_name.is_some() && old_entries.is_empty() {
+        return Err("No tags found in that folder".into());
     }
     let rewrites =
         build_folder_reference_rewrites(&root, &source, &destination, &old_entries, &names);
@@ -938,7 +1032,16 @@ pub(in crate::app) fn run_folder_refactor_job(
         fs::create_dir_all(parent)
             .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
     }
+    let new_entries = transform_folder_entries(&root, &source, &old_entries, &destination);
+    let mut script_summary = Default::default();
     if move_folder {
+        // Script paths first, as for one tag: dropping `scripts` undoes them
+        // if the move fails.
+        send_folder_refactor_progress(tx, &label, "Checking scripts", Some(0.1));
+        let (scripts, summary) = super::script_fixes::fix_before_move(
+            &root, game, &all_entries_before, &super::script_fixes::renames(&old_entries, &new_entries),
+        )?;
+        script_summary = summary;
         send_folder_refactor_progress(tx, &label, "Moving files", Some(0.15));
         fs::rename(&source, &destination).map_err(|error| {
             format!(
@@ -947,11 +1050,11 @@ pub(in crate::app) fn run_folder_refactor_job(
                 destination.display()
             )
         })?;
+        scripts.commit();
     } else {
         copy_folder_recursive_progress(&source, &destination, &label, tx)?;
     }
 
-    let new_entries = transform_folder_entries(&root, &source, &old_entries, &destination);
     let rewrite_result = if move_folder {
         let rewrite_entries = affected_move_rewrite_entries(
             &all_entries_before,
@@ -1061,6 +1164,7 @@ pub(in crate::app) fn run_folder_refactor_job(
         "Updated {references_changed} reference(s) in {tags_changed} tag(s)"
     ));
     lines.extend(rewrite_failure_lines(&failed));
+    super::script_fixes::report(&script_summary, &mut status, &mut lines);
 
     Ok(FolderRefactorFinished {
         status,
@@ -1070,6 +1174,7 @@ pub(in crate::app) fn run_folder_refactor_job(
         reverse_dependencies,
         old_to_new_keys,
         moved: move_folder,
+        moved_folders: Vec::new(),
         moved_folder: move_folder.then(|| {
             (
                 source_rel.clone(),
@@ -1580,6 +1685,175 @@ mod tests {
     }
 
     #[test]
+    fn container_rename_keeps_the_parent_and_move_explicitly_edits_the_path() {
+        let kit = kit("container-rename-vs-move");
+        let mut source = kit.source();
+        let key = kit.key(RENDER);
+        for entry in source
+            .entries
+            .iter_mut()
+            .chain(source.all_entries.iter_mut())
+        {
+            if entry.key == key {
+                entry.location = TagEntryLocation::NewContainer {
+                    template: crate::core::source::NewContainerTemplate::Derived {
+                        group: "render_model".into(),
+                    },
+                    package: "/Game/Tags/objects/props/crate-render_model".into(),
+                    group_tag: entry.group_tag,
+                };
+            }
+        }
+        source.source = TagSource::IoStoreContainerSet {
+            root: kit.base.clone(),
+            containers: Vec::new(),
+            index: Default::default(),
+            packages: Default::default(),
+            shipped: Default::default(),
+        };
+        let mut app = app();
+        app.install_loaded_source(source);
+        app.open_rename_tag(&key);
+        let state = app.dialogs.get::<RenameTagState>().unwrap();
+        assert!(!state.whole_path_editable);
+        assert_eq!(state.new_path_input, "crate");
+        assert!(state.focus_input, "Rename opens with the current name selected");
+        app.dialogs
+            .get_mut::<RenameTagState>()
+            .unwrap()
+            .new_path_input = r"elsewhere\crate".into();
+        app.begin_rename_tag(&ctx());
+        assert_eq!(
+            app.model.status,
+            "Enter a name only; use Move to choose a folder"
+        );
+        app.begin_move_tag(&key);
+        let state = app.dialogs.get::<RenameTagState>().unwrap();
+        assert!(state.whole_path_editable);
+        assert_eq!(state.new_path_input, r"objects\props\crate");
+    }
+
+    #[test]
+    fn cancelling_a_merge_interrupts_the_metadata_index_scan() {
+        let kit = LooseKit::new("merge-cancel-metadata", "halo2_mcc");
+        let first = kit.write_mcc("ui/hud_test/hud/example", "new_hud_definition", |_| {});
+        let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+        let total = (workers * 4).max(128);
+        for n in 1..total { fs::copy(&first, kit.path(&format!("ui/hud_test/hud/example_{n}.new_hud_definition"))).unwrap(); }
+        let entries = kit.entries();
+        let mut index = ReverseDependencyIndex::default();
+        for entry in &entries { index.set_tag_dependencies(entry.key.clone(), Vec::new()); }
+        crate::core::source::save_entry_index(kit.game, &kit.root, &entries).unwrap();
+        let checks = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        crate::core::source::ENTRY_REFRESH_FILE_CHECKS.with(|hook| *hook.borrow_mut() = Some(checks.clone()));
+        let (tx, _rx) = mpsc::channel();
+        let result = prepare_tag_refactor_index_cancellable(&kit.root, &kit.source().source, Some(GameId::Halo2), &kit.names(), &entries, Some(index), "Merging hud", &tx,
+            &|| checks.load(std::sync::atomic::Ordering::Relaxed) > 0);
+        crate::core::source::ENTRY_REFRESH_FILE_CHECKS.with(|hook| *hook.borrow_mut() = None);
+        let checked = checks.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(result.err().is_some_and(|error| error.contains("cancelled")), "Cancel was ignored during the checking-tag-index phase; checked {checked}/{total} files");
+        assert!(checked <= workers * 2, "cancellation still scanned {checked}/{total} files");
+    }
+
+    #[test]
+    fn catalog_refresh_waits_for_the_open_tag_move_to_finish() {
+        let kit = LooseKit::new("move-hud-refresh-gate", "halo2_mcc");
+        kit.write_mcc("hud/example", "new_hud_definition", |_| {});
+        let mut app = app(); kit.install_indexed(&mut app);
+        app.tag_ops.folder_refactor = Some(FolderRefactorUiState { label: "Moving tag".into(), phase: "Moving files".into(), progress: None });
+        app.model.kits[0].index_jobs.next_refresh_at = 0.0;
+        app.maybe_refresh_entry_index(ctx());
+        assert!(!app.model.kits[0].index_jobs.refreshing, "periodic refresh must wait for the move");
+        app.begin_refresh_entry_index(ctx());
+        assert!(!app.model.kits[0].index_jobs.refreshing, "a queued manual refresh must wait too");
+    }
+
+    #[test]
+    fn an_index_refresh_during_a_move_cannot_orphan_the_open_hud_tag() {
+        let kit = LooseKit::new("move-open-hud-refresh", "halo2_mcc");
+        kit.write_mcc("hud/example", "new_hud_definition", |_| {});
+        let mut app = app(); kit.install_indexed(&mut app);
+        let old_key = kit.open(&mut app, "hud/example.new_hud_definition");
+        let kit_id = app.model.active_kit_id();
+        let stamp = app.model.kit_stamp();
+        let pane = app.views[kit_id].tag_tree.tiles.iter().find_map(|(id, tile)|
+            matches!(tile, egui_tiles::Tile::Pane(key) if key == &old_key).then_some(*id)).unwrap();
+        let entry = app.model.entry_for_key(&old_key).unwrap().clone();
+        app.tag_ops.folder_refactor = Some(FolderRefactorUiState { label: "Moving tag".into(), phase: "Moving files".into(), progress: None });
+        let (tx, _rx) = mpsc::channel();
+        let done = run_tag_rename_job(kit.root.clone(), entry, "testing\\example".into(), "Moving tag".into(), kit.names(), Some(GameId::Halo2), kit.entries(), Some(kit.index()), &tx).unwrap();
+        let new_key = kit.key("testing/example.new_hud_definition");
+        // A background scan sees the changed filesystem before the move's
+        // completion message reaches the UI. Use the real message handlers.
+        app.apply_worker_message(WorkerMessage::EntryIndexRefreshed { stamp, result: Ok(EntryIndexRefresh {
+            entries: done.all_entries.clone(), changed: true, added: 1, updated: 0, removed: 1,
+            touched: done.all_entries.clone(), removed_keys: vec![old_key.clone()], touched_dependencies: Vec::new(), errors: Vec::new(),
+        }) }, &ctx());
+        assert_eq!(app.model.kit_stamp(), stamp, "background catalog changes must not invalidate an active move");
+        assert!(app.model.kits[0].index_jobs.refresh_browser, "the deferred refresh must be retried even if the scan already saved its index");
+        app.apply_worker_message(WorkerMessage::FolderRefactorFinished { stamp, result: Ok(done) }, &ctx());
+        assert!(matches!(app.views[kit_id].tag_tree.tiles.get(pane), Some(egui_tiles::Tile::Pane(key)) if key == &new_key), "the open HUD pane must follow the move even when the index refresh finishes first");
+        assert!(app.model.entry_for_key(&new_key).is_some());
+        assert!(app.model.entry_for_key(&old_key).is_none());
+        assert_eq!(app.model.kits[0].selected_key.as_deref(), Some(new_key.as_str()));
+    }
+
+    #[test]
+    fn moving_an_open_tag_refreshes_its_source_lookup_and_live_pane() {
+        for (game, source_ref, group, destination_ref) in [
+            ("halo2_mcc", "hud/example", "new_hud_definition", "testing/example"),
+            ("halo3_mcc", "objects/props/crate", "render_model", "levels/crate"),
+        ] {
+            let kit = LooseKit::new("move-open-tag-pane", game);
+            kit.write_mcc(source_ref, group, |_| {});
+            kit.write_mcc("other/untouched", group, |_| {});
+            let source_rel = format!("{source_ref}.{group}");
+            let destination_rel = format!("{destination_ref}.{group}");
+            let mut app = app();
+            kit.install_indexed(&mut app);
+            // An indexed workspace can resolve tags entirely from all_entries;
+            // unlike this fixture's default, its lazy browser entries are empty.
+            app.model.kits[0].source.as_mut().unwrap().entries.clear();
+            let other_key = kit.open(&mut app, &format!("other/untouched.{group}"));
+            let old_key = kit.open(&mut app, &source_rel);
+            let kit_id = app.model.active_kit_id();
+            let pane = app.views[kit_id].tag_tree.tiles.iter().find_map(|(id, tile)|
+                matches!(tile, egui_tiles::Tile::Pane(key) if key == &old_key).then_some(*id)).unwrap();
+            let context = ctx();
+            context.set_global_style(foundation_style());
+            let mut time = 1.0;
+            let mut frame = |app: &mut Baboon| {
+                time += 0.1;
+                crate::app::run_ui_test(&context, screen(Vec::new(), time), |ui| app.run_frame(ui));
+            };
+            for _ in 0..6 { frame(&mut app); }
+            let entry = app.model.entry_for_key(&old_key).unwrap().clone();
+            app.start_tag_rename_job(kit.root.clone(), entry, tag_path::from_input(destination_ref), "Moving tag");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while app.tag_ops.folder_refactor.is_some() {
+                assert!(std::time::Instant::now() < deadline, "move did not finish: {}", app.model.status);
+                frame(&mut app);
+                std::thread::yield_now();
+            }
+            while !app.model.kits[0].loading_tags.is_empty() {
+                assert!(std::time::Instant::now() < deadline, "open documents did not reload");
+                frame(&mut app);
+                std::thread::yield_now();
+            }
+            for _ in 0..3 { frame(&mut app); }
+            let new_key = kit.key(&destination_rel);
+            assert!(app.model.entry_for_key(&old_key).is_none(), "the browser must stop resolving the old path immediately");
+            let new_entry = app.model.entry_for_key(&new_key).expect("the browser must resolve the new path immediately after the move");
+            assert!(matches!(&new_entry.location, TagEntryLocation::LooseFile(path) if path == &kit.path(&destination_rel)));
+            assert!(matches!(app.views[kit_id].tag_tree.tiles.get(pane), Some(egui_tiles::Tile::Pane(key)) if key == &new_key), "the existing open pane must follow the moved file");
+            assert_eq!(app.model.kits[0].selected_key.as_deref(), Some(new_key.as_str()));
+            assert!(!app.model.kits[0].open_tabs.contains(&old_key));
+            assert!(app.model.kits[0].parsed_tags.contains_key(&new_key), "the moved open tag must reload without being selected again");
+            assert!(app.model.kits[0].parsed_tags.contains_key(&other_key), "other open tabs must stay loaded too");
+        }
+    }
+
+    #[test]
     fn renaming_a_tag_moves_it_and_rewrites_every_referrer() {
         let kit = kit("refactor-rename-tag");
         let mut app = app();
@@ -1631,8 +1905,11 @@ mod tests {
         assert!(tabs.contains(&new_key) && !tabs.contains(&old_key), "{tabs:?}");
         assert!(tabs.contains(&model_key));
         assert_eq!(app.model.kits[0].selected_key.as_deref(), Some(model_key.as_str()));
-        // Every document is dropped, edited or not, to be read again.
-        assert!(app.model.kits[0].parsed_tags.is_empty());
+        // Keep rendering the last document until its automatic reload arrives.
+        assert!(app.model.kits[0].parsed_tags.contains_key(&new_key));
+        assert!(app.model.kits[0].parsed_tags.contains_key(&model_key));
+        pump_until(&mut app, "open referrers to reload", |app| app.model.kits[0].loading_tags.is_empty());
+        assert_eq!(reference_of(&app.model.kits[0].parsed_tags[&model_key].tag, "render model").as_deref(), Some("objects\\props\\crate_renamed"));
         assert_ne!(app.model.kits[0].generation, generation);
         // Favorites follow it too.
         assert_eq!(
@@ -1680,7 +1957,7 @@ mod tests {
         let mut app = app();
         kit.install(&mut app);
         let stamp = app.model.kit_stamp();
-        app.handle_folder_refactor_finished(stamp, Ok(done));
+        app.handle_folder_refactor_finished(stamp, Ok(done), &ctx());
         let reads = crate::app::references::DEPENDENCY_READS.with(|reads| reads.borrow_mut().take().unwrap());
         let writes = crate::core::source::ENTRY_INDEX_WRITES.with(|writes| writes.borrow_mut().take().unwrap());
         let messages: Vec<_> = rx.try_iter().collect();
@@ -1824,6 +2101,7 @@ mod tests {
         for (input, refusal) in [
             ("", "Enter a new tag name"),
             ("sub/keg", "Enter a name only; use Move to choose a folder"),
+            (r"sub\keg", "Enter a name only; use Move to choose a folder"),
             ("keg.model", "Enter a name without an extension"),
         ] {
             app.dialogs

@@ -10,7 +10,8 @@ pub(in crate::app) enum PendingCloseAction {
     CloseApp,
     CloseTab(String),
     CloseAllTabs,
-    CloseAllButThis(String),
+    /// Exact membership of the clicked tab group, retained through a save prompt.
+    CloseTabGroup { kit: KitId, keys: Vec<String>, keep: Option<String> },
     /// Close a whole kit, discarding its documents and caches.
     CloseKit(KitId),
 }

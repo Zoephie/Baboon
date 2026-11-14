@@ -150,7 +150,7 @@ mod tests {
         let mut keys = Vec::new();
         for index in 0..7 { keys.push(kit.open(&mut app, &format!("objects/tag{index}.model"))); }
         app.kit_and_view(0).focus_pane(keys[3].clone());
-        app.close_all_tabs_but(&keys[0]);
+        app.execute_close_action(PendingCloseAction::CloseTabGroup {kit:app.model.active_kit_id(),keys:keys[1..].to_vec(),keep:Some(keys[0].clone())},&ctx());
         assert_eq!(app.model.prefs.editing_kit_recents[0].tags,
             [3, 1, 2, 4, 5].map(|i| PathBuf::from(format!("objects/tag{i}.model"))));
         app.handle_browser_action(BrowserAction::OpenFolderBrowser {

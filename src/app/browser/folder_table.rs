@@ -134,6 +134,10 @@ fn table_id() -> egui::Id {
     egui::Id::unique("folder_browser_table_columns")
 }
 
+pub(in crate::app) fn folder_table_sort_signature(ui:&Ui)->Option<(FolderColumn,bool)> {
+    ui.data(|data|data.get_temp::<FolderTable>(table_id())).and_then(|table|table.sort)
+}
+
 pub(in crate::app) fn begin_folder_table(
     ui: &mut Ui,
     root: Option<PathBuf>,
@@ -456,7 +460,7 @@ pub(in crate::app) fn table_order_folders(ui: &Ui, nodes: &[TagTreeNode]) -> Opt
     Some(rows.into_iter().map(|row| row.0).collect())
 }
 
-fn local_date(time: SystemTime) -> Option<String> {
+pub(in crate::app) fn local_date(time: SystemTime) -> Option<String> {
     let seconds: libc::time_t = time
         .duration_since(UNIX_EPOCH)
         .ok()?

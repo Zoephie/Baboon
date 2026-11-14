@@ -57,6 +57,8 @@ pub(in crate::app) struct Kit {
     pub(in crate::app) parsed_tags: HashMap<String, TagDocument>,
     /// Keys with an outstanding background load, preventing duplicate jobs.
     pub(in crate::app) loading_tags: HashSet<String>,
+    /// Invalidates reads started before a filesystem refactor.
+    pub(in crate::app) tag_load_epoch: u64,
     /// Active document key. Selection may temporarily precede parsing while a
     /// matching key is present in `loading_tags`.
     pub(in crate::app) selected_key: Option<String>,
@@ -131,6 +133,7 @@ impl Kit {
             names,
             parsed_tags: HashMap::new(),
             loading_tags: HashSet::new(),
+            tag_load_epoch: 0,
             selected_key: None,
             current_pane: None,
             open_tabs: Vec::new(),

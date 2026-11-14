@@ -215,24 +215,28 @@ impl Baboon {
                 .map(|count| count.get())
                 .unwrap_or(1)
                 .clamp(1, total.max(1));
-            let chunk_size = total.div_ceil(worker_count).max(1);
+            // Each thread takes the next tag from one shared queue. Fixed
+            // slices of the sorted list left most threads idle while one
+            // ground through `scenarios\`, where the largest tags are.
+            let next = std::sync::atomic::AtomicUsize::new(0);
             let processed = std::sync::atomic::AtomicUsize::new(0);
 
             let mut index = ReverseDependencyIndex::default();
-            let mut missing = 0usize;
+            let mut answered = 0usize;
             std::thread::scope(|scope| {
                 let mut handles = Vec::new();
-                for chunk in entries.chunks(chunk_size) {
-                    let tag_source = &tag_source;
+                for _ in 0..worker_count {
+                    let (entries, tag_source, next, processed) = (&entries, &tag_source, &next, &processed);
                     let progress_tx = tx.clone();
                     let progress_ctx = ctx.clone();
-                    let processed = &processed;
                     handles.push(scope.spawn(move || {
-                        let mut chunk_results = Vec::new();
-                        for entry in chunk {
-                            if let Ok(deps) = read_entry_dependencies(tag_source, entry) {
-                                chunk_results.push((entry.key.clone(), deps));
-                            }
+                        // Every tag taken, with its references if they could
+                        // be read.
+                        let mut results = Vec::new();
+                        loop {
+                            let at = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let Some(entry) = entries.get(at) else { break };
+                            results.push((entry.key.clone(), read_entry_dependencies(tag_source, entry).ok()));
                             let processed_now =
                                 processed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                             if processed_now == total || processed_now % 32 == 0 {
@@ -244,24 +248,25 @@ impl Baboon {
                                 progress_ctx.request_repaint();
                             }
                         }
-                        chunk_results
+                        results
                     }));
                 }
 
-                // A chunk whose thread panicked used to vanish from the index
-                // without a word. Its tags are counted instead, so the index is
-                // reported (and not saved) as incomplete.
-                for (handle, chunk) in handles.into_iter().zip(entries.chunks(chunk_size)) {
-                    match handle.join() {
-                        Ok(chunk_results) => {
-                            for (key, deps) in chunk_results {
+                // A thread that panicked loses the tags it had taken. They are
+                // counted instead of vanishing, so the index is reported (and
+                // not saved) as incomplete.
+                for handle in handles {
+                    if let Ok(results) = handle.join() {
+                        answered += results.len();
+                        for (key, deps) in results {
+                            if let Some(deps) = deps {
                                 index.set_tag_dependencies(key, deps);
                             }
                         }
-                        Err(_) => missing += chunk.len(),
                     }
                 }
             });
+            let missing = total - answered;
             WorkerMessage::ReverseDependenciesBuilt {
                 stamp,
                 index,
@@ -581,6 +586,13 @@ pub(in crate::app) fn read_entry_dependencies(
     DEPENDENCY_READS.with(|reads| {
         if let Some(reads) = reads.borrow_mut().as_mut() { reads.push(entry.key.clone()); }
     });
+    // A group whose definition has no tag reference field (a bitmap, say)
+    // references nothing; reading it, often in full, would only find that out.
+    if let (Some(game), Some((_, group))) = (source.game(), tag_path::split_extension(&entry.display_path))
+        && crate::core::reference_groups::cannot_reference(game, group)
+    {
+        return Ok(Vec::new());
+    }
     match &entry.location {
         // A loose tag usually carries a `want` (dependency-list) stream, which
         // is far cheaper to read than the whole tag.

@@ -4,6 +4,11 @@
 use super::*;
 
 pub(in crate::app) enum BrowserAction {
+    Bulk { pane: String, keys: Vec<String>, action: BulkAction },
+    /// Flat view items from `pane` dropped onto `folder` (relative to the
+    /// tags folder): Move them there, or Copy with Ctrl held. The usual review
+    /// asks before anything changes.
+    DropItems { pane: String, keys: Vec<String>, copy: bool, folder: PathBuf },
     /// Open a docked browser pane rooted at one real folder.
     OpenFolderBrowser {
         rel_path: PathBuf,
@@ -148,6 +153,7 @@ pub(in crate::app) enum BrowserAction {
 
 /// Per-tab state for a docked browser rooted at one folder.
 pub(in crate::app) struct FolderBrowserState {
+    pub(in crate::app) selection: BrowserSelection,
     pub(in crate::app) selected_tag: Option<String>,
     pub(in crate::app) rel_path: PathBuf,
     pub(in crate::app) label: String,
@@ -223,6 +229,9 @@ pub(in crate::app) struct LooseFolderRenameState {
     /// `None` when no dependency index is loaded: the job still finds and
     /// rewrites them, it just cannot be counted up front.
     pub(in crate::app) outside_referrers: Option<Vec<String>>,
+    /// Scripts that name this item's tags, checked in the background once
+    /// the window first draws.
+    pub(in crate::app) scripts: Option<crate::app::tag_ops::script_fixes::ScriptCheck>,
 }
 
 /// The name dialog's product-level operation. Storage details such as whether
@@ -235,7 +244,7 @@ pub(in crate::app) enum TagNameOperation {
     Duplicate,
 }
 
-/// The "Rename / Move tag (fix references)" dialog. Shows the referrers that
+/// The tag name dialog, with explicit Rename and Move modes. Shows referrers that
 /// will be rewritten (preview) and an editable destination path; applying moves
 /// the file on disk and rewrites every referencing tag.
 pub(in crate::app) struct RenameTagState {
@@ -251,7 +260,7 @@ pub(in crate::app) struct RenameTagState {
     pub(in crate::app) extension: String,
     /// The explicit operation being performed by this dialog.
     pub(in crate::app) operation: TagNameOperation,
-    /// Editable destination: relative path, forward slashes, NO extension.
+    /// Editable name, or relative path for Move/Save As; no extension.
     pub(in crate::app) new_path_input: String,
     /// Fixed display parent for Duplicate; Rename and Save As retain their
     /// existing path presentation rules.
@@ -265,10 +274,8 @@ pub(in crate::app) struct RenameTagState {
     /// Source is a Campaign Evolved container: apply writes an override
     /// container instead of moving a loose file + rewriting references.
     pub(in crate::app) is_container: bool,
-    /// Source is a brand-new (never-saved) Campaign Evolved tag: apply rewrites
-    /// the in-memory entry rather than writing any container, so the whole
-    /// destination path is editable — this is how a new tag is moved as well as
-    /// renamed. Implies `is_container`.
+    /// Source is a brand-new Campaign Evolved tag: apply updates the in-memory
+    /// entry rather than writing a container. Move edits its destination path. Implies `is_container`.
     pub(in crate::app) is_new_container: bool,
     /// Whether the whole destination path is editable, or only the leaf name.
     ///
@@ -287,6 +294,9 @@ pub(in crate::app) struct RenameTagState {
     /// to promise one thing and do another — which is exactly what it did while
     /// the text was hard-coded to describe the overlay route.
     pub(in crate::app) in_place_pak: Option<String>,
+    /// Scripts that name this item's tags, checked in the background once
+    /// the window first draws.
+    pub(in crate::app) scripts: Option<crate::app::tag_ops::script_fixes::ScriptCheck>,
 }
 
 /// Results of a tag query (find-references / unreferenced), shown in a floating
@@ -447,6 +457,7 @@ pub(in crate::app) struct ContentExplorer {
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub(in crate::app) enum BrowserMode {
+    Flat,
     #[default]
     Folders,
     Groups,

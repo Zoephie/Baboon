@@ -165,6 +165,7 @@ impl Baboon {
             .map(tag_path::relative_tag_path)
             .unwrap_or_default();
         self.dialogs.open(LooseFolderRenameState {
+            scripts: None,
             kit: self.model.active_kit_id(),
             rel_path,
             parent_display,

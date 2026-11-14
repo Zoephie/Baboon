@@ -78,6 +78,7 @@ pub(in crate::app) struct ContainerDeleteResult {
 /// the result if the kit has closed or its source was replaced, while
 /// preserving receive order for current work.
 pub(in crate::app) enum WorkerMessage {
+    BrowserBulkFinished { stamp: KitStamp, result: Result<crate::app::browser::bulk::BulkOutcome,String> },
     SourceLoaded {
         /// Which kit this load was started for.
         kit: KitId,
@@ -143,6 +144,7 @@ pub(in crate::app) enum WorkerMessage {
     },
     TagLoaded {
         kit: KitId,
+        epoch: u64,
         key: String,
         result: Result<TagFile, String>,
     },
@@ -337,6 +339,7 @@ pub(in crate::app) enum WorkerMessage {
         result: Result<(), String>,
     },
     FolderRefactorProgress(FolderRefactorProgress),
+    FolderMergeReview(crate::app::tag_ops::folder_merge_review::MergeReview),
     /// Stamped because the finish rewrites its kit's whole browser tree and
     /// drops that kit's open documents: unrouted, a refactor that outlived a
     /// workspace switch applied all of that to whichever kit was focused.
@@ -503,6 +506,7 @@ pub(in crate::app) struct FolderRefactorFinished {
     /// paths relative to the tags root, so what is keyed by folder rather than
     /// by tag (favorite folders) can follow it.
     pub(in crate::app) moved_folder: Option<(PathBuf, PathBuf)>,
+    pub(in crate::app) moved_folders: Vec<(PathBuf,PathBuf)>,
 }
 
 pub(in crate::app) struct FolderRefactorUiState {
@@ -814,6 +818,7 @@ mod tests {
             || panic!("decoder fell over"),
             |error| WorkerMessage::TagLoaded {
                 kit: KitId(0),
+                epoch: 0,
                 key: "k".to_owned(),
                 result: Err(error),
             },
@@ -823,6 +828,7 @@ mod tests {
             &ctx,
             || WorkerMessage::TagLoaded {
                 kit: KitId(0),
+                epoch: 0,
                 key: "fine".to_owned(),
                 result: Err("not a panic".to_owned()),
             },
