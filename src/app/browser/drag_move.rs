@@ -208,6 +208,24 @@ pub(in crate::app) fn drop_target(
     })
 }
 
+/// Why the navigation pane and Asset Browser refuse a drop.
+pub(in crate::app) const DROP_IN_FLAT_VIEW: &str = "Drop onto a folder in Flat view";
+/// Why a folder tab in Tree or Groups view refuses a drop.
+pub(in crate::app) const SWITCH_TO_FLAT_VIEW: &str = "Switch this tab to Flat view to drop here";
+
+/// Somewhere a Flat view drag can't land (the navigation pane, a folder tab
+/// in Tree or Groups view, an Asset Browser): while the pointer is over it,
+/// the label says `reason` in red with the not-allowed cursor, rather than
+/// the drag looking as if it would work. Letting go there does nothing.
+pub(in crate::app) fn refuse_drop(ctx: &egui::Context, over: bool, reason: &str) {
+    let frame = ctx.cumulative_frame_nr();
+    let claimed = ctx.data(|data| data.get_temp::<Hint>(hint_id())).is_some_and(|hint| hint.frame == frame);
+    if claimed || !over || !egui::DragAndDrop::has_payload_of_type::<DraggedItems>(ctx) {
+        return;
+    }
+    ctx.data_mut(|data| data.insert_temp(hint_id(), Hint { frame, verdict: Err(reason.to_owned()) }));
+}
+
 /// Once a frame, after the panes and tabs: while a Flat view drag is under
 /// way, a label beside the pointer saying what dropping here would do, and
 /// the matching cursor.
@@ -332,6 +350,27 @@ mod tests {
         assert!(dropped.is_none());
         let hint = ctx.data(|data| data.get_temp::<Hint>(hint_id())).expect("the other folder's reason");
         assert_eq!(hint.verdict.unwrap_err(), "Drop onto a folder in the same kit", "not {ALREADY_HERE}");
+    }
+
+    /// The navigation pane, Tree and Groups tabs and Asset Browsers say why
+    /// they take no drop, but never talk over a folder that does.
+    #[test]
+    fn places_without_drops_say_why_unless_a_target_already_spoke() {
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(50.0));
+        let reason = || ctx.data(|data| data.get_temp::<Hint>(hint_id())).map(|hint| hint.verdict);
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::DragAndDrop::set_payload(ui.ctx(), drag(&[(r"objects\a.model", false)]));
+            refuse_drop(ui.ctx(), false, DROP_IN_FLAT_VIEW);
+            refuse_drop(ui.ctx(), true, SWITCH_TO_FLAT_VIEW);
+        });
+        assert_eq!(reason(), Some(Err(SWITCH_TO_FLAT_VIEW.to_owned())), "only where the pointer is");
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::DragAndDrop::set_payload(ui.ctx(), drag(&[(r"objects\a.model", false)]));
+            let _ = drop_target(ui.ctx(), ui.painter(), true, rect, KitId(1), Path::new("other"), true);
+            refuse_drop(ui.ctx(), true, DROP_IN_FLAT_VIEW);
+        });
+        assert_eq!(reason(), Some(Ok("Move a.model to other".to_owned())), "the folder under the pointer wins");
     }
 
     #[test]

@@ -107,8 +107,11 @@ A blue outline marks where the items will land, and a label beside the pointer,
 led by a Move or Copy icon, says what will happen ("Move 3 items to covenant").
 Where a drop isn't allowed, the cursor shows "not allowed" and the label says
 why, in red: a folder can't go inside itself, and drops into another kit or a
-read-only kit are refused. The folder the items are already in is simply not a
-target: nothing is outlined there, and letting go does nothing. Ctrl-dropping
+read-only kit are refused. The left navigation pane and Asset Browsers say
+"Drop onto a folder in Flat view", and a folder tab in Tree or Groups view says
+"Switch this tab to Flat view to drop here" (its tab header still takes the
+drop). The folder the items are already in is simply not a target: nothing is
+outlined there, and letting go does nothing. Ctrl-dropping
 into it duplicates them with numbered names, as Copy does.
 
 A drop changes nothing by itself: it opens the same **Move Selected Items?**

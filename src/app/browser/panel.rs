@@ -188,6 +188,8 @@ pub(in crate::app) fn draw_folder_browser_pane(
         ui.label(RichText::new("This folder is no longer open").color(subtle_dark()));
         return;
     };
+    // The whole pane, for saying why a drag can't land here.
+    let pane_rect = ui.max_rect();
     let generation = cx.model.kits[kit_index].generation;
     let before_view = (pane.mode, pane.assets_view, pane.filter.clone(), pane.search_scope, pane.asset_bitmaps, pane.asset_models);
     let before_sort = (pane.sort, cx.model.prefs.folders_before_tags);
@@ -476,6 +478,18 @@ pub(in crate::app) fn draw_folder_browser_pane(
         }
         other => other,
     };
+    // Only Flat view takes dropped items; anywhere else in this tab says why.
+    // Its tab header still does, whatever the view.
+    let refusal = if pane.assets_view {
+        Some(super::drag_move::DROP_IN_FLAT_VIEW)
+    } else if pane.mode != BrowserMode::Flat {
+        Some(super::drag_move::SWITCH_TO_FLAT_VIEW)
+    } else {
+        None
+    };
+    if let Some(reason) = refusal {
+        super::drag_move::refuse_drop(ui.ctx(), ui.rect_contains_pointer(pane_rect), reason);
+    }
     view.browser.folder_browsers.insert(pane_key.to_owned(), pane);
     if !load_requests.is_empty() {
         cx.send(BrowserCommand::LoadFolders {
@@ -717,6 +731,7 @@ pub(in crate::app) fn draw_kit_browser(
     sound_language: Option<&str>,
 ) {
     let salt = cx.model.kits[kit_index].id.0;
+    let rect = ui.max_rect();
     ui.push_id(salt, |ui| {
         draw_kit_browser_inner(
             cx,
@@ -729,6 +744,8 @@ pub(in crate::app) fn draw_kit_browser(
             sound_language,
         )
     });
+    // The navigation tree takes no dropped items: say where they go instead.
+    super::drag_move::refuse_drop(ui.ctx(), ui.rect_contains_pointer(rect), super::drag_move::DROP_IN_FLAT_VIEW);
 }
 
 fn draw_kit_browser_inner(
