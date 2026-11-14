@@ -222,14 +222,29 @@ pub(in crate::app) fn draw_drag_label(ctx: &egui::Context) {
         }
     };
     ctx.set_cursor_icon(cursor);
-    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("browser_drag_label")));
-    let font = egui::TextStyle::Body.resolve(&ctx.global_style());
     let color = if error { ctx.global_style().visuals.error_fg_color } else { text_dark() };
-    let galley = painter.layout_no_wrap(text, font, color);
-    let at = pointer + egui::vec2(16.0, 18.0);
-    let rect = egui::Rect::from_min_size(at, galley.size()).expand2(egui::vec2(8.0, 4.0));
-    painter.rect(rect, 4.0, foundation_block_bar(), Stroke::new(1.0, foundation_block_edge()), egui::StrokeKind::Inside);
-    painter.galley(at, galley, color);
+    // The action's icon first: Move, or Copy while Ctrl is held. Red with
+    // the reason when the drop isn't allowed.
+    let icon = if copy { ButtonIcon::Copy } else { ButtonIcon::Move };
+    egui::Area::new(egui::Id::unique("browser_drag_label"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(pointer + egui::vec2(16.0, 18.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::NONE
+                .fill(foundation_block_bar())
+                .stroke(Stroke::new(1.0, foundation_block_edge()))
+                .corner_radius(4.0)
+                .inner_margin(egui::Margin::symmetric(8, 4))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
+                        paint_button_icon_at(ui, icon, rect, color);
+                        ui.add(egui::Label::new(RichText::new(text).color(color)).extend());
+                    });
+                });
+        });
 }
 
 #[cfg(test)]
@@ -246,6 +261,50 @@ mod tests {
                 .collect(),
             tag: None,
         }
+    }
+
+    /// The label beside the pointer: the action's icon, then what dropping
+    /// would do. Ctrl turns Move into Copy.
+    #[test]
+    fn the_drag_label_leads_with_the_action_icon() {
+        let ctx = egui::Context::default();
+        // As the app does: icons are rasterized by its SVG loader.
+        crate::app::Baboon::configure_context(&ctx);
+        let frame = |ctrl: bool| {
+            let modifiers = if ctrl { egui::Modifiers::CTRL } else { egui::Modifiers::NONE };
+            let output = crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(600.0, 400.0))),
+                    events: vec![egui::Event::ModifiersChanged(modifiers), egui::Event::PointerMoved(egui::pos2(100.0, 100.0))],
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::DragAndDrop::set_payload(ui.ctx(), drag(&[("a.model", false), ("b.model", false)]));
+                    draw_drag_label(ui.ctx());
+                },
+            );
+            let texts: Vec<String> = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+            let icon = output.shapes.iter().any(|clipped| {
+                matches!(&clipped.shape, egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default())
+            });
+            (texts, icon)
+        };
+        // An egui area measures itself on its first pass and paints from
+        // the next.
+        frame(false);
+        let (texts, icon) = frame(false);
+        assert!(texts.iter().any(|text| text == "Move 2 items"), "{texts:?}");
+        assert!(icon, "no icon painted beside the label");
+        let (texts, _) = frame(true);
+        assert!(texts.iter().any(|text| text == "Copy 2 items"), "{texts:?}");
     }
 
     #[test]
