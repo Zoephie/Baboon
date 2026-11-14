@@ -992,11 +992,8 @@ fn draw_kit_browser_inner(
         let mut sections = saved_sections;
         let scroll_hold = NavigationScrollHold::begin(ui, kit.generation);
         let mut reloading = false;
-        let mut scroll = ScrollArea::vertical().auto_shrink([false, false]);
-        if let Some(offset) = scroll_hold.offset() {
-            scroll = scroll.vertical_scroll_offset(offset);
-        }
-        let output = scroll
+        let output = ScrollArea::vertical()
+            .auto_shrink([false, false])
             .show(ui, |ui| with_browser_section_state(ui, &mut sections, |ui| {
                 let (favorite_action, _) = draw_favorites(
                     ui,
@@ -1219,9 +1216,10 @@ fn draw_kit_browser_inner(
                         }
                     }
                 };
+                scroll_hold.pad(ui);
                 favorite_action.or(recent_action).or(tree_action)
             }));
-        scroll_hold.end(ui, output.state.clamped_offset().y, reloading || !load_requests.is_empty());
+        scroll_hold.end(ui, output.content_size.y, reloading || !load_requests.is_empty());
         let action = output.inner;
         if sections != saved_sections {
             cx.edit_prefs(move |prefs| { prefs.browser_section_states.insert(section_key, sections); });
@@ -1685,19 +1683,23 @@ pub(in crate::app) fn current_browser_item(kit: &Kit, view: &KitView) -> Option<
 ///
 /// A move, rename or delete rebuilds the tree with its folders' tags unloaded,
 /// so open folders shrink to "Loading…" for a few frames. The scroll area would
-/// clamp to that shorter list and stay there once the tags came back. Instead,
-/// when the kit's generation changes the last offset is held, reapplied every
-/// frame, until no open folder (or search) is still loading.
+/// clamp to that shorter list and stay there once the tags came back. Forcing
+/// the old offset back is no better: past the end of the shorter list it
+/// rubber-bands, and the spring's pull carries on as a slow drift once the
+/// list is whole again. So instead, when the kit's generation changes, the
+/// list keeps the height it had, padded at the bottom, until no open folder
+/// (or search) is still loading; the offset never has to move.
 struct NavigationScrollHold {
     id: egui::Id,
     generation: u64,
+    /// The height the list keeps while it reloads.
     held: Option<f32>,
 }
 
 #[derive(Clone, Copy, Default)]
 struct NavigationScrollState {
     generation: u64,
-    offset: f32,
+    height: f32,
     held: Option<f32>,
 }
 
@@ -1706,22 +1708,28 @@ impl NavigationScrollHold {
         let id = ui.make_persistent_id("browser_navigation_scroll_hold");
         let state = ui.data(|data| data.get_temp::<NavigationScrollState>(id));
         let held = match state {
-            Some(state) if state.generation != generation => Some(state.held.unwrap_or(state.offset)),
+            Some(state) if state.generation != generation => Some(state.held.unwrap_or(state.height)),
             Some(state) => state.held,
             None => None,
         };
         Self { id, generation, held }
     }
 
-    fn offset(&self) -> Option<f32> {
-        self.held
+    /// At the end of the list: pad it to the held height.
+    fn pad(&self, ui: &mut Ui) {
+        if let Some(height) = self.held {
+            let used = ui.min_rect().height();
+            if used < height {
+                ui.add_space(height - used);
+            }
+        }
     }
 
-    /// Record this frame's offset; the hold ends once nothing is loading.
-    fn end(self, ui: &Ui, offset: f32, loading: bool) {
+    /// Record the list's height; the hold ends once nothing is loading.
+    fn end(self, ui: &Ui, height: f32, loading: bool) {
         let held = self.held.filter(|_| loading);
         ui.data_mut(|data| {
-            data.insert_temp(self.id, NavigationScrollState { generation: self.generation, offset, held })
+            data.insert_temp(self.id, NavigationScrollState { generation: self.generation, height, held })
         });
     }
 }
@@ -1737,21 +1745,25 @@ mod navigation_scroll_hold_tests {
         let mut offset = 0.0;
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0))),
+            // Time passes, so the scroll area's spring and coasting run.
+            time: Some(ctx.input(|input| input.time) + 1.0 / 60.0),
+            predicted_dt: 1.0 / 60.0,
             ..Default::default()
         };
         let _ = crate::app::run_ui_test(ctx, input, |ui| {
             let hold = NavigationScrollHold::begin(ui, generation);
             let mut scroll = ScrollArea::vertical().id_salt("navigation");
-            if let Some(y) = scroll_to.or(hold.offset()) {
+            if let Some(y) = scroll_to {
                 scroll = scroll.vertical_scroll_offset(y);
             }
             let output = scroll.show(ui, |ui| {
                 for row in 0..rows {
                     ui.label(format!("row {row}"));
                 }
+                hold.pad(ui);
             });
-            hold.end(ui, output.state.clamped_offset().y, loading);
-            offset = output.state.clamped_offset().y;
+            hold.end(ui, output.content_size.y, loading);
+            offset = output.state.unclamped_offset().y;
         });
         offset
     }
@@ -1763,11 +1775,16 @@ mod navigation_scroll_hold_tests {
         let ctx = egui::Context::default();
         frame(&ctx, 1, 300, false, Some(1000.0));
         assert_eq!(frame(&ctx, 1, 300, false, None), 1000.0);
-        // The kit changed: folders show "Loading…" and the list is short.
-        assert_eq!(frame(&ctx, 2, 3, true, None), 0.0);
-        assert_eq!(frame(&ctx, 2, 3, true, None), 0.0);
-        // The tags are back.
-        assert_eq!(frame(&ctx, 2, 300, false, None), 1000.0);
+        // The kit changed: folders show "Loading…" and the list is shorter,
+        // though still taller than the pane, for a few frames.
+        for _ in 0..10 {
+            assert_eq!(frame(&ctx, 2, 50, true, None), 1000.0);
+        }
+        // The tags are back, and the position stays put: no drift once the
+        // hold ends.
+        for _ in 0..30 {
+            assert_eq!(frame(&ctx, 2, 300, false, None), 1000.0);
+        }
         // The hold has ended: scrolling is the user's again.
         frame(&ctx, 2, 300, false, Some(200.0));
         assert_eq!(frame(&ctx, 2, 300, false, None), 200.0);
