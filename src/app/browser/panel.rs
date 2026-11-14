@@ -478,14 +478,20 @@ pub(in crate::app) fn draw_folder_browser_pane(
         }
         other => other,
     };
-    // Only Flat view takes dropped items; anywhere else in this tab says why.
-    // Its tab header still does, whatever the view.
+    // A Tree view folder row that items were dropped on.
+    if action.is_none() {
+        action = super::drag_move::take_tree_drop(ui.ctx());
+    }
+    // Flat view takes dropped items anywhere, Tree view on its folder rows;
+    // anywhere else in this tab says why. Its tab header always takes them.
     let refusal = if pane.assets_view {
         Some(super::drag_move::DROP_IN_FLAT_VIEW)
-    } else if pane.mode != BrowserMode::Flat {
-        Some(super::drag_move::SWITCH_TO_FLAT_VIEW)
     } else {
-        None
+        match pane.mode {
+            BrowserMode::Flat => None,
+            BrowserMode::Folders => Some(super::drag_move::DROP_ONTO_A_FOLDER),
+            BrowserMode::Groups => Some(super::drag_move::SWITCH_TO_FLAT_VIEW),
+        }
     };
     if let Some(reason) = refusal {
         super::drag_move::refuse_drop(ui.ctx(), ui.rect_contains_pointer(pane_rect), reason);

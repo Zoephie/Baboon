@@ -2391,6 +2391,8 @@ fn show_folder_tree_header<R>(
         if select_browser_tag(ui, &response, &folder_pane_key(path)) {
             paint_browser_selection_border(ui, response.rect);
         }
+        // In a folder tab's Tree view, a place to drop Flat view items.
+        super::drag_move::tree_folder_target(ui, response.rect, path);
     }
     if response.clicked() && !toggle_clicked {
         state.toggle(ui);
@@ -4154,6 +4156,67 @@ mod tests {
 
         assert_eq!(actual.left(), expected.left());
         assert_eq!(actual.right(), expected.right());
+    }
+
+    /// Flat view items dropped onto a Tree view folder row in a folder tab
+    /// move into that folder; the navigation pane's rows take nothing.
+    #[test]
+    fn a_tree_folder_row_in_a_folder_tab_takes_dropped_items() {
+        use super::super::drag_move::{DraggedItem, DraggedItems, take_tree_drop};
+        let drop_on_row = |folder_pane: bool| {
+            let ctx = egui::Context::default();
+            let row = std::cell::Cell::new(egui::Rect::NOTHING);
+            let frame = |events: Vec<egui::Event>| {
+                let _ = crate::app::run_ui_test(
+                    &ctx,
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(400.0, 300.0))),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            set_browser_is_folder_pane(ui, folder_pane);
+                            set_browser_loose_source(ui, true);
+                            set_operation_entries(ui, KitId(1), 1, &[], false, true);
+                            ui.data_mut(|data| {
+                                data.insert_temp(browser_selection_owner_id().with("drawing"), (KitId(1), "pane".to_owned()))
+                            });
+                            row.set(show_folder_tree_header(
+                                ui, "dest", "dest", text_dark(), false, false, false, Some(Path::new("objects/dest")), |_| {},
+                            )
+                            .rect);
+                        });
+                    },
+                );
+            };
+            frame(Vec::new());
+            egui::DragAndDrop::set_payload(
+                &ctx,
+                DraggedItems {
+                    kit: KitId(1),
+                    pane: "pane".into(),
+                    items: vec![DraggedItem { key: "k".into(), path: r"objects\a.model".into(), folder: false }],
+                    tag: None,
+                },
+            );
+            let at = row.get().center();
+            frame(vec![egui::Event::PointerMoved(at)]);
+            frame(vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            take_tree_drop(&ctx)
+        };
+        match drop_on_row(true) {
+            Some(BrowserAction::DropItems { keys, copy, folder, .. }) => {
+                assert_eq!((keys, copy, folder), (vec!["k".to_owned()], false, PathBuf::from("objects/dest")));
+            }
+            _ => panic!("the folder row took no drop"),
+        }
+        assert!(drop_on_row(false).is_none(), "the navigation pane's rows take nothing");
     }
 
     #[test]

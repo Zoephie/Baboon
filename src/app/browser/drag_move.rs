@@ -210,8 +210,40 @@ pub(in crate::app) fn drop_target(
 
 /// Why the navigation pane and Asset Browser refuse a drop.
 pub(in crate::app) const DROP_IN_FLAT_VIEW: &str = "Drop onto a folder in Flat view";
-/// Why a folder tab in Tree or Groups view refuses a drop.
-pub(in crate::app) const SWITCH_TO_FLAT_VIEW: &str = "Switch this tab to Flat view to drop here";
+/// Why a folder tab in Groups view refuses a drop: groups are tag types, not
+/// folders.
+pub(in crate::app) const SWITCH_TO_FLAT_VIEW: &str = "Switch this tab to Flat or Tree view to drop here";
+/// Why a Tree view tab refuses a drop anywhere but a folder row: a tag row
+/// inside an expanded folder would leave it unclear which folder was meant.
+pub(in crate::app) const DROP_ONTO_A_FOLDER: &str = "Drop onto a folder";
+
+fn tree_drop_id() -> egui::Id {
+    egui::Id::unique("browser_tree_drop")
+}
+
+/// A Tree view folder row in a folder tab (never the navigation pane): drop
+/// Flat view items into `folder`. The Move or Copy waits for the tab to
+/// collect it with [`take_tree_drop`] once it has drawn.
+pub(super) fn tree_folder_target(ui: &Ui, rect: egui::Rect, folder: &Path) {
+    if !browser_is_folder_pane(ui) {
+        return;
+    }
+    let Some((kit, _)) = ui.data(|data| data.get_temp::<(KitId, String)>(browser_selection_owner_id().with("drawing"))) else {
+        return;
+    };
+    let writable = browser_loose_source(ui) && !operation_read_only(ui);
+    if let Some(action) = drop_target(ui.ctx(), ui.painter(), ui.rect_contains_pointer(rect), rect, kit, folder, writable) {
+        let parked = Arc::new(std::sync::Mutex::new(Some(action)));
+        ui.data_mut(|data| data.insert_temp(tree_drop_id(), parked));
+    }
+}
+
+/// The Move or Copy a Tree view folder row was dropped on this frame.
+pub(super) fn take_tree_drop(ctx: &egui::Context) -> Option<BrowserAction> {
+    let parked = ctx.data_mut(|data| data.remove_temp::<Arc<std::sync::Mutex<Option<BrowserAction>>>>(tree_drop_id()))?;
+    let mut parked = parked.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    parked.take()
+}
 
 /// Somewhere a Flat view drag can't land (the navigation pane, a folder tab
 /// in Tree or Groups view, an Asset Browser): while the pointer is over it,
