@@ -123,24 +123,8 @@ pub(in crate::app) fn replace_scenario_scripts(
 
 /// `(name, source bytes)` per element of the scenario's `source files` block.
 fn read_source_files(tag: &TagFile) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
-    let block = tag
-        .root()
-        .field_path("source files")
-        .and_then(|field| field.as_block())
-        .ok_or_else(|| anyhow::anyhow!("Tag has no 'source files' block"))?;
-    let mut files = Vec::with_capacity(block.len());
-    for index in 0..block.len() {
-        let Some(element) = block.element(index) else {
-            continue;
-        };
-        let name = element.read_string("name").unwrap_or_default();
-        let source = match element.field_path("source").and_then(|field| field.value()) {
-            Some(TagFieldData::Data(data)) => data,
-            _ => Vec::new(),
-        };
-        files.push((name, source));
-    }
-    Ok(files)
+    crate::core::script_paths::scenario_source_files(tag)
+        .ok_or_else(|| anyhow::anyhow!("Tag has no 'source files' block"))
 }
 
 /// Read every `.hsc` in `folder` (non-recursive), sorted by file name so a

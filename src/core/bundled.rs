@@ -40,6 +40,34 @@ pub(crate) fn definitions_missing_message(path: &Path) -> String {
     )
 }
 
+/// The bundled script documentation, in the help docs root.
+pub(crate) const SCRIPT_DOCS_FILE: &str = "script_docs.sqlite3";
+/// The script documentation schema this build reads.
+pub(crate) const SCRIPT_DOCS_SCHEMA_VERSION: i64 = 1;
+
+/// Open the script documentation read-only, refusing a schema this build
+/// doesn't read. The Script Docs window and the script path checks share it.
+pub(crate) fn open_script_docs(path: &Path) -> Result<rusqlite::Connection, String> {
+    use rusqlite::{Connection, OpenFlags, OptionalExtension};
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|error| format!("Could not open {}: {error}", path.display()))?;
+    let version: Option<String> = connection
+        .query_row("SELECT value FROM metadata WHERE key='schema_version'", [], |row| row.get(0))
+        .optional()
+        .map_err(|error| format!("Could not read script documentation schema: {error}"))?;
+    if version.as_deref().and_then(|value| value.parse::<i64>().ok()) != Some(SCRIPT_DOCS_SCHEMA_VERSION) {
+        return Err(format!(
+            "Unsupported script documentation schema in {} (expected version {}).",
+            path.display(),
+            SCRIPT_DOCS_SCHEMA_VERSION
+        ));
+    }
+    Ok(connection)
+}
+
 /// Locate the runtime help docs root. Release builds copy `docs/` next to
 /// `Baboon.exe`, matching the editable-on-disk contract used by `definitions/`.
 pub(crate) fn locate_help_docs_root() -> PathBuf {

@@ -751,6 +751,7 @@ mod tests {
     #[test]
     fn a_recent_tags_icon_comes_from_the_kit_it_lies_in() {
         let profile = |game: &str, root: &str| CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: false,
             git_tracked: false,
             id: root.to_owned(),

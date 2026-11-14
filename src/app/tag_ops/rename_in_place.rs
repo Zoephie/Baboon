@@ -1008,6 +1008,7 @@ mod tests {
             // Carried by `rekey_tag_in_kit`.
             parsed_tags: _,
             loading_tags: _,
+            tag_load_epoch: _,
             selected_key: _,
             // Follows `selected_key` at the next sync.
             current_pane: _,
@@ -1073,6 +1074,7 @@ mod tests {
             chimp: _,
 
             // Not addressed by a tag key at all.
+            navigation_hidden: _,
             blam: _,
             terminal: _,
             // Classified field by field below.

@@ -141,7 +141,7 @@ pub(in crate::app) fn draw_menu_bar(cx: &Ctx, ui: &mut egui::Ui, menu: &MenuStat
                     aligned_menu_button(ui, "Tools", |ui| { draw_tools_menu(cx, ui); });
                 });
                 aligned_menu_button(ui, "View", |ui| {
-                    draw_view_menu(cx, ui, view);
+                    draw_view_menu(cx, ui, view, !menu.home && !menu.chimp_surface);
                 });
                 aligned_menu_button(ui, "Help", |ui| {
                     draw_help_menu(cx, ui, menu);
@@ -295,6 +295,11 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
     {
         close_menu(ui);
         cx.send(AppAction::OpenDataFolder);
+    }
+    if ui.add_enabled(!menu.home && cx.model.source().is_some_and(|source|
+        matches!(source.source, TagSource::LooseFolder { .. } | TagSource::SingleFile { .. })), egui::Button::new("Open Deleted Tags Folder")).clicked() {
+        close_menu(ui);
+        cx.send(AppAction::OpenDeletedTagsFolder);
     }
     let recent_action = right_opening_menu_button(ui, "Recent Folders", 280.0, |ui| {
         style_list_menu(ui);
@@ -690,8 +695,15 @@ fn draw_tools_menu(cx: &Ctx, ui: &mut Ui) {
 
 /// The View menu: browser mode and sort, display toggles, expert mode, and
 /// the terminal.
-fn draw_view_menu(cx: &Ctx, ui: &mut Ui, view: &mut KitView) {
+fn draw_view_menu(cx: &Ctx, ui: &mut Ui, view: &mut KitView, navigation_enabled: bool) {
     style_list_menu(ui);
+    let mut navigation_visible = !view.navigation_hidden;
+    if ui.add_enabled_ui(navigation_enabled && !view.tag_tree.is_empty(), |ui| {
+        ui.baboon_checkbox(&mut navigation_visible, "Navigation Pane")
+    }).inner.changed() {
+        view.navigation_hidden = !navigation_visible;
+    }
+    ui.separator();
     // Toggles on copies of the preferences, sent as a change once drawn.
     let prefs = &cx.model.prefs;
     let mut show_browser_prefixes = prefs.show_browser_prefixes;

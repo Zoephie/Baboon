@@ -6,6 +6,54 @@ that picking one up does not mean rediscovering it first.
 
 ---
 
+## Drag and drop: spring-loaded folders and edge scrolling
+
+**Status:** not implemented. Flat view drags drop onto folder rows (Flat and
+Tree view, and the navigation pane), folder tab headers and other open folder
+panes of the same kit.
+
+- **Spring-loading.** Hovering a folder row (or a tab) for about a second while
+  dragging would open it, so a drop can go deeper than what is on screen. It
+  changes panes under the pointer mid-drag, so it wants its own design pass.
+  The hover time and a short visual countdown on the row are the open questions.
+- **Scrolling at the edges.** The navigation tree is long; dragging near its top
+  or bottom edge should scroll it, as editors do, so a far folder can be
+  reached without dropping first.
+
+Both go through `browser/drag_move.rs`: a target is `drop_target` with the
+target's rect, its folder and whether the pointer is over it.
+
+---
+
+## Script paths in Halo 2 Anniversary Multiplayer and Halo 4
+
+**Status:** not implemented. Their Rename, Move and Delete windows say scripts
+aren't checked.
+
+Rename, Move and Delete fix tag paths in mission scripts for Halo CE to Reach
+(`src/core/script_paths`). Halo 2 Anniversary Multiplayer and Halo 4 keep their
+script text in `hs_source_file` tags, listed in the scenario's `source file
+references` block, rather than in `data\...\scripts\*.hsc`. Supporting them
+means reading that block, then reading and rewriting each tag's text the way
+`scenario_hs_source_file` tags are handled now; the matching and type lookup are
+the same. Their script docs are already bundled.
+
+---
+
+## Script paths whose type the script docs don't give
+
+**Status:** partly handled. Such a line is counted as "can't fix" (Rename/Move)
+or "may break" (Delete) only when the path could mean more than one tag.
+
+A path's tag type comes from the function it is passed to, read from the bundled
+script docs. Paths passed through a generic expression (`begin`, `if`, a script's
+return value, `set` on a global), or to a function the docs lack, have no type.
+A sample of Halo 2's 03a scripts had none, but user scripts may. Inferring a type
+from a global's declaration when the path is assigned with `set`, or from a
+script's declared return type, would cover most of what remains.
+
+---
+
 ## Blueprint-inherited meshes in level export
 
 **Status:** not implemented. Counted, not silently dropped.

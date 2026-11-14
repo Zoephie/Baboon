@@ -142,6 +142,7 @@ pub(in crate::app) struct EditingKitShortcut {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::app) struct CustomEditingKitProfile {
+    pub(in crate::app) recovery: crate::core::recovery::RecoveryLocation,
     pub(in crate::app) read_only: bool,
     pub(in crate::app) git_tracked: bool,
     pub(in crate::app) id: String,
@@ -240,11 +241,22 @@ pub(in crate::app) enum CustomEditingKitInput {
     Root,
     Tags,
     Data,
+    Recovery,
     Icon,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(in crate::app) enum EditingKitFormTab {
+    General,
+    Advanced,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::app) struct CustomEditingKitDraft {
+    pub(in crate::app) tab: EditingKitFormTab,
+    pub(in crate::app) recovery: crate::core::recovery::RecoveryLocation,
+    pub(in crate::app) recovery_input: String,
+    pub(in crate::app) original_recovery_folder: Option<PathBuf>,
     pub(in crate::app) read_only: bool,
     pub(in crate::app) git_tracked: bool,
     pub(in crate::app) editing_id: Option<String>,
@@ -279,6 +291,10 @@ impl CustomEditingKitDraft {
 
     pub(in crate::app) fn new() -> Self {
         Self {
+            tab: EditingKitFormTab::General,
+            recovery: Default::default(),
+            recovery_input: String::new(),
+            original_recovery_folder: None,
             read_only: false,
             git_tracked: false,
             editing_id: None,
@@ -298,6 +314,11 @@ impl CustomEditingKitDraft {
 
     pub(in crate::app) fn from_profile(profile: &CustomEditingKitProfile) -> Self {
         Self {
+            tab: EditingKitFormTab::General,
+            recovery: profile.recovery.clone(),
+            recovery_input: profile.recovery.folder.as_ref().map(|folder| folder.display().to_string())
+                .unwrap_or_default(),
+            original_recovery_folder: Some(crate::app::kits::recovery::profile_recovery_folder(profile)),
             read_only: profile.read_only,
             git_tracked: profile.git_tracked,
             editing_id: Some(profile.id.clone()),

@@ -17,6 +17,12 @@ mod filter;
 mod folder_table;
 mod tree;
 mod navigation;
+pub(in crate::app) mod selection;
+mod flat;
+pub(in crate::app) mod bulk;
+pub(in crate::app) mod bulk_rename;
+pub(in crate::app) mod drag_move;
+use selection::*;
 mod recents;
 use recents::draw_recents;
 pub(in crate::app) use recents::recent_relative_path;
@@ -436,6 +442,8 @@ impl KitBrowser {
 
 /// What the browser can be asked to do.
 pub(in crate::app) enum BrowserCommand {
+    BulkConfirmed(bulk::BulkRequest),
+    ApplyBulkRename {save:bool},
     /// A browser action raised in `kit`'s workspace, which becomes active
     /// first: the action addresses the active kit.
     Action { kit: KitId, action: BrowserAction },
@@ -473,6 +481,8 @@ pub(in crate::app) enum BrowserCommand {
 impl Baboon {
     pub(in crate::app) fn apply_browser_command(&mut self, command: BrowserCommand, ctx: &egui::Context) {
         match command {
+            BrowserCommand::ApplyBulkRename {save} => self.apply_bulk_rename(save,ctx),
+            BrowserCommand::BulkConfirmed(request) => self.run_browser_bulk(request,true,ctx),
             BrowserCommand::Action { kit, action } => {
                 if let Some(index) = self.model.kit_index(kit) {
                     self.focus_kit(index);
@@ -499,6 +509,7 @@ impl Baboon {
                 // Each acts on the active kit, so this one first.
                 self.focus_kit(index);
                 match (library, action) {
+                    (_, CellAction::BrowserAction(action)) => self.handle_browser_action(action, ctx.clone()),
                     (Library::Bitmaps, CellAction::Open(key)) => self.select_entry(key, ctx.clone()),
                     // Opens a native folder picker, which blocks until it is
                     // answered: not something to do part-way through a draw.

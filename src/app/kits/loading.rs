@@ -313,6 +313,17 @@ impl Baboon {
         if self.model.resolve_stamp(stamp).is_none() {
             return true;
         }
+        if self.tag_ops.folder_refactor.is_some() {
+            // A refactor owns both the catalog and the old-to-new tab map.
+            // Installing a scan here advances generation and makes its pending
+            // completion look stale, leaving open panes at deleted paths.
+            let jobs = &mut self.model.kits[kit_index].index_jobs;
+            jobs.refresh_browser = true;
+            jobs.next_refresh_at = 0.0;
+            // The scan may already have persisted its rows. Force a browser
+            // refresh on retry even if the next scan reports no disk changes.
+            return false;
+        }
         self.schedule_next_entry_index_refresh(kit_index, ctx);
         let refresh_browser = std::mem::take(&mut self.model.kits[kit_index].index_jobs.refresh_browser);
         match result {
@@ -861,6 +872,13 @@ impl Baboon {
             return;
         };
 
+        // The shared Extract menu asks for the tags root when the complete
+        // catalogue is missing, so single and multiple selections become ready
+        // together. This scans paths/types; payloads are read by extraction.
+        if rel_path.as_os_str().is_empty() && !source.complete_scan {
+            self.begin_scan_all_entries_with_label(ctx, "Loading Folder...");
+            return;
+        }
         if source.complete_scan {
             let entries = source
                 .all_entries
@@ -969,7 +987,8 @@ impl Baboon {
     /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
     /// Captured source identity prevents stale results from replacing newer state.
     pub(in crate::app) fn maybe_refresh_entry_index(&mut self, ctx: egui::Context) {
-        if self.model.kits[self.model.active].scanning_entries
+        if self.tag_ops.folder_refactor.is_some()
+            || self.model.kits[self.model.active].scanning_entries
             || self.model.kits[self.model.active].index_jobs.refreshing
             || self.model.kits[self.model.active].index_jobs.building_references
         {
@@ -992,7 +1011,8 @@ impl Baboon {
     }
 
     pub(in crate::app) fn begin_refresh_entry_index(&mut self, ctx: egui::Context) {
-        if self.model.kits[self.model.active].scanning_entries || self.model.kits[self.model.active].index_jobs.refreshing {
+        if self.tag_ops.folder_refactor.is_some()
+            || self.model.kits[self.model.active].scanning_entries || self.model.kits[self.model.active].index_jobs.refreshing {
             return;
         }
         let Some(source) = self.model.source() else {
@@ -1433,6 +1453,32 @@ mod tests {
     use super::*;
     use crate::app::kits::loading::replace_loaded_tree_scope;
 
+    #[test]
+    fn extract_load_folder_builds_the_complete_catalogue_without_opening_tabs() {
+        use crate::app::loose_fixture::{LooseKit, pump_until};
+        let kit = LooseKit::new("extract-load-catalogue", "halo2_mcc");
+        kit.write_mcc(r"ui\a", "bitmap", |_| {});
+        kit.write_mcc(r"ui\nested\b", "bitmap", |_| {});
+        let mut source = kit.source();
+        source.complete_scan = false;
+        source.all_entries.clear();
+        source.entries.clear();
+        source.tree = TagTree::default();
+        source.group_tree = TagTree::default();
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(source);
+        app.begin_load_folder_extractables(PathBuf::new(), "Tags".into(), egui::Context::default());
+        pump_until(&mut app, "complete extraction catalogue", |app| {
+            app.model.kits[0]
+                .source
+                .as_ref()
+                .is_some_and(|source| source.complete_scan)
+        });
+        let source = app.model.kits[0].source.as_ref().unwrap();
+        assert_eq!(source.full_entry_set().len(), 2);
+        assert!(app.model.kits[0].parsed_tags.is_empty());
+    }
+
     /// A refresh that saw a definition or option change, appear or go asks
     /// the shader grid to re-read them; one that saw only other tags does not.
     #[test]
@@ -1542,6 +1588,7 @@ mod tests {
         }
         let mut app = Baboon::for_test();
         let profile = |id: &str, tags: Option<&str>| CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: false,
             git_tracked: false,
             id: id.to_owned(),
@@ -1593,6 +1640,7 @@ mod tests {
     fn a_read_only_profile_still_covers_its_kit() {
         let mut app = loose_kit_at(Path::new("/ek/H3EK/tags"));
         app.model.prefs.custom_editing_kit_profiles = vec![CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: true,
             git_tracked: false,
             id: "00000000-0000-4000-8000-000000000001".to_owned(),

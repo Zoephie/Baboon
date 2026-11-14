@@ -1,10 +1,9 @@
 //! Lazy, read-only access to the generated Halo Script documentation database.
 
 use super::*;
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
-const SCRIPT_DOCS_FILE: &str = "script_docs.sqlite3";
-const SCRIPT_DOCS_SCHEMA_VERSION: i64 = 1;
+use crate::core::bundled::SCRIPT_DOCS_FILE;
 
 /// The games with HaloScript documentation, in the order the help lists them.
 pub(in crate::app) fn script_doc_games() -> impl Iterator<Item = GameId> {
@@ -195,31 +194,7 @@ impl ScriptDocsUiState {
 }
 
 fn open_database(path: &Path) -> Result<Connection, String> {
-    let connection = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|error| format!("Could not open {}: {error}", path.display()))?;
-    let version: Option<String> = connection
-        .query_row(
-            "SELECT value FROM metadata WHERE key='schema_version'",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|error| format!("Could not read script documentation schema: {error}"))?;
-    if version
-        .as_deref()
-        .and_then(|value| value.parse::<i64>().ok())
-        != Some(SCRIPT_DOCS_SCHEMA_VERSION)
-    {
-        return Err(format!(
-            "Unsupported script documentation schema in {} (expected version {}).",
-            path.display(),
-            SCRIPT_DOCS_SCHEMA_VERSION
-        ));
-    }
-    Ok(connection)
+    crate::core::bundled::open_script_docs(path)
 }
 
 fn query_rows(

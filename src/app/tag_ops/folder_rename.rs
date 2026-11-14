@@ -50,18 +50,6 @@ fn directory_names(dir: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// A sibling of `path` whose name matches its leaf ignoring case but not
-/// exactly — a conflict for tag paths that `Path::exists` misses on a
-/// case-sensitive file system.
-pub(in crate::app) fn sibling_differing_in_case(path: &Path) -> Option<PathBuf> {
-    let leaf = path.file_name()?.to_string_lossy().into_owned();
-    let parent = path.parent()?;
-    directory_names(parent)
-        .into_iter()
-        .find(|name| *name != leaf && name.eq_ignore_ascii_case(&leaf))
-        .map(|name| parent.join(name))
-}
-
 /// The tags outside a folder that reference one inside it, by key.
 ///
 /// `inside` is every tag in the folder. A referrer that is itself inside is
@@ -165,6 +153,7 @@ impl Baboon {
             .map(tag_path::relative_tag_path)
             .unwrap_or_default();
         self.dialogs.open(LooseFolderRenameState {
+            scripts: None,
             kit: self.model.active_kit_id(),
             rel_path,
             parent_display,

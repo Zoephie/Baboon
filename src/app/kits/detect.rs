@@ -44,6 +44,7 @@ pub(in crate::app) fn add_standard_editing_kit_profiles(
             id = uuid::Uuid::new_v4().to_string();
         }
         profiles.push(CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: false,
             git_tracked: false,
             id,
@@ -56,6 +57,7 @@ pub(in crate::app) fn add_standard_editing_kit_profiles(
         });
         added += 1;
     }
+    crate::app::kits::recovery::assign_recovery_names(profiles);
     added
 }
 

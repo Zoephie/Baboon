@@ -54,6 +54,7 @@ pub(in crate::app) mod tool_commands_window;
 pub(in crate::app) use tool_commands_window::pick_tool_command_path;
 pub(in crate::app) mod tools;
 pub(in crate::app) mod profiles;
+pub(in crate::app) mod recovery;
 
 /// Editing kits beyond any one workspace: their validation, the profile being
 /// edited or removed, paths being typed, tool commands, dragging a tag to a

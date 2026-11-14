@@ -3,8 +3,12 @@
 
 use super::*;
 
-use crate::app::search::result_windows::fixed_height_row;
-use crate::app::shell::frame::explorer_entry_row;
+use crate::app::browser::bulk_rename::{draw_links_box, draw_tag_band, padded_body};
+
+/// The lists' shortest height: the window can't be dragged smaller than this.
+const EXPLORER_MIN_BOX_HEIGHT: f32 = 160.0;
+/// The tooltip line under a row's path.
+const EXPLORE_HINT: &str = "Click to explore this tag's references";
 
 /// The Content Explorer window, while it is open.
 impl Dialog for ContentExplorer {
@@ -18,131 +22,120 @@ impl Dialog for ContentExplorer {
             .resolve_kit(explorer_kit)
             .unwrap_or(cx.model.active);
         let mut filter = self.filter.clone();
+        let game = cx.model.kits[explorer_kit_index].source.as_ref().and_then(|source| source.source.game());
         {
             let explorer = &*self;
             egui::Window::new("Content Explorer")
                 .constrain_to(window_work_area(ctx))
                 .id(egui::Id::unique("content_explorer"))
-                .open(&mut open)
+                .title_bar(false)
+                .frame(egui::Frame::window(&ctx.global_style()))
+                .resizable(true)
                 .default_width(window_width(ctx, 720.0))
+                .default_height(560.0)
                 .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(!explorer.back.is_empty(), egui::Button::new("← Back"))
-                            .clicked()
-                        {
-                            act = Some(ExplorerAct::Back);
+                    crate::app::search::draw_icon_window_header(ui, "Content Explorer", ButtonIcon::Find, &mut open);
+                    // The tag being explored, on the band the Move and Rename
+                    // windows show their folder on.
+                    draw_tag_band(ui, explorer.focus.group_tag, game, &explorer.focus.display_path);
+                    ui.add_space(10.0);
+                    padded_body(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            if icon_text_button(ui, ButtonIcon::JumpBack, "Back", !explorer.back.is_empty()).clicked() {
+                                act = Some(ExplorerAct::Back);
+                            }
+                            if icon_text_button(ui, ButtonIcon::JumpTo, "Forward", !explorer.forward.is_empty()).clicked() {
+                                act = Some(ExplorerAct::Forward);
+                            }
+                            ui.separator();
+                            if icon_text_button(ui, ButtonIcon::Open, "Open in Editor", true).clicked() {
+                                act = Some(ExplorerAct::Open(explorer.focus.key.clone()));
+                            }
+                            if icon_text_button(ui, ButtonIcon::NavigationPane, "Reveal in Browser", true).clicked() {
+                                act = Some(ExplorerAct::Reveal(explorer.focus.key.clone()));
+                            }
+                            ui.separator();
+                            ui.add(
+                                crate::app::ui_kit::singleline_text_edit(&mut filter)
+                                    .hint_text(placeholder_text("filter"))
+                                    .desired_width(140.0),
+                            );
+                        });
+                        if explorer.index_unavailable {
+                            let note = if cx.model.kits[cx.model.active]
+                                .index_jobs
+                                .building_references
+                                || cx.model.kits[explorer_kit_index].scanning_entries
+                            {
+                                "Reference index is building — reopen this in a moment."
+                            } else {
+                                "Reference index unavailable — run Tools → Build Reference Index."
+                            };
+                            ui.add_space(6.0);
+                            ui.label(RichText::new(note).color(subtle_dark()));
                         }
-                        if ui
-                            .add_enabled(
-                                !explorer.forward.is_empty(),
-                                egui::Button::new("Forward →"),
-                            )
-                            .clicked()
-                        {
-                            act = Some(ExplorerAct::Forward);
-                        }
-                        ui.separator();
-                        if ui.button("Open in editor").clicked() {
-                            act = Some(ExplorerAct::Open(explorer.focus.key.clone()));
-                        }
-                        if ui.button("Reveal in browser").clicked() {
-                            act = Some(ExplorerAct::Reveal(explorer.focus.key.clone()));
-                        }
-                        ui.separator();
-                        ui.add(
-                            crate::app::ui_kit::singleline_text_edit(&mut filter)
-                                .hint_text(placeholder_text("filter"))
-                                .desired_width(140.0),
-                        );
-                    });
-                    ui.separator();
-                    ui.label(
-                        RichText::new(&explorer.focus.display_path)
-                            .strong()
-                            .color(text_dark()),
-                    );
-                    if explorer.index_unavailable {
-                        let note = if cx.model.kits[cx.model.active]
-                            .index_jobs
-                            .building_references
-                            || cx.model.kits[explorer_kit_index].scanning_entries
-                        {
-                            "Reference index is building — reopen this in a moment."
-                        } else {
-                            "Reference index unavailable — run Tools → Build Reference Index."
+                        ui.add_space(12.0);
+                        let query = filter.trim();
+                        // The rows each list shows (their positions in the
+                        // explorer's lists, and path and group to draw),
+                        // built when the tag or filter changes rather than
+                        // copied every frame.
+                        let lists = {
+                            let id = egui::Id::unique(("ce_rows", &explorer.focus.key, query, explorer.parents.len(), explorer.children.len()));
+                            match ui.data(|data| data.get_temp::<Arc<[ExplorerRows; 2]>>(id)) {
+                                Some(lists) => lists,
+                                None => {
+                                    let lists = Arc::new([explorer_rows(&explorer.parents, query), explorer_rows(&explorer.children, query)]);
+                                    ui.data_mut(|data| data.insert_temp(id, lists.clone()));
+                                    lists
+                                }
+                            }
                         };
-                        ui.label(RichText::new(note).color(subtle_dark()));
-                    }
-                    ui.separator();
-                    let query = filter.trim();
-                    let matches =
-                        |entry: &TagEntry| contains_ignore_ascii_case(&entry.display_path, query);
-                    let parents: Vec<&TagEntry> =
-                        explorer.parents.iter().filter(|e| matches(e)).collect();
-                    let children: Vec<&TagEntry> =
-                        explorer.children.iter().filter(|e| matches(e)).collect();
-                    let count_label = |shown: usize, total: usize| {
-                        if shown == total {
-                            format!("({total})")
-                        } else {
-                            format!("({shown}/{total})")
-                        }
-                    };
-                    ui.columns(2, |cols| {
-                        cols[0].label(
-                            RichText::new(format!(
-                                "Referenced by {}",
-                                count_label(parents.len(), explorer.parents.len())
-                            ))
-                            .strong()
-                            .color(text_dark()),
-                        );
-                        if parents.is_empty() {
-                            cols[0].label(RichText::new("(none)").color(subtle_dark()));
-                        }
-                        // A widely used tag has thousands of referrers: only
-                        // the rows in view are drawn.
-                        let row_height = cols[0].spacing().interact_size.y;
-                        crate::app::ScrollArea::vertical()
-                            .id_salt("ce_parents")
-                            .max_height(380.0)
-                            .show_rows(&mut cols[0], row_height, parents.len(), |ui, rows| {
-                                for entry in &parents[rows] {
-                                    if fixed_height_row(ui, row_height, |ui| {
-                                        explorer_entry_row(ui, entry)
-                                    }) {
-                                        act = Some(ExplorerAct::Navigate((*entry).clone()));
-                                    }
-                                }
-                            });
-                        cols[1].label(
-                            RichText::new(format!(
-                                "References {}",
-                                count_label(children.len(), explorer.children.len())
-                            ))
-                            .strong()
-                            .color(text_dark()),
-                        );
-                        if children.is_empty() {
-                            cols[1].label(RichText::new("(none)").color(subtle_dark()));
-                        }
-                        // A widely used tag has thousands of referrers: only
-                        // the rows in view are drawn.
-                        let row_height = cols[1].spacing().interact_size.y;
-                        crate::app::ScrollArea::vertical()
-                            .id_salt("ce_children")
-                            .max_height(380.0)
-                            .show_rows(&mut cols[1], row_height, children.len(), |ui, rows| {
-                                for entry in &children[rows] {
-                                    if fixed_height_row(ui, row_height, |ui| {
-                                        explorer_entry_row(ui, entry)
-                                    }) {
-                                        act = Some(ExplorerAct::Navigate((*entry).clone()));
-                                    }
-                                }
-                            });
+                        let gap = 20.0;
+                        let column = ((ui.available_width() - gap) / 2.0).floor();
+                        // The lists fill what is left of the window, so
+                        // dragging its edge makes them taller or shorter.
+                        let box_height = (ui.available_height() - 20.0).floor().max(EXPLORER_MIN_BOX_HEIGHT);
+                        ui.horizontal_top(|ui| {
+                            ui.spacing_mut().item_spacing.x = gap;
+                            for (id, title, (positions, rows), entries, empty) in [
+                                ("ce_parents", "Referenced By", &lists[0], &explorer.parents, "No tags reference this tag."),
+                                ("ce_children", "References", &lists[1], &explorer.children, "This tag references no other tags."),
+                            ] {
+                                let total = entries.len();
+                                ui.allocate_ui_with_layout(
+                                    Vec2::new(column, box_height),
+                                    egui::Layout::top_down(egui::Align::Min),
+                                    |ui| {
+                                        ui.set_width(column);
+                                        let count = if rows.len() == total {
+                                            format!("({total})")
+                                        } else {
+                                            format!("({} of {total})", rows.len())
+                                        };
+                                        let notes = match (rows.len(), total) {
+                                            (0, 0) => vec![empty.to_owned()],
+                                            (0, _) => vec!["None match the filter.".to_owned()],
+                                            _ => Vec::new(),
+                                        };
+                                        if let Some(row) = draw_links_box(
+                                            ui,
+                                            id,
+                                            &format!("{title} {count}"),
+                                            &notes,
+                                            rows,
+                                            EXPLORE_HINT,
+                                            game,
+                                            box_height,
+                                        ) {
+                                            act = Some(ExplorerAct::Navigate(entries[positions[row]].clone()));
+                                        }
+                                    },
+                                );
+                            }
+                        });
                     });
+                    ui.add_space(8.0);
                 });
         }
         self.filter = filter;
@@ -383,4 +376,17 @@ impl Model {
         children.dedup_by(|a, b| a.key == b.key);
         (children, false)
     }
+}
+
+/// One Content Explorer list as drawn: each shown row's position in the
+/// explorer's list, and its path and group.
+type ExplorerRows = (Vec<usize>, Vec<(String, u32)>);
+
+fn explorer_rows(entries: &[TagEntry], query: &str) -> ExplorerRows {
+    entries
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| contains_ignore_ascii_case(&entry.display_path, query))
+        .map(|(position, entry)| (position, (entry.display_path.clone(), entry.group_tag)))
+        .unzip()
 }

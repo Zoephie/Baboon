@@ -241,6 +241,24 @@
           ]
         },
         {
+          "title": "Folder Browser",
+          "blocks": [
+            {
+              "kind": "markdown",
+              "file": "folder-browser.md"
+            }
+          ]
+        },
+        {
+          "title": "Renaming",
+          "blocks": [
+            {
+              "kind": "markdown",
+              "file": "renaming.md"
+            }
+          ]
+        },
+        {
           "title": "Strings Editor",
           "blocks": [
             {

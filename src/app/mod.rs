@@ -302,6 +302,10 @@ impl Baboon {
             names,
             last_opened_windows,
         );
+        if let Err(error) = crate::core::recovery::migrate_legacy(&crate::core::storage::data_path("deleted-tags")) {
+            app.model.status = format!("Deleted-tags migration: {error}");
+            eprintln!("{}", app.model.status);
+        }
         if let Some(kits) = auto_restore_session {
             app.begin_last_session_restore(kits, cc.egui_ctx.clone());
         }
@@ -434,6 +438,7 @@ impl Baboon {
                 container_delete_running: HashSet::new(),
                 created_tags: CreatedTagLedger::load(),
                 folder_refactor: None,
+                folder_merge: None,
             },
             mods: ModsFeature {
                 container_write_leases: HashMap::new(),

@@ -179,18 +179,29 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         // Each workspace carries its own browser, so two games side by side can
         // be browsed independently rather than sharing one panel that
         // retargets as focus moves.
-        let browser_id = egui::Id::unique(("kit_browser_panel", kit_id.0));
-        let browser_panel = egui::Panel::left(browser_id)
+        let browser_salt = ("kit_browser_panel", kit_id.0);
+        let browser_id = ui.scope_id().with(browser_salt);
+        let has_tabs = !parts.views[kit_id].tag_tree.is_empty();
+        let mut navigation_visible = !parts.views[kit_id].navigation_hidden || !has_tabs;
+        // Empty workspaces always show navigation immediately. Seed the slide
+        // state too, so opening their first tag does not replay an old collapse.
+        if !has_tabs {
+            cx.egui.animate_bool_with_time(browser_id.with("animation"), true, 0.0);
+            cx.egui.animate_bool_with_time(browser_id.with("gutter_animation"), true, 0.0);
+        }
+        let openness = cx.egui.animate_bool_responsive(browser_id.with("gutter_animation"), navigation_visible);
+        let panel = egui::Panel::left(browser_salt)
             .resizable(true)
+            .drag_to_open(false)
             .show_separator_line(false)
             .default_size(330.0)
             .frame(Frame::NONE.fill(left_panel()).inner_margin(egui::Margin {
                 left: 8,
-                right: 8,
-                top: 6,
-                bottom: 6,
-            }))
-            .show(ui, |ui| {
+                right: 4,
+                top: 8,
+                bottom: 8,
+            }));
+        let draw_browser = |ui: &mut Ui| {
                 let game = kit.source.as_ref().and_then(|source| source.game);
                 let profile = kit.profile.as_ref().map(|profile| profile.id.as_str());
                 let banner = game.and_then(|game| {
@@ -211,17 +222,26 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
                     parts.shell.blender_icon.as_ref(),
                     parts.audio.language.as_deref(),
                 );
-            });
+            };
+        let browser_panel = if has_tabs {
+            panel.show_collapsible(ui, &mut navigation_visible, draw_browser)
+        } else {
+            Some(panel.show(ui, draw_browser))
+        };
+        parts.views[kit_id].navigation_hidden = !navigation_visible;
         egui::CentralPanel::default()
             .frame(Frame::NONE.fill(left_panel()).inner_margin(egui::Margin {
-                left: 6, right: 6, top: 6, bottom: 6,
+                // Split the shared gutter with the browser's right inset.
+                left: (8.0 - 4.0 * openness).round() as i8,
+                right: 8, top: 8, bottom: 8,
             }))
             .show(ui, |ui| {
                 draw_tag_tiles(ui, cx, parts, self.inputs, kit_index);
             });
         // Paint after the editor so its background cannot cover the transient
         // separator. The panel retains its native resize behavior and width.
-        if let Some(handle) = ui.ctx().read_response(browser_id.with("__resize"))
+        if let Some(browser_panel) = browser_panel
+            && let Some(handle) = ui.ctx().read_response(browser_id.with("__resize"))
             && (handle.hovered() || handle.dragged())
         {
             ui.painter().vline(browser_panel.response.rect.right(), browser_panel.response.rect.y_range(),

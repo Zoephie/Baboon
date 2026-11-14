@@ -113,7 +113,7 @@ pub(in crate::app) fn validate_leaf_characters(
         return Err(format!("{noun} cannot be . or .."));
     }
     if tag_path::from_input(name).contains(tag_path::SEPARATOR) {
-        return Err("Enter a leaf name only; the parent folder is fixed".to_owned());
+        return Err("Names cannot contain / or \\. Use Move to choose another folder.".to_owned());
     }
     if name.contains('.') {
         return Err(format!("{noun} cannot contain a dot or extension"));

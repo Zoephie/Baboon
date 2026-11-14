@@ -166,6 +166,7 @@ mod tests {
     fn a_read_only_kit_refuses_every_ui_edit() {
         let mut app = app_with_open_tag();
         let profile = CustomEditingKitProfile {
+            recovery: Default::default(),
             read_only: true,
             git_tracked: false,
             id: "protected".to_owned(),

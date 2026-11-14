@@ -2836,11 +2836,10 @@ fn draw_shader_reference_cell(
             Sense::hover(),
         );
         let accepts = |payload: &DraggedTagRef| payload.group_tag == cell.group_tag;
-        if let Some(payload) = drop.dnd_hover_payload::<DraggedTagRef>() {
-            let color = if accepts(&payload) {
-                Color32::from_rgb(120, 170, 90)
-            } else {
-                REFERENCE_MISSING_COLOR
+        if let Some(drag) = crate::app::browser::drag_move::hovered_tag(&drop) {
+            let color = match drag {
+                crate::app::browser::drag_move::TagDrag::Tag(payload) if accepts(&payload) => Color32::from_rgb(120, 170, 90),
+                _ => REFERENCE_MISSING_COLOR,
             };
             ui.painter().rect_stroke(
                 text_rect,
@@ -2849,7 +2848,7 @@ fn draw_shader_reference_cell(
                 egui::StrokeKind::Inside,
             );
         }
-        if let Some(payload) = drop.dnd_release_payload::<DraggedTagRef>()
+        if let Some(payload) = crate::app::browser::drag_move::released_tag(&drop)
             && accepts(&payload)
         {
             let value = (cell.drop_value)(&payload);

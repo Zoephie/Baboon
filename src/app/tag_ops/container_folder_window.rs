@@ -171,7 +171,7 @@ impl Dialog for ContainerFolderDialog {
                         rounding.nw = 0;
                         rounding.ne = 0;
                         painter.rect_filled(background, rounding, foundation_block_bar());
-                        if ui.button("Cancel").clicked() { cancel = true; }
+                        if icon_text_button(ui, ButtonIcon::Clear, "Cancel", true).clicked() { cancel = true; }
                         if icon_text_button(ui, if renaming { ButtonIcon::Rename } else { ButtonIcon::Add },
                             if renaming { "Rename" } else { "Create Folder" }, !state.name_input.trim().is_empty()).clicked()
                         {

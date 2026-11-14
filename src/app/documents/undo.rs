@@ -23,6 +23,7 @@ impl Baboon {
             self.model.status = "Nothing to undo".to_owned();
             return;
         };
+        if self.refuse_while_reloading(&key) { return; }
         if self.step_linked_replace(false) || self.step_linked_string_rows(false) { return; }
         let restored = self.model.kits[self.model.active]
             .parsed_tags
@@ -49,12 +50,25 @@ impl Baboon {
             self.model.status = "Nothing to redo".to_owned();
             return;
         };
+        if self.refuse_while_reloading(&key) { return; }
         if self.step_linked_replace(true) || self.step_linked_string_rows(true) { return; }
         let restored = self.model.kits[self.model.active]
             .parsed_tags
             .get_mut(&key)
             .and_then(|doc| doc.journal.redo(&doc.tag));
         self.restore_snapshot(&key, restored, "Redo");
+    }
+
+    /// A tag reading again from disk (after a move rewrote it, say) is
+    /// read-only until the read lands. Undo or Redo then would mark the old
+    /// document dirty, the fresh read would be dropped, and Save would write
+    /// the old paths back.
+    fn refuse_while_reloading(&mut self, key: &str) -> bool {
+        let reloading = self.model.kits[self.model.active].loading_tags.contains(key);
+        if reloading {
+            self.model.status = "This tag is reloading; try again in a moment".to_owned();
+        }
+        reloading
     }
 
     /// Apply a snapshot returned by the journal: re-parse the bytes into the
@@ -120,10 +134,11 @@ impl Baboon {
         if self.model.editing_kit_is_read_only(self.model.active) {
             return false;
         }
-        self.model.kits[self.model.active]
-            .selected_key
+        let kit = &self.model.kits[self.model.active];
+        kit.selected_key
             .as_ref()
-            .and_then(|key| self.model.kits[self.model.active].parsed_tags.get(key))
+            .filter(|key| !kit.loading_tags.contains(*key))
+            .and_then(|key| kit.parsed_tags.get(key))
             .is_some_and(|doc| doc.journal.can_undo())
     }
 
@@ -139,10 +154,11 @@ impl Baboon {
         if self.model.editing_kit_is_read_only(self.model.active) {
             return false;
         }
-        self.model.kits[self.model.active]
-            .selected_key
+        let kit = &self.model.kits[self.model.active];
+        kit.selected_key
             .as_ref()
-            .and_then(|key| self.model.kits[self.model.active].parsed_tags.get(key))
+            .filter(|key| !kit.loading_tags.contains(*key))
+            .and_then(|key| kit.parsed_tags.get(key))
             .is_some_and(|doc| doc.journal.can_redo())
     }
 }
@@ -198,5 +214,21 @@ mod tests {
         app.undo_current_tag();
         assert!(!can_undo_tag(&app));
         assert!(app.model.kits[0].parsed_tags[KEY].journal.can_redo());
+    }
+
+    /// While a tag reads again from disk after a refactor, its pane is
+    /// read-only and Undo and Redo leave it alone: changing the old document
+    /// then would drop the fresh read and let Save write old paths back.
+    #[test]
+    fn undo_waits_while_the_tag_reloads() {
+        let mut app = app_with_undoable_tag();
+        app.model.kits[0].loading_tags.insert(KEY.to_owned());
+        assert!(!app.can_undo_current(), "the Edit menu's Undo is disabled");
+        app.undo_current_tag();
+        assert!(can_undo_tag(&app), "the tag's history is untouched");
+        assert!(app.model.status.contains("reloading"), "{}", app.model.status);
+        app.model.kits[0].loading_tags.clear();
+        app.undo_current_tag();
+        assert!(!can_undo_tag(&app));
     }
 }

@@ -9,6 +9,10 @@ pub(in crate::app) struct HelpWindow {
     pub(in crate::app) tab: HelpPanelTab,
     pub(in crate::app) doc_section: Option<String>,
     pub(in crate::app) doc_reveal_selection: bool,
+    /// Opened from a feature's About button: Help floats above other windows,
+    /// including a modal one such as Bulk Rename, so it can be read and used
+    /// without closing that window.
+    pub(in crate::app) above_dialogs: bool,
     pub(super) docs: Rc<HelpDocsState>,
     tutorials: Rc<TutorialsState>,
     tutorials_game: String,
@@ -25,6 +29,7 @@ impl HelpWindow {
             tab,
             doc_section: None,
             doc_reveal_selection: false,
+            above_dialogs: false,
             docs: help.docs.clone(),
             tutorials: help.tutorials.clone(),
             tutorials_game: GameId::CampaignEvolved.as_str().to_owned(),
@@ -40,9 +45,17 @@ impl Dialog for HelpWindow {
     fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let mut open = true;
+        let id = egui::Id::unique("baboon_help");
+        let order = if self.above_dialogs { egui::Order::Foreground } else { egui::Order::Middle };
+        // A modal shown since (or clicked) would lock Help again: stay above it.
+        let layer = egui::LayerId::new(order, id);
+        if self.above_dialogs && !ctx.memory(|memory| memory.is_above_modal_layer(layer)) {
+            ctx.move_to_top(layer);
+        }
         egui::Window::new("Baboon Help")
             .constrain_to(window_work_area(ctx))
-            .id(egui::Id::unique("baboon_help"))
+            .id(id)
+            .order(order)
             .collapsible(false)
             .resizable(true)
             .constrain(true)

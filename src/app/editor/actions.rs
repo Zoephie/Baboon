@@ -534,15 +534,9 @@ impl Dialog for BlockConfirm {
                 ui.label(RichText::new(message).color(text_dark()));
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new(&confirm_label)
-                                    .color(Color32::from_rgb(230, 230, 228)),
-                            )
-                            .fill(Color32::from_rgb(150, 48, 40))
-                            .min_size(Vec2::new(80.0, 24.0)),
-                        )
+                    // Delete, Delete All and Replace all discard entries.
+                    let icon = if confirm_label == "Replace" { ButtonIcon::Replace } else { ButtonIcon::Garbage };
+                    if accent_icon_text_button(ui, ButtonAccent::Destructive, icon, &confirm_label, true)
                         .clicked()
                     {
                         do_apply = true;

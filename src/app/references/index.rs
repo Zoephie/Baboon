@@ -121,11 +121,23 @@ impl Baboon {
         &mut self,
         stamp: KitStamp,
         result: Result<FolderRefactorFinished, String>,
+        ctx: &egui::Context,
     ) -> bool {
         self.tag_ops.folder_refactor = None;
+        self.tag_ops.folder_merge = None;
         let done = match result {
             Ok(done) => done,
             Err(error) => {
+                // A failure straight out of a review window is easy to miss in
+                // the status line, so it gets a window of its own. Cancelling
+                // is the user's own doing and needs no notice.
+                if !error.contains("cancelled") {
+                    self.dialogs.open(crate::app::shell::OperationNotice {
+                        title: "File Operation Stopped".to_owned(),
+                        message: error.clone(),
+                        failed: true,
+                    });
+                }
                 self.model.status = error;
                 return false;
             }
@@ -146,11 +158,12 @@ impl Baboon {
             // here would repeat O(all tags) work while blocking the UI.
         }
         if done.moved {
-            let moved_folder = done
-                .moved_folder
-                .as_ref()
-                .map(|(from, to)| (from.as_path(), to.as_path()));
-            self.remap_favorites_for_kit(kit_index, &done.old_to_new_keys, moved_folder);
+            let moved_folders: Vec<_> = if done.moved_folders.is_empty() {done.moved_folder.iter().collect()}else{done.moved_folders.iter().collect()};
+            self.remap_favorites_for_folders(kit_index,&done.old_to_new_keys,&moved_folders.iter().map(|(from,to)|(from.as_path(),to.as_path())).collect::<Vec<_>>());
+            for (from,to) in &moved_folders {
+                let kit_id=self.model.kits[kit_index].id;
+                self.views[kit_id].browser.remap_folder_browser_paths(from,to);
+            }
             self.kit_and_view(kit_index).remap_tag_keys(&done.old_to_new_keys);
             // Keywords are filed by tag key: they move with the tags.
             let keywords = &mut self.model.kits[kit_index].keywords;
@@ -158,16 +171,19 @@ impl Baboon {
                 keywords.rekey_tag(old, new);
             }
             keywords.save_if_dirty();
-            // A docked browser on the folder, or inside it, follows it.
-            if let Some((from, to)) = moved_folder {
-                let kit_id = self.model.kits[kit_index].id;
-                self.views[kit_id].browser.remap_folder_browser_paths(from, to);
-            }
         }
         let kit = &mut self.model.kits[kit_index];
         let view = &mut self.views[kit.id];
-        kit.parsed_tags.clear();
+        // Keep the last rendered documents until replacement reads finish.
+        // Clearing them first collapses every pane to a one-line placeholder,
+        // clamps its scroll offset, and never starts a new load.
+        let parsed = std::mem::take(&mut kit.parsed_tags);
+        kit.parsed_tags = parsed.into_iter().map(|(key, document)| {
+            let key = done.old_to_new_keys.get(&key).cloned().unwrap_or(key);
+            (key, document)
+        }).filter(|(key, _)| kit.open_tabs.contains(key)).collect();
         kit.loading_tags.clear();
+        kit.tag_load_epoch = kit.tag_load_epoch.wrapping_add(1);
         view.caches.bitmap_previews.clear();
         view.caches.model_previews.clear();
         view.edit_buffers.clear();
@@ -184,6 +200,8 @@ impl Baboon {
             pane.filter_cache = FilterCache::default();
             pane.date_cache = FolderDateCache::default();
         }
+        let open_tags: Vec<_> = kit.open_tabs.iter().filter(|key| kit.source.as_ref().is_some_and(|source| source.entry_for_key(key).is_some())).cloned().collect();
+        for key in open_tags { self.load_tag_in(kit_index, key, ctx.clone(), true); }
         self.kit_tools.terminal
             .lines
             .extend(done.lines.into_iter().map(TerminalLineEntry::new));
@@ -497,7 +515,9 @@ mod tests {
                 old_to_new_keys: HashMap::from([(old_key.clone(), new_key.clone())]),
                 moved: true,
                 moved_folder: Some(("objects/brute".into(), "objects/elite".into())),
+                moved_folders: Vec::new(),
             }),
+            &egui::Context::default(),
         );
         assert_eq!(app.model.active, 1);
         let kit = &app.model.kits[0];

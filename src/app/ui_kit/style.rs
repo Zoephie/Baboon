@@ -103,7 +103,10 @@ pub(in crate::app) fn popup_footer<R>(
         .inner_margin(inset)
         .show(ui, |ui| {
             ui.set_min_width((width - inset.sum().x).max(0.0));
-            contents(ui)
+            // A direct with_layout(right_to_left(...)) otherwise takes all
+            // remaining popup height. Give action layouts a content-sized row;
+            // taller controls still expand it naturally.
+            ui.horizontal(contents).inner
         });
     let mut band = footer.response.rect;
     band.min.x -= f32::from(margin.left);
@@ -1003,6 +1006,55 @@ pub(in crate::app) const FOUNDATION_LABEL_WIDTH: f32 = 280.0;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Rename and Import pass a right-aligned row directly to the footer;
+    /// its height must follow the buttons, even in a tall popup.
+    #[test]
+    fn popup_footer_action_rows_do_not_fill_remaining_window_height() {
+        for height in [240.0, 480.0, 720.0] {
+            let ctx = egui::Context::default();
+            crate::app::Baboon::configure_context(&ctx);
+            let mut geometry = None;
+            for _ in 0..3 {
+                let _ = crate::app::run_ui_test(
+                    &ctx,
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(1200.0, 1000.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |root| {
+                        egui::Window::new("Footer regression")
+                            .title_bar(false)
+                            .default_size(Vec2::new(480.0, height))
+                            .show(root.ctx(), |ui| {
+                                ui.label("Popup body");
+                                let mut button = egui::Rect::NOTHING;
+                                let footer = popup_footer(ui, |ui| {
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            button = ui.button("Cancel").rect;
+                                            let _ = ui.button("Rename");
+                                        },
+                                    );
+                                });
+                                geometry = Some((footer.response.rect, button));
+                            });
+                    },
+                );
+            }
+            let (footer, button) = geometry.expect("popup rendered");
+            assert!(
+                footer.height() <= button.height() + 16.0,
+                "window height {height}: footer height {} for a {}-point button",
+                footer.height(),
+                button.height()
+            );
+        }
+    }
 
     #[test]
     fn singleline_text_is_centered_in_taller_fields() {

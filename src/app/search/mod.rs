@@ -16,7 +16,7 @@ pub(in crate::app) mod find;
 pub(in crate::app) use find::*;
 pub(in crate::app) mod find_window;
 pub(in crate::app) use find_window::{
-    FindWindow, draw_icon_window_header, draw_icon_window_header_without_close,
+    FindWindow, draw_icon_window_header, draw_icon_window_header_with_help, draw_icon_window_header_without_close,
 };
 pub(in crate::app) mod find_state;
 pub(in crate::app) use find_state::*;

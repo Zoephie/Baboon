@@ -21,8 +21,15 @@ impl FolderColumn {
             Self::Keywords => "Keywords",
         }
     }
+    /// The narrowest a column goes: wide enough for its widest value (a
+    /// date, a size in KB) with the cell's padding, or its heading.
     fn minimum(self) -> f32 {
-        if self == Self::Name { 160.0 } else { 90.0 }
+        match self {
+            Self::Name => 160.0,
+            Self::Modified => 116.0,
+            Self::Size => 72.0,
+            Self::Keywords => 90.0,
+        }
     }
 }
 
@@ -31,18 +38,23 @@ pub(in crate::app) struct FolderTableLayout {
     columns: Vec<(FolderColumn, f32)>,
     sort: Option<(FolderColumn, bool)>, // true = descending
     initialized: bool,
+    /// The pane width the columns were last fitted to.
+    fitted_to: Option<f32>,
 }
 impl Default for FolderTableLayout {
     fn default() -> Self {
         Self {
+            // Sized to fit a folder tab split in two without scrolling;
+            // a wider pane stretches them when it first opens.
             columns: vec![
-                (FolderColumn::Name, 380.0),
-                (FolderColumn::Modified, 200.0),
-                (FolderColumn::Size, 110.0),
-                (FolderColumn::Keywords, 240.0),
+                (FolderColumn::Name, 220.0),
+                (FolderColumn::Modified, 124.0),
+                (FolderColumn::Size, 76.0),
+                (FolderColumn::Keywords, 130.0),
             ],
             sort: None,
             initialized: false,
+            fitted_to: None,
         }
     }
 }
@@ -52,6 +64,23 @@ impl FolderTableLayout {
     }
     pub(in crate::app) fn clear_sort(&mut self) {
         self.sort = None;
+    }
+    /// Fit the columns to a pane `available` wide, before its table draws.
+    /// The first time they are scaled to fill it; after that, whenever the
+    /// pane's width changes (a tab split in two, a window resized), they
+    /// scale with it, keeping their proportions and any widths the user set
+    /// relative to one another. No column goes below its minimum.
+    pub(in crate::app) fn fit_to(&mut self, available: f32) {
+        let scale = match self.fitted_to {
+            None => available / self.width(),
+            Some(previous) if (available - previous).abs() >= 0.5 && previous > 0.0 => available / previous,
+            Some(_) => return,
+        };
+        for (column, width) in &mut self.columns {
+            *width = (*width * scale).max(column.minimum());
+        }
+        self.fitted_to = Some(available);
+        self.initialized = true;
     }
     pub(in crate::app) fn width(&self) -> f32 {
         self.columns.iter().map(|(_, width)| width).sum()
@@ -134,6 +163,10 @@ fn table_id() -> egui::Id {
     egui::Id::unique("folder_browser_table_columns")
 }
 
+pub(in crate::app) fn folder_table_sort_signature(ui:&Ui)->Option<(FolderColumn,bool)> {
+    ui.data(|data|data.get_temp::<FolderTable>(table_id())).and_then(|table|table.sort)
+}
+
 pub(in crate::app) fn begin_folder_table(
     ui: &mut Ui,
     root: Option<PathBuf>,
@@ -142,9 +175,11 @@ pub(in crate::app) fn begin_folder_table(
     layout: &mut FolderTableLayout,
 ) {
     if !layout.initialized {
-        let scale = (ui.available_width() / layout.width()).max(1.0);
-        for (_, width) in &mut layout.columns {
-            *width *= scale;
+        // Fit the pane when it first opens: wider stretches every column,
+        // narrower shrinks them, but never below a column's minimum.
+        let scale = ui.available_width() / layout.width();
+        for (column, width) in &mut layout.columns {
+            *width = (*width * scale).max(column.minimum());
         }
         layout.initialized = true;
     }
@@ -456,7 +491,7 @@ pub(in crate::app) fn table_order_folders(ui: &Ui, nodes: &[TagTreeNode]) -> Opt
     Some(rows.into_iter().map(|row| row.0).collect())
 }
 
-fn local_date(time: SystemTime) -> Option<String> {
+pub(in crate::app) fn local_date(time: SystemTime) -> Option<String> {
     let seconds: libc::time_t = time
         .duration_since(UNIX_EPOCH)
         .ok()?
@@ -486,6 +521,24 @@ fn local_date(time: SystemTime) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Opened full width, then split in two: the columns follow the pane
+    /// down to fit, and back up when it widens again, never below their
+    /// minimums.
+    #[test]
+    fn the_columns_follow_the_panes_width() {
+        let mut layout = FolderTableLayout::default();
+        layout.fit_to(1200.0);
+        assert!((layout.width() - 1200.0).abs() < 0.5, "fills the pane: {}", layout.width());
+        layout.fit_to(600.0);
+        assert!((layout.width() - 600.0).abs() < 0.5, "fits the half: {}", layout.width());
+        layout.fit_to(1200.0);
+        assert!((layout.width() - 1200.0).abs() < 0.5, "and back: {}", layout.width());
+        layout.fit_to(200.0);
+        for (column, width) in &layout.columns {
+            assert!(*width >= column.minimum(), "{column:?} at {width}");
+        }
+    }
 
     #[test]
     fn header_click_resize_and_drag_reorder_work_and_name_stays_first() {
