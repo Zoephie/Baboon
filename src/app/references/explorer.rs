@@ -5,8 +5,8 @@ use super::*;
 
 use crate::app::browser::bulk_rename::{draw_links_box, draw_tag_band, padded_body};
 
-/// Each list's box height: about a dozen rows, then it scrolls.
-const EXPLORER_BOX_HEIGHT: f32 = 380.0;
+/// The lists' shortest height: the window can't be dragged smaller than this.
+const EXPLORER_MIN_BOX_HEIGHT: f32 = 160.0;
 /// The tooltip line under a row's path.
 const EXPLORE_HINT: &str = "Click to explore this tag's references";
 
@@ -28,35 +28,30 @@ impl Dialog for ContentExplorer {
             egui::Window::new("Content Explorer")
                 .constrain_to(window_work_area(ctx))
                 .id(egui::Id::unique("content_explorer"))
-                .open(&mut open)
+                .title_bar(false)
+                .frame(egui::Frame::window(&ctx.global_style()))
+                .resizable(true)
                 .default_width(window_width(ctx, 720.0))
+                .default_height(560.0)
                 .show(ctx, |ui| {
+                    crate::app::search::draw_icon_window_header(ui, "Content Explorer", ButtonIcon::Find, &mut open);
                     // The tag being explored, on the band the Move and Rename
                     // windows show their folder on.
                     draw_tag_band(ui, explorer.focus.group_tag, game, &explorer.focus.display_path);
                     ui.add_space(10.0);
                     padded_body(ui, |ui| {
                         ui.horizontal(|ui| {
-                            if ui
-                                .add_enabled(!explorer.back.is_empty(), egui::Button::new("← Back"))
-                                .clicked()
-                            {
+                            if icon_text_button(ui, ButtonIcon::JumpBack, "Back", !explorer.back.is_empty()).clicked() {
                                 act = Some(ExplorerAct::Back);
                             }
-                            if ui
-                                .add_enabled(
-                                    !explorer.forward.is_empty(),
-                                    egui::Button::new("Forward →"),
-                                )
-                                .clicked()
-                            {
+                            if icon_text_button(ui, ButtonIcon::JumpTo, "Forward", !explorer.forward.is_empty()).clicked() {
                                 act = Some(ExplorerAct::Forward);
                             }
                             ui.separator();
-                            if ui.button("Open in editor").clicked() {
+                            if icon_text_button(ui, ButtonIcon::Open, "Open in Editor", true).clicked() {
                                 act = Some(ExplorerAct::Open(explorer.focus.key.clone()));
                             }
-                            if ui.button("Reveal in browser").clicked() {
+                            if icon_text_button(ui, ButtonIcon::NavigationPane, "Reveal in Browser", true).clicked() {
                                 act = Some(ExplorerAct::Reveal(explorer.focus.key.clone()));
                             }
                             ui.separator();
@@ -92,6 +87,9 @@ impl Dialog for ContentExplorer {
                         let children = shown(&explorer.children);
                         let gap = 20.0;
                         let column = ((ui.available_width() - gap) / 2.0).floor();
+                        // The lists fill what is left of the window, so
+                        // dragging its edge makes them taller or shorter.
+                        let box_height = (ui.available_height() - 20.0).floor().max(EXPLORER_MIN_BOX_HEIGHT);
                         ui.horizontal_top(|ui| {
                             ui.spacing_mut().item_spacing.x = gap;
                             for (id, title, list, total, empty) in [
@@ -99,7 +97,7 @@ impl Dialog for ContentExplorer {
                                 ("ce_children", "References", &children, explorer.children.len(), "This tag references no other tags."),
                             ] {
                                 ui.allocate_ui_with_layout(
-                                    Vec2::new(column, EXPLORER_BOX_HEIGHT),
+                                    Vec2::new(column, box_height),
                                     egui::Layout::top_down(egui::Align::Min),
                                     |ui| {
                                         ui.set_width(column);
@@ -123,7 +121,7 @@ impl Dialog for ContentExplorer {
                                             &rows,
                                             EXPLORE_HINT,
                                             game,
-                                            EXPLORER_BOX_HEIGHT,
+                                            box_height,
                                         ) {
                                             act = Some(ExplorerAct::Navigate(list[row].clone()));
                                         }

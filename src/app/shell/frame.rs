@@ -4978,6 +4978,39 @@ mod tests {
             .collect()
     }
 
+    /// The Content Explorer's lists fill its window, which can be resized:
+    /// they must not ask for more than the window has, or a resizable window
+    /// grows to fit them a little more every frame.
+    #[test]
+    fn the_content_explorer_keeps_its_height_with_long_lists() {
+        let mut h = Harness::new();
+        memory_kit(&mut h);
+        let entries = h.app.model.kits[h.app.model.active].source.as_ref().unwrap().entries.clone();
+        h.app.dialogs.open(ContentExplorer {
+            kit: active_id(&h),
+            focus: entries[0].clone(),
+            parents: entries[1..200].to_vec(),
+            children: entries[200..240].to_vec(),
+            filter: String::new(),
+            index_unavailable: false,
+            back: Vec::new(),
+            forward: Vec::new(),
+        });
+        let height = |h: &Harness| {
+            h.ctx.memory(|memory| memory.area_rect(egui::Id::unique("content_explorer"))).expect("the explorer is open").height()
+        };
+        for _ in 0..FRAMES {
+            h.frame(Vec::new());
+        }
+        let settled = height(&h);
+        for _ in 0..30 {
+            h.frame(Vec::new());
+        }
+        assert_eq!(height(&h), settled, "the window kept growing");
+        assert!(h.painted.iter().any(|text| text == "Referenced By (199)"));
+        assert!(h.painted.iter().any(|text| text == "References (40)"));
+    }
+
     fn run_case(case: &Case) -> Result<(), String> {
         let (painted, status) = painted_after(&[case.base, case.open]);
         if std::env::var_os("BABOON_SMOKE_DUMP").is_some() {
