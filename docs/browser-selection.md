@@ -57,8 +57,10 @@ reference check finishes. Mission scripts that name the moved tags are listed
 after the tags, one row per script, and are fixed with them (see Renaming,
 Scripts). A line says whether any item has the same name as
 something already in the folder; those are still decided one by one afterwards.
-Move stays unavailable until the check finishes. Copy keeps its summary review,
-since copying fixes no references.
+Move stays unavailable until the check finishes. Moving a single item narrows
+the window to the single Delete windows' layout: the item is an icon row above
+the References to Fix box rather than a box of its own. Copy keeps its summary
+review, since copying fixes no references.
 
 Unsaved workspace tags require Save All and Continue or cancellation. Decisions
 are collected before applying; ordinary file changes during review trigger a
@@ -89,7 +91,8 @@ Every delete window's Delete button has a red accent fill (the Delete icon's
 red at 25%, 50% with a solid red border on hover) as a cue to take care.
 
 Move completion remaps open tag paths, folder browsers, favorites and references,
-and refreshes documents and the browser. Completed roots leave the selection;
+and refreshes documents and the browser. The left navigation keeps its scroll
+position while its folders reload. Completed roots leave the selection;
 skipped roots remain selected. Copy leaves the source selection intact.
 
 ## Drag and drop

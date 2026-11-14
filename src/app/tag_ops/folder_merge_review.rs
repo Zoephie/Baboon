@@ -217,8 +217,11 @@ fn draw_items_review(
     phase: Option<&str>,
     notice: Option<&str>,
 ) -> Option<bool> {
-    use crate::app::browser::bulk_rename::{draw_folder_band, draw_items_box, draw_references_box, missing_references_title, references_box_height, references_to_fix_title, rename_box};
+    use crate::app::browser::bulk_rename::{ITEM_ROW_HEIGHT, draw_folder_band, draw_item_row, draw_items_box, draw_references_box, missing_references_title, references_box_height, references_to_fix_title, rename_box};
     let moving = matches!(action, ItemsAction::Move { .. });
+    // A single moved item is a row above the references, as in the single
+    // Delete windows, rather than a box of its own.
+    let single = single_item_review(action, selected);
     let (title, icon) = if moving { (MOVE_REVIEW_TITLE, ButtonIcon::Move) } else { (DELETE_REVIEW_TITLE, ButtonIcon::Garbage) };
     crate::app::search::draw_icon_window_header_without_close(ui, title, icon);
     if let ItemsAction::Move { destination } = action {
@@ -230,14 +233,21 @@ fn draw_items_review(
             ui.label(RichText::new(notice).color(ui.visuals().warn_fg_color));
             ui.add_space(8.0);
         }
+        if let Some((path, icon)) = single {
+            draw_item_row(ui, *icon, game, path, ITEM_ROW_HEIGHT);
+            ui.add_space(10.0);
+        }
         if moving {
-            ui.label("Moves the selected items into this folder.");
+            ui.label(if single.is_some() { "Moves this item into the folder." } else { "Moves the selected items into this folder." });
             ui.label(RichText::new("Tags that reference them are updated to their new paths.").color(subtle_dark()));
             // Always one line, so the window keeps its size when the check
             // fills in.
             match check.as_ref().map(|check| check.conflicts) {
                 None => ui.label(RichText::new("Checking for name conflicts…").color(subtle_dark())),
                 Some(0) => ui.label(RichText::new("Nothing in this folder has the same name.").color(subtle_dark())),
+                    Some(1) if single.is_some() => ui.label(RichText::new(
+                    "Something here has the same name. You'll choose to keep both, skip or replace it before anything moves.",
+                ).color(ui.visuals().warn_fg_color)),
                 Some(conflicts) => ui.label(RichText::new(format!(
                     "{} the same name as something already here. You'll choose to keep both, skip or replace each one before anything moves.",
                     if conflicts == 1 { "1 item has".to_owned() } else { format!("{conflicts} items have") }
@@ -262,6 +272,26 @@ fn draw_items_review(
         let notes: [String; 0] = [];
         let fits = (window_work_area(ctx).height() - 300.0).max(120.0);
         let height = references_box_height(8, 0, fits);
+        let draw_references = |ui: &mut Ui| match &check {
+            Some(check) => {
+                let count = check.scripts.total(check.referrers.len());
+                let title = if moving { references_to_fix_title(count) } else { missing_references_title(count) };
+                draw_references_box(ui, &title, check.referrers, check.scripts, &notes, game, height);
+            }
+            None => rename_box(ui, height, |ui| {
+                ui.add_space(4.0);
+                ui.label(RichText::new(if moving { "Checking References to Fix…" } else { "Checking for Missing References…" }).strong());
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new(phase.unwrap_or("Checking references")).color(subtle_dark()));
+                });
+            }),
+        };
+        if single.is_some() {
+            draw_references(ui);
+            return;
+        }
         let gap = 20.0;
         let column_width = ((ui.available_width() - gap) / 2.0).floor();
         let title = if moving {
@@ -277,22 +307,7 @@ fn draw_items_review(
             });
             ui.allocate_ui_with_layout(Vec2::new(column_width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
                 ui.set_width(column_width);
-                match &check {
-                    Some(check) => {
-                        let count = check.scripts.total(check.referrers.len());
-                        let title = if moving { references_to_fix_title(count) } else { missing_references_title(count) };
-                        draw_references_box(ui, &title, check.referrers, check.scripts, &notes, game, height);
-                    }
-                    None => rename_box(ui, height, |ui| {
-                        ui.add_space(4.0);
-                        ui.label(RichText::new(if moving { "Checking References to Fix…" } else { "Checking for Missing References…" }).strong());
-                        ui.add_space(8.0);
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label(RichText::new(phase.unwrap_or("Checking references")).color(subtle_dark()));
-                        });
-                    }),
-                }
+                draw_references(ui);
             });
         });
     });
@@ -316,6 +331,23 @@ fn draw_items_review(
     choice
 }
 
+/// The one item a Move review moves, when it moves just one.
+fn single_item_review<'a>(
+    action: &ItemsAction,
+    selected: &'a [(String, crate::app::browser::bulk_rename::RenameIcon)],
+) -> Option<&'a (String, crate::app::browser::bulk_rename::RenameIcon)> {
+    match (action, selected) {
+        (ItemsAction::Move { .. }, [item]) => Some(item),
+        _ => None,
+    }
+}
+
+/// A one-item Move review is as narrow as the single Delete windows; the
+/// others are wide enough for their two boxes side by side.
+fn items_review_width(ctx: &egui::Context, action: &ItemsAction, selected: &[(String, crate::app::browser::bulk_rename::RenameIcon)]) -> f32 {
+    window_width(ctx, if single_item_review(action, selected).is_some() { 520.0 } else { 880.0 })
+}
+
 fn date_label(seconds: u64) -> String {
     // Use the folder browser's platform-aware local date formatter.
     crate::app::browser::local_date(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
@@ -335,7 +367,7 @@ pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi, phase: Opti
         let modal = egui::Modal::new(egui::Id::unique("folder_merge_review"))
             .frame(egui::Frame::window(&ctx.global_style()))
             .show(ctx, |ui| {
-                ui.set_width(window_width(ctx, 880.0));
+                ui.set_width(items_review_width(ctx, &preview.action, &preview.selected));
                 cancel = draw_items_review(ui, ctx, &preview.action, &preview.selected, None, preview.game, phase, None) == Some(false);
             });
         if cancel || modal.should_close() {
@@ -360,7 +392,7 @@ pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi, phase: Opti
                 _ => None,
             };
             if let Some((action, selected, game, check)) = items {
-                ui.set_width(window_width(ctx, 880.0));
+                ui.set_width(items_review_width(ctx, &action, selected));
                 response = draw_items_review(ui, ctx, &action, selected, Some(check), game, None, review.notice.as_deref())
                     .map(|go| go.then_some(MergeAnswer { choice: None, apply_remaining: false }));
                 return;

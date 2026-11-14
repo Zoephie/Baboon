@@ -4267,6 +4267,28 @@ mod tests {
                 &["Move Selected Items?", "props", "2 Items to Move", "1 Reference to Fix", "1 item has the same name", "Move"],
             ),
             case(
+                "single_item_move_review",
+                &["tag_ops.folder_merge"],
+                &[],
+                loose_kit,
+                |h| {
+                    use crate::app::browser::bulk_rename::RenameIcon;
+                    use crate::app::tag_ops::folder_merge_review::{MergeControl, MergeUi, MergeReview, ReviewKind};
+                    let (answer, _rx) = mpsc::channel();
+                    h.app.tag_ops.folder_merge = Some(MergeUi {
+                        control: std::sync::Arc::new(MergeControl::default()),
+                        items_preview: None,
+                        review: Some(MergeReview { notice: None, kind: ReviewKind::Move {
+                            selected: vec![("smoke.scenario".into(), RenameIcon::Tag(None))],
+                            referrers: vec![("levels/test.scenario".into(), 0)],
+                            scripts: Default::default(),
+                            game: None, destination: "levels/props".into(), conflicts: 1,
+                        }, answer, apply_remaining: false }),
+                    });
+                },
+                &["Move Selected Items?", "props", "Moves this item into the folder.", "Something here has the same name", "1 Reference to Fix", "Move"],
+            ),
+            case(
                 "folder_refactor_lock",
                 &["tag_ops.folder_refactor"],
                 &[],

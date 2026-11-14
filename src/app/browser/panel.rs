@@ -990,8 +990,13 @@ fn draw_kit_browser_inner(
         let section_key = crate::app::shell::shortcuts::shortcut_kit_key(cx.model, kit_index);
         let saved_sections = cx.model.prefs.browser_section_states.get(&section_key).copied().unwrap_or_default();
         let mut sections = saved_sections;
-        let action = ScrollArea::vertical()
-            .auto_shrink([false, false])
+        let scroll_hold = NavigationScrollHold::begin(ui, kit.generation);
+        let mut reloading = false;
+        let mut scroll = ScrollArea::vertical().auto_shrink([false, false]);
+        if let Some(offset) = scroll_hold.offset() {
+            scroll = scroll.vertical_scroll_offset(offset);
+        }
+        let output = scroll
             .show(ui, |ui| with_browser_section_state(ui, &mut sections, |ui| {
                 let (favorite_action, _) = draw_favorites(
                     ui,
@@ -1109,6 +1114,7 @@ fn draw_kit_browser_inner(
                         );
                         let cache = &view.browser.filter_cache;
                         if cache.waiting_for_results() {
+                            reloading = true;
                             ui.horizontal(|ui| {
                                 ui.spinner();
                                 ui.label(RichText::new("Searching…").color(subtle_dark()));
@@ -1214,8 +1220,9 @@ fn draw_kit_browser_inner(
                     }
                 };
                 favorite_action.or(recent_action).or(tree_action)
-            }))
-            .inner;
+            }));
+        scroll_hold.end(ui, output.state.clamped_offset().y, reloading || !load_requests.is_empty());
+        let action = output.inner;
         if sections != saved_sections {
             cx.edit_prefs(move |prefs| { prefs.browser_section_states.insert(section_key, sections); });
         }
@@ -1672,6 +1679,99 @@ pub(in crate::app) fn current_browser_item(kit: &Kit, view: &KitView) -> Option<
     }
     let pane = kit.current_pane.as_deref()?;
     view.browser.folder_browsers.get(pane).map(|folder| folder_pane_key(&folder.rel_path))
+}
+
+/// Keeps the navigation tree's scroll position while it reloads.
+///
+/// A move, rename or delete rebuilds the tree with its folders' tags unloaded,
+/// so open folders shrink to "Loading…" for a few frames. The scroll area would
+/// clamp to that shorter list and stay there once the tags came back. Instead,
+/// when the kit's generation changes the last offset is held, reapplied every
+/// frame, until no open folder (or search) is still loading.
+struct NavigationScrollHold {
+    id: egui::Id,
+    generation: u64,
+    held: Option<f32>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct NavigationScrollState {
+    generation: u64,
+    offset: f32,
+    held: Option<f32>,
+}
+
+impl NavigationScrollHold {
+    fn begin(ui: &Ui, generation: u64) -> Self {
+        let id = ui.make_persistent_id("browser_navigation_scroll_hold");
+        let state = ui.data(|data| data.get_temp::<NavigationScrollState>(id));
+        let held = match state {
+            Some(state) if state.generation != generation => Some(state.held.unwrap_or(state.offset)),
+            Some(state) => state.held,
+            None => None,
+        };
+        Self { id, generation, held }
+    }
+
+    fn offset(&self) -> Option<f32> {
+        self.held
+    }
+
+    /// Record this frame's offset; the hold ends once nothing is loading.
+    fn end(self, ui: &Ui, offset: f32, loading: bool) {
+        let held = self.held.filter(|_| loading);
+        ui.data_mut(|data| {
+            data.insert_temp(self.id, NavigationScrollState { generation: self.generation, offset, held })
+        });
+    }
+}
+
+#[cfg(test)]
+mod navigation_scroll_hold_tests {
+    use super::NavigationScrollHold;
+    use eframe::egui::{self, ScrollArea};
+
+    /// One frame of a scroll area holding `rows` rows under the hold, as the
+    /// navigation tree draws: `scroll_to` first scrolls it by hand.
+    fn frame(ctx: &egui::Context, generation: u64, rows: usize, loading: bool, scroll_to: Option<f32>) -> f32 {
+        let mut offset = 0.0;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0))),
+            ..Default::default()
+        };
+        let _ = crate::app::run_ui_test(ctx, input, |ui| {
+            let hold = NavigationScrollHold::begin(ui, generation);
+            let mut scroll = ScrollArea::vertical().id_salt("navigation");
+            if let Some(y) = scroll_to.or(hold.offset()) {
+                scroll = scroll.vertical_scroll_offset(y);
+            }
+            let output = scroll.show(ui, |ui| {
+                for row in 0..rows {
+                    ui.label(format!("row {row}"));
+                }
+            });
+            hold.end(ui, output.state.clamped_offset().y, loading);
+            offset = output.state.clamped_offset().y;
+        });
+        offset
+    }
+
+    /// A move rebuilds the tree with its folders' tags unloaded: the list is
+    /// short for a few frames, then whole again, and the position comes back.
+    #[test]
+    fn the_navigation_keeps_its_scroll_position_while_the_tree_reloads() {
+        let ctx = egui::Context::default();
+        frame(&ctx, 1, 300, false, Some(1000.0));
+        assert_eq!(frame(&ctx, 1, 300, false, None), 1000.0);
+        // The kit changed: folders show "Loading…" and the list is short.
+        assert_eq!(frame(&ctx, 2, 3, true, None), 0.0);
+        assert_eq!(frame(&ctx, 2, 3, true, None), 0.0);
+        // The tags are back.
+        assert_eq!(frame(&ctx, 2, 300, false, None), 1000.0);
+        // The hold has ended: scrolling is the user's again.
+        frame(&ctx, 2, 300, false, Some(200.0));
+        assert_eq!(frame(&ctx, 2, 300, false, None), 200.0);
+    }
 }
 
 /// The reveal that follows the current tab to `item`, as
