@@ -738,6 +738,9 @@ pub(in crate::app) fn draw_kit_browser(
 ) {
     let salt = cx.model.kits[kit_index].id.0;
     let rect = ui.max_rect();
+    let kit = cx.model.kits[kit_index].id;
+    // Its folder rows take dropped Flat view items.
+    super::drag_move::begin_navigation_drops(ui, kit);
     ui.push_id(salt, |ui| {
         draw_kit_browser_inner(
             cx,
@@ -750,8 +753,17 @@ pub(in crate::app) fn draw_kit_browser(
             sound_language,
         )
     });
-    // The navigation tree takes no dropped items: say where they go instead.
-    super::drag_move::refuse_drop(ui.ctx(), ui.rect_contains_pointer(rect), super::drag_move::DROP_IN_FLAT_VIEW);
+    super::drag_move::end_navigation_drops(ui);
+    if let Some(action) = super::drag_move::take_tree_drop(ui.ctx()) {
+        cx.send(BrowserCommand::Action { kit, action });
+    }
+    // Anywhere but a folder row says where to drop instead.
+    let reason = if view.browser.mode == BrowserMode::Groups {
+        super::drag_move::SWITCH_NAVIGATION_TO_FOLDERS
+    } else {
+        super::drag_move::DROP_ONTO_A_FOLDER
+    };
+    super::drag_move::refuse_drop(ui.ctx(), ui.rect_contains_pointer(rect), reason);
 }
 
 fn draw_kit_browser_inner(

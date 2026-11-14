@@ -6,20 +6,19 @@ that picking one up does not mean rediscovering it first.
 
 ---
 
-## Drag and drop: spring-loaded folders and more drop targets
+## Drag and drop: spring-loaded folders and edge scrolling
 
-**Status:** not implemented. Flat view drags drop onto folder rows, folder tab
-headers and other open folder panes of the same kit.
-
-Two things were left out on purpose:
+**Status:** not implemented. Flat view drags drop onto folder rows (Flat and
+Tree view, and the navigation pane), folder tab headers and other open folder
+panes of the same kit.
 
 - **Spring-loading.** Hovering a folder row (or a tab) for about a second while
   dragging would open it, so a drop can go deeper than what is on screen. It
   changes panes under the pointer mid-drag, so it wants its own design pass.
   The hover time and a short visual countdown on the row are the open questions.
-- **The left navigation tree as a target.** It is a long, dense tree where a
-  slip drops onto the wrong folder. If added, it wants a hover delay before a
-  folder counts as the target, and auto-scroll near the tree's edges.
+- **Scrolling at the edges.** The navigation tree is long; dragging near its top
+  or bottom edge should scroll it, as editors do, so a far folder can be
+  reached without dropping first.
 
 Both go through `browser/drag_move.rs`: a target is `drop_target` with the
 target's rect, its folder and whether the pointer is over it.

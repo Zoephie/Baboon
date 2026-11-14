@@ -101,8 +101,9 @@ You can drop onto:
 
 - a folder row in the same view,
 - another folder tab of the same kit (its tab header),
-- another folder pane open beside it, anywhere in its listing, or
-- a folder row in a folder tab showing Tree view.
+- another folder pane open beside it, anywhere in its listing,
+- a folder row in a folder tab showing Tree view, or
+- a folder in the left navigation pane.
 
 Dragging out of Tree view still only sets references; moving starts in Flat view.
 
@@ -110,10 +111,11 @@ A blue outline marks where the items will land, and a label beside the pointer,
 led by a Move or Copy icon, says what will happen ("Move 3 items to covenant").
 Where a drop isn't allowed, the cursor shows "not allowed" and the label says
 why, in red: a folder can't go inside itself, and drops into another kit or a
-read-only kit are refused. The left navigation pane and Asset Browsers say
-"Drop onto a folder in Flat view"; a Tree view tab, away from its folder rows,
-says "Drop onto a folder"; and a Groups view tab says "Switch this tab to Flat
-or Tree view to drop here" (any folder tab's header still takes the drop). The folder the items are already in is simply not a target: nothing is
+read-only kit are refused. Asset Browsers say "Drop onto a folder in Flat
+view"; the navigation pane and Tree view tabs, away from their folder rows, say
+"Drop onto a folder"; a Groups view tab says "Switch this tab to Flat or Tree
+view to drop here", and the navigation pane in Groups view "Switch to Folders
+view to drop here" (any folder tab's header still takes the drop). The folder the items are already in is simply not a target: nothing is
 outlined there, and letting go does nothing. Ctrl-dropping
 into it duplicates them with numbered names, as Copy does.
 

@@ -4158,12 +4158,13 @@ mod tests {
         assert_eq!(actual.right(), expected.right());
     }
 
-    /// Flat view items dropped onto a Tree view folder row in a folder tab
-    /// move into that folder; the navigation pane's rows take nothing.
+    /// Flat view items dropped onto a Tree view folder row in a folder tab or
+    /// the navigation pane move into that folder; a tree drawn anywhere else
+    /// (a picker, say) takes nothing.
     #[test]
-    fn a_tree_folder_row_in_a_folder_tab_takes_dropped_items() {
-        use super::super::drag_move::{DraggedItem, DraggedItems, take_tree_drop};
-        let drop_on_row = |folder_pane: bool| {
+    fn a_tree_folder_row_in_a_folder_tab_or_the_navigation_takes_dropped_items() {
+        use super::super::drag_move::{DraggedItem, DraggedItems, begin_navigation_drops, end_navigation_drops, take_tree_drop};
+        let drop_on_row = |folder_pane: bool, navigation: bool| {
             let ctx = egui::Context::default();
             let row = std::cell::Cell::new(egui::Rect::NOTHING);
             let frame = |events: Vec<egui::Event>| {
@@ -4182,10 +4183,14 @@ mod tests {
                             ui.data_mut(|data| {
                                 data.insert_temp(browser_selection_owner_id().with("drawing"), (KitId(1), "pane".to_owned()))
                             });
+                            if navigation {
+                                begin_navigation_drops(ui, KitId(1));
+                            }
                             row.set(show_folder_tree_header(
                                 ui, "dest", "dest", text_dark(), false, false, false, Some(Path::new("objects/dest")), |_| {},
                             )
                             .rect);
+                            end_navigation_drops(ui);
                         });
                     },
                 );
@@ -4210,13 +4215,15 @@ mod tests {
             }]);
             take_tree_drop(&ctx)
         };
-        match drop_on_row(true) {
-            Some(BrowserAction::DropItems { keys, copy, folder, .. }) => {
-                assert_eq!((keys, copy, folder), (vec!["k".to_owned()], false, PathBuf::from("objects/dest")));
+        for (folder_pane, navigation) in [(true, false), (false, true)] {
+            match drop_on_row(folder_pane, navigation) {
+                Some(BrowserAction::DropItems { keys, copy, folder, .. }) => {
+                    assert_eq!((keys, copy, folder), (vec!["k".to_owned()], false, PathBuf::from("objects/dest")));
+                }
+                _ => panic!("the folder row took no drop (folder tab: {folder_pane})"),
             }
-            _ => panic!("the folder row took no drop"),
         }
-        assert!(drop_on_row(false).is_none(), "the navigation pane's rows take nothing");
+        assert!(drop_on_row(false, false).is_none(), "a tree elsewhere takes nothing");
     }
 
     #[test]

@@ -217,18 +217,39 @@ pub(in crate::app) const SWITCH_TO_FLAT_VIEW: &str = "Switch this tab to Flat or
 /// inside an expanded folder would leave it unclear which folder was meant.
 pub(in crate::app) const DROP_ONTO_A_FOLDER: &str = "Drop onto a folder";
 
+/// Why the navigation pane in Groups view refuses a drop: it has no folder
+/// rows.
+pub(in crate::app) const SWITCH_NAVIGATION_TO_FOLDERS: &str = "Switch to Folders view to drop here";
+
 fn tree_drop_id() -> egui::Id {
     egui::Id::unique("browser_tree_drop")
 }
 
-/// A Tree view folder row in a folder tab (never the navigation pane): drop
-/// Flat view items into `folder`. The Move or Copy waits for the tab to
-/// collect it with [`take_tree_drop`] once it has drawn.
+fn navigation_kit_id() -> egui::Id {
+    egui::Id::unique("browser_navigation_drop_kit")
+}
+
+/// While kit `kit`'s navigation pane draws, its folder rows take drops.
+/// Undone by [`end_navigation_drops`], so other trees (pickers and the like)
+/// never do.
+pub(in crate::app) fn begin_navigation_drops(ui: &Ui, kit: KitId) {
+    ui.data_mut(|data| data.insert_temp(navigation_kit_id(), kit));
+}
+
+pub(in crate::app) fn end_navigation_drops(ui: &Ui) {
+    ui.data_mut(|data| data.remove::<KitId>(navigation_kit_id()));
+}
+
+/// A Tree view folder row, in a folder tab or the navigation pane: drop
+/// Flat view items into `folder`. The Move or Copy waits for the tab or pane
+/// to collect it with [`take_tree_drop`] once it has drawn.
 pub(super) fn tree_folder_target(ui: &Ui, rect: egui::Rect, folder: &Path) {
-    if !browser_is_folder_pane(ui) {
-        return;
-    }
-    let Some((kit, _)) = ui.data(|data| data.get_temp::<(KitId, String)>(browser_selection_owner_id().with("drawing"))) else {
+    let kit = if browser_is_folder_pane(ui) {
+        ui.data(|data| data.get_temp::<(KitId, String)>(browser_selection_owner_id().with("drawing"))).map(|(kit, _)| kit)
+    } else {
+        ui.data(|data| data.get_temp::<KitId>(navigation_kit_id()))
+    };
+    let Some(kit) = kit else {
         return;
     };
     let writable = browser_loose_source(ui) && !operation_read_only(ui);
@@ -239,7 +260,7 @@ pub(super) fn tree_folder_target(ui: &Ui, rect: egui::Rect, folder: &Path) {
 }
 
 /// The Move or Copy a Tree view folder row was dropped on this frame.
-pub(super) fn take_tree_drop(ctx: &egui::Context) -> Option<BrowserAction> {
+pub(in crate::app) fn take_tree_drop(ctx: &egui::Context) -> Option<BrowserAction> {
     let parked = ctx.data_mut(|data| data.remove_temp::<Arc<std::sync::Mutex<Option<BrowserAction>>>>(tree_drop_id()))?;
     let mut parked = parked.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     parked.take()
