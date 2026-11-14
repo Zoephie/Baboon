@@ -103,12 +103,13 @@ You can drop onto:
 - another folder tab of the same kit (its tab header), or
 - another folder pane open beside it, anywhere in its listing.
 
-A blue outline marks where the items will land, and a label beside the pointer
-says what will happen ("Move 3 items to covenant"). Where a drop isn't allowed,
-the cursor shows "not allowed" and the label says why: a folder can't go inside
-itself, a plain drop onto the folder the items are already in does nothing, and
-drops into another kit or a read-only kit are refused. Ctrl-dropping into the
-items' own folder duplicates them with numbered names, as Copy does.
+A blue outline marks where the items will land, and a label beside the pointer,
+led by a Move or Copy icon, says what will happen ("Move 3 items to covenant").
+Where a drop isn't allowed, the cursor shows "not allowed" and the label says
+why, in red: a folder can't go inside itself, and drops into another kit or a
+read-only kit are refused. The folder the items are already in is simply not a
+target: nothing is outlined there, and letting go does nothing. Ctrl-dropping
+into it duplicates them with numbered names, as Copy does.
 
 A drop changes nothing by itself: it opens the same **Move Selected Items?**
 review as Move (or Copy's review), with the folder already chosen, and nothing

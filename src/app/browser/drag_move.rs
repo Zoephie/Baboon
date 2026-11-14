@@ -111,6 +111,10 @@ fn is_copy(ctx: &egui::Context) -> bool {
     ctx.input(|input| input.modifiers.ctrl || input.modifiers.command)
 }
 
+/// Why a plain drop onto the folder the items are already in does nothing.
+/// Not shown: every drag starts there, so the folder simply isn't a target.
+const ALREADY_HERE: &str = "Already in this folder";
+
 /// What dropping `drag` into `folder` (relative, `\`-separated) of `kit`
 /// would do: the label beside the pointer, or why it can't.
 pub(super) fn verdict(drag: &DraggedItems, kit: KitId, folder: &str, writable: bool, copy: bool) -> Result<String, String> {
@@ -130,7 +134,7 @@ pub(super) fn verdict(drag: &DraggedItems, kit: KitId, folder: &str, writable: b
     }
     let parent = |item: &DraggedItem| tag_path::parent(&item.path).unwrap_or("").to_ascii_lowercase();
     if !copy && drag.items.iter().all(|item| parent(item) == lower) {
-        return Err("Already in this folder".into());
+        return Err(ALREADY_HERE.into());
     }
     let what = match drag.items.as_slice() {
         [item] => tag_path::name(&item.path).to_owned(),
@@ -178,6 +182,11 @@ pub(in crate::app) fn drop_target(
     let copy = is_copy(ctx);
     let folder_text = folder_path(folder);
     let verdict = verdict(&drag, kit, &folder_text, writable, copy);
+    // The items' own folder is no target at all: no outline, no reason, and
+    // a release there does nothing, as anywhere else.
+    if verdict.as_ref().is_err_and(|reason| reason == ALREADY_HERE) {
+        return None;
+    }
     if verdict.is_ok() {
         painter.rect_stroke(rect.shrink(1.0), 3.0, Stroke::new(1.5, foundation_blue()), egui::StrokeKind::Inside);
     }
@@ -307,6 +316,24 @@ mod tests {
         assert!(texts.iter().any(|text| text == "Copy 2 items"), "{texts:?}");
     }
 
+    /// Every drag starts over the items' own folder; that is no target, so
+    /// the label stays neutral there instead of saying why it can't drop.
+    #[test]
+    fn the_items_own_folder_is_quietly_no_target() {
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(50.0));
+        let mut dropped = Some(());
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::DragAndDrop::set_payload(ui.ctx(), drag(&[(r"objects\a.model", false)]));
+            dropped = drop_target(ui.ctx(), ui.painter(), true, rect, KitId(1), Path::new("objects"), true).map(|_| ());
+            // A folder elsewhere still gets its say.
+            assert!(drop_target(ui.ctx(), ui.painter(), true, rect, KitId(2), Path::new("other"), true).is_none());
+        });
+        assert!(dropped.is_none());
+        let hint = ctx.data(|data| data.get_temp::<Hint>(hint_id())).expect("the other folder's reason");
+        assert_eq!(hint.verdict.unwrap_err(), "Drop onto a folder in the same kit", "not {ALREADY_HERE}");
+    }
+
     #[test]
     fn reference_fields_take_one_dragged_tag_and_refuse_the_rest() {
         let tag = DraggedTagRef { group_tag: 1, input: "x".into(), rel_path: "x".into(), file_path: None };
@@ -336,7 +363,7 @@ mod tests {
         // A folder whose name merely starts the same is somewhere else.
         assert!(verdict(&some, KitId(1), r"objects\characters\grunt_v2", true, false).is_ok());
         let here = r"objects\characters";
-        assert_eq!(verdict(&some, KitId(1), here, true, false).unwrap_err(), "Already in this folder");
+        assert_eq!(verdict(&some, KitId(1), here, true, false).unwrap_err(), ALREADY_HERE);
         assert_eq!(verdict(&some, KitId(1), here, true, true).unwrap(), "Copy 2 items to characters", "copying in place duplicates");
     }
 }
