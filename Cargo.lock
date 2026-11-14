@@ -335,7 +335,7 @@ dependencies = [
 [[package]]
 name = "blam-tags"
 version = "0.1.0"
-source = "git+https://github.com/camden-smallwood/blam-tags?rev=19e4c78bbc17aeb9b5fb43209cb2e5d521fe1b39#19e4c78bbc17aeb9b5fb43209cb2e5d521fe1b39"
+source = "git+https://github.com/camden-smallwood/blam-tags?rev=113885b12099a65481189f63e6859bd6981c6087#113885b12099a65481189f63e6859bd6981c6087"
 dependencies = [
  "anyhow",
  "bcdec_rs",
