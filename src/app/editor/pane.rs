@@ -683,6 +683,7 @@ fn draw_responsive_tag_header(
         b"scnr" => TAG_HEADER_DYNAMIC_ACTIONS_WIDTH,
         b"bitm" => BITMAP_HEADER_ACTIONS_WIDTH,
         b"unic" | b"ustr" => 250.0,
+        b"hsc*" => 280.0,
         _ => 0.0,
     };
     let has_dynamic_actions = dynamic_actions_width > 0.0;
@@ -861,6 +862,7 @@ fn draw_tag_header_specific_actions(cx: &Ctx, ui: &mut Ui, kit_index: usize, ent
             });
         }
         b"scnr" => draw_scenario_launcher_buttons(cx, ui, kit_index, entry),
+        b"hsc*" => draw_script_tag_buttons(cx, ui, kit_index, entry),
         b"bitm" => {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = PANE_HEADER_ACTION_GAP;
@@ -885,6 +887,53 @@ fn draw_tag_header_specific_actions(cx: &Ctx, ui: &mut Ui, kit_index: usize, ent
             });
         }
         _ => {}
+    }
+}
+
+/// A script tag's header buttons: open it in VS Code, and recompile its
+/// scenario. Laid out right to left, as the header's other actions are.
+fn draw_script_tag_buttons(cx: &Ctx, ui: &mut Ui, kit_index: usize, entry: &TagEntry) {
+    let kit = cx.model.kits[kit_index].id;
+    let game = cx.model.kits[kit_index].source.as_ref().and_then(|source| source.game);
+    let enabled = matches!(entry.location, TagEntryLocation::LooseFile(_))
+        && crate::core::script_tags::supports_script_tags(game);
+    let why = "Opening and recompiling scripts works on the loose script tags of a Halo 2, Halo 3, \
+               ODST or Reach editing kit";
+    let mut action = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = PANE_HEADER_ACTION_GAP;
+        if icon_text_button(ui, ButtonIcon::Import, "Recompile", enabled)
+            .on_hover_text(crate::app::browser::RECOMPILE_HELP)
+            .on_disabled_hover_text(why)
+            .clicked()
+        {
+            action = Some(BrowserAction::RecompileScript(entry.key.clone()));
+        }
+        // The logo keeps its own colours, so it isn't a tinted button icon.
+        let logo = egui::Image::from_bytes(
+            "bytes://baboon_app_icons/vs-code.svg",
+            include_root_bytes!("assets/App Icons/VS Code.svg"),
+        )
+        .fit_to_exact_size(Vec2::splat(BUTTON_ICON_SIZE));
+        if ui
+            .add_enabled(
+                enabled,
+                egui::Button::image_and_text(logo, "VS Code").min_size(Vec2::new(0.0, BUTTON_HEIGHT)),
+            )
+            .on_hover_text(
+                "Open this script's .hsc file from the data folder in VS Code, where an extension \
+                 such as Atlas can edit it. If the data folder has none yet, it's written from the \
+                 copy saved in this tag first.",
+            )
+            .on_disabled_hover_text(why)
+            .clicked()
+        {
+            action = Some(BrowserAction::OpenScriptInVsCode(entry.key.clone()));
+        }
+        ui.label(RichText::new("Open In:").color(subtle_dark()));
+    });
+    if let Some(action) = action {
+        cx.send(BrowserCommand::Action { kit, action });
     }
 }
 

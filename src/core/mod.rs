@@ -20,6 +20,7 @@ pub(crate) mod process;
 pub(crate) mod recovery;
 pub(crate) mod reference_groups;
 pub(crate) mod script_paths;
+pub(crate) mod script_tags;
 pub(crate) mod source;
 pub(crate) mod storage;
 pub(crate) mod tag_key;

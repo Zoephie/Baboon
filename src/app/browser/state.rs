@@ -121,6 +121,10 @@ pub(in crate::app) enum BrowserAction {
     /// pane's header offers, reachable without opening the tag first.
     LaunchScenarioInSapien(String),
     LaunchScenarioInTagTest(String),
+    /// Open this script tag's `.hsc` in the data folder in VS Code.
+    OpenScriptInVsCode(String),
+    /// Recompile the scenario that lists this script tag.
+    RecompileScript(String),
     RenameTag(String),
     DuplicateTag(String),
     DeleteTag(String),

@@ -746,6 +746,8 @@ impl Baboon {
             BrowserAction::DumpReferences(key) => self.begin_dump_tag_references(&key, ctx),
             BrowserAction::LaunchScenarioInSapien(key) => self.launch_scenario_in_sapien(&key),
             BrowserAction::LaunchScenarioInTagTest(key) => self.launch_scenario_in_tag_test(&key),
+            BrowserAction::OpenScriptInVsCode(key) => self.open_script_in_vscode(&key),
+            BrowserAction::RecompileScript(key) => self.recompile_script(&key, &ctx),
             BrowserAction::MoveTag(key) => self.begin_move_tag(&key),
             BrowserAction::ImportTagInFolder { folder_rel } => self.begin_import_tag(folder_rel),
             BrowserAction::NewTagInFolder { folder_rel } => {
@@ -1479,13 +1481,13 @@ mod tests {
     }
 
     /// How many variants `BrowserAction` has. Bump it with `variant_index`.
-    const VARIANTS: usize = 50;
+    const VARIANTS: usize = 52;
 
     fn variant_index(action: &BrowserAction) -> usize {
         use BrowserAction as A;
         match action {
-            A::Bulk { .. } => 50, // Dedicated batch tests cover this compound action.
-            A::DropItems { .. } => 51, // So do drop tests: it is a Move or Copy.
+            A::Bulk { .. } => 52, // Dedicated batch tests cover this compound action.
+            A::DropItems { .. } => 53, // So do drop tests: it is a Move or Copy.
             A::OpenFolderBrowser { .. } => 0,
             A::ToggleFolderFavorite(_) => 1,
             A::Select(_) => 2,
@@ -1536,7 +1538,9 @@ mod tests {
             A::RenameContainerFolder { .. } => 47,
             A::DeleteContainerFolder { .. } => 48,
             A::StringTransfer { .. } => 49,
-            A::DeleteLooseFolder { .. } => 50,
+            A::DeleteLooseFolder { .. } => 54,
+            A::OpenScriptInVsCode(_) => 50,
+            A::RecompileScript(_) => 51,
         }
     }
 
@@ -2167,6 +2171,18 @@ mod tests {
                     ensure(app.model.kits[0].pending_container_folders.is_empty(), "nothing pending")?;
                     ensure(kit.path(FOLDER).is_dir(), "the folder on disk is untouched")
                 },
+            },
+            // 50, 51: a model is no script tag; the script tag cases are
+            // `kits::script_tools`'s.
+            Case {
+                action: |kit| A::OpenScriptInVsCode(kit.key(MODEL)),
+                setup: no_setup,
+                check: |app, _, _| status_is(app, "Only script tags can be opened or recompiled"),
+            },
+            Case {
+                action: |kit| A::RecompileScript(kit.key(MODEL)),
+                setup: no_setup,
+                check: |app, _, _| status_is(app, "Only script tags can be opened or recompiled"),
             },
         ]
     }

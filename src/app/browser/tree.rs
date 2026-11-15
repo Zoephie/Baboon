@@ -2947,6 +2947,11 @@ pub(in crate::app) fn paint_browser_selection_border(ui: &Ui, rect: egui::Rect) 
     );
 }
 
+/// What Recompile does, for its tooltips.
+pub(in crate::app) const RECOMPILE_HELP: &str = "Compile the scenario that lists this script from its data files: \
+    with Tool's rebuild-scenario-scripts in the terminal on Halo 2, or by opening it in Sapien, which \
+    compiles its scripts as it loads, on Halo 3, ODST and Reach.";
+
 pub(in crate::app) fn draw_tag_context_menu_contents(
     ui: &mut Ui,
     entry: &TagEntry,
@@ -3083,7 +3088,29 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
         }
     }
 
-    if favorite_keys.is_some() || launch.supported && is_scenario_group(entry.group_tag) {
+    // A script tag's two tools, as its header offers them.
+    let script_tag = &entry.group_tag.to_be_bytes() == b"hsc*";
+    if launch.supported && script_tag {
+        if favorite_keys.is_some() {
+            context_menu_separator(ui);
+        }
+        if context_menu_button(ui, "Open in VS Code")
+            .on_hover_text("Open this script's .hsc file from the data folder in VS Code")
+            .clicked()
+        {
+            action = Some(BrowserAction::OpenScriptInVsCode(entry.key.clone()));
+            close_menu(ui);
+        }
+        if context_menu_button(ui, "Recompile")
+            .on_hover_text(RECOMPILE_HELP)
+            .clicked()
+        {
+            action = Some(BrowserAction::RecompileScript(entry.key.clone()));
+            close_menu(ui);
+        }
+    }
+
+    if favorite_keys.is_some() || launch.supported && (is_scenario_group(entry.group_tag) || script_tag) {
         context_menu_separator(ui);
     }
     if crate::app::editor::string_list::supports_group(entry.group_tag) {

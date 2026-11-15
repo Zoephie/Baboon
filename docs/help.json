@@ -377,7 +377,9 @@
                 "Blender uses the path configured in File > Settings.",
                 "Run Tool Command lists each game's tool commands from per-game JSON and builds a form for the selected command.",
                 "Command forms use dropdowns, path pickers, and validation for required parameters before running.",
-                "Assembled commands run in the integrated terminal."
+                "Assembled commands run in the integrated terminal.",
+                "A Halo 2, Halo 3, ODST or Reach script tag (scenario_hs_source_file) has two buttons in its header, also on its right-click menu. Open In: VS Code opens the script's .hsc file from the data folder, which the tools compile, in VS Code, where an extension such as Atlas can edit it. If there's no data file yet, it's written from the copy saved in the tag first.",
+                "Recompile compiles the scenario that lists the script from its data files: on Halo 2 with Tool's rebuild-scenario-scripts, shown in the terminal; on Halo 3, ODST and Reach, whose tools have no such command, by opening the scenario in Sapien, which compiles its scripts as it loads. A script several scenarios list, such as global_scripts, has no one scenario to recompile; recompile from a scenario instead."
               ]
             }
           ]

@@ -45,6 +45,7 @@ pub(in crate::app) use detect::*;
 pub(in crate::app) mod kit_tool_options;
 pub(in crate::app) use kit_tool_options::*;
 pub(in crate::app) mod scenario_launch;
+pub(in crate::app) mod script_tools;
 pub(in crate::app) use scenario_launch::*;
 pub(in crate::app) mod tool_drop;
 pub(in crate::app) mod loading;
