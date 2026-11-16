@@ -899,6 +899,16 @@ fn draw_script_tag_buttons(cx: &Ctx, ui: &mut Ui, kit_index: usize, entry: &TagE
         && crate::core::script_tags::supports_script_tags(game);
     let why = "Opening and recompiling scripts works on the loose script tags of a Halo 2, Halo 3, \
                ODST or Reach editing kit";
+    // VS Code also needs VS Code, and the script's data file to open.
+    let vscode_blocked = enabled
+        .then(|| {
+            crate::app::kits::script_tools::vscode_unavailable(
+                ui.ctx(),
+                cx.model.loaded_tags_root_for(kit_index).as_deref(),
+                &entry.display_path,
+            )
+        })
+        .flatten();
     let mut action = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = PANE_HEADER_ACTION_GAP;
@@ -917,15 +927,11 @@ fn draw_script_tag_buttons(cx: &Ctx, ui: &mut Ui, kit_index: usize, entry: &TagE
         .fit_to_exact_size(Vec2::splat(BUTTON_ICON_SIZE));
         if ui
             .add_enabled(
-                enabled,
+                enabled && vscode_blocked.is_none(),
                 egui::Button::image_and_text(logo, "VS Code").min_size(Vec2::new(0.0, BUTTON_HEIGHT)),
             )
-            .on_hover_text(
-                "Open this script's .hsc file from the data folder in VS Code, where an extension \
-                 such as Atlas can edit it. If the data folder has none yet, it's written from the \
-                 copy saved in this tag first.",
-            )
-            .on_disabled_hover_text(why)
+            .on_hover_text(crate::app::browser::OPEN_IN_VSCODE_HELP)
+            .on_disabled_hover_text(vscode_blocked.as_deref().unwrap_or(why))
             .clicked()
         {
             action = Some(BrowserAction::OpenScriptInVsCode(entry.key.clone()));

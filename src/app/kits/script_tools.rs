@@ -3,13 +3,49 @@
 //! `core::script_tags`'s; this runs the programs.
 
 use super::*;
-use crate::core::script_tags::{self, data_file, listed_scripts, script_text, scenario_folder};
+use crate::app::shell::frame::{is_file_cached, recheck_cached};
+use crate::core::script_tags::{self, data_file, listed_scripts, scenario_folder};
+
+/// What the header's VS Code button and the row menu's Open in VS Code item
+/// say when they're greyed out because VS Code isn't installed.
+const NO_VSCODE: &str = "Baboon couldn't find VS Code. Install it, or put its code command on \
+                         your PATH, to open scripts in it.";
+
+/// Why Open in VS Code can't open the script tag at `display_path` in the
+/// kit whose tags folder is `tags_root`, or `None` when it can: VS Code isn't
+/// installed, or the script has no `.hsc` data file. The header and the row
+/// menu ask every frame, so both are re-checked at most once a second.
+pub(in crate::app) fn vscode_unavailable(
+    ctx: &egui::Context,
+    tags_root: Option<&Path>,
+    display_path: &str,
+) -> Option<String> {
+    let installed = recheck_cached(ctx, "vscode_program", || vscode_program().is_some());
+    let file = tags_root.and_then(|root| data_file(root, display_path));
+    let exists = file.as_deref().is_some_and(|file| is_file_cached(ctx, file));
+    unavailable_reason(installed, file.as_deref(), exists)
+}
+
+/// [`vscode_unavailable`]'s answer from what it found.
+fn unavailable_reason(installed: bool, file: Option<&Path>, exists: bool) -> Option<String> {
+    if !installed {
+        return Some(NO_VSCODE.to_owned());
+    }
+    match file {
+        None => Some("Baboon couldn't find this kit's data folder, which holds the script's .hsc file.".to_owned()),
+        Some(file) if !exists => Some(format!(
+            "This script has no data file to open. Baboon looked for {}.",
+            file.display()
+        )),
+        Some(_) => None,
+    }
+}
 
 impl Baboon {
     /// Open in VS Code: open the `.hsc` the active kit's script tag at `key`
     /// compiles from, where a HaloScript extension such as Atlas edits it.
-    /// A data file that doesn't exist yet is written from the copy the tag
-    /// holds first, and the status line says so.
+    /// The header and menu grey the command out when VS Code or the file is
+    /// missing; this says why again if either went missing since.
     pub(in crate::app) fn open_script_in_vscode(&mut self, key: &str) {
         let (entry, tags_root) = match self.script_tag(key) {
             Ok(found) => found,
@@ -18,39 +54,16 @@ impl Baboon {
                 return;
             }
         };
-        let Some(file) = data_file(&tags_root, &entry.display_path) else {
-            self.model.status = "Couldn't find this kit's data folder".to_owned();
+        let file = data_file(&tags_root, &entry.display_path);
+        let exists = file.as_deref().is_some_and(Path::is_file);
+        if let Some(reason) = unavailable_reason(vscode_program().is_some(), file.as_deref(), exists) {
+            self.model.status = reason;
             return;
-        };
-        let mut wrote = false;
-        if !file.exists() {
-            let text = match self.model.kits[self.model.active].parsed_tags.get(key) {
-                Some(document) => script_text(&document.tag),
-                None => self
-                    .model
-                    .source()
-                    .and_then(|source| read_entry(&source.source, &entry).ok())
-                    .and_then(|tag| script_text(&tag)),
-            };
-            let Some(text) = text else {
-                self.model.status =
-                    format!("{} doesn't exist, and the tag holds no script to write it from", file.display());
-                return;
-            };
-            let written = file
-                .parent()
-                .map_or(Ok(()), std::fs::create_dir_all)
-                .and_then(|()| std::fs::write(&file, text.as_bytes()));
-            if let Err(error) = written {
-                self.model.status = format!("Couldn't write {}: {error}", file.display());
-                return;
-            }
-            wrote = true;
         }
+        let Some(file) = file else { return };
         self.model.status = match launch_vscode(&file) {
-            Ok(_) if wrote => format!("Wrote {} from the tag's copy and opened it in VS Code", file.display()),
-            Ok(_) => format!("Opened {} in VS Code", file.display()),
-            Err(error) => format!("Couldn't start VS Code ({error}). Is it installed? The script is {}", file.display()),
+            Ok(()) => format!("Opened {} in VS Code", file.display()),
+            Err(error) => format!("Couldn't start VS Code ({error}). The script is {}", file.display()),
         };
     }
 
@@ -151,16 +164,17 @@ fn launch_vscode(file: &Path) -> std::io::Result<()> {
     }
     #[cfg(not(test))]
     {
-        vscode_command().arg(file).spawn().map(drop)
+        let program = vscode_program().ok_or_else(|| std::io::Error::other(NO_VSCODE))?;
+        std::process::Command::new(program).arg(file).spawn().map(drop)
     }
 }
 
-/// VS Code's program: where its installers put it, else `code` on the path.
-#[cfg_attr(test, allow(dead_code))]
-fn vscode_command() -> std::process::Command {
+/// VS Code's program: where its installers put it, else its `code` command
+/// on the path. `None` when neither is there.
+fn vscode_program() -> Option<PathBuf> {
     #[cfg(windows)]
-    {
-        let installed = [
+    let (installed, command) = (
+        [
             std::env::var_os("LOCALAPPDATA").map(|root| PathBuf::from(root).join("Programs")),
             std::env::var_os("ProgramFiles").map(PathBuf::from),
             std::env::var_os("ProgramFiles(x86)").map(PathBuf::from),
@@ -168,21 +182,17 @@ fn vscode_command() -> std::process::Command {
         .into_iter()
         .flatten()
         .map(|root| root.join("Microsoft VS Code").join("Code.exe"))
-        .find(|exe| exe.is_file());
-        match installed {
-            Some(exe) => std::process::Command::new(exe),
-            // `code` on the path is a batch file, which only cmd runs.
-            None => {
-                let mut command = std::process::Command::new("cmd");
-                command.args(["/C", "code"]);
-                command
-            }
-        }
-    }
+        .find(|exe| exe.is_file()),
+        // A batch file, which Rust runs through cmd for us.
+        "code.cmd",
+    );
     #[cfg(not(windows))]
-    {
-        std::process::Command::new("code")
-    }
+    let (installed, command) = (None, "code");
+    installed.or_else(|| {
+        std::env::split_paths(&std::env::var_os("PATH")?)
+            .map(|folder| folder.join(command))
+            .find(|program| program.is_file())
+    })
 }
 
 #[cfg(test)]
@@ -252,15 +262,26 @@ mod tests {
     }
 
     #[test]
-    fn opening_a_script_with_no_data_file_writes_it_from_the_tag() {
+    fn open_in_vscode_says_why_it_cant_open_a_script() {
+        use super::unavailable_reason;
+        let file = std::path::Path::new(r"C:\kit\data\levels\a\scripts\a_mission.hsc");
+        assert!(unavailable_reason(false, Some(file), true).unwrap().contains("couldn't find VS Code"));
+        assert!(unavailable_reason(true, None, false).unwrap().contains("data folder"));
+        let missing = unavailable_reason(true, Some(file), false).unwrap();
+        assert!(missing.contains("no data file") && missing.contains("a_mission.hsc"), "{missing}");
+        assert_eq!(unavailable_reason(true, Some(file), true), None);
+    }
+
+    #[test]
+    fn a_script_with_no_data_file_isnt_written_or_opened() {
         let kit = LooseKit::new("script_tools_vscode", "halo3_mcc");
         script(&kit, r"levels\a\scripts\a_mission");
         let mut app = app();
         kit.install(&mut app);
         app.open_script_in_vscode(&kit.key(r"levels\a\scripts\a_mission.scenario_hs_source_file"));
         let file = kit.root.parent().unwrap().join("data").join("levels").join("a").join("scripts").join("a_mission.hsc");
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "(script startup a)");
-        assert!(app.model.status.contains("Wrote") || app.model.status.contains("VS Code"), "{}", app.model.status);
+        assert!(!file.exists());
+        assert!(!app.model.status.starts_with("Opened"), "{}", app.model.status);
     }
 
     #[test]

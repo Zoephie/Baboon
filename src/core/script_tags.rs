@@ -39,18 +39,6 @@ pub(crate) fn data_file(tags_root: &Path, display_path: &str) -> Option<PathBuf>
     Some(layout.data.join(tag_path::to_relative(folder)).join(file))
 }
 
-/// The script a script tag holds: its `source` up to the terminator the
-/// engine reads it to. `None` when it holds none.
-pub(crate) fn script_text(tag: &TagFile) -> Option<String> {
-    match tag.root().field_path("source").and_then(|field| field.value()) {
-        Some(TagFieldData::Data(bytes)) => {
-            let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
-            Some(String::from_utf8_lossy(&bytes[..end]).into_owned()).filter(|text| !text.is_empty())
-        }
-        _ => None,
-    }
-}
-
 /// The script tags a scenario lists, as tag paths with their extension.
 pub(crate) fn listed_scripts(scenario: &TagFile) -> Vec<String> {
     let root = scenario.root();
@@ -96,18 +84,6 @@ mod tests {
             data_file(&kit.join("tags"), r"levels\solo\m10\scripts\m10_mission.scenario_hs_source_file"),
             Some(kit.join("data").join("levels").join("solo").join("m10").join("scripts").join("m10_mission.hsc"))
         );
-    }
-
-    #[test]
-    fn a_script_tags_text_stops_at_its_terminator() {
-        let mut tag = TagFile::new(definitions().join("halo3_mcc/scenario_hs_source_file.json")).unwrap();
-        assert_eq!(script_text(&tag), None);
-        tag.root_mut()
-            .field_path_mut("source")
-            .unwrap()
-            .set(TagFieldData::Data(b"(script startup a)\0padding".to_vec()))
-            .unwrap();
-        assert_eq!(script_text(&tag).as_deref(), Some("(script startup a)"));
     }
 
     #[test]

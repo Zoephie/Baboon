@@ -259,6 +259,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
             );
             set_browser_entries_scanning(ui, scanning);
             set_browser_loose_source(ui, is_loose);
+            set_browser_tags_root(ui, sound_tags_root.as_deref());
             set_browser_game(ui, game);
             set_browser_scenario_launch(ui, scenario_launch);
             set_browser_is_folder_pane(ui, true);
@@ -938,6 +939,7 @@ fn draw_kit_browser_inner(
         }
     });
     set_browser_sound_available_languages(ui, browser_game, browser_tags_root);
+    set_browser_tags_root(ui, browser_tags_root);
     set_browser_entries_scanning(ui, cx.model.kits[kit_index].scanning_entries);
     set_browser_loose_source(
         ui,

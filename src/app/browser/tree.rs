@@ -2951,6 +2951,10 @@ pub(in crate::app) fn paint_browser_selection_border(ui: &Ui, rect: egui::Rect) 
     );
 }
 
+/// What Open in VS Code does, for its tooltips.
+pub(in crate::app) const OPEN_IN_VSCODE_HELP: &str = "Open this script's .hsc file from the data folder in \
+    VS Code, where an extension such as Atlas can edit it.";
+
 /// What Recompile does, for its tooltips.
 pub(in crate::app) const RECOMPILE_HELP: &str = "Compile the scenario that lists this script from its data files: \
     with Tool's rebuild-scenario-scripts in the terminal on Halo 2, or by opening it in Sapien, which \
@@ -3103,12 +3107,21 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
         if favorite_keys.is_some() {
             context_menu_separator(ui);
         }
-        if context_menu_button(ui, "Open in VS Code")
-            .on_hover_text("Open this script's .hsc file from the data folder in VS Code")
-            .clicked()
-        {
+        let blocked = crate::app::kits::script_tools::vscode_unavailable(
+            ui.ctx(),
+            browser_tags_root(ui).as_deref(),
+            &entry.display_path,
+        );
+        let response = ui
+            .add_enabled_ui(blocked.is_none(), |ui| context_menu_button(ui, "Open in VS Code"))
+            .inner
+            .on_hover_text(OPEN_IN_VSCODE_HELP);
+        if response.clicked() {
             action = Some(BrowserAction::OpenScriptInVsCode(entry.key.clone()));
             close_menu(ui);
+        }
+        if let Some(blocked) = blocked {
+            response.on_disabled_hover_text(blocked);
         }
         if context_menu_button(ui, "Recompile")
             .on_hover_text(RECOMPILE_HELP)
