@@ -170,7 +170,7 @@ pub(in crate::app) fn foundation_visuals() -> egui::Visuals {
     visuals.widgets.inactive.bg_fill = if is_dark_mode() {
         Color32::from_rgb(68, 68, 68)
     } else {
-        Color32::from_rgb(218, 218, 214)
+        Color32::from_rgb(238, 222, 209)
     };
     // Buttons and combo boxes paint `weak_bg_fill`. Use premultiplied sRGB
     // values for a visually literal 10% neutral overlay; `from_white_alpha`
@@ -189,6 +189,13 @@ pub(in crate::app) fn foundation_visuals() -> egui::Visuals {
     } else {
         Color32::from_rgb(188, 207, 216)
     };
+    if !is_dark_mode() {
+        // egui's light warning is an orange close to Baboon Orange's chrome,
+        // and its error a pure red. Deeper amber and red keep both apart
+        // from the accent and readable on the warm panels.
+        visuals.warn_fg_color = Color32::from_rgb(143, 91, 0);
+        visuals.error_fg_color = Color32::from_rgb(179, 32, 42);
+    }
     if !is_dark_mode() {
         // Sliders paint both their rail and handle with bg_fill, while
         // buttons use weak_bg_fill. Share the button palette so the light
@@ -510,7 +517,7 @@ pub(in crate::app) fn menu_bar() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(50, 50, 50)
     } else {
-        Color32::from_rgb(161, 161, 157)
+        Color32::from_rgb(242, 195, 160)
     }
 }
 
@@ -525,7 +532,7 @@ fn active_tab_for(dark_mode: bool) -> Color32 {
     if dark_mode {
         Color32::from_rgb(72, 72, 72)
     } else {
-        Color32::from_rgb(161, 161, 157)
+        Color32::from_rgb(242, 195, 160)
     }
 }
 
@@ -533,7 +540,7 @@ pub(in crate::app) fn foundation_blue() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(134, 184, 213)
     } else {
-        Color32::from_rgb(15, 43, 64)
+        Color32::from_rgb(180, 68, 12)
     }
 }
 
@@ -541,7 +548,7 @@ pub(in crate::app) fn left_panel() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(31, 31, 31)
     } else {
-        Color32::from_rgb(238, 238, 234)
+        Color32::from_rgb(251, 246, 242)
     }
 }
 
@@ -549,7 +556,7 @@ pub(in crate::app) fn editor_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(40, 40, 40)
     } else {
-        Color32::from_rgb(224, 224, 220)
+        Color32::from_rgb(243, 233, 225)
     }
 }
 
@@ -557,7 +564,7 @@ pub(in crate::app) fn row_type() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(55, 55, 55)
     } else {
-        Color32::from_rgb(219, 219, 216)
+        Color32::from_rgb(238, 226, 216)
     }
 }
 
@@ -565,20 +572,25 @@ pub(in crate::app) fn grid_line() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(82, 82, 82)
     } else {
-        Color32::from_rgb(180, 180, 174)
+        Color32::from_rgb(220, 199, 184)
     }
 }
 
 /// Neutral emphasis for the tab owning the currently focused pane.
 pub(in crate::app) fn focused_tab_border(dark_mode: bool) -> Color32 {
-    Color32::from_gray(if dark_mode { 160 } else { 90 })
+    if dark_mode {
+        Color32::from_gray(160)
+    } else {
+        // Baboon Orange, darkened to read on the light tab strip.
+        Color32::from_rgb(232, 89, 12)
+    }
 }
 
 pub(in crate::app) fn foundation_group_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(43, 43, 43)
     } else {
-        Color32::from_rgb(236, 236, 234)
+        Color32::from_rgb(253, 249, 246)
     }
 }
 
@@ -597,7 +609,7 @@ pub(in crate::app) fn foundation_group_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(82, 82, 82)
     } else {
-        Color32::from_rgb(152, 152, 148)
+        Color32::from_rgb(207, 174, 151)
     }
 }
 
@@ -605,7 +617,7 @@ pub(in crate::app) fn foundation_section_bar() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(68, 68, 68)
     } else {
-        Color32::from_rgb(214, 214, 210)
+        Color32::from_rgb(247, 212, 187)
     }
 }
 
@@ -615,7 +627,7 @@ pub(in crate::app) fn foundation_block_bar() -> Color32 {
     } else {
         // Keep block headers distinct from the section bar without carrying
         // the dark-theme slab into an otherwise light editor.
-        Color32::from_rgb(204, 204, 200)
+        Color32::from_rgb(241, 201, 172)
     }
 }
 
@@ -631,9 +643,13 @@ pub(in crate::app) fn foundation_jump_cyan() -> Color32 {
 }
 
 fn input_fill_for(dark_mode: bool) -> Color32 {
-    // Match the literal sRGB overlay convention used by buttons: black in
-    // dark mode, white in light mode, both at approximately 30% alpha.
-    neutral_button_fill(!dark_mode, 77)
+    // Dark mode: the buttons' literal sRGB overlay, black at about 30%.
+    // Light mode: plain white, so fields stand out from the warm panels.
+    if dark_mode {
+        neutral_button_fill(false, 77)
+    } else {
+        Color32::WHITE
+    }
 }
 
 pub(in crate::app) fn foundation_input() -> Color32 {
@@ -654,7 +670,7 @@ pub(in crate::app) fn foundation_input_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(84, 84, 84)
     } else {
-        Color32::from_rgb(112, 112, 108)
+        Color32::from_rgb(168, 139, 120)
     }
 }
 
@@ -666,7 +682,7 @@ fn text_dark_for(dark_mode: bool) -> Color32 {
     if dark_mode {
         Color32::from_rgb(242, 242, 242)
     } else {
-        Color32::from_rgb(25, 25, 24)
+        Color32::from_rgb(33, 23, 15)
     }
 }
 
@@ -674,7 +690,7 @@ pub(in crate::app) fn subtle_dark() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(164, 164, 164)
     } else {
-        Color32::from_rgb(82, 82, 78)
+        Color32::from_rgb(114, 93, 79)
     }
 }
 
@@ -730,7 +746,7 @@ pub(in crate::app) fn unapplied_value_fill() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(54, 43, 24)
     } else {
-        Color32::from_rgb(255, 247, 220)
+        Color32::from_rgb(255, 243, 201)
     }
 }
 
@@ -780,7 +796,7 @@ pub(in crate::app) fn foundation_flag_hover() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(58, 58, 56)
     } else {
-        Color32::from_rgb(232, 232, 228)
+        Color32::from_rgb(248, 230, 216)
     }
 }
 
@@ -825,7 +841,7 @@ pub(in crate::app) fn foundation_block_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(94, 94, 94)
     } else {
-        Color32::from_rgb(154, 154, 149)
+        Color32::from_rgb(201, 157, 128)
     }
 }
 
@@ -833,7 +849,7 @@ pub(in crate::app) fn browser_search_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_black_alpha(102)
     } else {
-        Color32::from_rgba_premultiplied(102, 102, 102, 102)
+        Color32::from_rgb(239, 225, 214)
     }
 }
 
@@ -841,7 +857,7 @@ pub(in crate::app) fn browser_toolbar_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(68, 68, 68)
     } else {
-        Color32::from_rgb(226, 226, 222)
+        Color32::from_rgb(246, 223, 205)
     }
 }
 
@@ -1191,7 +1207,7 @@ mod tests {
 
     #[test]
     fn light_active_tab_keeps_the_existing_menu_bar_color() {
-        assert_eq!(active_tab_for(false), Color32::from_rgb(161, 161, 157));
+        assert_eq!(active_tab_for(false), Color32::from_rgb(242, 195, 160));
     }
 
     #[test]

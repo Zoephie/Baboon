@@ -7861,4 +7861,42 @@ mod tests {
         }
         h.shoot(&dir.join("app_banshee_model_with_imposter.png"));
     }
+
+    /// Screenshots of the whole app on Halo 2's brute `.model` Tag Fields
+    /// page, light and dark, as PNGs in `BABOON_APP_SHOTS`, with
+    /// `BLAM_TEST_H2EK` naming the kit's tags: for judging the themes.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn app_shots_of_the_themes() {
+        let (Some(dir), Ok(root)) = (
+            std::env::var_os("BABOON_APP_SHOTS"),
+            std::env::var("BLAM_TEST_H2EK"),
+        ) else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let dir = std::path::PathBuf::from(dir);
+        for dark in [false, true] {
+            let mut h = Harness::recording();
+            h.app.model.prefs.follow_system_theme = false;
+            h.app.model.prefs.dark_mode = dark;
+            h.frame(Vec::new());
+            let entries =
+                install_kit_subtree(&mut h, &root, GameId::Halo2, "objects/characters/brute");
+            let wanted = r"objects\characters\brute\brute.model";
+            let key = entries
+                .iter()
+                .find(|entry| entry.display_path.to_ascii_lowercase().ends_with(wanted))
+                .expect("the brute model")
+                .key
+                .clone();
+            h.app.select_entry(key.clone(), h.ctx.clone());
+            for _ in 0..120 {
+                h.frame(Vec::new());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let name = if dark { "theme_dark.png" } else { "theme_light.png" };
+            h.shoot(&dir.join(name));
+        }
+    }
 }
