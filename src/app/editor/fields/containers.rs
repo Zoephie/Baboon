@@ -1063,8 +1063,12 @@ fn draw_foundation_collapsing_header_inner(
         let trailing = trailing_ui.min_rect().width();
         let trailing_left = first_row.right() - if trailing > 0.0 { trailing + 8.0 } else { 0.0 };
         let controls_rect = if wrapped {
-            egui::Rect::from_min_max(first_row.left_bottom() + Vec2::new(0.0, 8.0),
-                egui::pos2(first_row.right(), row_rect.bottom() - header_inset.y))
+            // One button high: a wrapping layout's first row takes its
+            // rect's height and later rows copy it, so each row centres on
+            // a button's height and grows the rect as it wraps.
+            let top = first_row.bottom() + 8.0;
+            egui::Rect::from_min_max(egui::pos2(first_row.left(), top),
+                egui::pos2(first_row.right(), top + BUTTON_HEIGHT))
         } else {
             let left = (trailing_left - controls_width).max(first_row.left() + title_width + 16.0);
             egui::Rect::from_min_max(egui::pos2(left.min(trailing_left), first_row.top()),
@@ -1072,11 +1076,9 @@ fn draw_foundation_collapsing_header_inner(
         };
         let mut controls_ui = ui.new_child(egui::UiBuilder::new().id_salt(id.with("controls"))
             .max_rect(controls_rect)
-            // Wrapped rows stack from the top: centred, the first row sits
-            // at the middle of last frame's height, the rows under it push
-            // the measured height past it, and the header doubles each frame.
-            .layout(egui::Layout::left_to_right(if wrapped { egui::Align::Min } else { egui::Align::Center })
-                .with_main_wrap(wrapped)));
+            // Centred, so a button's label sits mid-button: egui lines a
+            // button's label up as its row does.
+            .layout(egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(wrapped)));
         controls_ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
         controls(&mut controls_ui, BoxPart::Controls);
         let drawn = controls_ui.min_rect();

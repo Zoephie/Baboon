@@ -244,7 +244,8 @@ fn selection_fill_for(dark_mode: bool) -> Color32 {
     if dark_mode {
         Color32::from_rgb(64, 108, 134) // #406C86
     } else {
-        Color32::from_rgb(75, 125, 155) // #4B7D9B
+        // A clear sky blue under the theme's dark text.
+        Color32::from_rgb(146, 192, 226) // #92C0E2
     }
 }
 
@@ -633,9 +634,10 @@ pub(in crate::app) fn foundation_documentation_bg() -> Color32 {
         // brighter than the equivalent design-tool/CSS overlay.
         Color32::from_rgba_premultiplied(13, 13, 13, 13)
     } else {
-        // The block headers' sand: documentation and the kit banner read
-        // as warm notes rather than grey slabs.
-        foundation_block_bar()
+        // The block headers' sand, half-transparent: on an open page it
+        // lands at that sand, and deepens on a darker pane, as the input
+        // wells do. Documentation and the kit banner read as warm notes.
+        Color32::from_rgba_unmultiplied(238, 211, 184, 128)
     }
 }
 
@@ -678,11 +680,13 @@ pub(in crate::app) fn foundation_jump_cyan() -> Color32 {
 
 fn input_fill_for(dark_mode: bool) -> Color32 {
     // Dark mode: the buttons' literal sRGB overlay, black at about 30%.
-    // Light mode: a warm sand well, set apart from the pale buttons.
+    // Light mode: a half-transparent warm sand well, set apart from the
+    // pale buttons. On an open page it lands at #F0E2D5; on a darker pane
+    // it deepens with it, as the dark theme's overlay does.
     if dark_mode {
         Color32::from_black_alpha(77)
     } else {
-        Color32::from_rgb(240, 226, 213)
+        Color32::from_rgba_unmultiplied(238, 211, 186, 128)
     }
 }
 
@@ -834,13 +838,10 @@ pub(in crate::app) fn foundation_flag_hover() -> Color32 {
     }
 }
 
-pub(in crate::app) const MATERIAL_PANEL: Color32 = Color32::from_rgb(238, 238, 235);
-pub(in crate::app) const MATERIAL_PANEL_EDGE: Color32 = Color32::from_rgb(168, 168, 162);
-
-/// The material/shader pane's backing fill. The light constant above bled
-/// through every 1-2px gap between the dark grid's rows and cells in dark
-/// mode, outlining the whole editor in near-white; dark mode gets a soft grey
-/// in the same family as the grid lines instead.
+/// The material/shader pane's backing fill. A near-white one bled through
+/// every 1-2px gap between the dark grid's rows and cells in dark mode,
+/// outlining the whole editor; dark mode gets a soft grey in the same family
+/// as the grid lines instead.
 pub(in crate::app) fn material_panel() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(58, 60, 56)
@@ -860,7 +861,6 @@ pub(in crate::app) const MATERIAL_REF_ROW: Color32 = Color32::from_rgb(166, 205,
 pub(in crate::app) const MATERIAL_NUMERIC_ROW: Color32 = Color32::from_rgb(232, 191, 171);
 pub(in crate::app) const MATERIAL_DATA_ROW: Color32 = Color32::from_rgb(216, 216, 216);
 pub(in crate::app) const MATERIAL_GRID: Color32 = Color32::from_rgb(92, 92, 92);
-pub(in crate::app) const MATERIAL_GRID_LIGHT: Color32 = Color32::from_rgb(198, 198, 192);
 pub(in crate::app) const MATERIAL_INPUT_EDGE: Color32 = Color32::from_rgb(112, 112, 112);
 pub(in crate::app) const MATERIAL_DEFAULT_BOX: Color32 = Color32::from_rgb(224, 224, 224);
 pub(in crate::app) const MATERIAL_TEXT: Color32 = Color32::from_rgb(20, 20, 20);
@@ -1216,7 +1216,7 @@ mod tests {
     #[test]
     fn selection_colors_are_lighter_with_a_dark_border_in_light_mode() {
         assert_eq!(selection_fill_for(true), Color32::from_rgb(64, 108, 134));
-        assert_eq!(selection_fill_for(false), Color32::from_rgb(75, 125, 155));
+        assert_eq!(selection_fill_for(false), Color32::from_rgb(146, 192, 226));
         assert_eq!(selection_stroke_for(false), Color32::from_rgb(38, 63, 78));
     }
 

@@ -282,7 +282,8 @@ pub(in crate::app::model_preview) fn draw_model_other_menu(
     });
 }
 
-/// Halo CE's and Halo 2's levels of detail as choices, the one drawn picked.
+/// Halo CE's and Halo 2's levels of detail as choices, the highest first and
+/// the one drawn picked.
 /// A level no permutation has is greyed out. Picking one reloads the model,
 /// keeping the regions picked.
 fn draw_detail_levels(
@@ -292,7 +293,7 @@ fn draw_detail_levels(
     levels: &DetailLevels,
 ) {
     ui.label(RichText::new("Level of Detail").color(subtle_dark()).small());
-    for (level, label) in levels.labels.iter().enumerate() {
+    for (level, label) in levels.labels.iter().enumerate().rev() {
         let available = levels.available.get(level).copied().unwrap_or(false);
         let response = ui
             .add_enabled_ui(available, |ui| menu_choice(ui, label, levels.shown == level))

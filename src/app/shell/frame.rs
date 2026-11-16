@@ -654,9 +654,17 @@ pub(in crate::app) fn draw_kit_banner_tile(
         text_width,
         TextStyle::Body,
     );
-    let wrappable_path = sidebar_wrappable_path_label(path_label);
+    // Whole folders move between rows as the pane resizes, each row after
+    // the first starting at a separator; only a folder wider than the row
+    // breaks inside itself.
+    let path_font = TextStyle::Small.resolve(ui.style());
+    let path_rows = ui.fonts_mut(|fonts| {
+        path_rows_at_separators(path_label, text_width, |text| {
+            fonts.layout_no_wrap(text.to_owned(), path_font.clone(), Color32::WHITE).size().x
+        })
+    });
     let mut path_job = egui::text::LayoutJob::default();
-    RichText::new(wrappable_path).color(subtle_dark()).small().append_to(
+    RichText::new(path_rows).color(subtle_dark()).small().append_to(
         &mut path_job, ui.style(), egui::FontSelection::Style(TextStyle::Small), egui::Align::Min,
     );
     path_job.wrap.max_width = text_width;
@@ -691,15 +699,36 @@ pub(in crate::app) fn draw_kit_banner_tile(
     );
 }
 
-pub(in crate::app) fn sidebar_wrappable_path_label(path: &str) -> String {
-    let mut wrappable = String::with_capacity(path.len());
-    for character in path.chars() {
-        wrappable.push(character);
-        if matches!(character, '\\' | '/') {
-            wrappable.push('\u{200b}');
+/// `path` in rows no wider than `width`, as `measure` sizes text: each row
+/// after the first starts at a `\` or `/`, so folder names stay whole.
+pub(in crate::app) fn path_rows_at_separators(
+    path: &str,
+    width: f32,
+    mut measure: impl FnMut(&str) -> f32,
+) -> String {
+    let mut segments = Vec::new();
+    let mut start = 0;
+    for (at, character) in path.char_indices() {
+        if matches!(character, '\\' | '/') && at > start {
+            segments.push(&path[start..at]);
+            start = at;
         }
     }
-    wrappable
+    segments.push(&path[start..]);
+    let mut rows = String::with_capacity(path.len() + 4);
+    let mut row = String::new();
+    for segment in segments {
+        let joined = format!("{row}{segment}");
+        if row.is_empty() || measure(&joined) <= width {
+            row = joined;
+        } else {
+            rows.push_str(&row);
+            rows.push('\n');
+            row = segment.to_owned();
+        }
+    }
+    rows.push_str(&row);
+    rows
 }
 
 pub(in crate::app) fn sidebar_source_path_label(source: &TagSource) -> String {
@@ -1165,7 +1194,7 @@ mod tests {
                 .unwrap();
             let location = text
                 .iter()
-                .find(|text| text.galley.job.text == sidebar_wrappable_path_label(path))
+                .find(|text| text.galley.job.text.replace('\n', "") == path)
                 .unwrap();
             assert_eq!(heading.galley.rows.len(), 1);
             assert!(location.galley.rows.len() <= 3);
@@ -1174,6 +1203,20 @@ mod tests {
                 assert!(location.galley.elided && heading.galley.elided);
             }
         }
+    }
+
+    /// A banner path breaks before a separator, never inside a folder name,
+    /// unless the folder alone is wider than the row.
+    #[test]
+    fn banner_paths_break_before_separators() {
+        let by_chars = |text: &str| text.chars().count() as f32;
+        let path = r"C:\Program Files (x86)\Steam\steamapps\common\H2R";
+        assert_eq!(
+            path_rows_at_separators(path, 24.0, by_chars),
+            "C:\\Program Files (x86)\n\\Steam\\steamapps\\common\n\\H2R"
+        );
+        assert_eq!(path_rows_at_separators(path, 200.0, by_chars), path);
+        assert_eq!(path_rows_at_separators("/a/b", 1.0, by_chars), "/a\n/b");
     }
 
     #[test]
@@ -7862,6 +7905,82 @@ mod tests {
         h.shoot(&dir.join("app_banshee_model_with_imposter.png"));
     }
 
+    /// A screenshot of Halo 2's brute on its Model Preview tab in light
+    /// mode, as `model_light.png` in `BABOON_APP_SHOTS`, with
+    /// `BLAM_TEST_H2EK` naming the kit's tags. With `BABOON_SHOT_CLICK` as
+    /// `x,y`, it then clicks there (the Other menu, say) and saves
+    /// `model_light_clicked.png`.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn app_shots_of_the_model_preview() {
+        let (Some(dir), Ok(root)) = (
+            std::env::var_os("BABOON_APP_SHOTS"),
+            std::env::var("BLAM_TEST_H2EK"),
+        ) else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let dir = std::path::PathBuf::from(dir);
+        let tag = std::env::var("BABOON_SHOT_TAG")
+            .unwrap_or_else(|_| "objects/characters/covenant/brute/brute.model".to_owned());
+        let subtree = tag.rsplit_once('/').map_or("", |(folder, _)| folder).to_owned();
+        let mut h = Harness::recording();
+        h.app.model.prefs.follow_system_theme = false;
+        h.app.model.prefs.dark_mode = false;
+        h.frame(Vec::new());
+        let entries = install_kit_subtree(&mut h, &root, GameId::Halo2, &subtree);
+        let key = open_model_page(&mut h, &entries, &tag);
+        h.shoot(&dir.join("model_light.png"));
+        // BABOON_SHOT_CLIP names an animation to play, by part of its name,
+        // for a shot of the Animation Player's scrubber.
+        if let Ok(clip) = std::env::var("BABOON_SHOT_CLIP") {
+            let id = h.app.model.kits[h.app.model.active].id;
+            let started = Instant::now();
+            let mut picked = false;
+            while started.elapsed().as_secs() < 60 {
+                h.frame(Vec::new());
+                let state = h.app.views[id].caches.model_previews.get_mut(&key).unwrap();
+                if !picked
+                    && let Some(Ok(data)) = &state.data
+                    && let Some(animations) = &data.animations
+                {
+                    state.animation.selected =
+                        animations.iter().position(|entry| entry.name.contains(&clip));
+                    assert!(state.animation.selected.is_some(), "no clip matches {clip}");
+                    picked = true;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+                if picked && h.painted.iter().any(|text| text.contains(" / ") && !text.contains("0 / 0")) {
+                    break;
+                }
+            }
+            for _ in 0..40 {
+                h.frame(Vec::new());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            h.shoot(&dir.join("model_light_clip.png"));
+        }
+        let Ok(click) = std::env::var("BABOON_SHOT_CLICK") else {
+            return;
+        };
+        let (x, y) = click.split_once(',').expect("x,y");
+        let target = egui::pos2(x.trim().parse().unwrap(), y.trim().parse().unwrap());
+        let button = |pressed| egui::Event::PointerButton {
+            pos: target,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        h.frame(vec![pointer_at(target)]);
+        h.frame(vec![button(true)]);
+        h.frame(vec![button(false)]);
+        for _ in 0..20 {
+            h.frame(Vec::new());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        h.shoot(&dir.join("model_light_clicked.png"));
+    }
+
     /// Screenshots of the whole app on Halo 2's brute `.model` Tag Fields
     /// page, light and dark, as PNGs in `BABOON_APP_SHOTS`, with
     /// `BLAM_TEST_H2EK` naming the kit's tags: for judging the themes.
@@ -7876,18 +7995,22 @@ mod tests {
         };
         let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
         let dir = std::path::PathBuf::from(dir);
+        // The H2 Rebalance brute by default; BABOON_SHOT_TAG names another
+        // model in the kit, as objects/characters/covenant/brute/brute.model.
+        let tag = std::env::var("BABOON_SHOT_TAG")
+            .unwrap_or_else(|_| "objects/characters/brute/brute.model".to_owned());
+        let subtree = tag.rsplit_once('/').map_or("", |(folder, _)| folder).to_owned();
+        let wanted = tag.replace('/', "\\");
         for dark in [false, true] {
             let mut h = Harness::recording();
             h.app.model.prefs.follow_system_theme = false;
             h.app.model.prefs.dark_mode = dark;
             h.frame(Vec::new());
-            let entries =
-                install_kit_subtree(&mut h, &root, GameId::Halo2, "objects/characters/brute");
-            let wanted = r"objects\characters\brute\brute.model";
+            let entries = install_kit_subtree(&mut h, &root, GameId::Halo2, &subtree);
             let key = entries
                 .iter()
-                .find(|entry| entry.display_path.to_ascii_lowercase().ends_with(wanted))
-                .expect("the brute model")
+                .find(|entry| entry.display_path.to_ascii_lowercase().ends_with(&wanted))
+                .expect("the model")
                 .key
                 .clone();
             h.app.select_entry(key.clone(), h.ctx.clone());

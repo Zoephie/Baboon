@@ -1900,7 +1900,6 @@ fn follow_reveal(kit_id: KitId, kit: &Kit, item: &str) -> Option<RevealRequest> 
 mod tests {
     use super::*;
     use crate::app::compare::GIT_REVIEW_TITLE;
-    use crate::app::shell::frame::sidebar_wrappable_path_label;
 
     #[test]
     fn favorite_folders_and_shortcuts_follow_double_click_preference() {
@@ -2137,14 +2136,6 @@ mod tests {
             }
             .hint(),
             "search tags & keywords"
-        );
-    }
-
-    #[test]
-    fn sidebar_paths_can_wrap_after_each_separator() {
-        assert_eq!(
-            sidebar_wrappable_path_label(r"C:\tags\objects"),
-            "C:\\\u{200b}tags\\\u{200b}objects"
         );
     }
 }
