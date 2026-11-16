@@ -125,7 +125,7 @@ impl Baboon {
 /// menus, then the tool launcher buttons.
 pub(in crate::app) fn draw_menu_bar(cx: &Ctx, ui: &mut egui::Ui, menu: &MenuState, view: &mut KitView) {
     let bar = egui::Panel::top("menu")
-        .frame(Frame::NONE.fill(row_type()).inner_margin(egui::Margin {
+        .frame(Frame::NONE.fill(chrome_bar()).inner_margin(egui::Margin {
             left: 6,
             right: 6,
             top: 2,

@@ -45,7 +45,7 @@ impl Baboon {
         set_window_work_area(ctx, ui.available_rect_before_wrap());
 
         egui::CentralPanel::default()
-            .frame(Frame::NONE.fill(row_type()).inner_margin(egui::Margin {
+            .frame(Frame::NONE.fill(chrome_bar()).inner_margin(egui::Margin {
                 top: 6, ..egui::Margin::ZERO
             }))
             .show(ui, |ui| {

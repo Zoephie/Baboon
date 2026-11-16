@@ -580,7 +580,7 @@ fn script_code(ui: &mut Ui, code: &str) {
         .fill(if is_dark_mode() {
             Color32::from_rgb(24, 27, 29)
         } else {
-            Color32::from_rgb(238, 241, 243)
+            Color32::from_rgb(247, 238, 231)
         })
         .inner_margin(egui::Margin::same(6))
         .show(ui, |ui| {

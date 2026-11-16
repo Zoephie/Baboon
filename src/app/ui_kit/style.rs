@@ -195,6 +195,9 @@ pub(in crate::app) fn foundation_visuals() -> egui::Visuals {
         // from the accent and readable on the warm panels.
         visuals.warn_fg_color = Color32::from_rgb(143, 91, 0);
         visuals.error_fg_color = Color32::from_rgb(179, 32, 42);
+        // Separators and code backgrounds, which egui draws in neutral grey.
+        visuals.widgets.noninteractive.bg_stroke.color = grid_line();
+        visuals.code_bg_color = row_type();
     }
     if !is_dark_mode() {
         // Sliders paint both their rail and handle with bg_fill, while
@@ -219,7 +222,9 @@ fn neutral_button_fill(dark_mode: bool, alpha: u8) -> Color32 {
     if dark_mode {
         Color32::from_rgba_premultiplied(alpha, alpha, alpha, alpha)
     } else {
-        Color32::from_black_alpha(alpha)
+        // A warm brown rather than black, so light-mode buttons tint the
+        // warm panels instead of greying them.
+        Color32::from_rgba_unmultiplied(70, 32, 8, alpha)
     }
 }
 
@@ -524,6 +529,13 @@ pub(in crate::app) fn menu_bar() -> Color32 {
 /// Fill for the selected tab in every tiled tab rack. In dark mode this must
 /// sit visibly above the surrounding 31-55 gray fills; the old menu-bar gray
 /// was actually darker than document tabs, which hid the active selection.
+/// The window's frame: the menu bar and the workspace tab bar. Light mode
+/// shares the status bar's peach, so the top and bottom read as one frame
+/// around the warmer workspace.
+pub(in crate::app) fn chrome_bar() -> Color32 {
+    if is_dark_mode() { row_type() } else { menu_bar() }
+}
+
 pub(in crate::app) fn active_tab() -> Color32 {
     active_tab_for(is_dark_mode())
 }
@@ -548,7 +560,8 @@ pub(in crate::app) fn left_panel() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(31, 31, 31)
     } else {
-        Color32::from_rgb(251, 246, 242)
+        // Warmer than an open page, lighter than the bars around it.
+        Color32::from_rgb(247, 221, 201)
     }
 }
 
@@ -646,7 +659,7 @@ fn input_fill_for(dark_mode: bool) -> Color32 {
     // Dark mode: the buttons' literal sRGB overlay, black at about 30%.
     // Light mode: plain white, so fields stand out from the warm panels.
     if dark_mode {
-        neutral_button_fill(false, 77)
+        Color32::from_black_alpha(77)
     } else {
         Color32::WHITE
     }
@@ -780,7 +793,7 @@ pub(in crate::app) fn function_plot_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(64, 64, 62)
     } else {
-        Color32::from_rgb(205, 205, 205)
+        Color32::from_rgb(234, 220, 209)
     }
 }
 
@@ -788,7 +801,7 @@ pub(in crate::app) fn function_grid_line() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(132, 132, 126)
     } else {
-        Color32::from_rgb(92, 92, 88)
+        Color32::from_rgb(120, 100, 86)
     }
 }
 
@@ -811,7 +824,7 @@ pub(in crate::app) fn material_panel() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(58, 60, 56)
     } else {
-        MATERIAL_PANEL
+        Color32::from_rgb(250, 243, 237)
     }
 }
 
@@ -819,7 +832,7 @@ pub(in crate::app) fn material_panel_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(72, 74, 70)
     } else {
-        MATERIAL_PANEL_EDGE
+        Color32::from_rgb(196, 165, 143)
     }
 }
 pub(in crate::app) const MATERIAL_REF_ROW: Color32 = Color32::from_rgb(166, 205, 166);
@@ -849,7 +862,7 @@ pub(in crate::app) fn browser_search_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_black_alpha(102)
     } else {
-        Color32::from_rgb(239, 225, 214)
+        Color32::from_rgb(253, 244, 237)
     }
 }
 
@@ -897,7 +910,7 @@ pub(in crate::app) fn material_data_row() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(42, 43, 41)
     } else {
-        MATERIAL_DATA_ROW
+        Color32::from_rgb(236, 224, 214)
     }
 }
 
@@ -905,7 +918,7 @@ pub(in crate::app) fn material_grid_light() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(54, 56, 52)
     } else {
-        MATERIAL_GRID_LIGHT
+        Color32::from_rgb(220, 199, 184)
     }
 }
 
@@ -913,7 +926,7 @@ pub(in crate::app) fn material_input_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(82, 86, 78)
     } else {
-        MATERIAL_INPUT_EDGE
+        Color32::from_rgb(168, 139, 120)
     }
 }
 
@@ -921,7 +934,7 @@ pub(in crate::app) fn material_text() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(231, 232, 226)
     } else {
-        MATERIAL_TEXT
+        Color32::from_rgb(33, 23, 15)
     }
 }
 
@@ -939,7 +952,7 @@ pub(in crate::app) fn material_muted_text() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(155, 158, 150)
     } else {
-        MATERIAL_MUTED_TEXT
+        Color32::from_rgb(114, 93, 79)
     }
 }
 
@@ -1144,8 +1157,11 @@ mod tests {
     fn neutral_button_fills_use_literal_ten_and_twenty_percent_channels() {
         assert_eq!(neutral_button_fill(true, 26).to_array(), [26, 26, 26, 26]);
         assert_eq!(neutral_button_fill(true, 51).to_array(), [51, 51, 51, 51]);
-        assert_eq!(neutral_button_fill(false, 26).to_array(), [0, 0, 0, 26]);
-        assert_eq!(neutral_button_fill(false, 51).to_array(), [0, 0, 0, 51]);
+        // Light mode: a warm brown at the same opacity, not black.
+        let light = neutral_button_fill(false, 26);
+        assert_eq!(light.a(), 26);
+        assert!(light.r() > light.g() && light.g() > light.b(), "{light:?}");
+        assert_eq!(neutral_button_fill(false, 51).a(), 51);
     }
 
     /// WCAG contrast ratio between two opaque colors.

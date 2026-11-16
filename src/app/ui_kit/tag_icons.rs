@@ -276,9 +276,10 @@ pub(in crate::app) fn tag_icon_image(
 ) -> egui::Image<'static> {
     let uri = tag_icon_uri_for_pixels_per_point_and_size(icon.name, ctx.pixels_per_point(), size);
     // On light panels the icons' bright colours wash out, so each is
-    // darkened, keeping its hue, until it reads against the editor.
+    // darkened, keeping its hue, until it reads against the tag tree's
+    // panel, the deepest they sit on.
     let backdrop = (!is_dark_mode()).then(|| {
-        let [r, g, b, _] = editor_bg().to_array();
+        let [r, g, b, _] = left_panel().to_array();
         [r, g, b]
     });
     if icon.svg.contains("currentColor") || backdrop.is_some() {
@@ -688,7 +689,7 @@ mod tests {
     /// keeping its hue; one that already reads keeps its colour.
     #[test]
     fn light_mode_icons_darken_until_they_read() {
-        let backdrop = [243, 233, 225];
+        let backdrop = [247, 221, 201];
         let yellow = readable_on([0xF8, 0xBE, 0x00], backdrop);
         assert!(contrast(yellow, backdrop) >= ICON_CONTRAST, "{yellow:?}");
         assert!(yellow[0] > yellow[2] && yellow[1] > yellow[2], "still yellow: {yellow:?}");

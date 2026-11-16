@@ -567,7 +567,7 @@ pub(in crate::app) fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction:
     let bg = if is_dark_mode() {
         Color32::from_rgb(31, 31, 30)
     } else {
-        Color32::from_rgb(215, 215, 210)
+        Color32::from_rgb(226, 208, 194)
     };
     let fill = if is_dark_mode() {
         Color32::from_rgb(69, 111, 132)
