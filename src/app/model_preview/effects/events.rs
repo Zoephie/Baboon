@@ -88,11 +88,49 @@ pub(in crate::app::model_preview) fn event_function_name(field: &str, path: &str
     format!("{field}: {stem}")
 }
 
+/// An effect an event plays: the field that names it, its path, and the
+/// marker the field beside it names, which its `replace` locations take.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::app::model_preview) struct EventEffectRef {
+    pub(in crate::app::model_preview) field: String,
+    pub(in crate::app::model_preview) path: String,
+    pub(in crate::app::model_preview) marker: String,
+}
+
+/// The marker field that goes with an effect field in the same element: an
+/// instant response's `transition effect` takes `effect marker name` (Reach
+/// splits it into `generic effect marker` and `specific effect marker`); a
+/// `delay effect`, `looping effect` or `pre recharge effect` takes the field
+/// of its own name plus `marker name` or `marker`. Empty when there is none,
+/// and the effect plays at the object's origin.
+pub(in crate::app::model_preview) fn effect_marker_beside(
+    holder: TagStruct<'_>,
+    effect_field: &str,
+) -> String {
+    let mut candidates = vec![
+        format!("{effect_field} marker name"),
+        format!("{effect_field} marker"),
+    ];
+    if effect_field.starts_with("transition effect") {
+        if effect_field.contains("(specific)") {
+            candidates.push("specific effect marker".to_owned());
+        } else {
+            candidates.push("generic effect marker".to_owned());
+        }
+        candidates.push("effect marker name".to_owned());
+    }
+    candidates
+        .iter()
+        .map(|field| super::placement::marker_name(holder, field))
+        .find(|marker| !marker.is_empty())
+        .unwrap_or_default()
+}
+
 /// Every effect reference under `holder`, by the field that names it, leaving
 /// out `attachments`, which run on their own.
 pub(in crate::app::model_preview) fn collect_event_effects(
     holder: TagStruct<'_>,
-    found: &mut Vec<(String, String)>,
+    found: &mut Vec<EventEffectRef>,
 ) {
     let effect_group = u32::from_be_bytes(*b"effe");
     for field in holder.fields() {
@@ -105,7 +143,11 @@ pub(in crate::app::model_preview) fn collect_event_effects(
                 && group == effect_group
                 && !path.is_empty()
             {
-                found.push((name.to_owned(), path));
+                found.push(EventEffectRef {
+                    field: name.to_owned(),
+                    path,
+                    marker: effect_marker_beside(holder, name),
+                });
             }
         } else if let Some(child) = field.as_struct() {
             collect_event_effects(child, found);

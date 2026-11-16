@@ -148,7 +148,8 @@ pub(in crate::app::model_preview) fn read_ce_event_effects(
     let mut cache = CeEffectCache::default();
     let mut seen = std::collections::HashSet::new();
     let mut effects = Vec::new();
-    for (field, path) in named {
+    // Halo CE's events name no marker beside their effects.
+    for super::super::super::effects::EventEffectRef { field, path, .. } in named {
         if !seen.insert(path.clone()) {
             continue;
         }
