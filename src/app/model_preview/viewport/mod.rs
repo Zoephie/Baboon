@@ -88,7 +88,7 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
         state,
         rect,
         time,
-        preview_background(ui.visuals()),
+        state.background.color(preview_background(ui.visuals())),
         &[],
     );
     // The overlays below draw over the same view and pose.

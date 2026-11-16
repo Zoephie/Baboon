@@ -540,6 +540,9 @@ pub(in crate::app) struct GuiPrefs {
     /// The model preview's projection: perspective, or orthographic when
     /// cleared. Shared by every tag pane and remembered across sessions.
     pub(in crate::app) model_preview_perspective: bool,
+    /// What the model preview's viewport is cleared to. Shared by every tag
+    /// pane and remembered across sessions.
+    pub(in crate::app) model_preview_background: crate::app::model_preview::ModelPreviewBackground,
     pub(in crate::app) bitmap_preview_view: BitmapPreviewViewSettings,
     pub(in crate::app) blender_path: Option<PathBuf>,
     pub(in crate::app) editing_kit_paths: HashMap<String, PathBuf>,
@@ -616,6 +619,7 @@ impl Default for GuiPrefs {
             zoom_speed: DEFAULT_ZOOM_SPEED,
             model_setup_width: DEFAULT_MODEL_SETUP_WIDTH,
             model_preview_perspective: true,
+            model_preview_background: crate::app::model_preview::ModelPreviewBackground::Theme,
             bitmap_preview_view: BitmapPreviewViewSettings::default(),
             blender_path: None,
             editing_kit_paths: HashMap::new(),

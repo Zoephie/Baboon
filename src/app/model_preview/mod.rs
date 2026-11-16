@@ -124,5 +124,5 @@ use viewport::draw_model_viewport;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::{
     DEFAULT_MODEL_SETUP_WIDTH, MAX_MODEL_SETUP_WIDTH, MIN_MODEL_SETUP_WIDTH, ModelPreviewState,
-    ModelRegionSelection, ModelRenderMode, ModelTagPanelTab,
+    ModelPreviewBackground, ModelRegionSelection, ModelRenderMode, ModelShading, ModelTagPanelTab,
 };

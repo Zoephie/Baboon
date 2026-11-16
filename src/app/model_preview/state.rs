@@ -111,6 +111,9 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) animation: PreviewAnimationPlayback,
     /// Draw the world-unit ground grid at z = 0 under the geometry.
     pub(in crate::app) show_grid: bool,
+    /// What the viewport is cleared to. The tag pane keeps it in step with
+    /// `GuiPrefs::model_preview_background`.
+    pub(in crate::app) background: ModelPreviewBackground,
     pub(in crate::app) scale: f32,
     pub(in crate::app) yaw: f32,
     pub(in crate::app) pitch: f32,
@@ -170,6 +173,7 @@ impl Default for ModelPreviewState {
             perspective: true,
             animation: PreviewAnimationPlayback::default(),
             show_grid: true,
+            background: ModelPreviewBackground::Theme,
             scale: 1.0,
             yaw: -0.45,
             pitch: 0.25,
@@ -309,9 +313,176 @@ impl ModelRenderMode {
     }
 }
 
+/// The Shading menu's choice: how the model's surfaces are drawn. Each is a
+/// render mode, and Game Shaders is Textured through the game's own passes;
+/// the wireframe drawn over a shaded choice is a toggle of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum ModelShading {
+    Wireframe,
+    Solid,
+    Textured,
+    GameShaders,
+}
+
+impl ModelShading {
+    pub(in crate::app) const ALL: [Self; 4] =
+        [Self::Wireframe, Self::Solid, Self::Textured, Self::GameShaders];
+
+    pub(in crate::app) fn label(self) -> &'static str {
+        match self {
+            Self::Wireframe => "Wireframe",
+            Self::Solid => "Solid",
+            Self::Textured => "Textured",
+            Self::GameShaders => "Game Shaders",
+        }
+    }
+
+    pub(in crate::app) fn uses_textures(self) -> bool {
+        matches!(self, Self::Textured | Self::GameShaders)
+    }
+}
+
+/// What the model viewport is cleared to behind the model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum ModelPreviewBackground {
+    /// The page's own background, dark or light with the theme.
+    Theme,
+    White,
+    Black,
+    GreenScreen,
+}
+
+impl ModelPreviewBackground {
+    pub(in crate::app) const ALL: [Self; 4] =
+        [Self::Theme, Self::White, Self::Black, Self::GreenScreen];
+
+    pub(in crate::app) fn label(self) -> &'static str {
+        match self {
+            Self::Theme => "Theme",
+            Self::White => "White",
+            Self::Black => "Black",
+            Self::GreenScreen => "Green Screen",
+        }
+    }
+
+    /// The clear colour, `theme` being the page's own.
+    pub(in crate::app) fn color(self, theme: [f32; 3]) -> [f32; 3] {
+        match self {
+            Self::Theme => theme,
+            Self::White => [1.0; 3],
+            Self::Black => [0.0; 3],
+            // Chroma-key green, #00B140.
+            Self::GreenScreen => [0.0, 177.0 / 255.0, 64.0 / 255.0],
+        }
+    }
+
+    pub(in crate::app) fn as_str(self) -> &'static str {
+        match self {
+            Self::Theme => "theme",
+            Self::White => "white",
+            Self::Black => "black",
+            Self::GreenScreen => "green_screen",
+        }
+    }
+
+    pub(in crate::app) fn from_str(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|background| background.as_str() == value)
+    }
+}
+
+impl ModelPreviewState {
+    /// The Shading menu's choice the render mode and Game Shaders make.
+    pub(in crate::app) fn shading(&self) -> ModelShading {
+        match self.render_mode {
+            ModelRenderMode::Wireframe => ModelShading::Wireframe,
+            ModelRenderMode::Solid | ModelRenderMode::SolidWireframe => ModelShading::Solid,
+            ModelRenderMode::Textured | ModelRenderMode::TexturedWireframe
+                if self.game_shaders =>
+            {
+                ModelShading::GameShaders
+            }
+            ModelRenderMode::Textured | ModelRenderMode::TexturedWireframe => {
+                ModelShading::Textured
+            }
+        }
+    }
+
+    /// Pick `shading`, keeping the wireframe drawn over it as it was.
+    /// Returns whether Game Shaders turned on or off, which reads the
+    /// preview again.
+    pub(in crate::app) fn set_shading(&mut self, shading: ModelShading) -> bool {
+        let overlay = self.wireframe_overlay();
+        self.render_mode = match shading {
+            ModelShading::Wireframe => ModelRenderMode::Wireframe,
+            ModelShading::Solid if overlay => ModelRenderMode::SolidWireframe,
+            ModelShading::Solid => ModelRenderMode::Solid,
+            _ if overlay => ModelRenderMode::TexturedWireframe,
+            _ => ModelRenderMode::Textured,
+        };
+        let game_shaders = shading == ModelShading::GameShaders;
+        let changed = self.game_shaders != game_shaders;
+        self.game_shaders = game_shaders;
+        changed
+    }
+
+    /// Whether a wireframe is drawn over the shaded surfaces.
+    pub(in crate::app) fn wireframe_overlay(&self) -> bool {
+        matches!(
+            self.render_mode,
+            ModelRenderMode::SolidWireframe | ModelRenderMode::TexturedWireframe
+        )
+    }
+
+    /// Draw a wireframe over the shaded surfaces, or stop. Wireframe shading
+    /// is nothing but the wireframe, so it is left as it is.
+    pub(in crate::app) fn set_wireframe_overlay(&mut self, on: bool) {
+        use ModelRenderMode::*;
+        self.render_mode = match (self.render_mode, on) {
+            (Solid | SolidWireframe, true) => SolidWireframe,
+            (Solid | SolidWireframe, false) => Solid,
+            (Textured | TexturedWireframe, true) => TexturedWireframe,
+            (Textured | TexturedWireframe, false) => Textured,
+            (Wireframe, _) => Wireframe,
+        };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shading_choices_keep_the_wireframe_overlay() {
+        let mut state = ModelPreviewState::default();
+        assert_eq!(state.shading(), ModelShading::Textured);
+        state.set_wireframe_overlay(true);
+        assert_eq!(state.render_mode, ModelRenderMode::TexturedWireframe);
+        assert!(state.set_shading(ModelShading::GameShaders), "Game Shaders turned on");
+        assert_eq!(state.shading(), ModelShading::GameShaders);
+        assert!(state.wireframe_overlay());
+        assert!(state.set_shading(ModelShading::Solid), "Game Shaders turned off");
+        assert_eq!(state.render_mode, ModelRenderMode::SolidWireframe);
+        assert!(!state.game_shaders);
+        state.set_shading(ModelShading::Wireframe);
+        state.set_wireframe_overlay(false);
+        assert_eq!(state.render_mode, ModelRenderMode::Wireframe);
+        assert!(!state.set_shading(ModelShading::Textured));
+        assert_eq!(state.render_mode, ModelRenderMode::Textured);
+    }
+
+    #[test]
+    fn preview_backgrounds_round_trip_their_names() {
+        for background in ModelPreviewBackground::ALL {
+            assert_eq!(
+                ModelPreviewBackground::from_str(background.as_str()),
+                Some(background)
+            );
+        }
+        let theme = [0.1, 0.2, 0.3];
+        assert_eq!(ModelPreviewBackground::Theme.color(theme), theme);
+    }
 
     #[test]
     fn model_render_modes_select_expected_passes() {

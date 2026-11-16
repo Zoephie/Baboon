@@ -18,6 +18,19 @@ pub(in crate::app::model_preview) const MODEL_PREVIEW_STATS_FOOTER_HEIGHT: f32 =
 
 pub(in crate::app::model_preview) const MODEL_PREVIEW_SECTION_GAP: f32 = 8.0;
 
+/// The viewport card's title. Its header draws it itself, at the left of its
+/// actions, and only when it has no model toggles to show there instead.
+pub(in crate::app::model_preview) const MODEL_PREVIEW_TITLE: &str = "Model Preview";
+
+/// A section header's title text.
+pub(in crate::app::model_preview) fn section_title(ui: &mut Ui, title: &str) -> egui::Response {
+    ui.label(
+        RichText::new(title)
+            .font(bold_font(12.5))
+            .color(foundation_block_text()),
+    )
+}
+
 pub(in crate::app::model_preview) fn draw_loading_section_body(ui: &mut Ui, height: f32) {
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width().max(1.0), height.max(1.0)),
@@ -39,7 +52,7 @@ pub(in crate::app::model_preview) fn draw_model_preview_loading_shells(
         draw_loading_section_body(ui, rects.setup.height());
     });
     let cards = [
-        (rects.preview, "Model Preview", PREVIEW_HEADER_HEIGHT),
+        (rects.preview, MODEL_PREVIEW_TITLE, PREVIEW_HEADER_HEIGHT),
         (
             rects.animation,
             "Animation Player",
@@ -49,10 +62,14 @@ pub(in crate::app::model_preview) fn draw_model_preview_loading_shells(
     for (rect, title, chrome) in cards {
         in_rect(ui, rect, title, |ui| {
             let body = (rect.height() - chrome).max(1.0);
-            draw_model_preview_section(ui, title, Some(body), |ui, part| {
-                if part == ModelPreviewSectionPart::Body {
-                    draw_loading_section_body(ui, body);
+            draw_model_preview_section(ui, title, Some(body), |ui, part| match part {
+                ModelPreviewSectionPart::Body => draw_loading_section_body(ui, body),
+                ModelPreviewSectionPart::Header if title == MODEL_PREVIEW_TITLE => {
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        section_title(ui, title);
+                    });
                 }
+                ModelPreviewSectionPart::Header => {}
             });
         });
     }
@@ -105,7 +122,7 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
             && header_wrap_width
                 .map(|wrap_width| width < wrap_width)
                 .unwrap_or(false);
-        let edge_to_edge = matches!(title, "Model Preview" | "Bitmap Preview");
+        let edge_to_edge = matches!(title, MODEL_PREVIEW_TITLE | "Bitmap Preview");
         let extra_header_height = if wrapped_bitmap_header {
             40.0
         } else if animation_header {
@@ -138,12 +155,8 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
         };
         let mut title_ui = ui.new_child(egui::UiBuilder::new().max_rect(title_rect));
         title_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            if !bitmap_header {
-                ui.label(
-                    RichText::new(title)
-                        .font(bold_font(12.5))
-                        .color(foundation_block_text()),
-                );
+            if !bitmap_header && title != MODEL_PREVIEW_TITLE {
+                section_title(ui, title);
             }
         });
         let actions_rect = if bitmap_header {

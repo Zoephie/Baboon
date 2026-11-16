@@ -4,10 +4,10 @@ use super::super::super::ui_kit::button_icons::{
 use super::super::super::ui_kit::style::{
     BUTTON_HEIGHT, ICON_BUTTON_SIZE, foundation_fonts, foundation_style,
 };
-use super::super::super::{Baboon, TagSource, locate_definitions_root};
+use super::super::super::{Baboon, TagSource};
 use super::super::{
     ANIMATION_FRAME_RATE, MIN_MODEL_SETUP_WIDTH, ModelPreviewData, ModelPreviewLayer,
-    ModelPreviewState, ModelRegionSelection, ModelRenderMode, PHYSICS_REGION,
+    ModelPreviewState, ModelRegionSelection, ModelShading, PHYSICS_REGION,
     PreviewAnimationEntry, PreviewAnimationPlayback, PreviewAnimationPose, RenderModelPreview,
     RenderModelPreviewBatch, RenderModelPreviewRegion, build_render_preview, frame,
     is_model_physics_overlay_region, load_referenced_tag_from_source, merge_preview_append,
@@ -28,7 +28,6 @@ use crate::app::model_preview::harness::kit::kit_root;
 use crate::app::ui_kit::checkbox::CheckboxUi as _;
 use crate::app::ui_kit::radio::RadioUi as _;
 use crate::core::game::GameId;
-use blam_tags::TagFile;
 use eframe::egui;
 use eframe::egui::{Sense, Vec2};
 
@@ -990,15 +989,16 @@ fn a_long_animation_is_ticked_every_few_frames() {
     assert!(ticks.windows(2).all(|pair| pair[1] - pair[0] >= 3.0));
 }
 
-/// A shading mode is picked from inside the View menu. It was a combo box
-/// there, whose list is a popup of its own; egui 0.36 keeps one popup open at
-/// a time, so opening the list closed the menu and nothing could be picked.
+/// A shading choice is picked from inside the Shading menu. It was a combo
+/// box in the View menu, whose list is a popup of its own; egui 0.36 keeps one
+/// popup open at a time, so opening the list closed the menu and nothing could
+/// be picked. Game Shaders is one of the choices, and picking it turns the
+/// game's shaders on.
 #[test]
-fn a_shading_mode_is_picked_inside_the_view_menu() {
+fn a_shading_choice_is_picked_inside_the_shading_menu() {
     let ctx = egui::Context::default();
     ctx.set_fonts(crate::app::foundation_fonts());
     ctx.set_global_style(crate::app::foundation_style());
-    let tag = TagFile::new(locate_definitions_root().join("halo3_mcc/render_model.json")).unwrap();
     let data = model_preview_data(
         "test".to_owned(),
         "test".to_owned(),
@@ -1006,10 +1006,8 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
         Vec::new(),
     );
     let mut state = ModelPreviewState::default();
-    let target = ModelRenderMode::ALL
-        .into_iter()
-        .find(|mode| *mode != state.render_mode)
-        .expect("more than one mode");
+    let target = ModelShading::GameShaders;
+    assert_ne!(state.shading(), target);
     let mut time = 0.0;
     type Painted = Vec<(String, egui::Rect)>;
     let mut frame = |events: Vec<egui::Event>, state: &mut ModelPreviewState| -> Painted {
@@ -1029,13 +1027,10 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
                 egui::CentralPanel::default().show(ui, |ui| {
                     draw_model_view_settings_menu(
                         ui,
-                        &tag,
                         &data,
                         state,
                         true,
                         None,
-                        Some(GameId::Halo3),
-                        false,
                     );
                 });
             },
@@ -1082,8 +1077,8 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
     let shown = frame(Vec::new(), &mut state);
     let menu = shown
         .iter()
-        .find(|(text, _)| text.starts_with("View:"))
-        .unwrap_or_else(|| panic!("the View button: {shown:?}"))
+        .find(|(text, _)| text == "Textured")
+        .unwrap_or_else(|| panic!("the Shading button: {shown:?}"))
         .1
         .center();
     let shown = click(&mut frame, menu, &mut state);
@@ -1094,7 +1089,8 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
         .1
         .center();
     click(&mut frame, option, &mut state);
-    assert_eq!(state.render_mode, target, "the mode was picked");
+    assert_eq!(state.shading(), target, "the choice was picked");
+    assert!(state.game_shaders, "Game Shaders is on");
 }
 
 #[test]
@@ -1129,7 +1125,6 @@ fn icon_checkbox_label_has_no_text_cursor() {
                     &mut checked,
                     ModelViewCheckboxIcon::Markers,
                     "Markers",
-                    None,
                 );
             },
         )
@@ -1183,7 +1178,6 @@ fn menu_checkbox_glyphs_align_with_option_icons() {
                             &mut checked,
                             ModelViewCheckboxIcon::Markers,
                             "Markers",
-                            None,
                         );
                         ui.baboon_checkbox(&mut checked, "Show prefixes");
                         ui.baboon_radio_value(&mut checked, true, "Textured");

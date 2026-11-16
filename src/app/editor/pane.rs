@@ -190,6 +190,7 @@ pub(in crate::app) fn draw_tag_pane(
     } = inputs;
     let bitmap_preview_view = cx.model.prefs.bitmap_preview_view;
     let model_preview_perspective = cx.model.prefs.model_preview_perspective;
+    let model_preview_background = cx.model.prefs.model_preview_background;
 
     let Some(doc) = cx.model.kits[kit_index].parsed_tags.get(&key) else {
         if cx.model.kits[kit_index].loading_tags.contains(&key) {
@@ -487,6 +488,7 @@ pub(in crate::app) fn draw_tag_pane(
         // One projection for every pane, as the bitmap view settings are:
         // applied going in, and a toggle in this pane written back.
         model_preview.perspective = model_preview_perspective;
+        model_preview.background = model_preview_background;
         let document_revision = (
             doc.id,
             doc.dirty.revision(),
@@ -528,6 +530,10 @@ pub(in crate::app) fn draw_tag_pane(
         if model_preview.perspective != model_preview_perspective {
             let perspective = model_preview.perspective;
             cx.edit_prefs(move |prefs| prefs.model_preview_perspective = perspective);
+        }
+        if model_preview.background != model_preview_background {
+            let background = model_preview.background;
+            cx.edit_prefs(move |prefs| prefs.model_preview_background = background);
         }
     }
 

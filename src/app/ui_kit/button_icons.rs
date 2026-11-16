@@ -124,6 +124,7 @@ pub(in crate::app) enum ButtonIcon {
     TableView,
     Bitmap,
     View,
+    Shading,
     WindowMode,
     NavigationPane,
     FolderClosed,
@@ -229,6 +230,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::NewTag => include_root_str!("assets/Button Icons/New Tag.svg"),
         ButtonIcon::TableView => include_root_str!("assets/Button Icons/Table View.svg"),
         ButtonIcon::View => include_root_str!("assets/Button Icons/View.svg"),
+        ButtonIcon::Shading => include_root_str!("assets/Button Icons/shading.svg"),
         ButtonIcon::Bitmap => {
             if is_dark_mode() {
                 include_root_str!("assets/tag icons/bitmap.svg")
@@ -1262,6 +1264,7 @@ mod tests {
             ButtonIcon::TableView,
             ButtonIcon::Pin,
             ButtonIcon::View,
+            ButtonIcon::Shading,
             ButtonIcon::WindowMode,
             ButtonIcon::NavigationPane,
         ];

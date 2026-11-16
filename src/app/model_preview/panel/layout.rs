@@ -18,10 +18,11 @@ use super::animation::{animation_card_height, draw_animation_player};
 use super::functions::draw_setup_body;
 use super::section::{
     MODEL_PREVIEW_SECTION_GAP, MODEL_PREVIEW_STATS_FOOTER_HEIGHT, ModelPreviewSectionPart,
-    draw_model_preview_loading_shells, draw_model_preview_section,
+    MODEL_PREVIEW_TITLE, draw_model_preview_loading_shells, draw_model_preview_section,
+    section_title,
 };
 use super::setup::draw_setup_header_actions;
-use super::view_menu::draw_model_view_settings_menu;
+use super::view_menu::{draw_model_layer_toggles, draw_model_view_settings_menu};
 use super::viewport_size::draw_model_viewport_with_stats;
 use blam_tags::TagFile;
 use eframe::egui;
@@ -212,7 +213,7 @@ pub(in crate::app::model_preview) fn draw_preview_card(
     let body_height = (height - PREVIEW_HEADER_HEIGHT).max(1.0);
     draw_model_preview_section(
         ui,
-        "Model Preview",
+        MODEL_PREVIEW_TITLE,
         Some(body_height),
         |ui, part| match part {
             ModelPreviewSectionPart::Header => draw_preview_header(ui, panel, state, requests),
@@ -267,8 +268,9 @@ pub(in crate::app::model_preview) fn setup_scroll_gutter(ui: &Ui) -> f32 {
     sidebar_scroll_gutter(ui)
 }
 
-/// The Model Preview card's header, right to left: the view settings menu,
-/// then Refresh Model to the left of the Camera menu.
+/// The Model Preview card's header. Right to left: the View, Shading and
+/// Camera menus, then Refresh Model. At the left, the model and armature
+/// toggles, or the card's title for a tag with none.
 pub(in crate::app::model_preview) fn draw_preview_header(
     ui: &mut Ui,
     panel: &PreviewPanel<'_>,
@@ -277,13 +279,10 @@ pub(in crate::app::model_preview) fn draw_preview_header(
 ) {
     draw_model_view_settings_menu(
         ui,
-        panel.tag,
         panel.data,
         state,
         panel.supports_textures,
         panel.own_view,
-        panel.source_game,
-        !panel.data.preview.nodes.is_empty(),
     );
     if icon_text_button(ui, ButtonIcon::Refresh, "Refresh Model", true)
         .on_hover_text("Load the model again from its tags.")
@@ -292,6 +291,21 @@ pub(in crate::app::model_preview) fn draw_preview_header(
         state.invalidate_load();
         requests.reload = true;
     }
+    // What the menus leave, from the header's left edge.
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        let toggles = draw_model_layer_toggles(
+            ui,
+            panel.tag,
+            panel.data,
+            state,
+            panel.own_view,
+            panel.source_game,
+            !panel.data.preview.nodes.is_empty(),
+        );
+        if !toggles {
+            section_title(ui, MODEL_PREVIEW_TITLE);
+        }
+    });
 }
 
 /// What the preview panel and its tab call themselves, by tag group. Only
