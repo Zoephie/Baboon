@@ -83,7 +83,9 @@ pub(in crate::app) use panel::{
 
 #[cfg(test)]
 use animation::PreviewAnimationPose;
-use animation::{ANIMATION_FRAME_RATE, animation_skinning_rows, armature_node_positions};
+use animation::{
+    ANIMATION_FRAME_RATE, animation_skinning_rows, armature_node_matrices, armature_node_positions,
+};
 #[cfg(test)]
 use ce::frame::object_states;
 use data::{MODEL_ERROR_FALLBACK_COLOR, NEXT_MODEL_GEOMETRY_ID, model_preview_data};
@@ -121,6 +123,7 @@ use selection::{
     selected_variant_regions,
 };
 use viewport::draw_model_viewport;
+pub(in crate::app) use viewport::BoundingSphere;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::{
     DEFAULT_MODEL_SETUP_WIDTH, MAX_MODEL_SETUP_WIDTH, MIN_MODEL_SETUP_WIDTH, ModelPreviewState,

@@ -3,26 +3,29 @@
 
 use super::super::super::GameId;
 use super::super::super::ui_kit::button_icons::{
-    ButtonIcon, icon_text_dropdown_button, paint_button_icon_at, paint_checkbox_row_hover,
-    selectable_text_button,
+    ButtonIcon, fixed_width_icon_text_menu_button, icon_dropdown_button, icon_text_dropdown_button,
+    paint_button_icon_at, paint_checkbox_row_hover, selectable_text_button,
 };
 use super::super::super::ui_kit::checkbox::ThemedCheckbox;
 use super::super::super::ui_kit::style::{
     BUTTON_HEIGHT, foundation_input_edge, menu_control_margin, placeholder_text, subtle_dark,
     text_dark,
 };
-use super::super::super::ui_kit::tag_icons::paint_tag_icon_at;
+use super::super::super::ui_kit::tag_icons::{
+    paint_tag_icon_at, tag_icon, tag_icon_accent, tag_icon_image_in,
+};
 use super::super::load::OwnViewSettings;
 use super::super::{
-    MAX_PREVIEW_SCALE, ModelPreviewBackground, ModelPreviewData, ModelPreviewLayer,
-    ModelPreviewState, ModelShading, is_object_family_group, min_preview_scale,
+    BoundingSphere, MAX_PREVIEW_SCALE, ModelPreviewBackground, ModelPreviewData,
+    ModelPreviewLayer, ModelPreviewState, ModelShading, is_object_family_group,
+    min_preview_scale,
 };
 use crate::app::ui_kit::checkbox::CheckboxUi as _;
 use blam_tags::TagFile;
 use eframe::egui;
 use eframe::egui::{Frame, RichText, Sense, Stroke, Ui, Vec2};
 
-/// The preview header's menus, right to left: View, Shading, then Camera.
+/// The preview header's menus, right to left: View, then Shading.
 pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
     ui: &mut Ui,
     data: &ModelPreviewData,
@@ -32,10 +35,13 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
 ) {
     draw_model_view_menu(ui, data, state, own_view);
     draw_model_shading_menu(ui, data, state, supports_textures);
-    draw_model_camera_menu(ui, data, state);
 }
 
 const MENU_WIDTH: f32 = 280.0;
+
+/// The Shading button's width, which fits its longest choice, Game Shaders,
+/// so picking another never shifts the buttons beside it.
+pub(in crate::app::model_preview) const SHADING_BUTTON_WIDTH: f32 = 140.0;
 
 /// One of a menu's mutually exclusive choices: a full-width row, highlighted
 /// while it is the one in effect.
@@ -55,114 +61,120 @@ pub(in crate::app::model_preview) fn draw_model_shading_menu(
     supports_textures: bool,
 ) {
     let current = state.shading();
-    preview_header_menu(ui, ButtonIcon::Shading, current.label(), |ui| {
-        // Fix both bounds: a menu's sizing pass can otherwise let its rows
-        // grow wider than the menu.
-        ui.set_width(MENU_WIDTH);
-        // Shading is picked right here. It was a combo box, whose list is
-        // a popup of its own; egui 0.36 keeps one popup open at a time, so
-        // opening it closed this menu and nothing could be picked.
-        for shading in ModelShading::ALL {
-            if !supports_textures && shading.uses_textures() {
-                continue;
+    fixed_width_icon_text_menu_button(
+        ui,
+        ButtonIcon::Shading,
+        current.label(),
+        SHADING_BUTTON_WIDTH,
+        |ui| {
+            // Fix both bounds: a menu's sizing pass can otherwise let its rows
+            // grow wider than the menu.
+            ui.set_width(MENU_WIDTH);
+            // Shading is picked right here. It was a combo box, whose list is
+            // a popup of its own; egui 0.36 keeps one popup open at a time, so
+            // opening it closed this menu and nothing could be picked.
+            for shading in ModelShading::ALL {
+                if !supports_textures && shading.uses_textures() {
+                    continue;
+                }
+                let response = menu_choice(ui, shading.label(), current == shading);
+                let response = if shading == ModelShading::GameShaders {
+                    response.on_hover_text(
+                        "Draw Halo CE, Halo 2 and Halo 3 materials through the game's own \
+                         shaders, lit by its default lighting, with the object's effects \
+                         and functions. The other choices read none of those.",
+                    )
+                } else {
+                    response
+                };
+                // What Game Shaders reads changes, so the preview reads again.
+                if response.clicked() && state.set_shading(shading) {
+                    super::weapons::carry_through_reload(data, state);
+                }
             }
-            let response = menu_choice(ui, shading.label(), current == shading);
-            let response = if shading == ModelShading::GameShaders {
-                response.on_hover_text(
-                    "Draw Halo CE, Halo 2 and Halo 3 materials through the game's own \
-                     shaders, lit by its default lighting, with the object's effects \
-                     and functions. The other choices read none of those.",
+            ui.separator();
+
+            let mut overlay = state.wireframe_overlay();
+            if ui
+                .add_enabled(
+                    current != ModelShading::Wireframe,
+                    ThemedCheckbox::new(&mut overlay, "Wireframe"),
                 )
+                .on_hover_text("Draw the wireframe over the shaded model.")
+                .changed()
+            {
+                state.set_wireframe_overlay(overlay);
+            }
+            ui.baboon_checkbox(&mut state.show_backfaces, "Render Backfaces");
+
+            const NEEDS_GAME_SHADERS: &str = "Needs Game Shaders shading.";
+            let game_shaders = state.game_shaders;
+            // What a game's models draw no differently for, its rules leave out.
+            let lit_options = super::super::load::rules(data.preview.game).lit_options;
+            if lit_options {
+                ui.add_enabled(
+                    game_shaders,
+                    ThemedCheckbox::new(&mut state.default_lights, "Default Lights"),
+                )
+                .on_hover_text(
+                    "Light Halo 2 models as the game does in a level with no lightmaps: \
+                     fixed lighting plus two sphere lights. Off, they are lit as an \
+                     object in a level with lightmaps.",
+                )
+                .on_disabled_hover_text(NEEDS_GAME_SHADERS);
+                ui.add_enabled(game_shaders, ThemedCheckbox::new(&mut state.prt, "PRT"))
+                    .on_hover_text(
+                        "Use the occlusion Halo 2 and Halo 3 models bake into their vertices. \
+                         Off, they light as though nothing shades them.",
+                    )
+                    .on_disabled_hover_text(NEEDS_GAME_SHADERS);
+            }
+            ui.add_enabled(
+                game_shaders && (!lit_options || !state.default_lights),
+                ThemedCheckbox::new(&mut state.light_follows_camera, "Light Follows Camera"),
+            )
+            .on_hover_text(
+                "Keep the main light of Halo 2 and Halo 3 models beside the viewer as you \
+                 orbit. This is the preview's own. Off, it stays fixed to the model.",
+            )
+            .on_disabled_hover_text(if game_shaders {
+                "Default Lights places the lights itself."
             } else {
-                response
-            };
-            // What Game Shaders reads changes, so the preview reads again.
-            if response.clicked() && state.set_shading(shading) {
-                super::weapons::carry_through_reload(data, state);
+                NEEDS_GAME_SHADERS
+            });
+            ui.add_enabled(
+                game_shaders,
+                ThemedCheckbox::new(&mut state.active_camo, "Active Camo"),
+            )
+            .on_hover_text(
+                "Draw a Halo 2 or Halo 3 model through its active camouflage, for \
+                 the models that have it.",
+            )
+            .on_disabled_hover_text(NEEDS_GAME_SHADERS);
+            if lit_options {
+                ui.add_enabled(game_shaders, ThemedCheckbox::new(&mut state.bloom, "Bloom"))
+                    .on_hover_text(
+                        "Add the glow of Halo 2 and Halo 3 materials with a bloom pass. The \
+                         blur is Halo 2's, and its strength is this preview's own: the \
+                         game's follows the exposure of the whole scene.",
+                    )
+                    .on_disabled_hover_text(NEEDS_GAME_SHADERS);
+                ui.add_enabled(
+                    game_shaders,
+                    ThemedCheckbox::new(&mut state.self_shadow, "Self Shadow"),
+                )
+                .on_hover_text(
+                    "Shadow Halo 2 and Halo 3 models from their main light. Halo 3 uses the \
+                     game's own shadow pass; Halo 2's is the preview's, as the game draws none here.",
+                )
+                .on_disabled_hover_text(NEEDS_GAME_SHADERS);
             }
-        }
-        ui.separator();
-
-        let mut overlay = state.wireframe_overlay();
-        if ui
-            .add_enabled(
-                current != ModelShading::Wireframe,
-                ThemedCheckbox::new(&mut overlay, "Wireframe"),
-            )
-            .on_hover_text("Draw the wireframe over the shaded model.")
-            .changed()
-        {
-            state.set_wireframe_overlay(overlay);
-        }
-        ui.baboon_checkbox(&mut state.show_backfaces, "Render Backfaces");
-
-        const NEEDS_GAME_SHADERS: &str = "Needs Game Shaders shading.";
-        let game_shaders = state.game_shaders;
-        // What a game's models draw no differently for, its rules leave out.
-        let lit_options = super::super::load::rules(data.preview.game).lit_options;
-        if lit_options {
-            ui.add_enabled(
-                game_shaders,
-                ThemedCheckbox::new(&mut state.default_lights, "Default Lights"),
-            )
-            .on_hover_text(
-                "Light Halo 2 models as the game does in a level with no lightmaps: \
-                 fixed lighting plus two sphere lights. Off, they are lit as an \
-                 object in a level with lightmaps.",
-            )
-            .on_disabled_hover_text(NEEDS_GAME_SHADERS);
-            ui.add_enabled(game_shaders, ThemedCheckbox::new(&mut state.prt, "PRT"))
-                .on_hover_text(
-                    "Use the occlusion Halo 2 and Halo 3 models bake into their vertices. \
-                     Off, they light as though nothing shades them.",
-                )
-                .on_disabled_hover_text(NEEDS_GAME_SHADERS);
-        }
-        ui.add_enabled(
-            game_shaders && (!lit_options || !state.default_lights),
-            ThemedCheckbox::new(&mut state.light_follows_camera, "Light Follows Camera"),
-        )
-        .on_hover_text(
-            "Keep the main light of Halo 2 and Halo 3 models beside the viewer as you \
-             orbit. This is the preview's own. Off, it stays fixed to the model.",
-        )
-        .on_disabled_hover_text(if game_shaders {
-            "Default Lights places the lights itself."
-        } else {
-            NEEDS_GAME_SHADERS
-        });
-        ui.add_enabled(
-            game_shaders,
-            ThemedCheckbox::new(&mut state.active_camo, "Active Camo"),
-        )
-        .on_hover_text(
-            "Draw a Halo 2 or Halo 3 model through its active camouflage, for \
-             the models that have it.",
-        )
-        .on_disabled_hover_text(NEEDS_GAME_SHADERS);
-        if lit_options {
-            ui.add_enabled(game_shaders, ThemedCheckbox::new(&mut state.bloom, "Bloom"))
-                .on_hover_text(
-                    "Add the glow of Halo 2 and Halo 3 materials with a bloom pass. The \
-                     blur is Halo 2's, and its strength is this preview's own: the \
-                     game's follows the exposure of the whole scene.",
-                )
-                .on_disabled_hover_text(NEEDS_GAME_SHADERS);
-            ui.add_enabled(
-                game_shaders,
-                ThemedCheckbox::new(&mut state.self_shadow, "Self Shadow"),
-            )
-            .on_hover_text(
-                "Shadow Halo 2 and Halo 3 models from their main light. Halo 3 uses the \
-                 game's own shadow pass; Halo 2's is the preview's, as the game draws none here.",
-            )
-            .on_disabled_hover_text(NEEDS_GAME_SHADERS);
-        }
-    });
+        },
+    );
 }
 
-/// The View menu: the game's own view settings, markers, errors, the grid
-/// and the background.
+/// The View menu: the game's own view settings, the grid, the background and
+/// the camera.
 pub(in crate::app::model_preview) fn draw_model_view_menu(
     ui: &mut Ui,
     data: &ModelPreviewData,
@@ -170,13 +182,63 @@ pub(in crate::app::model_preview) fn draw_model_view_menu(
     own_view: Option<OwnViewSettings>,
 ) {
     preview_header_menu(ui, ButtonIcon::View, "View", |ui| {
-        // Fix both bounds: a menu's sizing pass can otherwise let the
-        // full-width marker filter grow wider than the rest.
         ui.set_width(MENU_WIDTH);
         if let Some(own) = own_view {
             (own.draw)(ui, state);
             ui.separator();
         }
+        ui.baboon_checkbox(&mut state.show_grid, "Show Grid")
+            .on_hover_text("Ground-reference grid on the z = 0 plane, spaced to the model's size.");
+
+        ui.separator();
+        ui.label(RichText::new("Background Color").color(subtle_dark()).small());
+        for background in ModelPreviewBackground::ALL {
+            let response = menu_choice(ui, background.label(), state.background == background);
+            let response = if background == ModelPreviewBackground::Theme {
+                response.on_hover_text("The page's own background, dark or light with the theme.")
+            } else {
+                response
+            };
+            if response.clicked() {
+                state.background = background;
+            }
+        }
+
+        ui.separator();
+        draw_camera_settings(ui, data, state);
+    });
+}
+
+/// An object's bounding sphere: its `bounding radius` about its `bounding
+/// offset`. `None` for a tag that is no object, or one whose radius is not
+/// above 0.
+pub(in crate::app::model_preview) fn object_bounding_sphere(
+    tag: &TagFile,
+    game: Option<GameId>,
+) -> Option<BoundingSphere> {
+    if !is_object_family_group(tag.header.group_tag, game) {
+        return None;
+    }
+    let holder = super::super::common::fields::object_block(tag, "bounding radius")?;
+    let radius = holder.read_real("bounding radius")?;
+    let offset = holder.read_point3d("bounding offset");
+    (radius > 0.0).then_some(BoundingSphere {
+        center: [offset.x, offset.y, offset.z],
+        radius,
+    })
+}
+
+/// The Other menu, beside the header's model toggles: the markers, with
+/// their filter, the error reports and, for an object, its bounding sphere.
+pub(in crate::app::model_preview) fn draw_model_other_menu(
+    ui: &mut Ui,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+) {
+    icon_dropdown_button(ui, ButtonIcon::Other, "Other: markers and errors", |ui| {
+        // Fix both bounds: a menu's sizing pass can otherwise let the
+        // full-width marker filter grow wider than the rest.
+        ui.set_width(MENU_WIDTH);
         model_view_icon_checkbox(
             ui,
             &mut state.show_markers,
@@ -204,65 +266,49 @@ pub(in crate::app::model_preview) fn draw_model_view_menu(
             }
         });
 
-        ui.separator();
-        ui.baboon_checkbox(&mut state.show_grid, "Show Grid")
-            .on_hover_text("Ground-reference grid on the z = 0 plane, spaced to the model's size.");
-
-        ui.separator();
-        ui.label(RichText::new("Background Color").color(subtle_dark()).small());
-        for background in ModelPreviewBackground::ALL {
-            let response = menu_choice(ui, background.label(), state.background == background);
-            let response = if background == ModelPreviewBackground::Theme {
-                response.on_hover_text("The page's own background, dark or light with the theme.")
-            } else {
-                response
-            };
-            if response.clicked() {
-                state.background = background;
-            }
+        if state.bounding_sphere.is_some() {
+            ui.separator();
+            ui.baboon_checkbox(&mut state.show_bounding_sphere, "Show Bounding Sphere")
+                .on_hover_text(
+                    "Outline the object's bounding radius about its bounding offset.",
+                );
         }
     });
 }
 
-/// The Camera menu: zoom, projection and a reset.
-pub(in crate::app::model_preview) fn draw_model_camera_menu(
-    ui: &mut Ui,
-    data: &ModelPreviewData,
-    state: &mut ModelPreviewState,
-) {
+/// The View menu's camera settings: zoom, projection and a reset.
+fn draw_camera_settings(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
     let least = min_preview_scale(&data.preview);
-    preview_header_menu(ui, ButtonIcon::Find, "Camera", |ui| {
-        ui.set_min_width(MENU_WIDTH);
-        ui.horizontal(|ui| {
-            ui.label("Zoom");
-            ui.add(
-                egui::Slider::new(&mut state.scale, least..=MAX_PREVIEW_SCALE)
-                    .logarithmic(true)
-                    .show_value(false)
-                    .clamping(egui::SliderClamping::Always),
-            );
-            let drag_speed = (state.scale * 0.05) as f64;
-            ui.add(
-                egui::DragValue::new(&mut state.scale)
-                    .range(least..=MAX_PREVIEW_SCALE)
-                    .speed(drag_speed)
-                    .max_decimals(5)
-                    .suffix("×"),
-            );
-        });
-        ui.baboon_checkbox(&mut state.perspective, "Perspective Projection")
-            .on_hover_text(
-                "Perspective projection with a 60° lens; zooming moves the camera closer. Clear \
-                 it for the flat orthographic view. The framing at the orbit point stays \
-                 identical, so toggling never jumps.",
-            );
-        if ui.button("Reset View").clicked() {
-            state.yaw = -0.45;
-            state.pitch = 0.25;
-            state.focus = [0.0; 3];
-            state.scale = 1.0;
-        }
+    ui.label(RichText::new("Camera").color(subtle_dark()).small());
+    ui.horizontal(|ui| {
+        ui.label("Zoom");
+        ui.add(
+            egui::Slider::new(&mut state.scale, least..=MAX_PREVIEW_SCALE)
+                .logarithmic(true)
+                .show_value(false)
+                .clamping(egui::SliderClamping::Always),
+        );
+        let drag_speed = (state.scale * 0.05) as f64;
+        ui.add(
+            egui::DragValue::new(&mut state.scale)
+                .range(least..=MAX_PREVIEW_SCALE)
+                .speed(drag_speed)
+                .max_decimals(5)
+                .suffix("×"),
+        );
     });
+    ui.baboon_checkbox(&mut state.perspective, "Perspective Projection")
+        .on_hover_text(
+            "Perspective projection with a 60° lens; zooming moves the camera closer. Clear \
+             it for the flat orthographic view. The framing at the orbit point stays \
+             identical, so toggling never jumps.",
+        );
+    if ui.button("Reset View").clicked() {
+        state.yaw = -0.45;
+        state.pitch = 0.25;
+        state.focus = [0.0; 3];
+        state.scale = 1.0;
+    }
 }
 
 /// The preview header's icon toggles, left to right: the render, collision
@@ -305,7 +351,9 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
         .on_disabled_hover_text(
             "Collision Model\n\nThis model has no collision model, or it has no drawable geometry.",
         );
-        if group == *b"hlmt" {
+        // An object's physics model comes through the `.model` it names, as
+        // its collision model does; Halo CE has no physics models.
+        if source_game != Some(GameId::HaloCe) {
             let has_physics = overlay_layer_available(data, state, ModelPreviewLayer::Physics);
             layer_toggle(
                 ui,
@@ -336,7 +384,8 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
     true
 }
 
-/// An icon-only toggle showing `group`'s tag icon, highlighted while on.
+/// An icon-only toggle showing `group`'s tag icon: an ordinary button while
+/// off, filled with the icon's own colour and the icon drawn white while on.
 fn layer_toggle(
     ui: &mut Ui,
     on: &mut bool,
@@ -345,25 +394,28 @@ fn layer_toggle(
     enabled: bool,
     label: &str,
 ) -> egui::Response {
-    let highlighted = *on && enabled;
+    let icon = tag_icon(Some(u32::from_be_bytes(group)), game);
+    let accent = tag_icon_accent(icon).filter(|_| *on && enabled);
     let response = ui
         .add_enabled_ui(enabled, |ui| {
-            if highlighted {
-                let selection = ui.visuals().selection;
+            if let Some(accent) = accent {
                 let widgets = &mut ui.visuals_mut().widgets;
-                widgets.inactive.weak_bg_fill = selection.bg_fill;
-                widgets.inactive.bg_stroke = selection.stroke;
-                widgets.hovered.weak_bg_fill = selection.bg_fill;
-                widgets.active.weak_bg_fill = selection.bg_fill;
+                widgets.inactive.weak_bg_fill = accent;
+                widgets.inactive.bg_stroke = Stroke::NONE;
+                widgets.hovered.weak_bg_fill = accent.gamma_multiply(0.85);
+                widgets.hovered.bg_stroke = Stroke::NONE;
+                widgets.active.weak_bg_fill = accent.gamma_multiply(0.7);
+                widgets.active.bg_stroke = Stroke::NONE;
             }
-            let response = ui.add(
-                egui::Button::new("")
-                    .min_size(Vec2::splat(BUTTON_HEIGHT))
-                    .frame_when_inactive(highlighted),
-            );
+            let response = ui.add(egui::Button::new("").min_size(Vec2::splat(BUTTON_HEIGHT)));
             let icon_rect =
                 egui::Rect::from_center_size(response.rect.center(), Vec2::splat(16.0));
-            paint_tag_icon_at(ui, Some(u32::from_be_bytes(group)), game, icon_rect);
+            match accent {
+                Some(_) => tag_icon_image_in(ui.ctx(), icon, 16.0, egui::Color32::WHITE)
+                    .fit_to_exact_size(icon_rect.size())
+                    .paint_at(ui, icon_rect),
+                None => paint_tag_icon_at(ui, Some(u32::from_be_bytes(group)), game, icon_rect),
+            }
             response
         })
         .inner;

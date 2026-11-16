@@ -1564,3 +1564,80 @@ fn permutation_dropdown_filters_and_picks() {
         "picking a permutation turns its region on"
     );
 }
+
+/// An object's bounding sphere is its bounding radius about its bounding
+/// offset, found under the parent groups' fields; none until the radius is
+/// set, and none for a tag that is no object.
+#[test]
+fn an_objects_bounding_sphere_reads_its_radius_and_offset() {
+    let definitions = crate::core::bundled::locate_definitions_root();
+    let mut biped = blam_tags::TagFile::new(definitions.join("halo3_mcc/biped.json")).unwrap();
+    let game = Some(GameId::Halo3);
+    assert_eq!(super::view_menu::object_bounding_sphere(&biped, game), None);
+    // The parent groups' fields sit in a struct named after each.
+    let (radius, offset) = ("unit/object/bounding radius", "unit/object/bounding offset");
+    let mut root = biped.root_mut();
+    root.field_path_mut(radius)
+        .unwrap_or_else(|| panic!("{radius}"))
+        .set(blam_tags::TagFieldData::Real(0.75))
+        .unwrap();
+    root.field_path_mut(offset)
+        .unwrap_or_else(|| panic!("{offset}"))
+        .set(blam_tags::TagFieldData::RealPoint3d(blam_tags::math::RealPoint3d {
+            x: 0.0,
+            y: 0.0,
+            z: 0.5,
+        }))
+        .unwrap();
+    let sphere = super::view_menu::object_bounding_sphere(&biped, game).expect("a sphere");
+    assert_eq!(sphere.radius, 0.75);
+    assert_eq!(sphere.center, [0.0, 0.0, 0.5]);
+
+    let render = blam_tags::TagFile::new(definitions.join("halo3_mcc/render_model.json")).unwrap();
+    assert_eq!(super::view_menu::object_bounding_sphere(&render, game), None);
+}
+
+/// With the H3 and Halo CE kits: a shipped object's bounding sphere sits
+/// about its root node, as the game puts it, so it holds the middle of what
+/// it bounds. From the object's origin, a biped's sat at its feet.
+#[test]
+fn a_shipped_objects_bounding_sphere_holds_its_geometry() {
+    use crate::app::model_preview::harness::kit::kit_preview;
+    let cases: &[(GameId, &str, &str, &[u8; 4])] = &[
+        (GameId::Halo3, r"objects\characters\masterchief\masterchief", "biped", b"bipd"),
+        (GameId::Halo3, r"objects\weapons\rifle\assault_rifle\assault_rifle", "weapon", b"weap"),
+        (GameId::Halo3, r"objects\vehicles\warthog\warthog", "vehicle", b"vehi"),
+        (GameId::HaloCe, r"characters\cyborg\cyborg", "biped", b"bipd"),
+        (GameId::HaloCe, r"vehicles\warthog\mp_warthog", "vehicle", b"vehi"),
+    ];
+    for (game, path, extension, group) in cases {
+        let Some(root) = kit_root(*game) else { continue };
+        let source = crate::app::model_preview::harness::kit::kit_source(*game).unwrap();
+        let tag = crate::app::export::load_referenced_tag_from_source(&source, path, extension, group)
+            .unwrap_or_else(|error| panic!("{game:?} {path}: {error}"));
+        let sphere = super::view_menu::object_bounding_sphere(&tag, Some(*game));
+        let data = kit_preview(&root, *game, path, extension, group);
+        let mut min = [f32::MAX; 3];
+        let mut max = [f32::MIN; 3];
+        for vertex in &data.preview.vertices {
+            for axis in 0..3 {
+                min[axis] = min[axis].min(vertex.position[axis]);
+                max[axis] = max[axis].max(vertex.position[axis]);
+            }
+        }
+        let mid: Vec<f32> = (0..3).map(|a| (min[a] + max[a]) * 0.5).collect();
+        let state = ModelPreviewState::default();
+        let root = crate::app::model_preview::armature_node_matrices(&data, &state);
+        let placed = sphere
+            .expect("a bounding sphere")
+            .about_root(root.first());
+        let distance = (0..3)
+            .map(|axis| (placed.center[axis] - mid[axis]).powi(2))
+            .sum::<f32>()
+            .sqrt();
+        assert!(
+            distance < placed.radius * 0.5,
+            "{game:?} {path}: {placed:?} about the middle {mid:?}"
+        );
+    }
+}

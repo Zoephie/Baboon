@@ -198,6 +198,18 @@ pub(in crate::app::model_preview) fn armature_node_positions(
     data: &ModelPreviewData,
     state: &ModelPreviewState,
 ) -> Vec<[f32; 3]> {
+    armature_node_matrices(data, state)
+        .iter()
+        .map(Matrix4::translation)
+        .collect()
+}
+
+/// Each node's world transform as the preview poses it: the bind pose, or the
+/// animation's frame with its IK, as the armature is drawn.
+pub(in crate::app::model_preview) fn armature_node_matrices(
+    data: &ModelPreviewData,
+    state: &ModelPreviewState,
+) -> Vec<Matrix4> {
     let nodes = &data.preview.nodes;
     if nodes.is_empty() || nodes.len() > MAX_PREVIEW_BONES {
         return Vec::new();
@@ -241,5 +253,5 @@ pub(in crate::app::model_preview) fn armature_node_positions(
             }
         }
     }
-    matrices.iter().map(Matrix4::translation).collect()
+    matrices
 }

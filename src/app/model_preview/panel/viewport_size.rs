@@ -1,7 +1,8 @@
 //! The viewport with its stats footer.
 
+use super::super::super::ui_kit::button_icons::{ButtonIcon, icon_button};
 use super::super::super::ui_kit::style::{
-    foundation_block_text, foundation_input_edge, foundation_section_bar, subtle_dark,
+    foundation_input_edge, foundation_section_bar, subtle_dark, text_dark,
 };
 use super::super::{
     MaterialTextures, ModelPreviewData, ModelPreviewState, RenderModelPreviewMaterial,
@@ -9,7 +10,7 @@ use super::super::{
 };
 use super::section::MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
 use eframe::egui;
-use eframe::egui::{FontId, RichText, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{RichText, Sense, Stroke, Ui, Vec2};
 
 pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
     ui: &mut Ui,
@@ -43,23 +44,32 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
     );
     ui.painter()
         .rect_filled(footer_rect, 0.0, foundation_section_bar());
-    // The stats, then what the load left out and why materials drew
+    // About, the stats, then what the load left out and why materials drew
     // untextured, all in the footer's one row so the card keeps its height.
+    // Laid out as the Strings Editor's and the folder browser's footers are.
     let mut footer = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(footer_rect.shrink2(Vec2::new(8.0, 0.0)))
+            .max_rect(footer_rect.shrink(6.0))
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
+    footer.spacing_mut().item_spacing.x = 8.0;
+    if icon_button(
+        &mut footer,
+        ButtonIcon::About,
+        "About the Model Preview",
+        true,
+        text_dark(),
+    )
+    .clicked()
+    {
+        state.help_requested = true;
+    }
+    footer.label(model_counts(
+        &footer,
+        data.preview.vertices.len(),
+        data.preview.indices.len() / 3,
+    ));
     footer.spacing_mut().item_spacing.x = 12.0;
-    footer.label(
-        RichText::new(format!(
-            "{} vertices, {} triangles",
-            data.preview.vertices.len(),
-            data.preview.indices.len() / 3
-        ))
-        .font(FontId::proportional(10.0))
-        .color(foundation_block_text()),
-    );
     // What the load left out, which would otherwise just be missing.
     if !data.notes.is_empty() {
         let summary = match data.notes.len() {
@@ -99,6 +109,27 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
             )
             .on_hover_text(detail);
     }
+}
+
+/// "N vertices · N triangles", the dot muted as the other footers' are.
+fn model_counts(ui: &Ui, vertices: usize, triangles: usize) -> egui::text::LayoutJob {
+    let count = |count: usize, one: &str, many: &str| {
+        format!("{count} {}", if count == 1 { one } else { many })
+    };
+    let mut counts = egui::text::LayoutJob::default();
+    for (text, color) in [
+        (count(vertices, "vertex", "vertices"), text_dark()),
+        (" · ".to_owned(), subtle_dark()),
+        (count(triangles, "triangle", "triangles"), text_dark()),
+    ] {
+        RichText::new(text).color(color).append_to(
+            &mut counts,
+            ui.style(),
+            egui::FontSelection::Default,
+            egui::Align::Center,
+        );
+    }
+    counts
 }
 
 /// A line saying Game Shaders left something out, and why, for hover: what

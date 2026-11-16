@@ -22,7 +22,10 @@ use super::section::{
     section_title,
 };
 use super::setup::draw_setup_header_actions;
-use super::view_menu::{draw_model_layer_toggles, draw_model_view_settings_menu};
+use super::view_menu::{
+    draw_model_layer_toggles, draw_model_other_menu, draw_model_view_settings_menu,
+    object_bounding_sphere,
+};
 use super::viewport_size::draw_model_viewport_with_stats;
 use blam_tags::TagFile;
 use eframe::egui;
@@ -268,9 +271,9 @@ pub(in crate::app::model_preview) fn setup_scroll_gutter(ui: &Ui) -> f32 {
     sidebar_scroll_gutter(ui)
 }
 
-/// The Model Preview card's header. Right to left: the View, Shading and
-/// Camera menus, then Refresh Model. At the left, the model and armature
-/// toggles, or the card's title for a tag with none.
+/// The Model Preview card's header. Right to left: the View and Shading
+/// menus, then Refresh Model. At the left, the model and armature
+/// toggles, or the card's title for a tag with none, then the Other menu.
 pub(in crate::app::model_preview) fn draw_preview_header(
     ui: &mut Ui,
     panel: &PreviewPanel<'_>,
@@ -291,6 +294,7 @@ pub(in crate::app::model_preview) fn draw_preview_header(
         state.invalidate_load();
         requests.reload = true;
     }
+    state.bounding_sphere = object_bounding_sphere(panel.tag, panel.source_game);
     // What the menus leave, from the header's left edge.
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
         let toggles = draw_model_layer_toggles(
@@ -305,6 +309,7 @@ pub(in crate::app::model_preview) fn draw_preview_header(
         if !toggles {
             section_title(ui, MODEL_PREVIEW_TITLE);
         }
+        draw_model_other_menu(ui, panel.data, state);
     });
 }
 

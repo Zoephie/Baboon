@@ -14,7 +14,9 @@ pub(in crate::app) enum ModelPreviewSectionPart {
     Body,
 }
 
-pub(in crate::app::model_preview) const MODEL_PREVIEW_STATS_FOOTER_HEIGHT: f32 = 28.0;
+/// The stats footer's height: a button and its 6-point margins, as the
+/// Strings Editor's footer is.
+pub(in crate::app::model_preview) const MODEL_PREVIEW_STATS_FOOTER_HEIGHT: f32 = 36.0;
 
 pub(in crate::app::model_preview) const MODEL_PREVIEW_SECTION_GAP: f32 = 8.0;
 

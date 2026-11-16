@@ -56,16 +56,23 @@ pub(in crate::app::model_preview) fn draw_variant_controls(
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.baboon_checkbox(&mut selection.enabled, "");
-            ui.add_sized(
+            // Left-aligned in its column: `add_sized` would centre it.
+            ui.allocate_ui_with_layout(
                 Vec2::new(region_name_width, BUTTON_HEIGHT),
-                egui::Label::new(
-                    RichText::new(&region.name)
-                        .color(text_dark())
-                        .font(bold_font(13.0)),
-                )
-                .truncate(),
-            )
-            .on_hover_text(&region.name);
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.set_min_size(Vec2::new(region_name_width, BUTTON_HEIGHT));
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&region.name)
+                                .color(text_dark())
+                                .font(bold_font(13.0)),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(&region.name);
+                },
+            );
             let width = ui.available_width().max(60.0);
             let salt = (data.source_key.as_str(), region.name.as_str());
             let (choice, wheel_delta) = draw_permutation_picker(

@@ -288,6 +288,62 @@ pub(in crate::app) fn tag_icon_image(
     egui::Image::from_bytes(uri, icon.svg.as_bytes())
 }
 
+/// The colour `icon` is drawn in: the first `#RRGGBB` its artwork fills with.
+/// `None` for an icon in the theme's text colour.
+pub(in crate::app) fn tag_icon_accent(icon: TagIcon) -> Option<egui::Color32> {
+    let start = icon.svg.find("fill=\"#")? + "fill=\"#".len();
+    let hex = icon.svg.get(start..start + 6)?;
+    let value = u32::from_str_radix(hex, 16).ok()?;
+    Some(egui::Color32::from_rgb(
+        (value >> 16) as u8,
+        (value >> 8) as u8,
+        value as u8,
+    ))
+}
+
+/// Each tag icon redrawn in a colour, by icon name and that colour.
+type ColoredIconBytes =
+    std::cell::RefCell<std::collections::HashMap<(&'static str, [u8; 3]), std::sync::Arc<[u8]>>>;
+
+/// `icon` drawn all in `color`, `size` points wide: over a fill of its own
+/// accent, say, where the accent itself would not show.
+pub(in crate::app) fn tag_icon_image_in(
+    ctx: &egui::Context,
+    icon: TagIcon,
+    size: f32,
+    color: egui::Color32,
+) -> egui::Image<'static> {
+    let uri = tag_icon_uri_for_pixels_per_point_and_size(icon.name, ctx.pixels_per_point(), size);
+    let [r, g, b, _] = color.to_array();
+    thread_local! {
+        static SVGS: ColoredIconBytes = Default::default();
+    }
+    let bytes = SVGS.with(|cache| {
+        cache
+            .borrow_mut()
+            .entry((icon.name, [r, g, b]))
+            .or_insert_with(|| {
+                let to = format!("#{r:02x}{g:02x}{b:02x}");
+                let mut svg = icon.svg.replace("currentColor", &to);
+                if let Some(accent) = tag_icon_accent(icon) {
+                    let [ar, ag, ab, _] = accent.to_array();
+                    for from in [
+                        format!("#{ar:02X}{ag:02X}{ab:02X}"),
+                        format!("#{ar:02x}{ag:02x}{ab:02x}"),
+                    ] {
+                        svg = svg.replace(&from, &to);
+                    }
+                }
+                svg.into_bytes().into()
+            })
+            .clone()
+    });
+    egui::Image::from_bytes(
+        format!("{}-in{r:02x}{g:02x}{b:02x}.svg", uri.trim_end_matches(".svg")),
+        bytes,
+    )
+}
+
 fn themed_tag_icon_bytes(icon: TagIcon, rgb: [u8; 3]) -> std::sync::Arc<[u8]> {
     thread_local! {
         static SVGS: std::cell::RefCell<std::collections::HashMap<(&'static str, [u8; 3]), std::sync::Arc<[u8]>>> = Default::default();
@@ -481,6 +537,21 @@ mod tests {
             }
         }
         assert!(checked > 0, "the definitions must contain the tested groups");
+    }
+
+    /// The model preview's toggles fill with their icon's colour and draw the
+    /// icon over it in white.
+    #[test]
+    fn a_tag_icon_takes_its_fill_as_its_accent_and_draws_in_another_colour() {
+        let icon = tag_icon(Some(u32::from_be_bytes(*b"coll")), Some(GameId::Halo3));
+        assert_eq!(tag_icon_accent(icon), Some(egui::Color32::from_rgb(0xED, 0x5E, 0xBE)));
+        let ctx = egui::Context::default();
+        let image = tag_icon_image_in(&ctx, icon, 16.0, egui::Color32::WHITE);
+        let egui::ImageSource::Bytes { bytes, .. } = image.source(&ctx) else {
+            panic!("an icon from bytes");
+        };
+        let svg = std::str::from_utf8(&bytes).unwrap();
+        assert!(svg.contains("#ffffff") && !svg.contains("#ED5EBE"), "{svg}");
     }
 
     #[test]

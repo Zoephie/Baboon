@@ -5386,14 +5386,15 @@ mod tests {
         let refresh = rect_of(&h, "Refresh Model");
         assert_eq!(refresh.len(), 1, "{:?}", h.painted);
         let refresh = refresh[0];
-        let camera = rect_of(&h, "Camera")[0];
+        // The Shading menu, labelled with its choice.
+        let shading = rect_of(&h, "Textured")[0];
         let setup = rect_of(&h, "Permutations")[0];
         // The card's title, under the page's tab of the same name.
         let title = rect_of(&h, "Model Preview")
             .into_iter()
             .max_by(|a, b| a.top().total_cmp(&b.top()))
             .unwrap();
-        assert!(refresh.right() < camera.left(), "refresh {refresh:?}, camera {camera:?}");
+        assert!(refresh.right() < shading.left(), "refresh {refresh:?}, shading {shading:?}");
         assert!(refresh.right() < setup.left(), "in the sidebar: {refresh:?}");
         // The sidebar's first card starts level with the viewport's card.
         assert!(

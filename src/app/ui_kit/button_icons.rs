@@ -773,6 +773,30 @@ pub(in crate::app) fn icon_menu_button<R>(
     menu.response.on_hover_text(tooltip)
 }
 
+/// A menu trigger showing only an icon and the dropdown chevron, for a menu
+/// whose icon says enough.
+pub(in crate::app) fn icon_dropdown_button<R>(
+    ui: &mut Ui,
+    icon: ButtonIcon,
+    tooltip: &str,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    let button = egui::Button::new("").min_size(Vec2::new(44.0, BUTTON_HEIGHT));
+    let (response, inner) = dropdown_menu_button(ui, button, add_contents);
+    for (icon, center_x) in [
+        (icon, response.rect.left() + 13.0),
+        (ButtonIcon::Down, response.rect.right() - 12.0),
+    ] {
+        let rect = egui::Rect::from_center_size(
+            egui::pos2(center_x, response.rect.center().y),
+            Vec2::splat(BUTTON_ICON_SIZE),
+        );
+        paint_button_icon_at(ui, icon, rect, text_dark());
+    }
+    let response = response.on_hover_text(tooltip);
+    egui::InnerResponse::new(inner.map(|inner| inner.inner), response)
+}
+
 /// Picker trigger with an optional leading image and the standard dropdown chevron.
 pub(in crate::app) fn text_dropdown_button<R>(
     ui: &mut Ui,
@@ -817,6 +841,19 @@ pub(in crate::app) fn fixed_width_icon_text_dropdown_button<R>(
             value_dropdown_contents(ui, ui.spacing().combo_height, add_contents)
         })
     }).inner
+}
+
+/// An icon-and-text menu button `width` wide whatever its label, so a label
+/// that changes never moves the buttons beside it. The menu is a plain one,
+/// at least as wide as the button.
+pub(in crate::app) fn fixed_width_icon_text_menu_button<R>(
+    ui: &mut Ui,
+    icon: ButtonIcon,
+    label: &str,
+    width: f32,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    icon_text_dropdown_button_sized(ui, icon, label, Some(width), add_contents)
 }
 
 fn icon_text_dropdown_button_sized<R>(

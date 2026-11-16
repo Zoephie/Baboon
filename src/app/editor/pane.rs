@@ -531,6 +531,11 @@ pub(in crate::app) fn draw_tag_pane(
             let perspective = model_preview.perspective;
             cx.edit_prefs(move |prefs| prefs.model_preview_perspective = perspective);
         }
+        if std::mem::take(&mut model_preview.help_requested) {
+            cx.send(crate::app::help::HelpCommand::ShowDocSection(
+                crate::app::help::MODEL_PREVIEW_HELP_SECTION,
+            ));
+        }
         if model_preview.background != model_preview_background {
             let background = model_preview.background;
             cx.edit_prefs(move |prefs| prefs.model_preview_background = background);

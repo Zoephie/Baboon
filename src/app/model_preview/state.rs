@@ -31,6 +31,12 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) show_non_critical_errors: bool,
     /// Draw the model skeleton over the preview, with hoverable bone names.
     pub(in crate::app) show_armature: bool,
+    /// Draw the object's bounding sphere, for a tag that has one.
+    pub(in crate::app) show_bounding_sphere: bool,
+    /// The object's `bounding radius` about its `bounding offset`, read from
+    /// the open tag each pass so an edit shows at once. `None` for a tag
+    /// that is no object.
+    pub(in crate::app) bounding_sphere: Option<super::viewport::BoundingSphere>,
     /// Case-insensitive substring filter on marker names (empty = show all).
     /// Only applied while `show_markers` is on.
     pub(in crate::app) marker_filter: String,
@@ -114,6 +120,9 @@ pub(in crate::app) struct ModelPreviewState {
     /// What the viewport is cleared to. The tag pane keeps it in step with
     /// `GuiPrefs::model_preview_background`.
     pub(in crate::app) background: ModelPreviewBackground,
+    /// The footer's About button was pressed; the tag pane opens the Model
+    /// Preview help page and clears it.
+    pub(in crate::app) help_requested: bool,
     pub(in crate::app) scale: f32,
     pub(in crate::app) yaw: f32,
     pub(in crate::app) pitch: f32,
@@ -139,6 +148,8 @@ impl Default for ModelPreviewState {
             show_errors: false,
             show_non_critical_errors: false,
             show_armature: false,
+            show_bounding_sphere: false,
+            bounding_sphere: None,
             marker_filter: String::new(),
             campaign_evolved: Default::default(),
             weapon: None,
@@ -174,6 +185,7 @@ impl Default for ModelPreviewState {
             animation: PreviewAnimationPlayback::default(),
             show_grid: true,
             background: ModelPreviewBackground::Theme,
+            help_requested: false,
             scale: 1.0,
             yaw: -0.45,
             pitch: 0.25,
