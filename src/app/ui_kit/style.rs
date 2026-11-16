@@ -199,15 +199,16 @@ pub(in crate::app) fn foundation_visuals() -> egui::Visuals {
         // Separators and code backgrounds, which egui draws in neutral grey.
         visuals.widgets.noninteractive.bg_stroke.color = grid_line();
         visuals.code_bg_color = row_type();
-        // Buttons: white with a faint warm-grey edge, darkening a step on
-        // hover and press.
-        visuals.widgets.inactive.weak_bg_fill = Color32::WHITE;
+        // Buttons: half-white with a faint warm-grey edge, so they lift off
+        // the panel yet keep some of its colour; brighter on hover, dimmer
+        // when pressed.
+        visuals.widgets.inactive.weak_bg_fill = Color32::from_rgba_unmultiplied(255, 255, 255, 128);
         visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(214, 205, 197));
-        visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(250, 247, 244);
+        visuals.widgets.hovered.weak_bg_fill = Color32::from_rgba_unmultiplied(255, 255, 255, 191);
         visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(190, 178, 168));
-        visuals.widgets.active.weak_bg_fill = Color32::from_rgb(240, 234, 229);
+        visuals.widgets.active.weak_bg_fill = Color32::from_rgba_unmultiplied(255, 255, 255, 64);
         visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(176, 162, 151));
-        visuals.widgets.open.weak_bg_fill = Color32::from_rgb(250, 247, 244);
+        visuals.widgets.open.weak_bg_fill = Color32::from_rgba_unmultiplied(255, 255, 255, 191);
         visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(190, 178, 168));
     }
     if !is_dark_mode() {
@@ -668,11 +669,11 @@ pub(in crate::app) fn foundation_jump_cyan() -> Color32 {
 
 fn input_fill_for(dark_mode: bool) -> Color32 {
     // Dark mode: the buttons' literal sRGB overlay, black at about 30%.
-    // Light mode: a soft warm-grey well, set apart from the white buttons.
+    // Light mode: a warm sand well, set apart from the pale buttons.
     if dark_mode {
         Color32::from_black_alpha(77)
     } else {
-        Color32::from_rgb(224, 221, 218)
+        Color32::from_rgb(240, 226, 213)
     }
 }
 
@@ -694,7 +695,7 @@ pub(in crate::app) fn foundation_input_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(84, 84, 84)
     } else {
-        Color32::from_rgb(205, 198, 192)
+        Color32::from_rgb(204, 153, 102)
     }
 }
 
