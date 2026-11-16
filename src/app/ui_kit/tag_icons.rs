@@ -414,6 +414,12 @@ fn darken_hex_colors(svg: &str, backdrop: [u8; 3]) -> String {
     out
 }
 
+/// `#RRGGBB` darkened as [`readable_on`] does, for a button icon's own
+/// colours in light mode.
+pub(in crate::app) fn darken_for_light_mode(hex: &str, backdrop: [u8; 3]) -> String {
+    darken_hex_colors(hex, backdrop)
+}
+
 /// `color`, unchanged if it already reaches [`ICON_CONTRAST`] on
 /// `backdrop`, else darkened in OKLab lightness, keeping its hue, until it
 /// does.
