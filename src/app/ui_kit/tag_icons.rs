@@ -420,11 +420,12 @@ pub(in crate::app) fn darken_for_light_mode(hex: &str, backdrop: [u8; 3]) -> Str
     darken_hex_colors(hex, backdrop)
 }
 
-/// `color`, unchanged if it already reaches [`ICON_CONTRAST`] on
+/// `color`, unchanged if it is white or already reaches [`ICON_CONTRAST`] on
 /// `backdrop`, else darkened in OKLab lightness, keeping its hue, until it
 /// does.
 fn readable_on(color: [u8; 3], backdrop: [u8; 3]) -> [u8; 3] {
-    if contrast(color, backdrop) >= ICON_CONTRAST {
+    // White is a highlight or a cut-out, never ink to darken.
+    if color == [255; 3] || contrast(color, backdrop) >= ICON_CONTRAST {
         return color;
     }
     let [lightness, a, b] = to_oklab(color);
@@ -700,6 +701,7 @@ mod tests {
         assert!(contrast(yellow, backdrop) >= ICON_CONTRAST, "{yellow:?}");
         assert!(yellow[0] > yellow[2] && yellow[1] > yellow[2], "still yellow: {yellow:?}");
         assert_eq!(readable_on([0x3A, 0x1C, 0x08], backdrop), [0x3A, 0x1C, 0x08]);
+        assert_eq!(readable_on([255; 3], backdrop), [255; 3], "white stays white");
         for (icon, _) in GROUP_ICONS {
             let svg = themed_tag_icon_bytes(*icon, [0; 3], Some(backdrop));
             let svg = std::str::from_utf8(&svg).unwrap();
@@ -707,7 +709,7 @@ mod tests {
                 let value = u32::from_str_radix(&svg[at + 7..at + 13], 16).unwrap();
                 let color = [(value >> 16) as u8, (value >> 8) as u8, value as u8];
                 assert!(
-                    contrast(color, backdrop) >= ICON_CONTRAST - 0.01,
+                    color == [255; 3] || contrast(color, backdrop) >= ICON_CONTRAST - 0.01,
                     "{}: {color:?}",
                     icon.name
                 );
