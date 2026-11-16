@@ -17,6 +17,8 @@ The buttons at the left of the header show or hide each part of the model: the *
 
 A Halo 3 or ODST model whose `.model` names an **LOD render model** (the simpler model the game draws at a distance, as the Covenant cruiser's) gets an **LOD Model** button. It draws that model where the model is, following the sidebar's region and permutation picks by name and the model's animation. It starts hidden; Alt-click it to see it alone. If the tag it names can't be read, the button is greyed out; hover it to see why.
 
+A Reach or Halo 2 Anniversary model whose `.model` names an **imposter** (the low, untextured stand-in the game draws far away) gets an **Imposter** button. It draws the imposter where the model is, each triangle in the colour baked into its vertices. An imposter's regions are its own (`region_00` and on), not the model's, so it draws each region's first permutation, the intact one, whatever the sidebar picks, and it doesn't take the model's animation. It starts hidden. An `.imposter_model` opened on its own previews in its own Model Preview tab.
+
 ### Shading
 
 The **Shading** menu picks how the surfaces are drawn:

@@ -8,22 +8,18 @@ that picking one up does not mean rediscovering it first.
 
 ## Model Preview: imposters (Reach, Halo 2 Anniversary)
 
-**Status:** not implemented. A `.model`'s `imposter model` names an
-`imposter_model` (`impo`), the far stand-in Reach and H2A draw at a
-distance; 1,670 of HREK's 1,775 `.model`s have one. The plan: an Imposter
-header toggle like LOD Model (`load/stand_in.rs`), drawn where the model is,
-off by default, coloured by its baked vertex colour and `raw imposter data`
-(diffuse, ambient, specular per vertex), and a Model Preview tab on the
-`.imposter_model` itself.
+**Status:** built, waiting on blam-tags. The Imposter toggle and the
+`.imposter_model` tab (`load/imposter.rs`) read the imposter's geometry with
+`extract_render_geometry_meshes_at`, which blam-tags gains on
+`feature/geometry-meshes-at-path` (paddythibau/blam-tags). Until that merges
+upstream, Baboon builds against it through an uncommitted `[patch]` in
+`Cargo.toml`; once it does, bump the `blam-tags` rev and drop the patch.
 
-Its geometry is an ordinary `global_render_geometry_struct`, with `per mesh
-temporary` raw vertices and indices, but under `geometry`, not `render
-geometry`. blam-tags' mesh decoder (`read_meshes_at_path`) takes the path
-but is private, and its public `extract_render_geometry_meshes` fixes it to
-`render geometry`; `RenderModel::from_tag` also requires `nodes`, which an
-imposter lacks (`node maps` instead). So it waits on a blam-tags change that
-exposes the decoder at a path, and a rev bump, rather than a copy of the
-decoder here.
+Left out: an imposter's own lighting. Each vertex carries a BRDF (`raw
+imposter data`: diffuse, ambient, specular, shininess); the preview draws
+only the diffuse, scaled to display range, as flat colour per triangle.
+Its regions (`region_00`…) don't name the model's, so it ignores the
+sidebar's picks, and it is not posed (`node maps` would bind it).
 
 ---
 

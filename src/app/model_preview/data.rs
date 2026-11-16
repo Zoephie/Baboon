@@ -19,6 +19,9 @@ pub(crate) struct RenderModelPreview {
     /// Halo 3's and ODST's LOD render model, which the LOD Model toggle
     /// shows where the model is.
     pub lod_model: Option<super::load::StandIn>,
+    /// Reach's and Halo 2 Anniversary's imposter, which the Imposter toggle
+    /// shows where the model is.
+    pub imposter: Option<super::load::StandIn>,
     /// The game the opened tag is from: the tag's own generation for Halo CE
     /// and Halo 2, else its kit's. None for geometry no game's tag gave.
     pub game: Option<GameId>,
@@ -166,6 +169,9 @@ pub(crate) enum ModelPreviewLayer {
     /// A stand-in's geometry (Halo 3's and ODST's LOD render model), shown
     /// by its own toggle and off until it is turned on.
     LodModel,
+    /// An imposter's geometry (Reach, Halo 2 Anniversary), shown by its own
+    /// toggle. Its regions are its own, so each draws its first permutation.
+    Imposter,
 }
 
 #[derive(Debug, Clone)]

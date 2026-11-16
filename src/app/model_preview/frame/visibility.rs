@@ -60,6 +60,13 @@ pub(in crate::app::model_preview) fn visible_batch_indices(
                     .and_then(|shift| instances.checked_shr(shift));
                 return (chosen.unwrap_or(0) & 1 != 0).then_some(index);
             }
+            // An imposter's regions are its own (`region_00`…), not the
+            // model's: each draws its first permutation, the intact one.
+            if batch.layer == ModelPreviewLayer::Imposter {
+                return (overlay_first_permutation(batch.layer, &batch.region_name)
+                    == Some(batch.permutation_name.as_str()))
+                .then_some(index);
+            }
             let selection = state.region_selections.get(&batch.region_name)?;
             if !selection.enabled {
                 return None;
@@ -116,6 +123,9 @@ pub(in crate::app::model_preview) fn model_layer_visible(
     if layer == ModelPreviewLayer::LodModel {
         return state.show_lod_model;
     }
+    if layer == ModelPreviewLayer::Imposter {
+        return state.show_imposter;
+    }
     if !state.overlays_loaded {
         // A bare render/collision/physics tag is the primary preview, not an
         // optional overlay. `show_render` remains true for that path.
@@ -126,6 +136,7 @@ pub(in crate::app::model_preview) fn model_layer_visible(
         ModelPreviewLayer::Collision => state.show_collision,
         ModelPreviewLayer::Physics => state.show_physics,
         ModelPreviewLayer::LodModel => state.show_lod_model,
+        ModelPreviewLayer::Imposter => state.show_imposter,
     }
 }
 

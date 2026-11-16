@@ -1,5 +1,6 @@
 //! Renders a real model through the real renderer with no window, so a pass
-//! can be looked at without opening the app. macOS only, through CGL.
+//! can be looked at without opening the app: through CGL on macOS, a hidden
+//! window's WGL context on Windows.
 //!
 //! `H2_SHOT="<model path>|<out file>|<shaders 0/1>|<lights 0/1>|<yaw>|<pitch>"`,
 //! several separated by `;`, with `BLAM_TEST_H2EK` naming the kit's tags.
@@ -209,6 +210,7 @@ fn object_kind(kind: &str) -> (&'static str, &'static [u8; 4]) {
         "vehicle" => ("vehicle", b"vehi"),
         "effect_scenery" => ("effect_scenery", b"efsc"),
         "projectile" => ("projectile", b"proj"),
+        "imposter" => ("imposter_model", b"impo"),
         _ => ("biped", b"bipd"),
     }
 }
@@ -396,6 +398,7 @@ pub(super) fn render(
         state.render_mode = mode;
     }
     state.show_grid = options.grid;
+    state.show_imposter = std::env::var_os("H2_SHOT_IMPOSTER").is_some();
     state.active_camo = options.camo;
     state.bloom = options.bloom;
     state.self_shadow = options.shadow;
@@ -563,6 +566,8 @@ pub(super) fn render(
 }
 
 /// What [`shoot`] gives back of a shot.
+// The pixel gates that read it run on macOS only.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(in crate::app::model_preview) struct Shown {
     /// RGBA, bottom row first.
     pub(in crate::app::model_preview) pixels: Vec<u8>,
@@ -849,5 +854,52 @@ fn without_game_shaders_no_game_pass_draws() {
         };
         assert_eq!(programs(false).len(), 1, "{game:?} {model}: off");
         assert!(programs(true).len() > 1, "{game:?} {model}: on");
+    }
+}
+
+/// Shoots Reach's banshee imposter on its own and beside its model, as PNGs
+/// in `BABOON_IMPOSTER_SHOTS`, with `BLAM_TEST_HREK` naming the kit's tags.
+#[test]
+fn imposter_shots() {
+    let (Some(dir), Some(source)) = (
+        std::env::var_os("BABOON_IMPOSTER_SHOTS"),
+        super::kit::kit_source(GameId::HaloReach),
+    ) else {
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    let gl = Arc::new(headless_gl());
+    unsafe {
+        eprintln!("GL {}", gl.get_parameter_string(glow::VERSION));
+    }
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let options = ShotOptions::new(GameId::HaloReach);
+    let model = r"objects\vehicles\covenant\banshee\banshee";
+    for (name, kind, imposter) in [
+        ("imposter", Some("imposter"), false),
+        ("model", None, false),
+        ("model_with_imposter", None, true),
+    ] {
+        // SAFETY: the test sets it before the shot reads it, on this thread.
+        unsafe {
+            if imposter {
+                std::env::set_var("H2_SHOT_IMPOSTER", "1");
+            } else {
+                std::env::remove_var("H2_SHOT_IMPOSTER");
+            }
+        }
+        let shot = Shot {
+            model: model.to_owned(),
+            shaders: false,
+            lights: true,
+            yaw: 0.6,
+            pitch: 0.25,
+            kind: kind.map(str::to_owned),
+        };
+        let pixels = render(&gl, &mut renderer, &source, &shot, &options).pixels;
+        let row = SHOT_SIZE[0] as usize * 4;
+        let upright: Vec<u8> = pixels.chunks_exact(row).rev().flatten().copied().collect();
+        let image = image::RgbaImage::from_raw(SHOT_SIZE[0], SHOT_SIZE[1], upright).unwrap();
+        image.save(dir.join(format!("banshee_{name}.png"))).unwrap();
     }
 }

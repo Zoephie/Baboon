@@ -25,6 +25,7 @@ mod guard;
 pub(in crate::app::model_preview) use guard::{feature, feature_into};
 mod detail;
 mod stand_in;
+mod imposter;
 pub(in crate::app) use stand_in::StandIn;
 pub(in crate::app) use detail::DetailLevels;
 mod render_model;
@@ -88,6 +89,9 @@ fn load_tag_preview(
     let group = model_tag.header.group_tag.to_be_bytes();
     if matches!(&group, b"mode" | b"mod2") {
         return load_render_tag(model_tag, entry, settings.detail_level);
+    }
+    if &group == b"impo" {
+        return imposter::load_imposter_tag(model_tag, entry);
     }
     if let Some(result) = load_own_object(model_tag, entry, reader, settings) {
         return result;

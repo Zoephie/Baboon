@@ -393,6 +393,9 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
     if let Some(lod_model) = &data.preview.lod_model {
         toggle(ui, ModelLayer::LodModel, lod_model.missing.is_none(), lod_model.missing.as_deref());
     }
+    if let Some(imposter) = &data.preview.imposter {
+        toggle(ui, ModelLayer::Imposter, imposter.missing.is_none(), imposter.missing.as_deref());
+    }
     if has_armature {
         toggle(ui, ModelLayer::Armature, true, None);
     }
@@ -411,6 +414,8 @@ pub(in crate::app::model_preview) enum ModelLayer {
     Physics,
     /// Halo 3's and ODST's LOD render model, where the model is.
     LodModel,
+    /// Reach's and Halo 2 Anniversary's imposter, where the model is.
+    Imposter,
     Armature,
 }
 
@@ -421,6 +426,7 @@ impl ModelLayer {
             Self::Collision => "Collision Model",
             Self::Physics => "Physics Model",
             Self::LodModel => "LOD Model",
+            Self::Imposter => "Imposter",
             Self::Armature => "Armature",
         }
     }
@@ -432,6 +438,7 @@ impl ModelLayer {
             Self::Collision => *b"coll",
             Self::Physics => *b"phmo",
             Self::LodModel => *b"mode",
+            Self::Imposter => *b"impo",
             Self::Armature => *b"jmad",
         }
     }
@@ -442,6 +449,7 @@ impl ModelLayer {
             Self::Collision => &mut state.show_collision,
             Self::Physics => &mut state.show_physics,
             Self::LodModel => &mut state.show_lod_model,
+            Self::Imposter => &mut state.show_imposter,
             Self::Armature => &mut state.show_armature,
         }
     }
@@ -546,6 +554,9 @@ fn layer_toggle(
     let extra = match layer {
         ModelLayer::Armature => "\nHover a joint to see its name.",
         ModelLayer::LodModel => "\nThe simpler model the game draws at a distance.",
+        ModelLayer::Imposter => {
+            "\nThe untextured stand-in the game draws far away, coloured as baked."
+        }
         _ => "",
     };
     let tip = format!(

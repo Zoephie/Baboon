@@ -68,11 +68,12 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
         state.help_requested = true;
     }
     // The model's own: a stand-in drawn with it is counted apart.
-    let (stand_in_vertices, stand_in_triangles) = data
-        .preview
-        .lod_model
-        .as_ref()
-        .map_or((0, 0), |stand_in| (stand_in.vertices, stand_in.triangles));
+    let (stand_in_vertices, stand_in_triangles) = [&data.preview.lod_model, &data.preview.imposter]
+        .into_iter()
+        .flatten()
+        .fold((0, 0), |(vertices, triangles), stand_in| {
+            (vertices + stand_in.vertices, triangles + stand_in.triangles)
+        });
     footer.label(model_counts(
         &footer,
         data.preview.vertices.len().saturating_sub(stand_in_vertices),
