@@ -354,7 +354,7 @@ fn context_menu_icon(label: &str) -> Option<ButtonIcon> {
         "Find Tag References..." => Some(ButtonIcon::Find),
         "Dump Tag to JSON..." => Some(ButtonIcon::Json),
         "Dump Tag References..." => Some(ButtonIcon::Doc),
-        "Reimport" => Some(ButtonIcon::Import),
+        "Reimport" | "Recompile" => Some(ButtonIcon::Import),
         "Export Strings..." => Some(ButtonIcon::Export),
         _ => None,
     };
@@ -496,6 +496,10 @@ fn context_menu_app_icon(label: &str) -> Option<egui::Image<'static>> {
         "Open in Tag Test" => (
             "bytes://baboon_app_icons/tag-test.png",
             include_root_bytes!("assets/App Icons/Tag Test.png"),
+        ),
+        "Open in VS Code" => (
+            "bytes://baboon_app_icons/vs-code.svg",
+            include_root_bytes!("assets/App Icons/VS Code.svg"),
         ),
         _ => return None,
     };
@@ -2899,7 +2903,7 @@ pub(in crate::app) fn draw_entry(
     let open_requested = browser_open_requested(&response, double_click_to_open);
     let mut action = open_requested.then(|| BrowserAction::Select(entry.key.clone()));
     context_menu(&response, |ui| {
-        if let Some(menu_action) = draw_tag_context_menu_contents(ui, entry, favorite_keys, false) {
+        if let Some(menu_action) = draw_tag_context_menu_contents(ui, entry, favorite_keys, false, false) {
             action = Some(menu_action);
         }
     });
@@ -2952,11 +2956,15 @@ pub(in crate::app) const RECOMPILE_HELP: &str = "Compile the scenario that lists
     with Tool's rebuild-scenario-scripts in the terminal on Halo 2, or by opening it in Sapien, which \
     compiles its scripts as it loads, on Halo 3, ODST and Reach.";
 
+/// The tag menu: on a browser row when `in_tag_header` is false, else
+/// behind the tag pane header's "…" button, which leaves out what the
+/// header already shows as buttons.
 pub(in crate::app) fn draw_tag_context_menu_contents(
     ui: &mut Ui,
     entry: &TagEntry,
     favorite_keys: Option<&HashSet<String>>,
     open_submenus_left: bool,
+    in_tag_header: bool,
 ) -> Option<BrowserAction> {
     let mut action = None;
     style_tag_context_menu(ui);
@@ -3088,8 +3096,9 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
         }
     }
 
-    // A script tag's two tools, as its header offers them.
-    let script_tag = &entry.group_tag.to_be_bytes() == b"hsc*";
+    // A script tag's two tools, as its header offers them; the header's own
+    // menu leaves them to its buttons.
+    let script_tag = &entry.group_tag.to_be_bytes() == b"hsc*" && !in_tag_header;
     if launch.supported && script_tag {
         if favorite_keys.is_some() {
             context_menu_separator(ui);
@@ -6044,5 +6053,57 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&root);
         assert!(offsets.iter().all(|after| (after - offset).abs() <= 24.0), "deletion moved the scroll offset from {offset} to {offsets:?}");
+    }
+}
+
+#[cfg(test)]
+mod script_tag_menu_tests {
+    use super::*;
+
+    /// The labels the tag menu paints for `entry`.
+    fn menu_labels(entry: &TagEntry, in_tag_header: bool) -> Vec<String> {
+        let ctx = egui::Context::default();
+        crate::app::Baboon::configure_context(&ctx);
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                set_browser_scenario_launch(
+                    ui,
+                    crate::app::kits::scenario_launch::ScenarioLaunchAvailability {
+                        supported: true,
+                        ..Default::default()
+                    },
+                );
+                let _ = draw_tag_context_menu_contents(ui, entry, None, false, in_tag_header);
+            });
+        });
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A script tag's menu offers its two tools on a browser row, but not
+    /// behind the tag header's "…", where they're already buttons.
+    #[test]
+    fn a_script_tags_tools_are_on_its_row_menu_but_not_its_header_menu() {
+        let script = unnamed_entry_of(b"hsc*");
+        let row = menu_labels(&script, false);
+        assert!(row.iter().any(|label| label == "Open in VS Code"), "{row:?}");
+        assert!(row.iter().any(|label| label == "Recompile"), "{row:?}");
+        let header = menu_labels(&script, true);
+        assert!(!header.iter().any(|label| label == "Open in VS Code" || label == "Recompile"), "{header:?}");
+        // Other tags never have them.
+        let other = menu_labels(&unnamed_entry_of(b"bipd"), false);
+        assert!(!other.iter().any(|label| label == "Open in VS Code"), "{other:?}");
+    }
+
+    #[test]
+    fn the_script_tools_have_icons() {
+        assert!(context_menu_app_icon("Open in VS Code").is_some());
+        assert_eq!(context_menu_icon("Recompile"), Some(ButtonIcon::Import));
     }
 }

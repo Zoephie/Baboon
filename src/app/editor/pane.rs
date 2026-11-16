@@ -954,7 +954,7 @@ fn draw_tag_header_common_actions(cx: &Ctx, ui: &mut Ui, kit_index: usize, entry
             "Other tag actions",
             CONTEXT_MENU_WIDTH,
             |ui| {
-                if let Some(menu_action) = draw_tag_context_menu_contents(ui, entry, None, true)
+                if let Some(menu_action) = draw_tag_context_menu_contents(ui, entry, None, true, true)
                 {
                     action = Some(menu_action);
                 }
