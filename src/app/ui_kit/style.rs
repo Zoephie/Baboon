@@ -189,12 +189,13 @@ pub(in crate::app) fn foundation_visuals() -> egui::Visuals {
     } else {
         Color32::from_rgb(188, 207, 216)
     };
+    // Warnings and errors take the amber and red a field uses for an
+    // unapplied or invalid value, in both themes: egui's own are a harsh
+    // orange and a pure red, and its light orange sits close to the warm
+    // chrome.
+    visuals.warn_fg_color = unapplied_value_text();
+    visuals.error_fg_color = invalid_value_text();
     if !is_dark_mode() {
-        // egui's light warning is an orange close to Baboon Orange's chrome,
-        // and its error a pure red. Deeper amber and red keep both apart
-        // from the accent and readable on the warm panels.
-        visuals.warn_fg_color = Color32::from_rgb(143, 91, 0);
-        visuals.error_fg_color = Color32::from_rgb(179, 32, 42);
         // Separators and code backgrounds, which egui draws in neutral grey.
         visuals.widgets.noninteractive.bg_stroke.color = grid_line();
         visuals.code_bg_color = row_type();
