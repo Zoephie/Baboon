@@ -14,6 +14,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Baboon (not blam-tags) since it is purely a GUI concern.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RenderModelPreview {
+    /// Halo CE's and Halo 2's levels of detail, and the one drawn.
+    pub detail_levels: Option<super::load::DetailLevels>,
     /// The game the opened tag is from: the tag's own generation for Halo CE
     /// and Halo 2, else its kit's. None for geometry no game's tag gave.
     pub game: Option<GameId>,

@@ -209,6 +209,9 @@ pub(in crate::app::model_preview) struct PreviewLoadSettings {
     pub(in crate::app::model_preview) equippable: Option<Vec<super::super::weapons::Equippable>>,
     /// What the load reads for: [`super::TagReader::game_shaders`].
     pub(in crate::app::model_preview) game_shaders: bool,
+    /// Halo CE's and Halo 2's level of detail, lowest first; `None` for the
+    /// highest.
+    pub(in crate::app::model_preview) detail_level: Option<usize>,
 }
 
 /// A load of everything, Game Shaders' share too, as a test reads it.
@@ -222,6 +225,7 @@ impl Default for PreviewLoadSettings {
             secondary_weapon: None,
             equippable: None,
             game_shaders: true,
+            detail_level: None,
         }
     }
 }
@@ -244,6 +248,7 @@ impl PreviewLoadSettings {
             },
             ce: super::super::ce::weapons::CeLoadSettings::of(state.data.as_ref()),
             game_shaders: state.game_shaders,
+            detail_level: state.detail_level,
         }
     }
 }
@@ -311,6 +316,7 @@ impl Baboon {
         state.loaded_weapon = settings.weapon.clone();
         state.loaded_secondary_weapon = settings.secondary_weapon.clone();
         state.loaded_game_shaders = settings.game_shaders;
+        state.loaded_detail_level = settings.detail_level;
         state.preview_load_id = Some(request_id);
         state.remember_selection();
         let previous = match state.data.take() {

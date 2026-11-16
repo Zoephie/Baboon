@@ -14,7 +14,8 @@ use super::super::super::ui_kit::style::{
 use super::super::super::ui_kit::tag_icons::{
     paint_tag_icon_at, tag_icon, tag_icon_accent, tag_icon_image_in,
 };
-use super::super::load::OwnViewSettings;
+use super::super::load::{DetailLevels, OwnViewSettings};
+use super::carry_through_reload;
 use super::super::{
     BoundingSphere, MAX_PREVIEW_SCALE, ModelPreviewBackground, ModelPreviewData,
     ModelPreviewLayer, ModelPreviewState, ModelShading, is_object_family_group,
@@ -235,7 +236,7 @@ pub(in crate::app::model_preview) fn draw_model_other_menu(
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
 ) {
-    icon_dropdown_button(ui, ButtonIcon::Other, "Other: markers and errors", |ui| {
+    icon_dropdown_button(ui, ButtonIcon::Other, "Other: markers, errors and level of detail", |ui| {
         // Fix both bounds: a menu's sizing pass can otherwise let the
         // full-width marker filter grow wider than the rest.
         ui.set_width(MENU_WIDTH);
@@ -273,7 +274,35 @@ pub(in crate::app::model_preview) fn draw_model_other_menu(
                     "Outline the object's bounding radius about its bounding offset.",
                 );
         }
+
+        if let Some(levels) = &data.preview.detail_levels {
+            ui.separator();
+            draw_detail_levels(ui, data, state, levels);
+        }
     });
+}
+
+/// Halo CE's and Halo 2's levels of detail as choices, the one drawn picked.
+/// A level no permutation has is greyed out. Picking one reloads the model,
+/// keeping the regions picked.
+fn draw_detail_levels(
+    ui: &mut Ui,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+    levels: &DetailLevels,
+) {
+    ui.label(RichText::new("Level of Detail").color(subtle_dark()).small());
+    for (level, label) in levels.labels.iter().enumerate() {
+        let available = levels.available.get(level).copied().unwrap_or(false);
+        let response = ui
+            .add_enabled_ui(available, |ui| menu_choice(ui, label, levels.shown == level))
+            .inner
+            .on_disabled_hover_text("No permutation of this model has geometry at this level.");
+        if response.clicked() && levels.shown != level {
+            carry_through_reload(data, state);
+            state.detail_level = Some(level);
+        }
+    }
 }
 
 /// The View menu's camera settings: zoom, projection and a reset.
@@ -330,72 +359,153 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
         return false;
     }
     ui.spacing_mut().item_spacing.x = 4.0;
-    layer_toggle(
-        ui,
-        &mut state.show_render,
-        *b"mode",
-        source_game,
-        true,
-        "Render Model",
-    );
+    let has_collision = overlay_layer_available(data, state, ModelPreviewLayer::Collision);
+    let has_physics = overlay_layer_available(data, state, ModelPreviewLayer::Physics);
+    // Each toggle drawn, whether it can be used, and what a click asked.
+    let mut drawn = Vec::new();
+    let mut toggle = |ui: &mut Ui, layer: ModelLayer, enabled: bool, disabled_tip: Option<&str>| {
+        let on = layer.shown(state);
+        let (response, action) = layer_toggle(ui, on, layer, source_game, enabled);
+        if let Some(tip) = disabled_tip {
+            response.on_disabled_hover_text(format!("{}\n\n{tip}", layer.label()));
+        }
+        drawn.push((layer, enabled, action));
+    };
+    toggle(ui, ModelLayer::Render, true, None);
     if overlays {
-        let has_collision = overlay_layer_available(data, state, ModelPreviewLayer::Collision);
-        layer_toggle(
+        toggle(
             ui,
-            &mut state.show_collision,
-            *b"coll",
-            source_game,
+            ModelLayer::Collision,
             has_collision,
-            "Collision Model",
-        )
-        .on_disabled_hover_text(
-            "Collision Model\n\nThis model has no collision model, or it has no drawable geometry.",
+            Some("This model has no collision model, or it has no drawable geometry."),
         );
         // An object's physics model comes through the `.model` it names, as
         // its collision model does; Halo CE has no physics models.
         if source_game != Some(GameId::HaloCe) {
-            let has_physics = overlay_layer_available(data, state, ModelPreviewLayer::Physics);
-            layer_toggle(
+            toggle(
                 ui,
-                &mut state.show_physics,
-                *b"phmo",
-                source_game,
+                ModelLayer::Physics,
                 has_physics,
-                "Physics Model",
-            )
-            .on_disabled_hover_text(
-                "Physics Model\n\nThis model has no physics model, or it has no drawable geometry.",
+                Some("This model has no physics model, or it has no drawable geometry."),
             );
         }
     }
     if has_armature {
-        layer_toggle(
-            ui,
-            &mut state.show_armature,
-            *b"jmad",
-            source_game,
-            true,
-            "Armature",
-        );
+        toggle(ui, ModelLayer::Armature, true, None);
     }
+    apply_layer_actions(state, &drawn);
     if state.overlays_pending && (state.show_collision || state.show_physics) {
         ui.spinner();
     }
     true
 }
 
-/// An icon-only toggle showing `group`'s tag icon: an ordinary button while
+/// One of the header's model toggles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app::model_preview) enum ModelLayer {
+    Render,
+    Collision,
+    Physics,
+    Armature,
+}
+
+impl ModelLayer {
+    pub(in crate::app::model_preview) fn label(self) -> &'static str {
+        match self {
+            Self::Render => "Render Model",
+            Self::Collision => "Collision Model",
+            Self::Physics => "Physics Model",
+            Self::Armature => "Armature",
+        }
+    }
+
+    /// The tag group whose icon the toggle shows.
+    fn group(self) -> [u8; 4] {
+        match self {
+            Self::Render => *b"mode",
+            Self::Collision => *b"coll",
+            Self::Physics => *b"phmo",
+            Self::Armature => *b"jmad",
+        }
+    }
+
+    fn flag(self, state: &mut ModelPreviewState) -> &mut bool {
+        match self {
+            Self::Render => &mut state.show_render,
+            Self::Collision => &mut state.show_collision,
+            Self::Physics => &mut state.show_physics,
+            Self::Armature => &mut state.show_armature,
+        }
+    }
+
+    fn shown(self, state: &mut ModelPreviewState) -> bool {
+        *self.flag(state)
+    }
+}
+
+/// What a click on a model toggle asked for, by its modifier, as the bitmap
+/// preview's channel buttons do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app::model_preview) enum LayerAction {
+    None,
+    /// A plain click: flip it.
+    Toggle,
+    /// Alt-click: show only this one.
+    Solo,
+    /// Shift-click: hide only this one.
+    Exclude,
+}
+
+impl LayerAction {
+    fn of_click(modifiers: egui::Modifiers) -> Self {
+        if modifiers.alt {
+            Self::Solo
+        } else if modifiers.shift {
+            Self::Exclude
+        } else {
+            Self::Toggle
+        }
+    }
+}
+
+/// Apply this pass's clicks to the toggles `drawn` (each with whether it
+/// could be used): Alt and Shift set every usable toggle drawn, the clicked
+/// one one way and the rest the other.
+pub(in crate::app::model_preview) fn apply_layer_actions(
+    state: &mut ModelPreviewState,
+    drawn: &[(ModelLayer, bool, LayerAction)],
+) {
+    for &(clicked, _, action) in drawn {
+        let others = match action {
+            LayerAction::None => continue,
+            LayerAction::Toggle => {
+                let flag = clicked.flag(state);
+                *flag = !*flag;
+                continue;
+            }
+            LayerAction::Solo => false,
+            LayerAction::Exclude => true,
+        };
+        for &(layer, enabled, _) in drawn {
+            if enabled {
+                *layer.flag(state) = if layer == clicked { !others } else { others };
+            }
+        }
+    }
+}
+
+/// An icon-only toggle showing `layer`'s tag icon: an ordinary button while
 /// off, filled with the icon's own colour and the icon drawn white while on.
 fn layer_toggle(
     ui: &mut Ui,
-    on: &mut bool,
-    group: [u8; 4],
+    on: bool,
+    layer: ModelLayer,
     game: Option<GameId>,
     enabled: bool,
-    label: &str,
-) -> egui::Response {
+) -> (egui::Response, LayerAction) {
+    let group = layer.group();
     let icon = tag_icon(Some(u32::from_be_bytes(group)), game);
-    let accent = tag_icon_accent(icon).filter(|_| *on && enabled);
+    let accent = tag_icon_accent(icon).filter(|_| on && enabled);
     let response = ui
         .add_enabled_ui(enabled, |ui| {
             if let Some(accent) = accent {
@@ -419,15 +529,21 @@ fn layer_toggle(
             response
         })
         .inner;
-    if response.clicked() {
-        *on = !*on;
-    }
-    let shown = if *on { "shown" } else { "hidden" };
-    let tip = match &group {
-        b"jmad" => format!("Armature ({shown})\n\nHover a joint to see its name."),
-        _ => format!("{label} ({shown})"),
+    let action = if response.clicked() {
+        LayerAction::of_click(ui.input(|input| input.modifiers))
+    } else {
+        LayerAction::None
     };
-    response.on_hover_text(tip)
+    let shown = if on { "shown" } else { "hidden" };
+    let extra = match layer {
+        ModelLayer::Armature => "\nHover a joint to see its name.",
+        _ => "",
+    };
+    let tip = format!(
+        "{} ({shown})\nAlt-click: show only this one\nShift-click: hide only this one{extra}",
+        layer.label()
+    );
+    (response.on_hover_text(tip), action)
 }
 
 #[derive(Clone, Copy)]

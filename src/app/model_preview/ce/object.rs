@@ -1,6 +1,6 @@
 //! A classic Halo CE object's own features, read when it opens.
 
-use super::super::load::{build_render_preview, feature, feature_into};
+use super::super::load::{build_render_preview_at, feature, feature_into};
 use super::super::object_reference;
 use super::super::{
     ModelPreviewData, PreviewLoadSettings, RenderModelPreview, RenderModelPreviewMarker,
@@ -177,7 +177,7 @@ pub(in crate::app::model_preview) fn load_ce_object(
     let render = reader
         .load(&reference, "gbxmodel", b"mod2")
         .map_err(|error| format!("Could not load {reference}.gbxmodel: {error}"))?;
-    let mut preview = build_render_preview(&render)?;
+    let mut preview = build_render_preview_at(&render, settings.detail_level)?;
     if preview.batches.is_empty() {
         return Err("Referenced gbxmodel has no previewable draw batches.".to_owned());
     }

@@ -40,8 +40,9 @@ pub(super) fn load_particle_model(
 pub(super) fn load_render_tag(
     model_tag: &TagFile,
     entry: &TagEntry,
+    detail_level: Option<usize>,
 ) -> Result<ModelPreviewData, String> {
-    let preview = build_render_preview(model_tag)?;
+    let preview = build_render_preview_at(model_tag, detail_level)?;
     if preview.batches.is_empty() {
         return Err("This render tag has no previewable draw batches.".to_owned());
     }
@@ -176,12 +177,28 @@ pub(super) const PARTICLE_OBJECT_PERMUTATION: &str = "default";
 pub(in crate::app) fn build_render_preview(
     render_tag: &TagFile,
 ) -> Result<RenderModelPreview, String> {
+    build_render_preview_at(render_tag, None)
+}
+
+/// [`build_render_preview`] at a Halo CE or Halo 2 level of detail, by
+/// index, lowest first; `None` for the highest.
+pub(in crate::app::model_preview) fn build_render_preview_at(
+    render_tag: &TagFile,
+    detail_level: Option<usize>,
+) -> Result<RenderModelPreview, String> {
     let mut render_model = RenderModel::from_tag(render_tag).map_err(|error| error.to_string())?;
     let render_meshes =
         RenderModel::derive_render_meshes(render_tag).map_err(|error| error.to_string())?;
+    let detail_levels = super::detail::apply_detail_level(
+        render_tag,
+        &mut render_model,
+        render_meshes.len(),
+        detail_level,
+    );
     let generation = blam_tags::game::Game::of(render_tag);
     super::games::turn_render_model(generation, &mut render_model);
     let mut preview = render_model_to_preview(&render_model, &render_meshes);
+    preview.detail_levels = detail_levels;
     super::games::finish_render_preview(generation, render_tag, &mut preview);
     super::games::read_render_prt(render_tag, &render_model, &render_meshes, &mut preview);
     append_model_errors(render_tag, &mut preview, ModelPreviewLayer::Render);

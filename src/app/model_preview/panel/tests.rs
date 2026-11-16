@@ -879,6 +879,33 @@ fn two_panes_advance_the_clock_once_per_pass() {
     assert!((playback.time - 0.2).abs() < 1e-6, "{}", playback.time);
 }
 
+/// The header's model toggles take the bitmap channels' shortcuts: a click
+/// flips one, Alt shows only it, Shift hides only it, and a toggle that
+/// can't be used (no collision model) is left as it is.
+#[test]
+fn model_toggles_take_alt_and_shift_clicks() {
+    use super::view_menu::{LayerAction, ModelLayer, apply_layer_actions};
+    let mut state = ModelPreviewState::default();
+    let shown = |state: &ModelPreviewState| {
+        (state.show_render, state.show_collision, state.show_physics, state.show_armature)
+    };
+    let drawn = |clicked: ModelLayer, action: LayerAction| {
+        [ModelLayer::Render, ModelLayer::Collision, ModelLayer::Physics, ModelLayer::Armature]
+            .map(|layer| {
+                let enabled = layer != ModelLayer::Collision;
+                (layer, enabled, if layer == clicked { action } else { LayerAction::None })
+            })
+    };
+    state.show_render = true;
+    apply_layer_actions(&mut state, &drawn(ModelLayer::Armature, LayerAction::Toggle));
+    assert_eq!(shown(&state), (true, false, false, true));
+    apply_layer_actions(&mut state, &drawn(ModelLayer::Physics, LayerAction::Solo));
+    assert_eq!(shown(&state), (false, false, true, false));
+    apply_layer_actions(&mut state, &drawn(ModelLayer::Physics, LayerAction::Exclude));
+    // Collision has nothing to show, so it stays off.
+    assert_eq!(shown(&state), (true, false, false, true));
+}
+
 /// A clip carried through a reload (Game Shaders on or off) comes back as it
 /// was, paused, stopped or playing, at its time; one picked from the list
 /// plays from the top.

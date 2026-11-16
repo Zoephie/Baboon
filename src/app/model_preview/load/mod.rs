@@ -23,6 +23,8 @@ pub(in crate::app::model_preview) mod overlays;
 pub(in crate::app::model_preview) use jobs::*;
 mod guard;
 pub(in crate::app::model_preview) use guard::{feature, feature_into};
+mod detail;
+pub(in crate::app) use detail::DetailLevels;
 mod render_model;
 pub(in crate::app) use render_model::build_render_preview;
 pub(in crate::app::model_preview) use render_model::*;
@@ -83,7 +85,7 @@ fn load_tag_preview(
     }
     let group = model_tag.header.group_tag.to_be_bytes();
     if matches!(&group, b"mode" | b"mod2") {
-        return load_render_tag(model_tag, entry);
+        return load_render_tag(model_tag, entry, settings.detail_level);
     }
     if let Some(result) = load_own_object(model_tag, entry, reader, settings) {
         return result;
@@ -106,7 +108,7 @@ fn load_tag_preview(
     if let Some(result) = load_unreal_model(model_tag, entry, reader, settings) {
         return result;
     }
-    load_model(model_tag, entry, names, reader)
+    load_model(model_tag, entry, names, reader, settings.detail_level)
 }
 
 #[cfg(test)]

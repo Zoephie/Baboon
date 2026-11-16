@@ -56,6 +56,10 @@ pub(in crate::app) struct ModelPreviewState {
     /// The `game_shaders` the cached `data` was read for: turned on or off,
     /// the preview reads again (`TagReader::game_shaders`).
     pub(in crate::app) loaded_game_shaders: bool,
+    /// Halo CE's and Halo 2's level of detail picked, lowest first; `None`
+    /// for the highest. A view setting: never written to the tag.
+    pub(in crate::app) detail_level: Option<usize>,
+    pub(in crate::app) loaded_detail_level: Option<usize>,
     /// The weapon picker opened before the unit's weapons were listed: the
     /// pane lists them on a worker (`maybe_request_unit_weapons`).
     pub(in crate::app) list_weapons: bool,
@@ -169,6 +173,8 @@ impl Default for ModelPreviewState {
             secondary_weapon: None,
             loaded_secondary_weapon: None,
             loaded_game_shaders: false,
+            detail_level: None,
+            loaded_detail_level: None,
             list_weapons: false,
             weapons_pending: false,
             reload_carry: None,
@@ -252,6 +258,7 @@ impl ModelPreviewState {
             || self.loaded_weapon != self.weapon
             || self.loaded_secondary_weapon != self.secondary_weapon
             || self.loaded_game_shaders != self.game_shaders
+            || self.loaded_detail_level != self.detail_level
             || self.loaded_scenario_selection != self.scenario_bsp_selection
     }
 }
