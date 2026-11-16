@@ -689,7 +689,7 @@ mod tests {
     /// keeping its hue; one that already reads keeps its colour.
     #[test]
     fn light_mode_icons_darken_until_they_read() {
-        let backdrop = [247, 221, 201];
+        let backdrop = [235, 229, 224];
         let yellow = readable_on([0xF8, 0xBE, 0x00], backdrop);
         assert!(contrast(yellow, backdrop) >= ICON_CONTRAST, "{yellow:?}");
         assert!(yellow[0] > yellow[2] && yellow[1] > yellow[2], "still yellow: {yellow:?}");
