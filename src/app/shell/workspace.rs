@@ -641,7 +641,7 @@ pub(in crate::app) fn draw_status_bar(
             });
         });
     ui.painter().hline(bar.response.rect.x_range(), bar.response.rect.top() + 0.5,
-        Stroke::new(1.0, grid_line()));
+        Stroke::new(1.0, chrome_edge()));
 }
 
 /// The "please wait" window shown while the active kit is still indexing.

@@ -541,6 +541,13 @@ pub(in crate::app) fn menu_bar() -> Color32 {
 /// Fill for the selected tab in every tiled tab rack. In dark mode this must
 /// sit visibly above the surrounding 31-55 gray fills; the old menu-bar gray
 /// was actually darker than document tabs, which hid the active selection.
+/// The lines between the window's frame and the workspace: under the menu
+/// bar and over the status bar. Light mode draws them in the focused
+/// tab's border colour; dark mode keeps its divider.
+pub(in crate::app) fn chrome_edge() -> Color32 {
+    if is_dark_mode() { grid_line() } else { focused_tab_border(false) }
+}
+
 /// The window's frame: the menu bar and the workspace tab bar. Light mode
 /// shares the status bar's peach, so the top and bottom read as one frame
 /// around the warmer workspace.
@@ -626,7 +633,9 @@ pub(in crate::app) fn foundation_documentation_bg() -> Color32 {
         // brighter than the equivalent design-tool/CSS overlay.
         Color32::from_rgba_premultiplied(13, 13, 13, 13)
     } else {
-        Color32::from_black_alpha(13)
+        // The block headers' sand: documentation and the kit banner read
+        // as warm notes rather than grey slabs.
+        foundation_block_bar()
     }
 }
 
@@ -874,7 +883,8 @@ pub(in crate::app) fn browser_search_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_black_alpha(102)
     } else {
-        Color32::from_rgb(213, 207, 202)
+        // The input wells' sand, as the keyword field beside it.
+        foundation_input()
     }
 }
 

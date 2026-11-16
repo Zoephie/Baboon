@@ -153,7 +153,7 @@ pub(in crate::app) fn draw_menu_bar(cx: &Ctx, ui: &mut egui::Ui, menu: &MenuStat
             });
         });
     ui.painter().hline(bar.response.rect.x_range(), bar.response.rect.bottom() - 0.5,
-        Stroke::new(1.0, grid_line()));
+        Stroke::new(1.0, chrome_edge()));
 }
 
 #[cfg(test)]
