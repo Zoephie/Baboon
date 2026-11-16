@@ -68,6 +68,9 @@ pub(super) fn append_imposter(
             for batch in &mut imposter.batches {
                 batch.layer = ModelPreviewLayer::Imposter;
             }
+            // Its regions are its own (`region_00`...), which the sidebar
+            // would list beside the model's; its batches draw without them.
+            imposter.regions.clear();
             merge_preview_append(preview, &imposter);
         }
         Err(error) => found.missing = Some(error),
@@ -320,5 +323,9 @@ mod tests {
         let on_layer = |layer| model.preview.batches.iter().filter(move |batch| batch.layer == layer);
         assert!(on_layer(ModelPreviewLayer::Imposter).count() > 0);
         assert!(on_layer(ModelPreviewLayer::Render).count() > 0);
+        assert!(
+            !model.preview.regions.iter().any(|region| region.name.starts_with("region_")),
+            "the imposter's regions joined the model's"
+        );
     }
 }
