@@ -2054,6 +2054,18 @@ mod tests {
         pub(super) painted_rects: Vec<(String, egui::Rect)>,
         /// What the last frame asked the platform to do.
         pub(super) commands: Vec<egui::OutputCommand>,
+        /// Every texture upload since the harness began, in order, and the
+        /// last frame's shapes: what [`Harness::shoot`] paints. `None`
+        /// keeps neither.
+        pub(super) recording: Option<Recording>,
+    }
+
+    /// What a frame needs to be painted after the fact.
+    #[derive(Default)]
+    pub(super) struct Recording {
+        textures: Vec<(egui::TextureId, egui::epaint::ImageDelta)>,
+        shapes: Vec<egui::epaint::ClippedShape>,
+        pixels_per_point: f32,
     }
 
     impl Harness {
@@ -2087,7 +2099,15 @@ mod tests {
                 painted: Vec::new(),
                 painted_rects: Vec::new(),
                 commands: Vec::new(),
+                recording: None,
             }
+        }
+
+        /// A harness that keeps what [`Harness::shoot`] needs.
+        pub(super) fn recording() -> Self {
+            let mut harness = Self::new();
+            harness.recording = Some(Recording::default());
+            harness
         }
 
         /// Run one whole application frame with `events`, timed.
@@ -2108,7 +2128,15 @@ mod tests {
             Counters::reset();
             let app = &mut self.app;
             let started = Instant::now();
-            let output = crate::app::run_ui_test(&self.ctx, input, |ui| app.run_frame(ui));
+            let mut output = self.ctx.run_ui(input, |ui| app.run_frame(ui));
+            if let Some(recording) = &mut self.recording {
+                for (id, deltas) in output.textures_delta.set.drain() {
+                    recording.textures.extend(deltas.into_iter().map(|delta| (id, delta)));
+                }
+                recording.shapes = output.shapes.clone();
+                recording.pixels_per_point = output.pixels_per_point;
+            }
+            output.textures_delta.clear();
             let run = started.elapsed();
             let counters = Counters::read();
             let started = Instant::now();
@@ -5483,6 +5511,21 @@ mod tests {
         assert!(state(&mut h).reloading.is_none(), "the old model was kept past its load");
     }
 
+    /// A loaded model's viewport draws it: the page holds the model's data
+    /// out of its state while it draws, and asked of the state then, the
+    /// viewport took itself for reloading and showed loading rings forever.
+    #[test]
+    fn a_loaded_models_viewport_draws_instead_of_waiting() {
+        let mut h = Harness::recording();
+        let _kit = model_preview_pane(&mut h);
+        h.frame(Vec::new());
+        let shapes = &h.recording.as_ref().unwrap().shapes;
+        assert!(
+            shapes.iter().any(|clipped| matches!(clipped.shape, egui::Shape::Callback(_))),
+            "the viewport painted no model"
+        );
+    }
+
     /// The sidebar's left edge drags its width, which is saved and kept
     /// within its clamp; a drag inside the sidebar leaves it.
     #[test]
@@ -7606,5 +7649,216 @@ mod tests {
         click_point(&mut edit.h, egui::pos2(1400.0, 900.0));
         settle(&mut edit.h, 2);
         assert_eq!(offset(&edit), undone, "the undo stays undone");
+    }
+
+    impl Harness {
+        /// Paint the last frame, the 3D viewport included, through egui's own
+        /// GL painter into an offscreen framebuffer, and save it as a PNG.
+        /// Needs [`Harness::recording`]. Nothing is shown, so this works with
+        /// no screen: what a screenshot of the window would be, without one.
+        #[cfg(any(target_os = "macos", windows))]
+        pub(super) fn shoot(&self, path: &std::path::Path) {
+            use eframe::glow::{self, HasContext as _};
+            let recording = self.recording.as_ref().expect("a recording harness");
+            let pixels_per_point = recording.pixels_per_point;
+            let width = (self.screen.x * pixels_per_point).round() as u32;
+            let height = (self.screen.y * pixels_per_point).round() as u32;
+            let gl = std::sync::Arc::new(crate::app::model_preview::headless_gl());
+            let mut painter =
+                eframe::egui_glow::Painter::new(std::sync::Arc::clone(&gl), "", None, false)
+                    .expect("egui's GL painter");
+            for (id, delta) in &recording.textures {
+                painter.set_texture(*id, delta);
+            }
+            let primitives = self.ctx.tessellate(recording.shapes.clone(), pixels_per_point);
+            let mut pixels = vec![0_u8; width as usize * height as usize * 4];
+            unsafe {
+                let color = gl.create_renderbuffer().unwrap();
+                gl.bind_renderbuffer(glow::RENDERBUFFER, Some(color));
+                gl.renderbuffer_storage(glow::RENDERBUFFER, glow::RGBA8, width as i32, height as i32);
+                let depth = gl.create_renderbuffer().unwrap();
+                gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
+                gl.renderbuffer_storage(
+                    glow::RENDERBUFFER,
+                    glow::DEPTH24_STENCIL8,
+                    width as i32,
+                    height as i32,
+                );
+                let framebuffer = gl.create_framebuffer().unwrap();
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+                gl.framebuffer_renderbuffer(
+                    glow::FRAMEBUFFER,
+                    glow::COLOR_ATTACHMENT0,
+                    glow::RENDERBUFFER,
+                    Some(color),
+                );
+                gl.framebuffer_renderbuffer(
+                    glow::FRAMEBUFFER,
+                    glow::DEPTH_STENCIL_ATTACHMENT,
+                    glow::RENDERBUFFER,
+                    Some(depth),
+                );
+                assert_eq!(
+                    gl.check_framebuffer_status(glow::FRAMEBUFFER),
+                    glow::FRAMEBUFFER_COMPLETE
+                );
+                gl.viewport(0, 0, width as i32, height as i32);
+                let background = self.ctx.global_style().visuals.panel_fill;
+                let [r, g, b, _] = egui::Rgba::from(background).to_array();
+                gl.disable(glow::SCISSOR_TEST);
+                gl.clear_color(r, g, b, 1.0);
+                gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+                painter.paint_primitives([width, height], pixels_per_point, &primitives);
+                // The viewport's own passes may leave another framebuffer
+                // bound; read the one painted into.
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+                gl.read_pixels(
+                    0,
+                    0,
+                    width as i32,
+                    height as i32,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelPackData::Slice(Some(&mut pixels)),
+                );
+            }
+            painter.destroy();
+            let row = width as usize * 4;
+            let upright: Vec<u8> = pixels
+                .chunks_exact(row)
+                .rev()
+                .flatten()
+                .copied()
+                .enumerate()
+                // Opaque: the window has no see-through parts.
+                .map(|(index, byte)| if index % 4 == 3 { 255 } else { byte })
+                .collect();
+            let image = image::RgbaImage::from_raw(width, height, upright).unwrap();
+            if let Some(folder) = path.parent() {
+                let _ = std::fs::create_dir_all(folder);
+            }
+            image.save(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        }
+    }
+
+    /// Opens a kit's `subtree` as the active kit, from the kit at `root`.
+    fn install_kit_subtree(
+        h: &mut Harness,
+        root: &std::path::Path,
+        game: GameId,
+        subtree: &str,
+    ) -> Vec<TagEntry> {
+        let names = TagNameIndex::load_game(&locate_definitions_root(), game).expect("group names");
+        // The kit's own separators, as a folder load names its tags.
+        let subtree = subtree.replace('/', std::path::MAIN_SEPARATOR_STR);
+        let entries = crate::core::source::scan_folder_subtree_entries(
+            root,
+            std::path::Path::new(&subtree),
+            &names,
+        )
+        .expect("scan the kit");
+        h.app.install_loaded_source(LoadedSourceData {
+            label: format!("{game:?}"),
+            source: TagSource::LooseFolder {
+                root: root.to_owned(),
+                game: Some(game),
+                definitions_root: locate_definitions_root(),
+            },
+            names,
+            game: Some(game),
+            entries: entries.clone(),
+            tree: crate::core::source::build_folder_directory_tree(root).unwrap(),
+            group_tree: crate::core::source::build_group_tree(&entries),
+            all_entries: entries.clone(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: true,
+            chosen_kit_layout: None,
+        });
+        entries
+    }
+
+    /// Opens the tag of `entries` whose path ends `rel` (with its
+    /// extension), and runs frames until its model preview has loaded and
+    /// settled.
+    fn open_model_page(h: &mut Harness, entries: &[TagEntry], rel: &str) -> String {
+        let wanted = rel.replace('/', "\\").to_ascii_lowercase();
+        let key = entries
+            .iter()
+            .find(|entry| {
+                entry.display_path.replace('/', "\\").to_ascii_lowercase().ends_with(&wanted)
+            })
+            .unwrap_or_else(|| panic!("{rel} is not in the kit: {:?}", entries.first().map(|entry| &entry.display_path)))
+            .key
+            .clone();
+        h.app.select_entry(key.clone(), h.ctx.clone());
+        let started = Instant::now();
+        loop {
+            h.frame(Vec::new());
+            // The page opens on its fields; the preview is its other tab.
+            if h.painted.iter().any(|text| text == "Model Preview")
+                && !h.painted.iter().any(|text| text.trim() == "Refresh Model")
+            {
+                h.click("Model Preview", 0);
+            }
+            let id = h.app.model.kits[h.app.model.active].id;
+            let loaded = h.app.views[id]
+                .caches
+                .model_previews
+                .get(&key)
+                .is_some_and(|state| {
+                    state.loaded_key.as_ref() == Some(&key) && !state.needs_preview_load(&key)
+                });
+            if loaded && h.painted.iter().any(|text| text.trim() == "Refresh Model") {
+                break;
+            }
+            assert!(started.elapsed().as_secs() < 120, "{rel} never loaded: {:?}", h.painted);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // Textures and the layout settle over a few more.
+        for _ in 0..60 {
+            h.frame(Vec::new());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        key
+    }
+
+    /// Screenshots of the whole app with Reach's banshee imposter open, on
+    /// its own and beside its model, as PNGs in `BABOON_APP_SHOTS`, with
+    /// `BLAM_TEST_HREK` naming the kit's tags.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn app_shots_of_the_banshee_imposter() {
+        let (Some(dir), Ok(root)) = (
+            std::env::var_os("BABOON_APP_SHOTS"),
+            std::env::var("BLAM_TEST_HREK"),
+        ) else {
+            return;
+        };
+        // The kit's own separators, as a folder load would name its tags.
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let dir = std::path::PathBuf::from(dir);
+        let mut h = Harness::recording();
+        h.frame(Vec::new());
+        let entries = install_kit_subtree(
+            &mut h,
+            &root,
+            GameId::HaloReach,
+            "objects/vehicles/covenant/banshee",
+        );
+        let base = "objects/vehicles/covenant/banshee/banshee";
+        open_model_page(&mut h, &entries, &format!("{base}.imposter_model"));
+        h.shoot(&dir.join("app_banshee_imposter.png"));
+        let key = open_model_page(&mut h, &entries, &format!("{base}.model"));
+        h.shoot(&dir.join("app_banshee_model.png"));
+        let id = h.app.model.kits[h.app.model.active].id;
+        if let Some(state) = h.app.views[id].caches.model_previews.get_mut(&key) {
+            state.show_imposter = true;
+        }
+        for _ in 0..10 {
+            h.frame(Vec::new());
+        }
+        h.shoot(&dir.join("app_banshee_model_with_imposter.png"));
     }
 }

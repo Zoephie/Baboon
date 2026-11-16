@@ -106,6 +106,7 @@ pub(in crate::app) fn draw_model_preview_panel(
             supports_textures,
             own_view,
             data: &shown.data,
+            reloading: true,
         };
         let page_width = page.width();
         let refreshed = draw_reloading_page(
@@ -153,6 +154,7 @@ pub(in crate::app) fn draw_model_preview_panel(
         supports_textures,
         own_view,
         data,
+        reloading: false,
     };
 
     let mut requests = SetupRequests::default();
@@ -289,6 +291,10 @@ pub(in crate::app::model_preview) struct PreviewPanel<'a> {
     /// The view menu's own settings for the tag's model, if its game has any.
     pub(in crate::app::model_preview) own_view: Option<super::super::load::OwnViewSettings>,
     pub(in crate::app::model_preview) data: &'a ModelPreviewData,
+    /// Drawn from the model as it was while another loads: the viewport
+    /// waits. Said here, not asked of the state, whose data the page holds
+    /// out while it draws.
+    pub(in crate::app::model_preview) reloading: bool,
 }
 
 /// What the panel's header actions asked for this pass.
@@ -321,8 +327,7 @@ pub(in crate::app::model_preview) fn draw_preview_card(
                     ui.available_width().max(1.0),
                     (body_height - MODEL_PREVIEW_STATS_FOOTER_HEIGHT).max(1.0),
                 );
-                let reloading = state.needs_preview_load(&panel.entry.key);
-                draw_model_viewport_with_stats(ui, panel.data, state, viewport, reloading);
+                draw_model_viewport_with_stats(ui, panel.data, state, viewport, panel.reloading);
             }
         },
     );

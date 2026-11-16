@@ -44,6 +44,8 @@ pub(crate) mod h3;
 pub(crate) mod h4;
 #[cfg(test)]
 mod harness;
+#[cfg(all(test, any(target_os = "macos", windows)))]
+pub(in crate::app) use harness::headless_gl;
 pub(in crate::app) mod load;
 pub(in crate::app) mod materials;
 mod panel;

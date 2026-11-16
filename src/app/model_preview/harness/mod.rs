@@ -7,6 +7,9 @@ pub(in crate::app::model_preview) mod gl;
 #[cfg(windows)]
 #[path = "gl_win.rs"]
 pub(in crate::app::model_preview) mod gl;
+/// A headless GL context, for shooting the whole app.
+#[cfg(any(target_os = "macos", windows))]
+pub(in crate::app) use gl::headless_gl;
 #[cfg(any(target_os = "macos", windows))]
 mod gl_state;
 pub(in crate::app::model_preview) mod kit;

@@ -64,7 +64,7 @@ unsafe extern "system" {
     fn GetProcAddress(module: *mut c_void, name: *const i8) -> *const c_void;
 }
 
-pub(in crate::app::model_preview) fn headless_gl() -> glow::Context {
+pub(in crate::app) fn headless_gl() -> glow::Context {
     const PFD_DRAW_TO_WINDOW: u32 = 0x04;
     const PFD_SUPPORT_OPENGL: u32 = 0x20;
     const PFD_DOUBLEBUFFER: u32 = 0x01;
