@@ -17,6 +17,7 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
     desired_size: Vec2,
+    reloading: bool,
 ) {
     // Hold the viewport until the textures land, rather than drawing the model
     // untextured and re-shading it a second later — a model that changes
@@ -25,7 +26,9 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
     let waiting_for_textures = state.render_mode.uses_textures()
         && !data.preview.materials.is_empty()
         && data.textures_for(state.game_shaders).is_none();
-    if waiting_for_textures {
+    // A reload (Game Shaders, a weapon) waits the same way, the page around
+    // it drawn from the model as it was.
+    if reloading || waiting_for_textures {
         let (rect, _) = ui.allocate_exact_size(desired_size, Sense::hover());
         ui.painter().rect_stroke(
             rect,

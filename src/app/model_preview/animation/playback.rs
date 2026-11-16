@@ -42,6 +42,10 @@ pub(crate) struct PreviewAnimationPlayback {
     /// tag share this state, and each advanced the clock, so playback ran at
     /// twice the speed.
     pub advanced_in_pass: Option<u64>,
+    /// The clip was carried through a reload (Game Shaders, a weapon), so
+    /// its decode resumes it where it was, paused, stopped or playing,
+    /// rather than starting it from the top as a newly picked clip does.
+    pub resume_on_decode: bool,
 }
 
 impl Default for PreviewAnimationPlayback {
@@ -60,6 +64,27 @@ impl Default for PreviewAnimationPlayback {
             requested_list: false,
             filter: String::new(),
             advanced_in_pass: None,
+            resume_on_decode: false,
+        }
+    }
+}
+
+impl PreviewAnimationPlayback {
+    /// How the player looks now, clip, transport and time, for drawing it
+    /// unchanged while the model loads again. Nothing it holds is worked on.
+    pub(crate) fn display_copy(&self) -> Self {
+        Self {
+            selected: self.selected,
+            playing: self.playing,
+            stopped: self.stopped,
+            looped: self.looped,
+            interpolate: self.interpolate,
+            speed: self.speed,
+            time: self.time,
+            pose: self.pose.clone(),
+            error: self.error.clone(),
+            filter: self.filter.clone(),
+            ..Self::default()
         }
     }
 }

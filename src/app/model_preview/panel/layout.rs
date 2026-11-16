@@ -12,8 +12,9 @@ use super::super::super::ui_kit::style::subtle_dark;
 use super::super::super::{GameId, TagEntry, TagNameIndex};
 use super::super::{
     FieldEditContext, MAX_MODEL_SETUP_WIDTH, MIN_MODEL_SETUP_WIDTH, ModelPreviewData,
-    ModelPreviewState, is_previewable_geometry_group_for_game,
+    ModelPreviewState, PreviewAnimationPlayback, is_previewable_geometry_group_for_game,
 };
+use super::super::state::ReloadingPreview;
 use super::animation::{animation_card_height, draw_animation_player};
 use super::functions::draw_setup_body;
 use super::section::{
@@ -74,12 +75,59 @@ pub(in crate::app) fn draw_model_preview_panel(
     let (page, _) = ui.allocate_exact_size(size, Sense::hover());
     let rects = panel_rects(page, *model_setup_width);
 
+    let own_view = super::super::load::own_view_settings(tag);
     if state.needs_preview_load(&entry.key) {
-        draw_model_preview_loading_shells(ui, &rects);
+        // The same model with new settings (Game Shaders, a weapon) keeps its
+        // page: drawn from the model as it was, held aside once the load is
+        // asked for, or still in place the pass before it is.
+        let same_model = state.loaded_key.as_deref() == Some(entry.key.as_str());
+        let shown = match (state.reloading.take(), state.data.take()) {
+            (Some(reloading), data) => {
+                state.data = data;
+                Some((reloading, false))
+            }
+            (None, Some(Ok(data))) if same_model => {
+                let animation = state.animation.display_copy();
+                Some((ReloadingPreview { data, animation }, true))
+            }
+            (None, data) => {
+                state.data = data;
+                None
+            }
+        };
+        let Some((shown, in_place)) = shown else {
+            draw_model_preview_loading_shells(ui, &rects);
+            return;
+        };
+        let panel = PreviewPanel {
+            tag,
+            entry,
+            source_game,
+            supports_textures,
+            own_view,
+            data: &shown.data,
+        };
+        let page_width = page.width();
+        let refreshed = draw_reloading_page(
+            ui,
+            &rects,
+            &panel,
+            state,
+            shown.animation.display_copy(),
+            page_width,
+            model_setup_width,
+            edit,
+        );
+        // Refresh Model starts over from the loading shells.
+        if !refreshed {
+            if in_place {
+                state.data = Some(Ok(shown.data));
+            } else {
+                state.reloading = Some(shown);
+            }
+        }
         return;
     }
-
-    let own_view = super::super::load::own_view_settings(tag);
 
     let Some(data_result) = state.data.take() else {
         in_rect(ui, page, "model_preview_empty", |ui| {
@@ -123,6 +171,54 @@ pub(in crate::app) fn draw_model_preview_panel(
     } else if !requests.reload {
         state.data = restore_data.take();
     }
+}
+
+/// The page as it was while the same model loads again with new settings
+/// (Game Shaders, a weapon): the header works as ever, the viewport waits on
+/// the load, and the sidebar and player show what they did, still, until the
+/// new model arrives.
+#[allow(clippy::too_many_arguments)]
+fn draw_reloading_page(
+    ui: &mut Ui,
+    rects: &PanelRects,
+    panel: &PreviewPanel<'_>,
+    state: &mut ModelPreviewState,
+    shown_animation: PreviewAnimationPlayback,
+    page_width: f32,
+    model_setup_width: &mut f32,
+    edit: &mut FieldEditContext<'_>,
+) -> bool {
+    // Header actions write nothing to the tag; a click on Refresh Model, or
+    // a shading change, starts its own load next pass. Says whether Refresh
+    // Model was clicked.
+    let mut requests = SetupRequests::default();
+    draw_setup_resize_handle(ui, rects, page_width, model_setup_width);
+    in_rect(ui, rects.preview, "model_preview_viewport_card", |ui| {
+        draw_preview_card(ui, panel, state, &mut requests, rects.preview.height());
+    });
+    if requests.reload {
+        state.invalidate_load();
+    }
+    // Shown, not worked: what is picked here would be lost to the load's
+    // own carry, and the player's clip indexes the old model's list.
+    let live = std::mem::replace(&mut state.animation, shown_animation);
+    let mut discard = SetupRequests::default();
+    still(ui, rects.setup, "model_preview_setup_cards", |ui| {
+        draw_setup_cards(ui, panel, state, edit, &mut discard);
+    });
+    still(ui, rects.animation, "model_preview_animation_card", |ui| {
+        draw_animation_player(ui, panel, state);
+    });
+    state.animation = live;
+    requests.reload
+}
+
+/// `add_contents` in `rect`, drawn as it looks but taking no clicks.
+fn still(ui: &mut Ui, rect: Rect, id: &str, add_contents: impl FnOnce(&mut Ui)) {
+    in_rect(ui, rect, id, |ui| {
+        ui.visuals_mut().disabled_alpha = 1.0;
+        ui.add_enabled_ui(false, add_contents);
+    });
 }
 
 pub(in crate::app::model_preview) use crate::app::ui_kit::dock::in_rect;
@@ -225,7 +321,8 @@ pub(in crate::app::model_preview) fn draw_preview_card(
                     ui.available_width().max(1.0),
                     (body_height - MODEL_PREVIEW_STATS_FOOTER_HEIGHT).max(1.0),
                 );
-                draw_model_viewport_with_stats(ui, panel.data, state, viewport);
+                let reloading = state.needs_preview_load(&panel.entry.key);
+                draw_model_viewport_with_stats(ui, panel.data, state, viewport, reloading);
             }
         },
     );

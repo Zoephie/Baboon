@@ -145,6 +145,8 @@ pub(in crate::app::model_preview) fn draw_animation_combo(
                         playback.time = 0.0;
                         playback.playing = false;
                         playback.stopped = false;
+                        // Picked, not carried: it plays from the top.
+                        playback.resume_on_decode = false;
                         playback.error = None;
                         egui::Popup::close_id(ui.ctx(), popup_id);
                     }

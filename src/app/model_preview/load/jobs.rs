@@ -301,6 +301,8 @@ impl Baboon {
             .model_previews
             .get_mut(key)
             .expect("preview state checked above");
+        // The same model with new settings keeps its page on screen.
+        let same_model = state.loaded_key.as_deref() == Some(key);
         state.loaded_key = Some(key.to_owned());
         settings
             .campaign_evolved
@@ -311,7 +313,19 @@ impl Baboon {
         state.loaded_game_shaders = settings.game_shaders;
         state.preview_load_id = Some(request_id);
         state.remember_selection();
-        state.data = None;
+        let previous = match state.data.take() {
+            Some(Ok(data)) if same_model => Some(super::super::state::ReloadingPreview {
+                data,
+                animation: state.animation.display_copy(),
+            }),
+            _ => None,
+        };
+        // A load asked for again (one dropped as stale) keeps what it showed.
+        state.reloading = if same_model {
+            previous.or(state.reloading.take())
+        } else {
+            None
+        };
         state.render_model_path = None;
         // A fresh base load orphans any overlay, material, or animation work
         // keyed to the old geometry. Their request hooks re-arm after this
@@ -331,6 +345,9 @@ impl Baboon {
             speed: kept.speed,
             time: kept.time,
             filter: kept.filter,
+            // A clip that was picked is picked again by name; its decode
+            // then resumes it as it was.
+            resume_on_decode: kept.selected.is_some() || kept.resume_on_decode,
             ..PreviewAnimationPlayback::default()
         };
 
@@ -387,6 +404,7 @@ impl Baboon {
         if stale {
             return true;
         }
+        state.reloading = None;
         if let Ok(data) = &result {
             state.render_model_path = Some(data.render_model_path.clone());
             // The variant chosen before the reload, by name, else the canonical

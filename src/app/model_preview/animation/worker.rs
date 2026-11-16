@@ -7,7 +7,7 @@ use super::super::{
 };
 use super::decode::decode_held_animation;
 use super::graph::list_model_animations;
-use super::playback::PreviewAnimationEntry;
+use super::playback::{PreviewAnimationEntry, PreviewAnimationPlayback};
 use super::pose::{DecodedAnimationPose, PreviewAnimationPose, PreviewNodeTransform};
 use super::skinning::held_layers;
 use eframe::egui;
@@ -330,15 +330,26 @@ impl Baboon {
                     solvers: decoded.solvers,
                     ..PreviewAnimationPose::new(animation_index, frames)
                 }));
-                state.animation.time = 0.0;
-                state.animation.playing = true;
-                state.animation.stopped = false;
+                resume_or_start(&mut state.animation);
             }
             Err(error) => {
                 state.animation.error = Some(error);
                 state.animation.playing = false;
+                state.animation.resume_on_decode = false;
             }
         }
         false
     }
+}
+
+/// A decoded clip's playback: a clip carried through a reload resumes as it
+/// was, paused, stopped or playing, at its time; a newly picked one plays
+/// from the top.
+pub(in crate::app::model_preview) fn resume_or_start(playback: &mut PreviewAnimationPlayback) {
+    if std::mem::take(&mut playback.resume_on_decode) {
+        return;
+    }
+    playback.time = 0.0;
+    playback.playing = true;
+    playback.stopped = false;
 }

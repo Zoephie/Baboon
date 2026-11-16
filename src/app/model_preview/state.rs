@@ -20,6 +20,10 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) preview_load_id: Option<u64>,
     pub(in crate::app) render_model_path: Option<String>,
     pub(in crate::app) data: Option<Result<ModelPreviewData, String>>,
+    /// The model as it was before a settings change (Game Shaders, a weapon)
+    /// began loading it again: the page keeps drawing from it, and only the
+    /// viewport waits on the load.
+    pub(in crate::app) reloading: Option<ReloadingPreview>,
     pub(in crate::app) active_tab: ModelTagPanelTab,
     pub(in crate::app) new_variant_name: String,
     pub(in crate::app) selected_variant: Option<usize>,
@@ -133,11 +137,19 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) focus: [f32; 3],
 }
 
+/// The last loaded model and how its player stood, drawn while the same
+/// model loads again with new settings.
+pub(in crate::app) struct ReloadingPreview {
+    pub(in crate::app) data: ModelPreviewData,
+    pub(in crate::app) animation: super::PreviewAnimationPlayback,
+}
+
 impl Default for ModelPreviewState {
     fn default() -> Self {
         Self {
             loaded_key: None,
             preview_load_id: None,
+            reloading: None,
             render_model_path: None,
             data: None,
             active_tab: ModelTagPanelTab::Fields,
@@ -202,6 +214,7 @@ impl ModelPreviewState {
         self.remember_selection();
         self.loaded_key = None;
         self.data = None;
+        self.reloading = None;
         self.preview_load_id = None;
     }
 

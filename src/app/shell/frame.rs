@@ -5440,6 +5440,49 @@ mod tests {
         assert!(!loaded(&h), "Refresh Model left the preview as loaded");
     }
 
+    /// Switching Game Shaders loads the model again, and only the viewport
+    /// waits on it: the header keeps its buttons rather than the bare title,
+    /// and the sidebar keeps its cards, every pass until the load lands.
+    #[test]
+    fn a_game_shaders_switch_keeps_the_page_while_the_model_reloads() {
+        let mut h = Harness::new();
+        let _kit = model_preview_pane(&mut h);
+        fn state(h: &mut Harness) -> &mut crate::app::model_preview::state::ModelPreviewState {
+            let id = h.app.model.kits[h.app.model.active].id;
+            h.app.views[id]
+                .caches
+                .model_previews
+                .values_mut()
+                .next()
+                .unwrap()
+        }
+        let painted = |h: &Harness, needle: &str| h.painted.iter().any(|text| text.trim() == needle);
+        assert!(painted(&h, "Refresh Model") && painted(&h, "Permutations"));
+        state(&mut h).game_shaders = true;
+        // The pass that asks for the load, then passes with it out: its
+        // answer is held off by taking it for a superseded one.
+        for pass in 0..4 {
+            h.frame(Vec::new());
+            assert!(painted(&h, "Refresh Model"), "the header lost its buttons: {:?}", h.painted);
+            assert!(painted(&h, "Permutations"), "the sidebar lost its cards: {:?}", h.painted);
+            if pass == 0 {
+                assert!(state(&mut h).reloading.is_some(), "the old model was not held aside");
+                state(&mut h).preview_load_id = Some(u64::MAX);
+            }
+        }
+        // Asked for again, it lands, and the old model goes.
+        state(&mut h).preview_load_id = None;
+        for _ in 0..400 {
+            h.frame(Vec::new());
+            let key = state(&mut h).loaded_key.clone().unwrap();
+            if !state(&mut h).needs_preview_load(&key) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(state(&mut h).reloading.is_none(), "the old model was kept past its load");
+    }
+
     /// The sidebar's left edge drags its width, which is saved and kept
     /// within its clamp; a drag inside the sidebar leaves it.
     #[test]

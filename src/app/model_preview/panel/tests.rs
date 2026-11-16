@@ -879,6 +879,30 @@ fn two_panes_advance_the_clock_once_per_pass() {
     assert!((playback.time - 0.2).abs() < 1e-6, "{}", playback.time);
 }
 
+/// A clip carried through a reload (Game Shaders on or off) comes back as it
+/// was, paused, stopped or playing, at its time; one picked from the list
+/// plays from the top.
+#[test]
+fn a_reloaded_clip_resumes_as_it_was() {
+    use super::super::animation::resume_or_start;
+    for (playing, stopped) in [(false, false), (false, true), (true, false)] {
+        let mut playback = PreviewAnimationPlayback {
+            playing,
+            stopped,
+            time: 1.5,
+            resume_on_decode: true,
+            ..Default::default()
+        };
+        resume_or_start(&mut playback);
+        assert_eq!((playback.playing, playback.stopped), (playing, stopped));
+        assert_eq!(playback.time, 1.5);
+        assert!(!playback.resume_on_decode, "resumed once, not every decode");
+        // The next clip decoded is a pick: it plays from the top.
+        resume_or_start(&mut playback);
+        assert_eq!((playback.playing, playback.stopped, playback.time), (true, false, 0.0));
+    }
+}
+
 /// A looping clock wraps to the animation's loop frame, not to 0, so the
 /// slider and the pose agree on where playback is.
 #[test]
