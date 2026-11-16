@@ -24,6 +24,7 @@ pub(super) fn load_model(
     if preview.batches.is_empty() {
         return Err("Referenced render_model has no previewable draw batches.".to_owned());
     }
+    preview.lod_model = super::stand_in::append_lod_model(model_tag, reader, &mut preview);
     add_overlay_shaders(model_tag, &mut preview);
     // The collision/physics overlays are not built here: walking the
     // collision BSP and tessellating the physics shapes is slow, and a

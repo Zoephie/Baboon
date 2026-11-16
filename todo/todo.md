@@ -6,6 +6,38 @@ that picking one up does not mean rediscovering it first.
 
 ---
 
+## Model Preview: imposters (Reach, Halo 2 Anniversary)
+
+**Status:** not implemented. A `.model`'s `imposter model` names an
+`imposter_model` (`impo`), the far stand-in Reach and H2A draw at a
+distance; 1,670 of HREK's 1,775 `.model`s have one. The plan: an Imposter
+header toggle like LOD Model (`load/stand_in.rs`), drawn where the model is,
+off by default, coloured by its baked vertex colour and `raw imposter data`
+(diffuse, ambient, specular per vertex), and a Model Preview tab on the
+`.imposter_model` itself.
+
+Its geometry is an ordinary `global_render_geometry_struct`, with `per mesh
+temporary` raw vertices and indices, but under `geometry`, not `render
+geometry`. blam-tags' mesh decoder (`read_meshes_at_path`) takes the path
+but is private, and its public `extract_render_geometry_meshes` fixes it to
+`render geometry`; `RenderModel::from_tag` also requires `nodes`, which an
+imposter lacks (`node maps` instead). So it waits on a blam-tags change that
+exposes the decoder at a path, and a rev bump, rather than a copy of the
+decoder here.
+
+---
+
+## Model Preview: a weapon's first-person skeleton (Campaign Evolved)
+
+**Status:** not implemented. A Campaign Evolved weapon's `first person
+skeleton model` (`skel`) is ignored; the third-person `.model`'s `skeleton
+model` already gives the preview its nodes, markers and regions
+(`campaign_evolved/meshes.rs`). A skeleton model has no geometry, so showing
+it means drawing its armature beside the weapon's, once there is a use for
+it.
+
+---
+
 ## Drag and drop: spring-loaded folders and edge scrolling
 
 **Status:** not implemented. Flat view drags drop onto folder rows (Flat and

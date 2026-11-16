@@ -67,7 +67,10 @@ pub(in crate::app::model_preview) fn visible_batch_indices(
             if selection.permutation == batch.permutation_name {
                 return Some(index);
             }
-            let is_overlay = state.overlays_loaded && batch.layer != ModelPreviewLayer::Render;
+            // An overlay or stand-in without the permutation picked draws
+            // its first.
+            let is_overlay = batch.layer == ModelPreviewLayer::LodModel
+                || (state.overlays_loaded && batch.layer != ModelPreviewLayer::Render);
             (is_overlay
                 && !overlay_has_selected(batch.layer, &batch.region_name, &selection.permutation)
                 && overlay_first_permutation(batch.layer, &batch.region_name)
@@ -108,6 +111,11 @@ pub(in crate::app::model_preview) fn model_layer_visible(
     state: &ModelPreviewState,
     layer: ModelPreviewLayer,
 ) -> bool {
+    // A stand-in is the load's own, not an overlay, and only its toggle
+    // shows it.
+    if layer == ModelPreviewLayer::LodModel {
+        return state.show_lod_model;
+    }
     if !state.overlays_loaded {
         // A bare render/collision/physics tag is the primary preview, not an
         // optional overlay. `show_render` remains true for that path.
@@ -117,6 +125,7 @@ pub(in crate::app::model_preview) fn model_layer_visible(
         ModelPreviewLayer::Render => state.show_render,
         ModelPreviewLayer::Collision => state.show_collision,
         ModelPreviewLayer::Physics => state.show_physics,
+        ModelPreviewLayer::LodModel => state.show_lod_model,
     }
 }
 

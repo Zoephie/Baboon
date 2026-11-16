@@ -16,6 +16,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) struct RenderModelPreview {
     /// Halo CE's and Halo 2's levels of detail, and the one drawn.
     pub detail_levels: Option<super::load::DetailLevels>,
+    /// Halo 3's and ODST's LOD render model, which the LOD Model toggle
+    /// shows where the model is.
+    pub lod_model: Option<super::load::StandIn>,
     /// The game the opened tag is from: the tag's own generation for Halo CE
     /// and Halo 2, else its kit's. None for geometry no game's tag gave.
     pub game: Option<GameId>,
@@ -160,6 +163,9 @@ pub(crate) enum ModelPreviewLayer {
     Render,
     Collision,
     Physics,
+    /// A stand-in's geometry (Halo 3's and ODST's LOD render model), shown
+    /// by its own toggle and off until it is turned on.
+    LodModel,
 }
 
 #[derive(Debug, Clone)]

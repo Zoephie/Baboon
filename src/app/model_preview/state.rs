@@ -114,6 +114,8 @@ pub(in crate::app) struct ModelPreviewState {
     /// the collision/physics layers on screen — a frame-level filter, so
     /// toggling never rebuilds geometry.
     pub(in crate::app) show_render: bool,
+    /// Draw the model's stand-in (Halo 3's and ODST's LOD render model).
+    pub(in crate::app) show_lod_model: bool,
     /// Perspective projection (the default) instead of orthographic. A fixed
     /// 60° lens whose eye dollies toward the orbit point as the zoom grows,
     /// placed so the focus plane matches the orthographic framing exactly —
@@ -199,6 +201,7 @@ impl Default for ModelPreviewState {
             function_inputs: Default::default(),
             textures_pending: false,
             show_render: true,
+            show_lod_model: false,
             perspective: true,
             animation: PreviewAnimationPlayback::default(),
             show_grid: true,

@@ -390,6 +390,9 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
             );
         }
     }
+    if let Some(lod_model) = &data.preview.lod_model {
+        toggle(ui, ModelLayer::LodModel, lod_model.missing.is_none(), lod_model.missing.as_deref());
+    }
     if has_armature {
         toggle(ui, ModelLayer::Armature, true, None);
     }
@@ -406,6 +409,8 @@ pub(in crate::app::model_preview) enum ModelLayer {
     Render,
     Collision,
     Physics,
+    /// Halo 3's and ODST's LOD render model, where the model is.
+    LodModel,
     Armature,
 }
 
@@ -415,6 +420,7 @@ impl ModelLayer {
             Self::Render => "Render Model",
             Self::Collision => "Collision Model",
             Self::Physics => "Physics Model",
+            Self::LodModel => "LOD Model",
             Self::Armature => "Armature",
         }
     }
@@ -425,6 +431,7 @@ impl ModelLayer {
             Self::Render => *b"mode",
             Self::Collision => *b"coll",
             Self::Physics => *b"phmo",
+            Self::LodModel => *b"mode",
             Self::Armature => *b"jmad",
         }
     }
@@ -434,6 +441,7 @@ impl ModelLayer {
             Self::Render => &mut state.show_render,
             Self::Collision => &mut state.show_collision,
             Self::Physics => &mut state.show_physics,
+            Self::LodModel => &mut state.show_lod_model,
             Self::Armature => &mut state.show_armature,
         }
     }
@@ -537,6 +545,7 @@ fn layer_toggle(
     let shown = if on { "shown" } else { "hidden" };
     let extra = match layer {
         ModelLayer::Armature => "\nHover a joint to see its name.",
+        ModelLayer::LodModel => "\nThe simpler model the game draws at a distance.",
         _ => "",
     };
     let tip = format!(
