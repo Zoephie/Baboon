@@ -1072,7 +1072,11 @@ fn draw_foundation_collapsing_header_inner(
         };
         let mut controls_ui = ui.new_child(egui::UiBuilder::new().id_salt(id.with("controls"))
             .max_rect(controls_rect)
-            .layout(egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(wrapped)));
+            // Wrapped rows stack from the top: centred, the first row sits
+            // at the middle of last frame's height, the rows under it push
+            // the measured height past it, and the header doubles each frame.
+            .layout(egui::Layout::left_to_right(if wrapped { egui::Align::Min } else { egui::Align::Center })
+                .with_main_wrap(wrapped)));
         controls_ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
         controls(&mut controls_ui, BoxPart::Controls);
         let drawn = controls_ui.min_rect();
@@ -5877,5 +5881,41 @@ mod tests {
             eprintln!("  {tagname}  ->  {p}");
         }
         assert!(broken.is_empty(), "{} unresolvable paths", broken.len());
+    }
+
+    /// A header whose controls wrap onto rows of their own keeps its height
+    /// from frame to frame. Centred, the rows sat at the middle of the last
+    /// frame's height and the header doubled each frame, pushing a model's
+    /// Permutations card far off the sidebar.
+    #[test]
+    fn a_wrapped_header_keeps_its_height() {
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(320.0, 2000.0),
+            )),
+            ..Default::default()
+        };
+        let mut heights = Vec::new();
+        for _ in 0..8 {
+            let mut height = 0.0;
+            crate::app::run_ui_test(&ctx, input(), |ui| {
+                let top = ui.cursor().top();
+                draw_resettable_box(ui, "Permutations", "wrapped", false, |ui, part| {
+                    if part == BoxPart::Controls {
+                        for _ in 0..3 {
+                            ui.add_sized([120.0, 24.0], egui::Button::new("control"));
+                        }
+                    }
+                });
+                height = ui.cursor().top() - top;
+            });
+            heights.push(height);
+        }
+        let settled = heights[heights.len() - 1];
+        assert_eq!(heights[heights.len() - 2], settled, "{heights:?}");
+        assert!(settled < 200.0, "{heights:?}");
     }
 }
