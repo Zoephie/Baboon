@@ -168,6 +168,15 @@ Shared services sit beside them: `ui_kit` (theme, icons, widgets — nothing
 about tags), `prefs`, `model_preview`, `audio`, plus `model`, `context` and
 `dialogs`.
 
+**Colours.** Every interface colour is a named accessor in
+`ui_kit/style.rs` (`help_cue()`, `progress_track()`, `error_text()`), named
+for what it is for rather than how it looks, and only `ui_kit` asks whether
+the theme is dark. A test (`ui_kit/palette_gate.rs`) fails on a colour
+written as numbers, or a theme branch, anywhere else in `app`. Colours that
+must not follow the theme, such as a mark over an image or a backdrop the
+user picks, carry a `// fixed: <reason>` comment; the 3D scene's own colours
+in `model_preview/renderer` and `model_preview/viewport` are exempt.
+
 **Imports.** A file in a feature imports its own feature with `use super::*`.
 What a feature uses from another, it names in its root with explicit paths —
 `use crate::app::browser::{BrowserMode, TagQueryResults};` — so a feature's

@@ -9,6 +9,8 @@ pub(in crate::app) mod scroll;
 pub(in crate::app) mod dock;
 
 pub(in crate::app) mod style;
+#[cfg(test)]
+mod palette_gate;
 pub(in crate::app) use style::*;
 mod input;
 pub(in crate::app) use input::*;
