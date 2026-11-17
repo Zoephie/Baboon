@@ -1,5 +1,7 @@
 //! User keyword tags, stored in a per-game sidecar JSON (outside the tag
 //! binaries). Keyed by tag entry key → sorted, unique, lowercased keywords.
+//! Loose folders carry keywords too, under their folder keys
+//! ([`crate::core::tag_key::folder_entry_key`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -132,7 +134,96 @@ impl KeywordStore {
         self.touched.insert(new_key.to_owned());
     }
 
-    /// All keywords with how many tags carry each, sorted by name.
+    /// Carry a folder's keywords, and those of every folder inside it, to its
+    /// new key after a rename or move. Keys compare as paths do: letter case
+    /// and separators aside.
+    pub(crate) fn rekey_folder(&mut self, old_key: &str, new_key: &str) {
+        use crate::core::tag_key::key_identity;
+        let old = key_identity(old_key);
+        if old == key_identity(new_key) {
+            return;
+        }
+        let moving: Vec<(String, String)> = self
+            .by_tag
+            .keys()
+            .filter_map(|key| {
+                let identity = key_identity(key);
+                let rest = if identity == old {
+                    ""
+                } else if identity.starts_with(&old) && identity[old.len()..].starts_with('\\') {
+                    &key[old.len()..]
+                } else {
+                    return None;
+                };
+                Some((key.clone(), format!("{new_key}{rest}")))
+            })
+            .collect();
+        for (from, to) in moving {
+            self.rekey_tag(&from, &to);
+        }
+    }
+
+    /// Drop the keywords of a deleted folder and every folder inside it.
+    pub(crate) fn forget_folder(&mut self, folder_key: &str) {
+        use crate::core::tag_key::key_identity;
+        let old = key_identity(folder_key);
+        let gone: Vec<String> = self
+            .by_tag
+            .keys()
+            .filter(|key| {
+                let identity = key_identity(key);
+                identity == old
+                    || (identity.starts_with(&old) && identity[old.len()..].starts_with('\\'))
+            })
+            .cloned()
+            .collect();
+        for key in gone {
+            self.forget_tag(&key);
+        }
+    }
+
+    /// Folder keys carrying `keyword`.
+    pub(crate) fn folders_with(&self, keyword: &str) -> Vec<String> {
+        self.by_tag
+            .iter()
+            .filter(|(key, keywords)| {
+                key.starts_with(crate::core::tag_key::FOLDER_KEY_PREFIX)
+                    && keywords.iter().any(|existing| existing == keyword)
+            })
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
+    /// Keywords already in use that match what is being typed, for picking
+    /// one rather than spelling it slightly differently: those starting with
+    /// `typed` first, then those containing it, the most used first within
+    /// each, leaving out `except` (those the tag already has). Empty `typed`
+    /// lists the most used.
+    pub(crate) fn suggestions(
+        &self,
+        typed: &str,
+        except: &[String],
+        limit: usize,
+    ) -> Vec<(String, usize)> {
+        let typed = typed.trim().to_ascii_lowercase();
+        let mut matches: Vec<(bool, String, usize)> = self
+            .all_keywords()
+            .into_iter()
+            .filter(|(keyword, _)| !except.contains(keyword))
+            .filter_map(|(keyword, count)| {
+                let starts = keyword.starts_with(&typed);
+                (starts || keyword.contains(&typed)).then_some((!starts, keyword, count))
+            })
+            .collect();
+        matches.sort_by(|a, b| a.0.cmp(&b.0).then(b.2.cmp(&a.2)).then(a.1.cmp(&b.1)));
+        matches
+            .into_iter()
+            .take(limit)
+            .map(|(_, keyword, count)| (keyword, count))
+            .collect()
+    }
+
+    /// All keywords with how many tags (and folders) carry each, sorted by name.
     pub(crate) fn all_keywords(&self) -> Vec<(String, usize)> {
         let mut counts: BTreeMap<String, usize> = BTreeMap::new();
         for keywords in self.by_tag.values() {
@@ -320,6 +411,49 @@ mod tests {
         assert_eq!(before.get("file:a").unwrap(), &["hero"]);
         assert_eq!(store.keywords("file:a"), &["hero", "wip"]);
         assert!(!Arc::ptr_eq(&before, &store.snapshot()));
+    }
+
+    /// Suggestions put what starts with the typed text first, then what
+    /// contains it, the most used first, and leave out the tag's own.
+    #[test]
+    fn suggestions_rank_prefixes_then_use_and_skip_the_tags_own() {
+        let mut store = KeywordStore::default();
+        for (key, keyword) in [
+            ("file:a", "brute"),
+            ("file:b", "brute"),
+            ("file:c", "brutes"),
+            ("file:a", "big brute"),
+            ("file:d", "wip"),
+        ] {
+            store.add(key, keyword);
+        }
+        let names = |list: Vec<(String, usize)>| list.into_iter().map(|(name, _)| name).collect::<Vec<_>>();
+        assert_eq!(names(store.suggestions("Bru", &[], 8)), ["brute", "brutes", "big brute"]);
+        assert_eq!(store.suggestions("bru", &[], 8)[0], ("brute".to_owned(), 2));
+        assert_eq!(names(store.suggestions("bru", &["brute".to_owned()], 8)), ["brutes", "big brute"]);
+        assert_eq!(names(store.suggestions("", &[], 2)), ["brute", "big brute"]);
+        assert!(store.suggestions("zzz", &[], 8).is_empty());
+    }
+
+    /// A folder's keywords follow it, and the folders inside it, through a
+    /// rename, whatever the letter case; a folder whose name only starts the
+    /// same stays put. Deleting the folder drops them all.
+    #[test]
+    fn folder_keywords_follow_renames_and_go_with_deletes() {
+        let mut store = KeywordStore::default();
+        store.add(r"folder:C:\tags\objects\brute", "covenant");
+        store.add(r"folder:C:\tags\objects\brute\fx", "effects");
+        store.add(r"folder:C:\tags\objects\brutes", "other");
+        store.rekey_folder(r"folder:c:\TAGS\objects\brute", r"folder:C:\tags\objects\jiralhanae");
+        assert_eq!(store.keywords(r"folder:C:\tags\objects\jiralhanae"), ["covenant"]);
+        assert_eq!(store.keywords(r"folder:C:\tags\objects\jiralhanae\fx"), ["effects"]);
+        assert_eq!(store.keywords(r"folder:C:\tags\objects\brutes"), ["other"]);
+        assert!(store.keywords(r"folder:C:\tags\objects\brute").is_empty());
+        assert_eq!(store.folders_with("covenant"), [r"folder:C:\tags\objects\jiralhanae"]);
+        store.forget_folder(r"folder:C:\tags\objects\jiralhanae");
+        assert!(store.folders_with("covenant").is_empty());
+        assert!(store.folders_with("effects").is_empty());
+        assert_eq!(store.folders_with("other").len(), 1);
     }
 
     #[test]

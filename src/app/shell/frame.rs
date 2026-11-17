@@ -808,9 +808,11 @@ fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
         .min;
     ui.painter().galley(text_pos, galley, text_dark());
 
-    let remove_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.right() - REMOVE_WIDTH, rect.top()),
-        rect.right_bottom(),
+    // The tabs' close button, shown while the pointer is on the keyword;
+    // only the button itself removes it.
+    let remove_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - REMOVE_WIDTH / 2.0 - 2.0, rect.center().y),
+        Vec2::splat(16.0),
     );
     let remove = ui
         .interact(
@@ -819,12 +821,9 @@ fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
             Sense::click(),
         )
         .on_hover_text("Remove keyword");
-    let stroke = ui.style().interact(&remove).fg_stroke;
-    let cross = egui::Rect::from_center_size(remove_rect.center(), Vec2::splat(7.0));
-    ui.painter()
-        .line_segment([cross.left_top(), cross.right_bottom()], stroke);
-    ui.painter()
-        .line_segment([cross.right_top(), cross.left_bottom()], stroke);
+    if ui.rect_contains_pointer(rect) || remove.has_focus() {
+        crate::app::ui_kit::paint_close_control(ui, &remove);
+    }
     remove.clicked()
 }
 
@@ -979,16 +978,170 @@ pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, 
             egui::StrokeKind::Middle,
         );
         let submitted = lost_focus_once(&resp) && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        if (add_clicked || submitted) && !draft.trim().is_empty() {
+        let picked = draw_keyword_suggestions(
+            ui,
+            draft_id,
+            &resp,
+            keyword_field.response.rect,
+            &cx.model.kits[kit_index].keywords,
+            &existing,
+            &mut draft,
+        );
+        // Enter takes the highlighted suggestion, if there is one.
+        let keyword = match picked {
+            KeywordPick::Clicked(keyword) => Some(keyword),
+            KeywordPick::Highlighted(keyword) if submitted => Some(keyword),
+            _ if add_clicked || submitted => Some(draft.clone()),
+            _ => None,
+        };
+        if let Some(keyword) = keyword.filter(|keyword| !keyword.trim().is_empty()) {
             cx.send(BrowserCommand::AddKeyword {
                 kit,
                 key: tag_key.to_owned(),
-                keyword: draft.clone(),
+                keyword,
             });
             draft.clear();
         }
         ui.data_mut(|data| data.insert_temp(draft_id, draft));
     });
+}
+
+/// What the keyword suggestions gave this frame.
+enum KeywordPick {
+    None,
+    /// Picked with the pointer: added at once.
+    Clicked(String),
+    /// Highlighted with the arrow keys: Enter adds it instead of the draft.
+    Highlighted(String),
+}
+
+/// Keywords already in use that match what is being typed, listed under the
+/// keyword field while it has the keyboard, so a tag gets "brute" rather
+/// than a new "brutes". Up and Down highlight one, Tab fills it in, and a
+/// click adds it.
+fn draw_keyword_suggestions(
+    ui: &mut Ui,
+    draft_id: egui::Id,
+    field: &egui::Response,
+    field_rect: egui::Rect,
+    keywords: &crate::core::keywords::KeywordStore,
+    existing: &[String],
+    draft: &mut String,
+) -> KeywordPick {
+    let highlight_id = draft_id.with("suggestion_highlight");
+    let list_id = draft_id.with("suggestions");
+    // The list's rect last frame: a press on it takes the field's focus
+    // before the click lands, so the list stays up for that press.
+    let last_rect = ui.data(|data| data.get_temp::<egui::Rect>(list_id));
+    let pressing_list = last_rect.is_some_and(|rect| {
+        ui.input(|input| {
+            input.pointer.interact_pos().is_some_and(|pos| rect.contains(pos))
+                && (input.pointer.any_down() || input.pointer.any_released())
+        })
+    });
+    let entered = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    if !field.has_focus() && !pressing_list && !entered {
+        ui.data_mut(|data| {
+            data.remove::<egui::Rect>(list_id);
+            data.remove::<usize>(highlight_id);
+        });
+        return KeywordPick::None;
+    }
+    let suggestions = keywords.suggestions(draft, existing, 8);
+    let mut highlight = ui
+        .data(|data| data.get_temp::<usize>(highlight_id))
+        .filter(|index| *index < suggestions.len());
+    if entered {
+        ui.data_mut(|data| {
+            data.remove::<egui::Rect>(list_id);
+            data.remove::<usize>(highlight_id);
+        });
+        return highlight.map_or(KeywordPick::None, |index| {
+            KeywordPick::Highlighted(suggestions[index].0.clone())
+        });
+    }
+    if suggestions.is_empty() {
+        ui.data_mut(|data| data.remove::<egui::Rect>(list_id));
+        return KeywordPick::None;
+    }
+    if field.has_focus() {
+        // Tab completes only once something is typed: Tab into an empty
+        // field just arrives there.
+        let typed = !draft.trim().is_empty();
+        let (down, up, tab) = ui.input_mut(|input| {
+            (
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                typed && input.consume_key(egui::Modifiers::NONE, egui::Key::Tab),
+            )
+        });
+        let last = suggestions.len() - 1;
+        if down {
+            highlight = Some(highlight.map_or(0, |index| (index + 1).min(last)));
+        }
+        if up {
+            highlight = highlight.and_then(|index| index.checked_sub(1));
+        }
+        if tab {
+            // Fill in the highlighted one, or the best match.
+            *draft = suggestions[highlight.unwrap_or(0)].0.clone();
+            highlight = None;
+            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), field.id) {
+                let end = egui::text::CCursor::new(draft.chars().count());
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
+                state.store(ui.ctx(), field.id);
+            }
+        }
+    }
+    let mut clicked = None;
+    let area = egui::Area::new(list_id)
+        .order(egui::Order::Foreground)
+        .fixed_pos(field_rect.left_bottom() + Vec2::new(0.0, 4.0))
+        .show(ui.ctx(), |ui| {
+            Frame::popup(ui.style()).show(ui, |ui| {
+                // As wide as the field, or enough for a longer keyword.
+                ui.set_width(field_rect.width().max(200.0));
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (index, (keyword, count)) in suggestions.iter().enumerate() {
+                    let row = ui
+                        .add(
+                            egui::Button::selectable(
+                                highlight == Some(index),
+                                RichText::new(keyword).color(text_dark()),
+                            )
+                            .right_text(RichText::new(count.to_string()).color(subtle_dark()))
+                            .min_size(Vec2::new(ui.available_width(), 22.0)),
+                        )
+                        .on_hover_text(format!(
+                            "Used on {count} tag{} or folder{}",
+                            if *count == 1 { "" } else { "s" },
+                            if *count == 1 { "" } else { "s" }
+                        ));
+                    if row.clicked() {
+                        clicked = Some(keyword.clone());
+                    }
+                }
+            });
+        });
+    ui.data_mut(|data| {
+        data.insert_temp(list_id, area.response.rect);
+        match highlight {
+            Some(index) => {
+                data.insert_temp(highlight_id, index);
+            }
+            None => data.remove::<usize>(highlight_id),
+        }
+    });
+    match clicked {
+        Some(keyword) => {
+            // Back to the field, for the next keyword.
+            field.request_focus();
+            KeywordPick::Clicked(keyword)
+        }
+        None => highlight.map_or(KeywordPick::None, |index| {
+            KeywordPick::Highlighted(suggestions[index].0.clone())
+        }),
+    }
 }
 
 /// The scenario header's launch buttons. `kit_index` is the workspace whose
@@ -7067,6 +7220,74 @@ mod tests {
         assert_eq!(draft(draft_ids[1]), "", "the other pane's box is untouched");
     }
 
+    /// Typing in the keyword field lists the keywords already in use that
+    /// match, so a tag gets "brute" rather than a new spelling; Down and
+    /// Enter add the highlighted one rather than what was typed.
+    #[test]
+    fn the_keyword_field_suggests_keywords_already_in_use() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let mut app = Baboon::for_test();
+        for (key, keyword) in [
+            ("file:a", "brute"),
+            ("file:b", "brute"),
+            ("file:c", "brutes"),
+            ("file:d", "wip"),
+        ] {
+            app.model.kits[0].keywords.add(key, keyword);
+        }
+        let key = |key: egui::Key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let frame = |app: &mut Baboon, events: Vec<egui::Event>| -> Vec<String> {
+            let output = crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 400.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let egui = ui.ctx().clone();
+                        draw_keyword_bar(&cx!(app, &egui), ui, 0, "file:crate.model");
+                    });
+                },
+            );
+            output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        let painted = frame(&mut app, Vec::new());
+        assert!(!painted.iter().any(|text| text == "brutes"), "listed before typing: {painted:?}");
+        // Tab gives the field the keyboard, then "bru" is typed.
+        frame(&mut app, vec![key(egui::Key::Tab)]);
+        frame(&mut app, vec![egui::Event::Text("bru".to_owned())]);
+        let painted = frame(&mut app, Vec::new());
+        for listed in ["brute", "2", "brutes"] {
+            assert!(painted.iter().any(|text| text == listed), "{listed}: {painted:?}");
+        }
+        assert!(!painted.iter().any(|text| text == "wip"), "{painted:?}");
+
+        frame(&mut app, vec![key(egui::Key::ArrowDown)]);
+        frame(&mut app, vec![key(egui::Key::Enter)]);
+        app.apply_commands(&ctx);
+        assert_eq!(app.model.kits[0].keywords.keywords("file:crate.model"), ["brute"]);
+    }
+
     /// An open tag that nobody touches does not keep the window drawing. The
     /// pane and the tile tree send a command every frame; applying one that
     /// changed nothing used to ask for the next frame, which sent them again,
@@ -8199,6 +8420,87 @@ mod tests {
             h.app.select_entry(other, h.ctx.clone());
             settle(&mut h);
             h.shoot(&dir.join(format!("mini_{theme}.png")));
+        }
+    }
+
+    /// `BABOON_APP_SHOTS` shots of a folder's keywords: `BABOON_SHOT_FOLDER`
+    /// (under `BLAM_TEST_H2EK`'s tags) open in a folder tab, its subfolders
+    /// and tags carrying keywords, then the keyword field's suggestions with
+    /// "bru" typed. Light and dark.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn app_shots_of_folder_keywords() {
+        let (Some(dir), Ok(root), Ok(folder)) = (
+            std::env::var_os("BABOON_APP_SHOTS"),
+            std::env::var("BLAM_TEST_H2EK"),
+            std::env::var("BABOON_SHOT_FOLDER"),
+        ) else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let dir = std::path::PathBuf::from(dir);
+        let game = std::env::var("BABOON_SHOT_GAME")
+            .map_or(GameId::Halo2, |id| id.parse().expect("a game id"));
+        let settle = |h: &mut Harness| {
+            for _ in 0..60 {
+                h.frame(Vec::new());
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        for dark in [false, true] {
+            let mut h = Harness::recording();
+            h.app.model.prefs.follow_system_theme = false;
+            h.app.model.prefs.dark_mode = dark;
+            h.frame(Vec::new());
+            let entries = install_kit_subtree(&mut h, &root, game, &folder);
+            let active = h.app.model.active;
+            let tags_root = h.app.model.loaded_tags_root_for(active).unwrap();
+            let relative = folder.replace('/', "\\");
+            let folder_key = |sub: &str| {
+                let path = if sub.is_empty() { relative.clone() } else { format!("{relative}\\{sub}") };
+                crate::core::tag_key::folder_entry_key(&tags_root, &path)
+            };
+            let keywords = &mut h.app.model.kits[active].keywords;
+            keywords.add(&folder_key(""), "covenant");
+            keywords.add(&folder_key(""), "brute");
+            keywords.add(&folder_key("bitmaps"), "textures");
+            keywords.add(&folder_key("fx"), "effects");
+            keywords.add(&folder_key("fx"), "brute");
+            for (index, entry) in entries.iter().take(6).enumerate() {
+                keywords.add(&entry.key, if index % 3 == 0 { "brutes" } else { "brute" });
+                if index == 1 {
+                    keywords.add(&entry.key, "brute ai");
+                }
+            }
+            h.app.handle_browser_action(
+                BrowserAction::OpenFolderBrowser {
+                    rel_path: folder.clone().into(),
+                    label: folder.rsplit('/').next().unwrap().into(),
+                    open_in_new_tab: true,
+                },
+                h.ctx.clone(),
+            );
+            settle(&mut h);
+            let theme = if dark { "dark" } else { "light" };
+            h.shoot(&dir.join(format!("folder_keywords_{theme}.png")));
+            // The pointer on a keyword shows its remove button, then on the
+            // button its hover.
+            let pill = h
+                .painted_rects
+                .iter()
+                .find(|(text, _)| text == "covenant")
+                .map(|(_, rect)| *rect)
+                .expect("the covenant keyword");
+            h.frame(vec![pointer_at(pill.center())]);
+            settle(&mut h);
+            h.shoot(&dir.join(format!("keyword_hover_{theme}.png")));
+            h.frame(vec![pointer_at(egui::pos2(pill.right() + 8.0 + 10.0 - 2.0, pill.center().y))]);
+            settle(&mut h);
+            h.shoot(&dir.join(format!("keyword_remove_hover_{theme}.png")));
+            h.click("add keyword", 0);
+            h.frame(vec![egui::Event::Text("bru".to_owned())]);
+            settle(&mut h);
+            h.shoot(&dir.join(format!("keyword_suggestions_{theme}.png")));
         }
     }
 

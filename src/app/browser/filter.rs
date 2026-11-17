@@ -107,6 +107,10 @@ impl ScopedSearchQuery {
                         .any(|keyword| search_term_matches(term, keyword)))
         })
     }
+    /// Whether a folder's own keywords match.
+    pub(in crate::app) fn keywords(&self, keywords: &[String]) -> bool {
+        self.matches(|term| keywords.iter().any(|keyword| search_term_matches(term, keyword)))
+    }
     pub(in crate::app) fn folder(&self, path: &str) -> bool {
         self.matches(|term| {
             tag_path::segments(path).any(|part| search_term_matches(term, part))
@@ -472,6 +476,42 @@ mod tests {
         );
         assert_eq!(cache.entries.len(), 1);
         assert_eq!(cache.tree.entries, vec![0]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A folder carrying a keyword is found by a keyword search, though no
+    /// tag in it carries the keyword and its name does not match.
+    #[test]
+    fn keyword_search_finds_folders_by_their_own_keywords() {
+        let root =
+            std::env::temp_dir().join(format!("baboon-folder-keywords-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("objects/jiralhanae")).unwrap();
+        std::fs::create_dir_all(root.join("objects/elite")).unwrap();
+        let mut keywords = std::collections::BTreeMap::new();
+        keywords.insert(
+            crate::core::tag_key::folder_entry_key(&root, "objects\\jiralhanae"),
+            vec!["brute".to_owned()],
+        );
+        let mut cache = FilterCache::default();
+        cache.refresh_scoped(
+            1,
+            "brute",
+            &[entry("objects\\armor.bitmap", b"bitm")],
+            false,
+            Path::new(""),
+            Some(&root),
+            BrowserSearchScope {
+                tags: false,
+                folders: false,
+                keywords: true,
+            },
+            &keywords,
+        );
+        assert!(cache.entries.is_empty());
+        let objects = &cache.tree.children[0];
+        assert_eq!(objects.label, "objects");
+        let labels: Vec<_> = objects.children.iter().map(|node| node.label.as_str()).collect();
+        assert_eq!(labels, ["jiralhanae"]);
         std::fs::remove_dir_all(&root).unwrap();
     }
 

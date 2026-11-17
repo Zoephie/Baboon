@@ -22,6 +22,21 @@ it, and double-clicking opens it.
 Use its type filters and search to narrow the listing. It supports multiple tag
 selection, with fewer file-management actions because assets may span folders.
 
+## Keywords
+
+A folder carries keywords as a tag does: add them on the **Keywords** bar in
+its header, and they show in its row's Keywords column. Typing in the bar
+lists the keywords already in use that match, the most used first, so similar
+tags and folders share one spelling: click one to add it, or use Up and Down
+and press Enter; Tab fills the highlighted one in. A search with **Keywords**
+ticked finds folders by their own keywords as well as tags by theirs, and the
+Keywords window names the folders that carry the one picked. A folder's
+keywords are not given to the tags inside it.
+
+Keywords live in Baboon's own data, not in the tags, one file per game shared
+by that game's kits. Renaming or moving a folder in Baboon carries its
+keywords, and those of the folders inside it, along; deleting it drops them.
+
 ## Selection and keyboard navigation
 
 - Click an item to select it. Ctrl-click (Command-click on macOS) toggles an

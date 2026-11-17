@@ -12,7 +12,7 @@ use crate::app::shell::frame::pane_header_inline_left_width;
 use crate::app::shell::frame::PANE_HEADER_COMMON_ACTIONS_WIDTH;
 use crate::app::shell::frame::PANE_HEADER_SECTION_GAP;
 
-const TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT: f32 = 1160.0;
+pub(in crate::app) const TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT: f32 = 1160.0;
 const TAG_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT: f32 = 1180.0;
 const TAG_HEADER_DYNAMIC_ACTIONS_WIDTH: f32 = 285.0;
 const BITMAP_HEADER_ACTIONS_WIDTH: f32 = 225.0;

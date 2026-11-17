@@ -165,10 +165,20 @@ impl Baboon {
                 self.views[kit_id].browser.remap_folder_browser_paths(from,to);
             }
             self.kit_and_view(kit_index).remap_tag_keys(&done.old_to_new_keys);
-            // Keywords are filed by tag key: they move with the tags.
+            // Keywords are filed by tag key: they move with the tags, and a
+            // folder's with the folder.
+            let root = self.model.loaded_tags_root_for(kit_index);
             let keywords = &mut self.model.kits[kit_index].keywords;
             for (old, new) in &done.old_to_new_keys {
                 keywords.rekey_tag(old, new);
+            }
+            if let Some(root) = root {
+                for (from, to) in &moved_folders {
+                    keywords.rekey_folder(
+                        &crate::core::tag_key::folder_entry_key(&root, &tag_path::relative_tag_path(from)),
+                        &crate::core::tag_key::folder_entry_key(&root, &tag_path::relative_tag_path(to)),
+                    );
+                }
             }
             keywords.save_if_dirty();
         }
@@ -500,6 +510,12 @@ mod tests {
         let old_key = format!("file:{}", root.join("objects/brute/armor.bitmap").display());
         let new_key = format!("file:{}", root.join("objects/elite/armor.bitmap").display());
         app.model.kits[0].keywords.add(&old_key, "wip");
+        let folder_key = |path: &str| {
+            crate::core::tag_key::folder_entry_key(&root, &tag_path::relative_tag_path(Path::new(path)))
+        };
+        app.model.kits[0].keywords.add(&folder_key("objects/brute"), "covenant");
+        app.model.kits[0].keywords.add(&folder_key("objects/brute/bitmaps"), "textures");
+        app.model.kits[0].keywords.add(&folder_key("objects/brute_other"), "other");
         app.kit_and_view(0).open_tag_pane(&old_key);
         let stamp = app.model.kit_stamp();
         app.add_kit();
@@ -533,6 +549,12 @@ mod tests {
         assert!(kit.open_tabs.contains(&new_key));
         assert_eq!(kit.keywords.keywords(&new_key), &["wip"]);
         assert!(kit.keywords.keywords(&old_key).is_empty());
+        // The folder's keywords, and its folders', follow it; a sibling
+        // whose name only starts the same keeps its own.
+        assert_eq!(kit.keywords.keywords(&folder_key("objects/elite")), &["covenant"]);
+        assert_eq!(kit.keywords.keywords(&folder_key("objects/elite/bitmaps")), &["textures"]);
+        assert!(kit.keywords.keywords(&folder_key("objects/brute")).is_empty());
+        assert_eq!(kit.keywords.keywords(&folder_key("objects/brute_other")), &["other"]);
         assert_eq!(
             view.browser.folder_browsers[&folder_pane_key(Path::new("objects/brute/bitmaps"))].rel_path,
             Path::new("objects/elite/bitmaps")

@@ -753,7 +753,10 @@ fn run_browser_search(
     }
     let mut folders = None;
     let mut extra = Vec::new();
-    if request.scope.folders && !request.groups && !request.query.trim().is_empty() {
+    if (request.scope.folders || request.scope.keywords)
+        && !request.groups
+        && !request.query.trim().is_empty()
+    {
         if let Some(root) = &request.root {
             let paths = match known_folders {
                 Some(paths) => paths,
@@ -775,11 +778,31 @@ fn run_browser_search(
                     Arc::new(paths)
                 }
             };
+            // Folders' own keywords, by the folder's path as tags compare.
+            let folder_keywords: std::collections::HashMap<String, &Vec<String>> = if request
+                .scope
+                .keywords
+            {
+                keywords
+                    .iter()
+                    .filter(|(key, _)| key.starts_with(crate::core::tag_key::FOLDER_KEY_PREFIX))
+                    .map(|(key, list)| (crate::core::tag_key::key_identity(key), list))
+                    .collect()
+            } else {
+                Default::default()
+            };
             for path in paths.iter() {
                 if cancelled() {
                     return None;
                 }
-                if query.folder(path) {
+                let named = request.scope.folders && query.folder(path);
+                let tagged = !folder_keywords.is_empty()
+                    && folder_keywords
+                        .get(&crate::core::tag_key::key_identity(
+                            &crate::core::tag_key::folder_entry_key(root, path),
+                        ))
+                        .is_some_and(|list| query.keywords(list));
+                if named || tagged {
                     extra.push(path.clone());
                 }
             }

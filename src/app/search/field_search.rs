@@ -388,9 +388,23 @@ impl Baboon {
             .iter()
             .filter_map(|key| self.model.entry_for_key(key).cloned())
             .collect();
-        let note = entries
-            .is_empty()
-            .then(|| "No tags with this keyword are in the current source.".to_owned());
+        let kit = &self.model.kits[self.model.active];
+        let folders: Vec<String> = kit
+            .keywords
+            .folders_with(keyword)
+            .iter()
+            .filter_map(|key| {
+                let path = key.strip_prefix(crate::core::tag_key::FOLDER_KEY_PREFIX)?;
+                let root = self.model.loaded_tags_root_for(self.model.active)?;
+                let relative = std::path::Path::new(path).strip_prefix(&root).ok()?;
+                Some(tag_path::relative_tag_path(relative))
+            })
+            .collect();
+        let note = match (entries.is_empty(), folders.is_empty()) {
+            (_, false) => Some(format!("Folders: {}", folders.join(", "))),
+            (true, true) => Some("No tags with this keyword are in the current source.".to_owned()),
+            (false, true) => None,
+        };
         self.dialogs.open(QueryResultsWindow::new(TagQueryResults {
             kit: self.model.active_kit_id(),
             title: format!("Tags tagged '{keyword}' ({})", entries.len()),

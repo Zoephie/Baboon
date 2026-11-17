@@ -100,7 +100,7 @@
                 "Find References lists every indexed tag that references the current tag.",
                 "Content Explorer shows the current tag's parents and children as a reference graph with history and filtering.",
                 "Unreferenced tag scans help find tags that nothing else points at.",
-                "Keyword tagging stores freeform labels in a sidecar outside the tags and lets you browse or filter by them.",
+                "Keyword tagging stores freeform labels for tags and folders in a sidecar outside the tags and lets you browse or filter by them. The keyword field suggests keywords already in use.",
                 "Scenario map ID and sound tools expose common kit-wide lists without hand-searching raw tags.",
                 "Tag Diff compares the current tag against another open tab or a tag on disk and can export differences as TSV."
               ]

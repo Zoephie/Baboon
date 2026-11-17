@@ -406,6 +406,14 @@ impl Baboon {
             both.close_tag_pane(key);
             both.drop_document(key);
         }
+        // Deleted folders' own keywords go with them.
+        if let Some(root) = self.model.loaded_tags_root_for(index) {
+            for folder in &outcome.deleted_folders {
+                self.model.kits[index].keywords.forget_folder(
+                    &crate::core::tag_key::folder_entry_key(&root, &tag_path::relative_tag_path(folder)),
+                );
+            }
+        }
         self.model.kits[index].keywords.save_if_dirty();
         let kit = stamp.kit;
         let close_folders: Vec<_> = self.views[kit]

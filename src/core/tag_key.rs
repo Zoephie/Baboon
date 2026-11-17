@@ -17,6 +17,19 @@ pub(crate) fn file_entry_key(path: &Path) -> String {
     format!("file:{}", path.display())
 }
 
+/// A loose folder's key, for the keywords it carries: `folder:` and the
+/// folder's path as a tag's under it is spelled, `relative` (`a\b`, or
+/// empty for the root) joined to the root.
+pub(crate) fn folder_entry_key(root: &Path, relative: &str) -> String {
+    if relative.is_empty() {
+        return format!("{FOLDER_KEY_PREFIX}{}", root.display());
+    }
+    format!("{FOLDER_KEY_PREFIX}{}", root.join(relative).display())
+}
+
+/// What starts every folder key.
+pub(crate) const FOLDER_KEY_PREFIX: &str = "folder:";
+
 /// Which file a key names, for telling whether two keys are the same tag:
 /// tag paths and Windows paths ignore letter case, and a key can spell its
 /// separators either way. Only for comparing; never saved.

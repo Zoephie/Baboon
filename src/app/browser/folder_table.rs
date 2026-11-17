@@ -321,7 +321,14 @@ pub(in crate::app) fn paint_folder_columns(
         );
         let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(cell));
         if *column == FolderColumn::Keywords {
-            let Some(keywords) = entry.and_then(|entry| table.keywords.get(&entry.key)) else {
+            // A tag's keywords, or a folder's own.
+            let key = entry
+                .map(|entry| entry.key.clone())
+                .or_else(|| folder.and_then(|folder| table.folder_key(folder)));
+            let Some(key) = key else {
+                continue;
+            };
+            let Some(keywords) = table.keywords.get(&key) else {
                 continue;
             };
             let mut x = cell.left();
@@ -345,7 +352,7 @@ pub(in crate::app) fn paint_folder_columns(
             }
             ui.interact(
                 cell,
-                ui.make_persistent_id(("folder_keywords", &entry.unwrap().key)),
+                ui.make_persistent_id(("folder_keywords", &key)),
                 Sense::hover(),
             )
             .on_hover_text(keywords.join(", "));
@@ -397,6 +404,13 @@ enum SortValue {
     Keywords(Vec<String>),
 }
 impl FolderTable {
+    /// A folder's keyword key, for a folder `relative` to the root.
+    fn folder_key(&self, relative: &Path) -> Option<String> {
+        self.root.as_ref().map(|root| {
+            crate::core::tag_key::folder_entry_key(root, &tag_path::relative_tag_path(relative))
+        })
+    }
+
     fn value(
         &self,
         column: FolderColumn,
@@ -470,9 +484,10 @@ pub(in crate::app) fn table_order_folders(ui: &Ui, nodes: &[TagTreeNode]) -> Opt
         .map(|(index, node)| {
             let name = node.label.to_ascii_lowercase();
             let path = table.root.as_ref().map(|root| root.join(&node.rel_path));
+            let key = table.folder_key(&node.rel_path);
             (
                 index,
-                table.value(column, &name, path.as_deref(), None),
+                table.value(column, &name, path.as_deref(), key.as_deref()),
                 name,
             )
         })

@@ -281,8 +281,18 @@ pub(in crate::app) fn draw_folder_browser_pane(
             } else {
                 source.full_entry_set()
             };
+            // A loose folder carries keywords as a tag does.
+            let keyword_key = cx.model.loaded_tags_root_for(kit_index).map(|root| {
+                crate::core::tag_key::folder_entry_key(
+                    &root,
+                    &tag_path::relative_tag_path(&pane.rel_path),
+                )
+            });
             draw_folder_pane_header(
+                cx,
                 ui,
+                kit_index,
+                keyword_key.as_deref(),
                 &mut pane,
                 header_entries,
                 is_loose,
@@ -1510,8 +1520,12 @@ fn draw_folder_browser_controls(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_folder_pane_header(
+    cx: &Ctx,
     ui: &mut Ui,
+    kit_index: usize,
+    keyword_key: Option<&str>,
     pane: &mut FolderBrowserState,
     entries: &[TagEntry],
     is_loose: bool,
@@ -1534,28 +1548,46 @@ fn draw_folder_pane_header(
     let inline_left_width = pane_header_inline_left_width(available, action_width);
     let actions_inline = inline_left_width.is_some();
     let left_width = inline_left_width.unwrap_or(available);
+    // Keywords follow the title when there is room, as a tag's do, or take
+    // a row under it.
+    let keywords_inline = available >= crate::app::editor::pane::TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT;
+    let left_height = if keyword_key.is_some() && !keywords_inline {
+        PANE_HEADER_ICON_SIZE + 10.0 + BUTTON_HEIGHT
+    } else {
+        PANE_HEADER_ICON_SIZE
+    };
 
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = PANE_HEADER_SECTION_GAP;
         ui.allocate_ui_with_layout(
-            Vec2::new(left_width, PANE_HEADER_ICON_SIZE),
+            Vec2::new(left_width, left_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
+                ui.spacing_mut().item_spacing.y = 10.0;
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = PANE_HEADER_ICON_TEXT_GAP;
-                    let (icon_rect, _) =
-                        ui.allocate_exact_size(Vec2::splat(PANE_HEADER_ICON_SIZE), Sense::hover());
-                    paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon_rect, text_dark());
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        if let Some((path, label)) = pane_header_breadcrumbs(ui, &breadcrumbs) {
-                            navigate_folder_browser(pane, path, label);
-                            ui.ctx().request_repaint();
-                        }
-                        ui.label(RichText::new(title).size(15.0).strong().color(text_dark()));
+                    ui.spacing_mut().item_spacing.x = PANE_HEADER_SECTION_GAP;
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = PANE_HEADER_ICON_TEXT_GAP;
+                        let (icon_rect, _) = ui
+                            .allocate_exact_size(Vec2::splat(PANE_HEADER_ICON_SIZE), Sense::hover());
+                        paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon_rect, text_dark());
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            if let Some((path, label)) = pane_header_breadcrumbs(ui, &breadcrumbs) {
+                                navigate_folder_browser(pane, path, label);
+                                ui.ctx().request_repaint();
+                            }
+                            ui.label(RichText::new(title).size(15.0).strong().color(text_dark()));
+                        });
                     });
+                    if keywords_inline && let Some(key) = keyword_key {
+                        crate::app::shell::draw_keyword_bar(cx, ui, kit_index, key);
+                    }
                 });
+                if !keywords_inline && let Some(key) = keyword_key {
+                    crate::app::shell::draw_keyword_bar(cx, ui, kit_index, key);
+                }
             },
         );
 
