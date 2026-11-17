@@ -1195,11 +1195,8 @@ fn draw_wwise_event_player(
     // Name the field each event comes from only when there is more than one
     // kind of them.
     let grouped = events.iter().any(|(label, _)| *label != events[0].0);
-    egui::CollapsingHeader::new(
-        RichText::new(format!("Sound \u{2014} Wwise event ({})", events.len())).color(text_dark()),
-    )
-    .default_open(true)
-    .show(ui, |ui| {
+    let note = format!("Wwise event ({})", events.len());
+    sound_card(ui, "Sound Player", &note, |ui| {
         let language = edit.sound_language.unwrap_or("");
         let clips: Vec<PlayerClip> = events
             .iter()
@@ -1260,10 +1257,30 @@ fn draw_wwise_event_player(
 /// About a tenth of the game's sound tags are like this — Reach metadata kept
 /// for the simulation with no audio asset behind them. Saying so is the whole
 /// point: the alternative is a player that looks playable and never is.
+/// A sound tag's player, boxed as the Model Preview's Animation Player is:
+/// `title` in the header bar with `note` at its right, `body` under it.
+fn sound_card(ui: &mut Ui, title: &str, note: &str, body: impl FnOnce(&mut Ui)) {
+    let mut body = Some(body);
+    crate::app::model_preview::draw_model_preview_section_with_header_wrap(
+        ui,
+        title,
+        None,
+        None,
+        |ui, part| match part {
+            crate::app::model_preview::ModelPreviewSectionPart::Header => {
+                ui.label(RichText::new(note).color(subtle_dark()));
+            }
+            crate::app::model_preview::ModelPreviewSectionPart::Body => {
+                if let Some(body) = body.take() {
+                    ui.push_id(title, body);
+                }
+            }
+        },
+    );
+}
+
 fn draw_ce_unbound_note(ui: &mut Ui) {
-    egui::CollapsingHeader::new(RichText::new("Sound \u{2014} no audio bound").color(text_dark()))
-        .default_open(true)
-        .show(ui, |ui| {
+    sound_card(ui, "Sound Player", "no audio bound", |ui| {
             ui.label(
                 RichText::new(
                     "This tag's permutation table is inherited Reach metadata. Campaign \
@@ -1296,16 +1313,12 @@ fn draw_ce_wwise_player(
     let media = binding.media_for_language(&selected);
 
     let language_picker = language_choices(edit, None);
-    egui::CollapsingHeader::new(
-        RichText::new(format!(
-            "Sound \u{2014} Wwise media ({} permutation{})",
-            media.len(),
-            if media.len() == 1 { "" } else { "s" }
-        ))
-        .color(text_dark()),
-    )
-    .default_open(true)
-    .show(ui, |ui| {
+    let note = format!(
+        "Wwise media, {} permutation{}",
+        media.len(),
+        if media.len() == 1 { "" } else { "s" }
+    );
+    sound_card(ui, "Sound Player", &note, |ui| {
         if media.is_empty() {
             ui.label(RichText::new("(no media in this language)").color(subtle_dark()));
             return;
@@ -1685,16 +1698,8 @@ pub(in crate::app) fn draw_sound_player(
         || (is_fmod_language_game(edit.game) && !shared_fmod_audio);
     let language_name = language_label(language.unwrap_or(H2_DEFAULT_LANGUAGE));
 
-    egui::CollapsingHeader::new(
-        RichText::new(format!(
-            "Sound \u{2014} {} permutation{}",
-            rows.len(),
-            if rows.len() == 1 { "" } else { "s" }
-        ))
-        .color(text_dark()),
-    )
-    .default_open(true)
-    .show(ui, |ui| {
+    let note = format!("{} permutation{}", rows.len(), if rows.len() == 1 { "" } else { "s" });
+    sound_card(ui, "Sound Player", &note, |ui| {
         let clips: Vec<PlayerClip> = rows
             .iter()
             .map(|row| PlayerClip {
@@ -2519,15 +2524,12 @@ pub(in crate::app) fn draw_sound_looping_player(
             container_source,
         )
     };
-    egui::CollapsingHeader::new(
-        RichText::new(format!(
-            "Sound Looping \u{2014} {} component sound(s)",
-            refs.len()
-        ))
-        .color(text_dark()),
-    )
-    .default_open(true)
-    .show(ui, |ui| {
+    let note = format!(
+        "{} component sound{}",
+        refs.len(),
+        if refs.len() == 1 { "" } else { "s" }
+    );
+    sound_card(ui, "Sound Looping Player", &note, |ui| {
         let selected = draw_clip_player(ui, edit, "looping", &clips, &languages, &mut play);
         // The selected component: open it, or extract it.
         let (_, group, path) = &refs[selected];
@@ -4030,7 +4032,8 @@ mod tests {
         let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::HaloCe));
         let (painted, queued) = run(&tag, &[]);
         for expected in [
-            "Sound \u{2014} 3 permutations",
+            "Sound Player",
+            "3 permutations",
             // The clip's length, read from its inline samples before any decode.
             "0:00.000 / 0:01.000",
             "pcm \u{b7} mono \u{b7} 22.05 kHz",
@@ -4123,7 +4126,8 @@ mod tests {
             draw_sound_looping_player(ui, &tag, edit)
         });
         for expected in [
-            "Sound Looping \u{2014} 3 component sound(s)",
+            "Sound Looping Player",
+            "3 component sounds",
             "ambience \u{25B8} in \u{b7} loop_in",
             // Its length is unknown until the referenced tag is decoded.
             "0:00.000 / -:--.---",
