@@ -20,6 +20,27 @@ pub(in crate::app) fn railed_slider(
     enabled: bool,
     marks: impl FnOnce(egui::Rect) -> Vec<egui::Shape>,
 ) -> egui::Response {
+    railed_slider_over(ui, slider, enabled, foundation_group_bg(), marks)
+}
+
+/// A [`railed_slider`] with no marks, for any slider in the app.
+/// `background` is what it sits on, which a disabled slider fades toward.
+pub(in crate::app) fn plain_railed_slider(
+    ui: &mut Ui,
+    slider: egui::Slider<'_>,
+    enabled: bool,
+    background: Color32,
+) -> egui::Response {
+    railed_slider_over(ui, slider, enabled, background, |_| Vec::new())
+}
+
+fn railed_slider_over(
+    ui: &mut Ui,
+    slider: egui::Slider<'_>,
+    enabled: bool,
+    background: Color32,
+    marks: impl FnOnce(egui::Rect) -> Vec<egui::Shape>,
+) -> egui::Response {
     ui.scope(|ui| {
         // How much of each colour shows: the opacity egui would have drawn at.
         let opacity = if enabled && ui.is_enabled() {
@@ -29,7 +50,6 @@ pub(in crate::app) fn railed_slider(
         } else {
             ui.opacity()
         };
-        let background = foundation_group_bg();
         let fade = move |color: Color32| {
             if opacity >= 1.0 {
                 color

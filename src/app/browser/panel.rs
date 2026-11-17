@@ -1487,7 +1487,7 @@ fn draw_folder_browser_controls(
         browser_sort_control(ui, &mut pane.sort, folders_before_tags, Some(&mut pane.table_layout));
         icon_text_dropdown_button(ui, ButtonIcon::View, "View", |ui| {
             ui.label("Thumbnail size");
-            ui.add(egui::Slider::new(&mut pane.asset_cell_size, MIN_CELL..=MAX_CELL));
+            plain_railed_slider(ui, egui::Slider::new(&mut pane.asset_cell_size, MIN_CELL..=MAX_CELL), true, editor_bg());
         });
         icon_menu_button(ui, ButtonIcon::Filter, "Filter asset types", |ui| {
             style_list_menu(ui);

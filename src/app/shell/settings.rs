@@ -2343,10 +2343,13 @@ fn draw_settings_ui_scale(ui: &mut Ui, pending: &mut f32, live: &mut f32) -> boo
                 *pending = DEFAULT_UI_SCALE;
             }
             draw_ui_scale_input(ui, pending);
-            ui.add(
+            plain_railed_slider(
+                ui,
                 egui::Slider::new(pending, MIN_UI_SCALE..=MAX_UI_SCALE)
                     .show_value(false)
                     .clamping(egui::SliderClamping::Always),
+                true,
+                editor_bg(),
             );
             if applied {
                 *live = (*pending).clamp(MIN_UI_SCALE, MAX_UI_SCALE);

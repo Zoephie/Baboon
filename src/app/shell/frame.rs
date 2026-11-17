@@ -1757,8 +1757,12 @@ mod tests {
             },
             |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    let response = ui
-                        .add(egui::Slider::new(pending, MIN_UI_SCALE..=MAX_UI_SCALE).show_value(false));
+                    let response = plain_railed_slider(
+                        ui,
+                        egui::Slider::new(pending, MIN_UI_SCALE..=MAX_UI_SCALE).show_value(false),
+                        true,
+                        editor_bg(),
+                    );
                     rect = response.rect;
                     if crate::app::shell::first_run::commit_ui_scale_now(&response, *pending, *live) {
                         *live = *pending;
@@ -8134,22 +8138,43 @@ mod tests {
             .unwrap_or_else(|_| "objects/characters/brute/brute.model".to_owned());
         let subtree = tag.rsplit_once('/').map_or("", |(folder, _)| folder).to_owned();
         let wanted = tag.replace('/', "\\");
+        // BABOON_SHOT_GAME names the kit's game ("halo3_mcc"; Halo 2 by default).
+        let game = std::env::var("BABOON_SHOT_GAME")
+            .map_or(GameId::Halo2, |id| id.parse().expect("a game id"));
         for dark in [false, true] {
             let mut h = Harness::recording();
             h.app.model.prefs.follow_system_theme = false;
             h.app.model.prefs.dark_mode = dark;
             h.frame(Vec::new());
-            let entries = install_kit_subtree(&mut h, &root, GameId::Halo2, &subtree);
+            let entries = install_kit_subtree(&mut h, &root, game, &subtree);
             let key = entries
                 .iter()
                 .find(|entry| entry.display_path.to_ascii_lowercase().ends_with(&wanted))
-                .expect("the model")
+                .expect("the tag")
                 .key
                 .clone();
             h.app.select_entry(key.clone(), h.ctx.clone());
             for _ in 0..120 {
                 h.frame(Vec::new());
                 std::thread::sleep(Duration::from_millis(10));
+            }
+            // BABOON_SHOT_SCROLL ("x,y,points") turns the wheel over a point,
+            // to bring fields further down the page into view.
+            if let Ok(scroll) = std::env::var("BABOON_SHOT_SCROLL") {
+                let parts: Vec<f32> = scroll.split(',').map(|part| part.trim().parse().unwrap()).collect();
+                let at = egui::pos2(parts[0], parts[1]);
+                h.frame(vec![pointer_at(at)]);
+                h.frame(vec![egui::Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -parts[2]),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+                for _ in 0..30 {
+                    h.frame(Vec::new());
+                    std::thread::sleep(Duration::from_millis(10));
+                }
             }
             let name = if dark { "theme_dark.png" } else { "theme_light.png" };
             h.shoot(&dir.join(name));

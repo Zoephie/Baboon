@@ -331,13 +331,15 @@ fn draw_thumbnail_library_toolbar<S: ThumbnailSource>(
         ui.separator();
         ui.label(RichText::new("Size").color(subtle_dark()));
         let mut cell = library.cell_size();
-        if ui
-            .add(
-                egui::Slider::new(&mut cell, MIN_CELL..=MAX_CELL)
-                    .show_value(false)
-                    .clamping(egui::SliderClamping::Always),
-            )
-            .changed()
+        if plain_railed_slider(
+            ui,
+            egui::Slider::new(&mut cell, MIN_CELL..=MAX_CELL)
+                .show_value(false)
+                .clamping(egui::SliderClamping::Always),
+            true,
+            editor_bg(),
+        )
+        .changed()
         {
             library.cell_size = cell;
         }

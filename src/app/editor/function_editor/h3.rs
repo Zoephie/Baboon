@@ -348,11 +348,14 @@ fn draw_function_type_row(
                 // a graph, so its view settings do not apply to this type.
                 ui.add_enabled_ui(editor.master_type() != EngineMasterType::Basic, |ui| {
                     icon_menu_button(ui, ButtonIcon::Find, "Zoom and grid", |ui| {
-                        ui.add(
+                        plain_railed_slider(
+                            ui,
                             egui::Slider::new(&mut graph_view.zoom_percent, 50.0..=100.0)
                                 .text("Zoom")
                                 .suffix("%")
                                 .step_by(1.0),
+                            true,
+                            editor_bg(),
                         );
                         ui.separator();
                         ui.label(RichText::new("Grid").color(text_dark().gamma_multiply(0.5)));

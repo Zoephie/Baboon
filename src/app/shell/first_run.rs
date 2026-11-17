@@ -213,10 +213,12 @@ fn draw_first_run_interface(ui: &mut Ui, s: &mut FirstRunDraw) {
     crate::app::shell::settings::draw_theme_picker(ui, &mut s.prefs);
     ui.horizontal(|ui| {
         ui.label("UI scale");
-        let response = ui.add(egui::Slider::new(
-            &mut s.wizard.pending_ui_scale,
-            MIN_UI_SCALE..=MAX_UI_SCALE,
-        ));
+        let response = plain_railed_slider(
+            ui,
+            egui::Slider::new(&mut s.wizard.pending_ui_scale, MIN_UI_SCALE..=MAX_UI_SCALE),
+            true,
+            editor_bg(),
+        );
         if commit_ui_scale_now(&response, s.wizard.pending_ui_scale, s.prefs.ui_scale) {
             s.prefs.ui_scale = s.wizard.pending_ui_scale;
         }

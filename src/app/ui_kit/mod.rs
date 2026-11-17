@@ -30,7 +30,7 @@ pub(in crate::app) mod game_assets;
 pub(in crate::app) use game_assets::*;
 
 mod slider;
-pub(in crate::app) use slider::railed_slider;
+pub(in crate::app) use slider::{plain_railed_slider, railed_slider};
 pub(in crate::app) mod checkbox;
 pub(in crate::app) use checkbox::*;
 

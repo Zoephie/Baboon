@@ -518,12 +518,12 @@ pub(super) fn draw_sound_output_controls(
     let error_status = sound_error_status(edit);
     let mut volume = edit.sound_volume;
     ui.spacing_mut().slider_width = 90.0;
-    if ui
-        .add(percent_slider(
-            &mut volume,
-            super::audio::VOLUME_SLIDER_MAX,
-            "\u{1F50A}",
-        ))
+    if plain_railed_slider(
+        ui,
+        percent_slider(&mut volume, super::audio::VOLUME_SLIDER_MAX, "\u{1F50A}"),
+        true,
+        editor_bg(),
+    )
         .on_hover_text("Playback volume; type a value for more than 100%.")
         .changed()
     {
@@ -534,12 +534,12 @@ pub(super) fn draw_sound_output_controls(
     // read as the start of the control after it.
     ui.separator();
     let mut speed = edit.sound_speed;
-    let response = ui
-        .add(percent_slider(
-            &mut speed,
-            super::audio::SPEED_SLIDER_MAX,
-            SPEED_ICON,
-        ))
+    let response = plain_railed_slider(
+        ui,
+        percent_slider(&mut speed, super::audio::SPEED_SLIDER_MAX, SPEED_ICON),
+        true,
+        editor_bg(),
+    )
         .on_hover_text(
             "Playback speed; pitch moves with it. Type a value for more than 500%; \
              double-click for 100%.",

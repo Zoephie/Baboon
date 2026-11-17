@@ -1035,7 +1035,7 @@ fn draw_foundation_slider_row(
             Some(step) => slider.step_by(step as f64),
             None => slider,
         };
-        let mut slid = ui.add_enabled(editable, slider);
+        let mut slid = plain_railed_slider(ui, slider, editable, editor_bg());
         if show_limits {
             ui.label(limit(range.max));
         } else {
