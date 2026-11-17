@@ -1151,7 +1151,7 @@ pub(in crate::app) fn value_decreased() -> Color32 {
 
 /// A tick for two things that match: an identical tag, a finished step.
 pub(in crate::app) fn match_tick() -> Color32 {
-    disclosure_triangle_green()
+    good_news()
 }
 
 /// An open folder's icon in the tag tree.
@@ -1429,80 +1429,80 @@ pub(in crate::app) fn bitmap_channel_colors(icon: ButtonIcon) -> (Color32, Color
     }
 }
 
-// Status colours still to be unified. Each is a status (an error, a warning,
-// a success) drawn in its own shade; they keep their shades for now and are
-// meant to become invalid_value_text, unapplied_value_text and good_news.
+// Statuses. Every error, warning and success message shares one of three
+// colours, invalid_value_text, unapplied_value_text and good_news, each
+// legible in both themes; these names say where each is used.
 
 /// Warnings in the import, compatibility and cache windows.
 pub(in crate::app) fn import_warning_text() -> Color32 {
-    Color32::from_rgb(242, 196, 48)
+    unapplied_value_text()
 }
 
 /// Notes that an action will replace or lose something: mods, Chimp,
 /// closing documents, container dumps.
 pub(in crate::app) fn replace_warning_text() -> Color32 {
-    Color32::from_rgb(210, 120, 90)
+    unapplied_value_text()
 }
 
 /// Errors in Chimp's property editor and save dialog.
 pub(in crate::app) fn chimp_error_text() -> Color32 {
-    Color32::from_rgb(210, 120, 80)
+    invalid_value_text()
 }
 
 /// A save or close that failed, and a missing source folder.
 pub(in crate::app) fn save_error_text() -> Color32 {
-    Color32::from_rgb(180, 48, 40)
+    invalid_value_text()
 }
 
 /// Saving over the installed game's containers.
 pub(in crate::app) fn installed_overwrite_text() -> Color32 {
-    Color32::from_rgb(190, 72, 56)
+    unapplied_value_text()
 }
 
 /// Errors in Chimp's document view and the Model Preview's panels.
 pub(in crate::app) fn panel_error_text() -> Color32 {
-    Color32::from_rgb(150, 56, 44)
+    invalid_value_text()
 }
 
 /// A bitmap that could not be shown.
 pub(in crate::app) fn bitmap_error_text() -> Color32 {
-    Color32::from_rgb(130, 32, 24)
+    invalid_value_text()
 }
 
 /// Read-only and missing notes in Chimp's headers and the New Tag window.
 pub(in crate::app) fn header_notice_text() -> Color32 {
-    Color32::from_rgb(170, 130, 60)
+    unapplied_value_text()
 }
 
 /// A browser filter that cannot match as typed.
 pub(in crate::app) fn filter_warning_text() -> Color32 {
-    Color32::from_rgb(184, 134, 11)
+    unapplied_value_text()
 }
 
 /// Settings that need attention.
 pub(in crate::app) fn settings_warning_text() -> Color32 {
-    Color32::from_rgb(220, 170, 70)
+    unapplied_value_text()
 }
 
 /// Expert mode's note in the reference picker.
 pub(in crate::app) fn expert_mode_text() -> Color32 {
-    Color32::from_rgb(214, 166, 64)
+    unapplied_value_text()
 }
 
 /// A drop target that will take what is dragged over it, and a search's
 /// result count.
 pub(in crate::app) fn accept_text() -> Color32 {
-    Color32::from_rgb(120, 170, 90)
+    good_news()
 }
 
 /// The Add icon on a shortcut row.
 pub(in crate::app) fn add_icon() -> Color32 {
-    Color32::from_rgb(126, 211, 75)
+    good_news()
 }
 
 /// Errors and archive names in Chimp's browser.
 pub(in crate::app) fn chimp_browser_error_text() -> Color32 {
-    Color32::from_rgb(210, 80, 80)
+    invalid_value_text()
 }
 
 pub(in crate::app) fn chimp_archive_text() -> Color32 {
@@ -1511,27 +1511,27 @@ pub(in crate::app) fn chimp_archive_text() -> Color32 {
 
 /// Untyped bytes Chimp keeps read-only.
 pub(in crate::app) fn chimp_raw_value_text() -> Color32 {
-    Color32::from_rgb(190, 150, 70)
+    unapplied_value_text()
 }
 
 /// Errors in the git review window.
 pub(in crate::app) fn review_error_text() -> Color32 {
-    Color32::from_rgb(225, 105, 105)
+    invalid_value_text()
 }
 
 /// Errors in the first-run window.
 pub(in crate::app) fn first_run_error_text() -> Color32 {
-    Color32::from_rgb(220, 70, 70)
+    invalid_value_text()
 }
 
 /// A reference to a tag that is not in the kit.
 pub(in crate::app) fn reference_missing_text() -> Color32 {
-    Color32::from_rgb(216, 92, 92)
+    invalid_value_text()
 }
 
 /// An error message in a window.
 pub(in crate::app) fn error_text() -> Color32 {
-    material_delete_text()
+    invalid_value_text()
 }
 
 /// How long a status message stays on the status line before it clears.
