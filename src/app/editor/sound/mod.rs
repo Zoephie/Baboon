@@ -5,7 +5,11 @@ use super::*;
 
 mod h2;
 pub(in crate::app) use h2::*;
+mod mini_player;
 mod player;
+
+use player::{PlayerDeck, deck_id, random_other};
+pub(in crate::app) use mini_player::{draw_sound_mini_player, sound_player_drawing, sound_player_drawn};
 #[cfg(test)]
 pub(super) use player::clip_selection_id;
 pub(in crate::app) use player::forget_closed_players;
@@ -567,6 +571,149 @@ pub(super) fn draw_sound_output_controls(
     }
     if let Some(status) = edit.sound_status.filter(|_| error_status.is_none()) {
         ui.label(RichText::new(status).color(subtle_dark()));
+    }
+}
+
+/// The player's status line, when no error stands in for it.
+pub(super) fn draw_sound_status(ui: &mut Ui, edit: &FieldEditContext<'_>) {
+    if let Some(status) = edit.sound_status.filter(|_| sound_error_status(edit).is_none()) {
+        ui.label(RichText::new(status).color(subtle_dark()));
+    }
+}
+
+/// A percentage in a value cell, as the function editor's Min and Max:
+/// typed and committed when it loses focus, Escape discarding the draft.
+/// The typed value, as a fraction, once committed.
+fn percent_cell(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: f32,
+    corners: egui::CornerRadius,
+    hover: &str,
+) -> Option<f32> {
+    let draft_id = id.with("draft");
+    // Escape clears egui's focus before widgets draw: remember the focus so
+    // that its loss discards the draft rather than committing it.
+    let cancelled = ui.memory(|memory| memory.has_focus(id) || memory.had_focus_last_frame(id))
+        && ui.input(|input| input.key_pressed(egui::Key::Escape));
+    let parse = |text: &str| {
+        text.trim()
+            .trim_end_matches('%')
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|percent| percent.is_finite() && *percent >= 0.0)
+            .map(|percent| percent / 100.0)
+    };
+    let mut text = ui
+        .data(|data| data.get_temp::<String>(draft_id))
+        .unwrap_or_else(|| format!("{:.0}%", value * 100.0));
+    let invalid = parse(&text).is_none();
+    let response = crate::app::editor::fields::foundation_value_cell_with_error_and_corners(
+        ui, &mut text, 56.0, id, true, invalid, corners,
+    )
+    .on_hover_text(hover);
+    let mut typed = None;
+    if cancelled {
+        response.surrender_focus();
+    } else if crate::app::editor::fields::lost_focus_once(&response) {
+        typed = parse(&text);
+    }
+    if response.has_focus() && !cancelled {
+        ui.data_mut(|data| data.insert_temp(draft_id, text));
+    } else {
+        ui.data_mut(|data| data.remove::<String>(draft_id));
+    }
+    typed
+}
+
+/// "Speed", its percentage, and arrows that step it by 10%, in the format of
+/// the function editor's Min and Max.
+pub(super) fn draw_sound_speed_stepper(ui: &mut Ui, edit: &mut FieldEditContext<'_>) {
+    const HOVER: &str = "Playback speed; pitch moves with it. Drag, type or step it; \
+                         double-click Speed for 100%.";
+    let mut speed = edit.sound_speed;
+    let before = speed;
+    let label = ui
+        .add(egui::Label::new(RichText::new("Speed").color(text_dark())).sense(Sense::click()))
+        .on_hover_text(HOVER);
+    if label.double_clicked() {
+        speed = 1.0;
+    }
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let id = ui.make_persistent_id("sound_speed_field");
+        let corners = egui::CornerRadius { nw: 2, sw: 2, ne: 0, se: 0 };
+        let typed = percent_cell(ui, id, speed, corners, HOVER);
+        if let Some(typed) = typed.filter(|typed| *typed > 0.0) {
+            speed = typed.clamp(0.05, 8.0);
+        }
+        let step = crate::app::editor::fields::value_stepper(ui, id, true, "10% faster", "10% slower");
+        if step != 0.0 {
+            speed = (((speed * 10.0).round() + step) / 10.0).clamp(0.1, 8.0);
+            ui.memory_mut(|memory| memory.surrender_focus(id));
+            ui.data_mut(|data| data.remove::<String>(id.with("draft")));
+        }
+    });
+    if speed != before {
+        edit.sound_play_request
+            .push_back(super::audio::SoundAction::SetSpeed(speed));
+    }
+}
+
+/// Below this width a sound card's header takes two rows: the clip and its
+/// transport, then the time, speed, volume and zoom.
+const SOUND_HEADER_WRAP_WIDTH: f32 = 1200.0;
+
+/// How wide [`draw_sound_volume_control`] draws.
+pub(super) const VOLUME_CONTROL_WIDTH: f32 = 24.0 + 110.0 + 56.0 + 2.0 * 8.0;
+
+/// The Volume button, which mutes and unmutes, the volume's slider and its
+/// percentage.
+pub(super) fn draw_sound_volume_control(ui: &mut Ui, edit: &mut FieldEditContext<'_>) {
+    // What the volume was before Mute, for Unmute to put back.
+    let unmuted_id = egui::Id::unique("sound_volume_before_mute");
+    let mut volume = edit.sound_volume;
+    let before = volume;
+    let muted = volume <= 0.0;
+    let (icon, hover) = if muted {
+        (ButtonIcon::Mute, "Unmute")
+    } else {
+        (ButtonIcon::Volume, "Mute")
+    };
+    if icon_button(ui, icon, hover, true, text_dark()).clicked() {
+        if muted {
+            volume = ui
+                .data(|data| data.get_temp::<f32>(unmuted_id))
+                .filter(|volume| *volume > 0.0)
+                .unwrap_or(1.0);
+        } else {
+            ui.data_mut(|data| data.insert_temp(unmuted_id, volume));
+            volume = 0.0;
+        }
+    }
+    ui.spacing_mut().slider_width = 110.0;
+    plain_railed_slider(
+        ui,
+        egui::Slider::new(&mut volume, 0.0..=super::audio::VOLUME_SLIDER_MAX)
+            .clamping(egui::SliderClamping::Never)
+            .show_value(false),
+        true,
+        foundation_section_bar(),
+    )
+    .on_hover_text("Playback volume");
+    if let Some(typed) = percent_cell(
+        ui,
+        ui.make_persistent_id("sound_volume_field"),
+        volume,
+        egui::CornerRadius::same(2),
+        "Playback volume; type a value for more than 100%.",
+    ) {
+        volume = typed.clamp(0.0, 4.0);
+    }
+    if volume != before {
+        edit.sound_play_request
+            .push_back(super::audio::SoundAction::SetVolume(volume));
     }
 }
 
@@ -1286,6 +1433,7 @@ fn sound_card_footer(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
         egui::CornerRadius { nw: 0, ne: 0, sw: 5, se: 5 },
         foundation_section_bar(),
     );
+    ui.painter().hline(band.x_range(), band.top(), egui::Stroke::new(1.0_f32, crate::app::ui_kit::style::foundation_group_edge()));
     let mut footer = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(band.shrink(6.0))
@@ -1302,11 +1450,14 @@ fn sound_card_footer(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
 fn sound_card(ui: &mut Ui, title: &str, note: &str, body: impl FnOnce(&mut Ui, Option<egui::Rect>)) {
     let mut body = Some(body);
     let mut header = None;
+    // A player's controls take two header rows below this width; a card
+    // with a note has no controls in its header.
+    let wrap = note.is_empty().then_some(SOUND_HEADER_WRAP_WIDTH);
     crate::app::model_preview::draw_model_preview_section_with_header_wrap(
         ui,
         title,
         None,
-        None,
+        wrap,
         |ui, part| match part {
             crate::app::model_preview::ModelPreviewSectionPart::Header => {
                 header = Some(ui.max_rect());
@@ -1319,6 +1470,11 @@ fn sound_card(ui: &mut Ui, title: &str, note: &str, body: impl FnOnce(&mut Ui, O
             crate::app::model_preview::ModelPreviewSectionPart::Body => {
                 if let Some(body) = body.take() {
                     ui.push_id(title, |ui| body(ui, header));
+                }
+                // Any of the card in sight keeps the mini player away.
+                let card = header.map_or(ui.min_rect(), |header| header.union(ui.min_rect()));
+                if ui.is_rect_visible(card) {
+                    mini_player::mark_player_on_screen(ui.ctx());
                 }
             }
         },
@@ -1421,7 +1577,7 @@ fn draw_ce_wwise_player(
         let m = media[chosen];
         ui.horizontal_wrapped(|ui| {
             if let Some(root) = edit.ce_paks_root
-                && icon_text_button(ui, ButtonIcon::Export, "Extract all", true)
+                && icon_text_button(ui, ButtonIcon::Export, "Extract All", true)
                     .on_hover_text("Extract every permutation of this language to WAV")
                     .clicked()
                 && let Some(base) = rfd::FileDialog::new()
@@ -1590,12 +1746,9 @@ fn draw_sound_format_line(
 ) {
     let (class, compression) = sound_class_and_compression(tag);
     ui.horizontal_wrapped(|ui| {
-        let dot = |ui: &mut Ui| {
-            ui.label(RichText::new("\u{00B7}").color(subtle_dark()));
-        };
         if let Some(class) = &class {
             ui.label(RichText::new(format!("class: {class}")).color(subtle_dark()));
-            dot(ui);
+            sound_footer_divider(ui);
         }
         let h2_entry = source.h2.and_then(|h2| {
             rows.iter().find_map(|row| match row.kind {
@@ -1645,6 +1798,16 @@ fn draw_sound_format_line(
             }
         }
     });
+}
+
+/// A line between the footer's groups.
+fn sound_footer_divider(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(1.0, BUTTON_HEIGHT), Sense::hover());
+    ui.painter().vline(
+        rect.center().x,
+        rect.y_range(),
+        egui::Stroke::new(1.0_f32, crate::app::ui_kit::style::foundation_group_edge()),
+    );
 }
 
 pub(in crate::app) fn draw_sound_player(
@@ -1815,21 +1978,24 @@ pub(in crate::app) fn draw_sound_player(
             }
             draw_sound_format_line(ui, tag, &rows, source);
             if fallback {
+                sound_footer_divider(ui);
                 ui.label(
                     RichText::new(format!("no {language_name} \u{00B7} plays English"))
                         .color(ui.visuals().warn_fg_color),
                 );
             }
             if let Some(gain) = row.gain_db.filter(|gain| gain.abs() >= 0.05) {
+                sound_footer_divider(ui);
                 ui.label(RichText::new(format!("gain {gain:+.1} dB")).color(subtle_dark()));
             }
             if let Some(skip) = row.skip_fraction.filter(|skip| *skip > 0.0) {
+                sound_footer_divider(ui);
                 ui.label(RichText::new(format!("skip {:.0}%", skip * 100.0)).color(subtle_dark()))
                     .on_hover_text("Fraction of requests for this permutation that are ignored");
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Right to left: the selected permutation's own, then every one.
-                if icon_text_button(ui, ButtonIcon::Export, row.name.as_str(), true)
+                if icon_text_button(ui, ButtonIcon::Export, format!("Extract {}", row.name), true)
                     .on_hover_text(format!(
                         "Extract this permutation to a file\n{}",
                         row_details(row, h2.as_ref())
@@ -1866,7 +2032,7 @@ pub(in crate::app) fn draw_sound_player(
                             h2.languages.len()
                         )
                     };
-                    if icon_text_button(ui, ButtonIcon::Export, "All languages", true)
+                    if icon_text_button(ui, ButtonIcon::Export, "Extract All Languages", true)
                         .on_hover_text(all_hover)
                         .clicked()
                     {
@@ -1922,9 +2088,9 @@ pub(in crate::app) fn draw_sound_player(
                     extract_hover.push_str(&format!("\nFor tool.exe reimport: {format_note}"));
                 }
                 let extract_label = if localized {
-                    format!("Extract all ({language_name})")
+                    format!("Extract All ({language_name})")
                 } else {
-                    "Extract all".to_owned()
+                    "Extract All".to_owned()
                 };
                 if icon_text_button(ui, ButtonIcon::Export, extract_label, true)
                     .on_hover_text(extract_hover)
@@ -2571,21 +2737,98 @@ pub(in crate::app) fn draw_sound_looping_player(
         )
     };
     let title = if languages.is_empty() { "Sound Looping Player" } else { "" };
+    // A referenced sound's files, extracted beside it in its data folder.
+    let extract_items = |group: u32, path: &str| -> Vec<ExtractItem> {
+        load_referenced_sound(game, tags_root, defs, path, group)
+            .and_then(|(sound, abs)| {
+                kit_layout
+                    .and_then(|layout| reimport_base_dir_lang(layout, &abs, language))
+                    .map(|base| referenced_sound_extract_items(&sound, game, &base, Some(path), language))
+            })
+            .unwrap_or_default()
+    };
     sound_card(ui, title, "", |ui, header| {
         let selected = draw_clip_player(ui, header, edit, "looping", &clips, &languages, &mut play);
-        // The selected component: open it, or extract it.
         let (_, group, path) = &refs[selected];
-        clicked.take_from(draw_referenced_sound_cell(
-            ui,
-            &[(*group, path.clone())],
-            None,
-            game,
-            tags_root,
-            kit_layout,
-            defs,
-            language,
-            container_source,
-        ));
+        let leaf = tag_path::name(path).to_owned();
+        // The footer, as a sound's: About, the sounds it plays (the selected
+        // one opens), then extracting them.
+        sound_card_footer(ui, |ui| {
+            if icon_button(ui, ButtonIcon::About, "About the Sound Player", true, text_dark())
+                .clicked()
+            {
+                edit.sound_help_requested = true;
+            }
+            let unique: Vec<&(String, u32, String)> = refs
+                .iter()
+                .enumerate()
+                .filter(|(index, (_, _, path))| {
+                    refs[..*index].iter().all(|(_, _, earlier)| earlier != path)
+                })
+                .map(|(_, entry)| entry)
+                .collect();
+            let count = unique.len();
+            ui.label(
+                RichText::new(format!("{count} sound{}", if count == 1 { "" } else { "s" }))
+                    .color(subtle_dark()),
+            );
+            sound_footer_divider(ui);
+            if let Some(request) = ref_open_label(ui, *group, path) {
+                clicked.open = Some(request);
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Right to left: the selected sound's own, then every one.
+                let one_hover = if container_source {
+                    "Extract this sound's permutations to a folder"
+                } else {
+                    "Extract this sound to its data\\ folder"
+                };
+                let extractable = container_source || kit_layout.is_some();
+                if icon_text_button(ui, ButtonIcon::Export, format!("Extract {leaf}"), extractable)
+                    .on_hover_text(one_hover)
+                    .clicked()
+                {
+                    if container_source {
+                        clicked.ce_ref = Some(CeSoundRefRequest {
+                            group_tag: *group,
+                            reference: path.clone(),
+                            label: leaf.clone(),
+                            extract: true,
+                            clip: None,
+                            preview: false,
+                        });
+                    } else {
+                        let items = extract_items(*group, path);
+                        if !items.is_empty() {
+                            clicked.extract = Some(ExtractRequest {
+                                items,
+                                tags_root: tags_root.map(std::path::Path::to_path_buf),
+                                label: leaf.clone(),
+                            });
+                        }
+                    }
+                }
+                // Campaign Evolved extracts one referenced sound at a time.
+                if !container_source
+                    && count > 1
+                    && icon_text_button(ui, ButtonIcon::Export, "Extract All", kit_layout.is_some())
+                        .on_hover_text("Extract every sound this loop plays to its data\\ folder")
+                        .clicked()
+                {
+                    let items: Vec<ExtractItem> = unique
+                        .iter()
+                        .flat_map(|(_, group, path)| extract_items(*group, path))
+                        .collect();
+                    if !items.is_empty() {
+                        clicked.extract = Some(ExtractRequest {
+                            items,
+                            tags_root: tags_root.map(std::path::Path::to_path_buf),
+                            label: tag_path::name(&edit.tag_key.replace('\\', "/")).to_owned(),
+                        });
+                    }
+                }
+            });
+        });
     });
     clicked.apply(&ui.ctx().clone(), edit, "looping", &clips, &mut play);
     ui.add_space(6.0);
@@ -4080,7 +4323,7 @@ mod tests {
             // The clip's length, read from its inline samples before any decode.
             "0:00.000 / 0:01.000",
             "pcm \u{b7} mono \u{b7} 22.05 kHz",
-            "Extract all",
+            "Extract All",
         ] {
             assert!(
                 painted.iter().any(|text| text == expected),
@@ -4099,8 +4342,8 @@ mod tests {
             "drawing alone played something"
         );
 
-        // "▶" is Next on the clip row, then Play on the transport.
-        let (_, queued) = run(&tag, &[("\u{25B6}", 1)]);
+        // In the header "▶" is Play, then Next after Stop.
+        let (_, queued) = run(&tag, &[("\u{25B6}", 0)]);
         let play = queued
             .iter()
             .find(|request| !request.preview)
@@ -4115,7 +4358,7 @@ mod tests {
         }
 
         // Next selects the second permutation (and plays nothing while stopped).
-        let (painted, queued) = run(&tag, &[("\u{25B6}", 0)]);
+        let (painted, queued) = run(&tag, &[("\u{25B6}", 1)]);
         assert!(painted.iter().any(|text| *text == rows[1].name), "{painted:?}");
         assert!(queued.iter().all(|request| request.preview));
         assert!(queued.iter().any(|request| request.clip.as_deref() == Some("0:1:")));
@@ -4174,6 +4417,11 @@ mod tests {
             "ambience \u{25B8} in \u{b7} loop_in",
             // Its length is unknown until the referenced tag is decoded.
             "0:00.000 / -:--.---",
+            // The footer: what it plays, the selected one, extracting them.
+            "3 sounds",
+            "loop_in",
+            "Extract All",
+            "Extract loop_in",
         ] {
             assert!(
                 painted.iter().any(|text| text == expected),

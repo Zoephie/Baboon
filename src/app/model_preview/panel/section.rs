@@ -77,18 +77,23 @@ pub(in crate::app::model_preview) fn draw_model_preview_loading_shells(
     }
 }
 
+/// How tall a card's header row is. A header that stacks takes whole rows
+/// of this height, a line between each.
+pub(in crate::app) const HEADER_ROW_HEIGHT: f32 = 40.0;
+
 /// The Animation Player header's extra rows at `width`: its picker and
 /// transport wrap under the title as the page narrows.
 pub(in crate::app::model_preview) fn animation_extra_header_height(width: f32) -> f32 {
-    if width >= 800.0 {
+    let rows = if width >= 800.0 {
         0.0
     } else if width < 320.0 {
-        96.0
+        3.0
     } else if width < 560.0 {
-        64.0
+        2.0
     } else {
-        32.0
-    }
+        1.0
+    };
+    rows * HEADER_ROW_HEIGHT
 }
 
 /// A fixed, full-width section styled like the Tag Fields group headers, with
@@ -130,14 +135,18 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
                 .map(|wrap_width| width < wrap_width)
                 .unwrap_or(false);
         let edge_to_edge = matches!(title, MODEL_PREVIEW_TITLE | "Bitmap Preview");
-        let extra_header_height = if wrapped_bitmap_header {
-            40.0
+        // A sound player's header: one row, or two below its wrap width.
+        let wrapped_leading_header = leading_header
+            && !animation_header
+            && header_wrap_width.is_some_and(|wrap_width| width < wrap_width);
+        let extra_header_height = if wrapped_bitmap_header || wrapped_leading_header {
+            HEADER_ROW_HEIGHT
         } else if animation_header {
             animation_extra_header_height(width)
         } else {
             0.0
         };
-        let header_height = 40.0 + extra_header_height;
+        let header_height = HEADER_ROW_HEIGHT + extra_header_height;
         let (header_rect, _) =
             ui.allocate_exact_size(Vec2::new(width, header_height), Sense::hover());
         ui.painter().rect_filled(
@@ -150,6 +159,16 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
             },
             foundation_section_bar(),
         );
+        // A line under each of the header's rows, the last over the body.
+        let mut row_top = header_rect.top() + HEADER_ROW_HEIGHT;
+        while row_top < header_rect.bottom() + 1.0 {
+            ui.painter().hline(
+                header_rect.x_range(),
+                row_top,
+                Stroke::new(1.0_f32, foundation_group_edge()),
+            );
+            row_top += HEADER_ROW_HEIGHT;
+        }
 
         let header_content_rect = header_rect.shrink(8.0);
         let title_rect = if extra_header_height > 0.0 {
@@ -168,11 +187,12 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
         });
         let actions_rect = if bitmap_header {
             header_content_rect
-        } else if extra_header_height > 0.0 {
+        } else if extra_header_height > 0.0 && !wrapped_leading_header {
+            // The rows under the title's, each centred in its own.
             egui::Rect::from_min_max(
                 egui::pos2(
                     header_content_rect.min.x,
-                    header_content_rect.max.y - extra_header_height + 2.0,
+                    header_rect.top() + HEADER_ROW_HEIGHT + 8.0,
                 ),
                 header_content_rect.max,
             )
@@ -196,7 +216,8 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
         let mut actions_ui = ui.new_child(egui::UiBuilder::new().max_rect(actions_rect));
         if wrapped_bitmap_header {
             actions_ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+                // A row's controls, then the next row's a whole row lower.
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, HEADER_ROW_HEIGHT - 24.0);
                 add_contents(ui, ModelPreviewSectionPart::Header);
             });
         } else if leading_header || bitmap_header {

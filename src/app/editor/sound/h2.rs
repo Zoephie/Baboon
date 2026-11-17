@@ -607,10 +607,10 @@ mod tests {
         ] {
             assert!(has(&english, text), "missing {text:?} in {english:?}");
         }
-        assert!(has(&english, "Extract all (English)"));
-        assert!(has(&english, "All languages"));
+        assert!(has(&english, "Extract All (English)"));
+        assert!(has(&english, "Extract All Languages"));
         // The third extract button is the selected permutation's own.
-        assert!(has(&english, "1"), "{english:?}");
+        assert!(has(&english, "Extract 1"), "{english:?}");
         assert!(
             !english.iter().any(|shown| shown.contains("|default|")),
             "a lone default pitch range isn't shown: {english:?}"
@@ -641,7 +641,7 @@ mod tests {
             "{portuguese:?}"
         );
         assert!(has(&portuguese, "(rate inferred)"));
-        assert!(has(&portuguese, "Extract all (Portuguese)"));
+        assert!(has(&portuguese, "Extract All (Portuguese)"));
 
         // Another game's language this tag never had: say so, play English.
         let mexican = painted_sound_player(&tag, Some("mexican"), None);

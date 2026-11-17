@@ -1006,6 +1006,11 @@ fn draw_bitmap_stats_footer(ui: &mut Ui, data: &BitmapPreviewData, selection: Op
     );
     ui.painter()
         .rect_filled(footer_rect, 0.0, foundation_section_bar());
+    ui.painter().hline(
+        footer_rect.x_range(),
+        footer_rect.top(),
+        Stroke::new(1.0_f32, foundation_group_edge()),
+    );
     ui.painter().text(
         footer_rect.left_center() + Vec2::new(8.0, 0.0),
         Align2::LEFT_CENTER,

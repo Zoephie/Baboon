@@ -332,6 +332,7 @@ pub(in crate::app) fn draw_tag_pane(
         key: key.clone(),
     };
     let sound_playback = audio.playback(Some(&sound_owner));
+    crate::app::editor::sound_player_drawing(ui.ctx());
     // A status line from another tab's sound is that tab's business.
     let sound_status_shown = audio.status_is_for(&sound_owner);
     let sound_looping = audio.looping();
@@ -408,7 +409,7 @@ pub(in crate::app) fn draw_tag_pane(
         open_request: &mut open_request,
         sound_play_request: crate::app::audio::SoundRequests::new(
             &mut sound_queue,
-            Some(sound_owner),
+            Some(sound_owner.clone()),
         ),
         sound_status: audio.status.as_deref().filter(|_| sound_status_shown),
         sound_volume,
@@ -571,6 +572,7 @@ pub(in crate::app) fn draw_tag_pane(
     if !sound_queue.is_empty() {
         cx.send(AudioCommand::Queue(sound_queue));
     }
+    crate::app::editor::sound_player_drawn(ui.ctx(), &sound_owner);
     if let Some(request) = sound_extract_request {
         cx.send(ExportCommand::QueueSoundExtract(request));
     }

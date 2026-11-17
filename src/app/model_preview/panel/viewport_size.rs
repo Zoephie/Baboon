@@ -47,6 +47,11 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
     );
     ui.painter()
         .rect_filled(footer_rect, 0.0, foundation_section_bar());
+    ui.painter().hline(
+        footer_rect.x_range(),
+        footer_rect.top(),
+        Stroke::new(1.0_f32, crate::app::ui_kit::style::foundation_group_edge()),
+    );
     // About, the stats, then what the load left out and why materials drew
     // untextured, all in the footer's one row so the card keeps its height.
     // Laid out as the Strings Editor's and the folder browser's footers are.

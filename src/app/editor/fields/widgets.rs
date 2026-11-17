@@ -3,6 +3,42 @@
 
 use super::*;
 
+/// The up and down arrows beside a value cell, as the function editor's Min
+/// and Max have them: 1 for up, -1 for down, else 0. Drawn after a cell with
+/// square right corners, it reads as part of it.
+pub(in crate::app) fn value_stepper(
+    ui: &mut Ui,
+    id: egui::Id,
+    enabled: bool,
+    up_tooltip: &str,
+    down_tooltip: &str,
+) -> f32 {
+    ui.add_enabled_ui(enabled, |ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(20.0, 24.0), Sense::hover());
+        let mut step = 0.0;
+        for (up, delta, tooltip) in [(true, 1.0, up_tooltip), (false, -1.0, down_tooltip)] {
+            let button = egui::Rect::from_min_size(
+                rect.min + Vec2::new(0.0, if up { 0.0 } else { 13.0 }), Vec2::new(20.0, 11.0),
+            );
+            let response = ui.interact(button, id.with(up), Sense::click()).on_hover_text(tooltip);
+            let visuals = ui.style().interact(&response);
+            let corners = egui::CornerRadius { nw: 0, sw: 0, ne: if up { 2 } else { 0 }, se: if up { 0 } else { 2 } };
+            // Filled as a button is, so the arrows show on any background.
+            ui.painter().rect(button, corners, visuals.weak_bg_fill, visuals.bg_stroke, egui::StrokeKind::Inside);
+            let center = button.center();
+            let direction = if up { -1.0 } else { 1.0 };
+            ui.painter().add(egui::Shape::convex_polygon(vec![
+                center + Vec2::new(-3.5, -2.0 * direction),
+                center + Vec2::new(3.5, -2.0 * direction),
+                center + Vec2::new(0.0, 2.0 * direction),
+            ], visuals.fg_stroke.color, egui::Stroke::NONE));
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tooltip));
+            if response.clicked() { step = delta; }
+        }
+        step
+    }).inner
+}
+
 /// Whether `response`'s widget gave up keyboard focus, reported on one pass
 /// only.
 ///

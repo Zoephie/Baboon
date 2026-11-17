@@ -8123,6 +8123,88 @@ mod tests {
     /// `BLAM_TEST_H2EK` naming the kit's tags: for judging the themes.
     #[cfg(any(target_os = "macos", windows))]
     #[test]
+    fn app_shots_of_the_sound_players() {
+        let (Some(dir), Ok(root), Ok(tag), Ok(other)) = (
+            std::env::var_os("BABOON_APP_SHOTS"),
+            std::env::var("BLAM_TEST_H2EK"),
+            std::env::var("BABOON_SHOT_TAG"),
+            std::env::var("BABOON_SHOT_OTHER"),
+        ) else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let dir = std::path::PathBuf::from(dir);
+        let subtree = tag.rsplit_once('/').map_or("", |(folder, _)| folder).to_owned();
+        let game = std::env::var("BABOON_SHOT_GAME")
+            .map_or(GameId::Halo2, |id| id.parse().expect("a game id"));
+        // The whole window, then about half its width for the player's
+        // two-row header.
+        for (dark, width) in [(false, SCREEN.x), (true, SCREEN.x), (false, 960.0), (true, 960.0)] {
+            let mut h = Harness::recording();
+            h.screen = egui::vec2(width, SCREEN.y);
+            h.app.model.prefs.follow_system_theme = false;
+            h.app.model.prefs.dark_mode = dark;
+            h.frame(Vec::new());
+            let entries = install_kit_subtree(&mut h, &root, game, &subtree);
+            let key_of = |path: &str| {
+                let wanted = path.replace('/', "\\");
+                entries
+                    .iter()
+                    .find(|entry| entry.display_path.to_ascii_lowercase().ends_with(&wanted))
+                    .expect("the tag")
+                    .key
+                    .clone()
+            };
+            let (key, other) = (key_of(&tag), key_of(&other));
+            let settle = |h: &mut Harness| {
+                for _ in 0..120 {
+                    h.frame(Vec::new());
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            };
+            h.app.select_entry(key.clone(), h.ctx.clone());
+            settle(&mut h);
+            let theme = if dark { "dark" } else { "light" };
+            let theme = format!("{theme}_{width}");
+            h.shoot(&dir.join(format!("player_{theme}.png")));
+            // BABOON_SHOT_CLICK ("x,y") opens something there, as the Zoom
+            // menu, for a shot of it.
+            if let Ok(at) = std::env::var("BABOON_SHOT_CLICK")
+                && width == SCREEN.x
+            {
+                let parts: Vec<f32> = at.split(',').map(|part| part.trim().parse().unwrap()).collect();
+                let at = egui::pos2(parts[0], parts[1]);
+                h.frame(vec![pointer_at(at)]);
+                let button = |pressed| egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                h.frame(vec![button(true)]);
+                h.frame(vec![button(false)]);
+                settle(&mut h);
+                h.shoot(&dir.join(format!("clicked_{theme}.png")));
+                h.frame(vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            let kit = h.app.model.kits[h.app.model.active].id;
+            h.app.audio.load_paused_for_shot(crate::app::audio::SoundOwner { kit, key }, 0.4);
+            settle(&mut h);
+            h.app.select_entry(other, h.ctx.clone());
+            settle(&mut h);
+            h.shoot(&dir.join(format!("mini_{theme}.png")));
+        }
+    }
+
+    /// `BABOON_APP_SHOTS` shots of the theme with `BABOON_SHOT_TAG` open.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
     fn app_shots_of_the_themes() {
         let (Some(dir), Ok(root)) = (
             std::env::var_os("BABOON_APP_SHOTS"),

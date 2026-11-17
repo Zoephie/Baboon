@@ -52,6 +52,7 @@ impl Baboon {
                 self.draw_workspace_tiles(ui, ctx);
             });
         crate::app::browser::drag_move::draw_drag_label(ctx);
+        crate::app::editor::draw_sound_mini_player(&cx!(self, ctx), &self.audio);
         self.draw_auxiliary_windows(ctx);
         crate::app::ui_kit::autoscroll::draw_blocker(ui);
         // The draws' commands land first: some of them queue the very requests
@@ -101,18 +102,13 @@ impl Baboon {
         // Drain queued sound-player actions: resolve the permutation against the
         // FMOD banks, decode (cached), and play/stop. Runs every frame so voices
         // are reaped even when idle; the tags root is only cloned when acting.
-        // Playback follows its tab: paused once another tab (or another kit)
-        // has focus, disposed of once its tab is closed, whichever way that
-        // happened. Checked against the open tabs rather than hooked into each
-        // close path, so a close confirmed after the save prompt counts and a
+        // Playback carries on in another tab, under the mini player, and is
+        // disposed of once its tab is closed, whichever way that happened.
+        // Checked against the open tabs rather than hooked into each close
+        // path, so a close confirmed after the save prompt counts and a
         // cancelled one does not.
-        let focus = self.model.kits.get(self.model.active).filter(|_| !self.shell.home_open).and_then(|kit| {
-            kit.selected_key
-                .clone()
-                .map(|key| crate::app::audio::SoundOwner { kit: kit.id, key })
-        });
         let kits = &self.model.kits;
-        self.audio.follow_tabs(focus.as_ref(), |owner| {
+        self.audio.follow_tabs(|owner| {
             kits.iter()
                 .find(|kit| kit.id == owner.kit)
                 .is_some_and(|kit| kit.open_tabs.contains(&owner.key))

@@ -231,6 +231,8 @@ pub(in crate::app::model_preview) fn draw_animation_header(
     } = *frames;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 16.0;
+        // Wrapped rows a whole header row apart, each centred in its own.
+        ui.spacing_mut().item_spacing.y = super::section::HEADER_ROW_HEIGHT - BUTTON_HEIGHT;
         let loading = state.animation.selected.is_some()
             && state.animation.pose.is_none()
             && state.animation.error.is_none();
@@ -268,37 +270,28 @@ pub(in crate::app::model_preview) fn draw_animation_header(
                 ui.spinner();
             }
         });
-        animation_header_group(ui, 140.0, |ui| {
+        animation_header_group(ui, 112.0, |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            if selectable_icon_button(
-                ui,
-                ButtonIcon::Play,
-                "Play",
-                state.animation.playing,
-                controls_enabled,
-            )
-            .clicked()
-            {
-                state.animation.playing = true;
-                state.animation.stopped = false;
-                // Play at the end of a non-looping clip restarts it.
-                if !state.animation.looped
-                    && state.animation.time * ANIMATION_FRAME_RATE >= last_frame
-                {
-                    state.animation.time = 0.0;
+            // One button that plays, and pauses while playing.
+            let (icon, hover) = if state.animation.playing {
+                (ButtonIcon::Pause, "Pause")
+            } else {
+                (ButtonIcon::Play, "Play")
+            };
+            if selectable_icon_button(ui, icon, hover, false, controls_enabled).clicked() {
+                if state.animation.playing {
+                    state.animation.playing = false;
+                    state.animation.stopped = false;
+                } else {
+                    state.animation.playing = true;
+                    state.animation.stopped = false;
+                    // Play at the end of a non-looping clip restarts it.
+                    if !state.animation.looped
+                        && state.animation.time * ANIMATION_FRAME_RATE >= last_frame
+                    {
+                        state.animation.time = 0.0;
+                    }
                 }
-            }
-            if selectable_icon_button(
-                ui,
-                ButtonIcon::Pause,
-                "Pause",
-                !state.animation.playing && !state.animation.stopped,
-                controls_enabled,
-            )
-            .clicked()
-            {
-                state.animation.playing = false;
-                state.animation.stopped = false;
             }
             if selectable_icon_button(
                 ui,

@@ -215,6 +215,9 @@ pub(in crate::app) enum EditorCommand {
     /// The pane showing `key` in `kit` took focus: it is the tag the file
     /// actions act on.
     FocusTab { kit: KitId, key: String },
+    /// Bring a tag's tab to the front, in its kit, from anywhere: the mini
+    /// player's way back to the sound it plays.
+    RevealTab { kit: KitId, key: String },
     /// Bring `kit`'s open tabs in line with the panes its tile tree holds,
     /// which a drag, a split or a close can have changed.
     SyncOpenTabs { kit: KitId },
@@ -250,6 +253,14 @@ impl Baboon {
                     // A folder pane is not a tag: focusing one leaves no tag for
                     // Save, Undo or Ctrl+W to act on, rather than a hidden one.
                     self.kit_and_view(index).focus_pane(key);
+                }
+            }
+            EditorCommand::RevealTab { kit, key } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.focus_kit(index);
+                    let mut kit_view = self.kit_and_view(index);
+                    kit_view.open_tag_pane(&key);
+                    kit_view.focus_pane(key);
                 }
             }
             EditorCommand::ReimportBitmap { kit, key } => {

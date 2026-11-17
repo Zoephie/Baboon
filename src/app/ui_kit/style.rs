@@ -671,6 +671,12 @@ pub(in crate::app) fn foundation_block_text() -> Color32 {
     text_dark()
 }
 
+/// A sound player's playhead: the theme's highlight, blue in dark mode and
+/// Baboon Orange in light, as the waveform's played part is.
+pub(in crate::app) fn playhead() -> Color32 {
+    foundation_blue()
+}
+
 /// High-visibility navigation accent used by the filtered block jump. Block
 /// headers are mid-gray in both themes, so one bright cyan works cleanly on
 /// each without colliding with the green structural-edit controls.
@@ -1300,6 +1306,12 @@ pub(in crate::app) fn terminal_error_text() -> Color32 {
 
 pub(in crate::app) fn terminal_success_text() -> Color32 {
     Color32::from_rgb(123, 184, 137)
+}
+
+/// A dark-mode slider's rail: a see-through shade, so it sinks into
+/// whatever it is drawn on, a card's header bar or its body.
+pub(in crate::app) fn slider_rail_dark() -> Color32 {
+    Color32::from_black_alpha(90)
 }
 
 /// A progress bar's track and its fill.

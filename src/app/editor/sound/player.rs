@@ -199,8 +199,16 @@ pub(super) fn draw_clip_player(
         .position(|&index| index == selected)
         .unwrap_or(0);
     // A card's header bar holds the language, the clip choice and the
-    // transport, in that order; without a card each has its own row.
-    let mut header_ui = header.map(|rect| {
+    // transport, then the time, speed, volume and zoom: on one row, or on
+    // a second when the card is narrow. Without a card each has its own row.
+    let (row_one, row_two) = match header {
+        Some(rect) if rect.height() > 40.0 => (
+            Some(egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + 24.0))),
+            Some(egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - 24.0), rect.max)),
+        ),
+        other => (other, None),
+    };
+    let mut header_ui = row_one.map(|rect| {
         let mut header_ui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(rect)
@@ -214,12 +222,101 @@ pub(super) fn draw_clip_player(
     {
         draw_sound_language_picker(header_ui, edit, languages);
     }
+    let in_header = header_ui.is_some();
+    // Two rows: the language, the clip and the volume on the first; the
+    // speed, then the transport and time centred, then the zoom on the second.
+    let mut second = row_two.map(|rect| {
+        let mut row = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        row.spacing_mut().item_spacing.x = 8.0;
+        row
+    });
+    let centred = second.as_mut().map(|row| {
+        draw_sound_speed_stepper(row, edit);
+        let rect = row.max_rect();
+        let left = row.min_rect().right() + 16.0;
+        let right = rect.right() - ZOOM_BUTTON_WIDTH - 16.0;
+        let group = TRANSPORT_WIDTH + 8.0 + TIME_BOX_WIDTH;
+        let start = ((left + right - group) / 2.0).max(left);
+        let at = |x: f32, width: f32| {
+            egui::Rect::from_min_size(
+                egui::pos2(x, rect.center().y - ICON_BUTTON_SIZE.y / 2.0),
+                Vec2::new(width, ICON_BUTTON_SIZE.y),
+            )
+        };
+        (at(start, TRANSPORT_WIDTH), at(start + TRANSPORT_WIDTH + 8.0, TIME_BOX_WIDTH))
+    });
+    let many = clips.len() > 1;
+    let previous_index = order[(rank + order.len() - 1) % order.len()];
+    let next_index = order[(rank + 1) % order.len()];
     let mut pick = |ui: &mut Ui| {
-        let many = clips.len() > 1;
-        let previous = icon_button(ui, ButtonIcon::Left, "Previous", many, text_dark());
+        if in_header {
+            // The clip, then Shuffle, Skip Back, Play, Stop, Skip Forward
+            // and Loop; the time, speed, volume and zoom follow on this
+            // row. On two rows the clip runs up to the volume, and the
+            // transport has the second row's middle.
+            let width = match centred {
+                Some(_) => (ui.available_width() - VOLUME_CONTROL_WIDTH - 16.0).max(160.0),
+                None => (ui.available_width() - TRANSPORT_WIDTH - 16.0 - HEADER_TAIL_WIDTH)
+                    .clamp(160.0, 360.0),
+            };
+            if let Some(index) =
+                draw_clip_selector(ui, id_salt, edit.tag_key, clips, &order, selected, width)
+            {
+                choose = Some(index);
+            }
+            let mut placed = centred.zip(second.as_mut()).map(|((rect, _), row)| {
+                row.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(rect)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                )
+            });
+            let ui = match placed.as_mut() {
+                Some(row) => row,
+                None => {
+                    ui.add_space(16.0);
+                    ui
+                }
+            };
+            ui.scope(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let shuffle = icon_button(
+                    ui,
+                    ButtonIcon::Shuffle,
+                    "Play a random one, as the game picks",
+                    many,
+                    text_dark(),
+                );
+                mark_button(ui, RANDOM_ICON, shuffle.rect);
+                if shuffle.clicked() {
+                    let next = random_other(selected, clips.len());
+                    choose = Some(next);
+                    // Random always plays: it is how the game would sound.
+                    queue_play(edit, clips, next, play);
+                }
+                let previous = icon_button(ui, ButtonIcon::SkipBack, "Previous", many, text_dark());
+                mark_button(ui, "\u{25C0}", previous.rect);
+                if previous.clicked() {
+                    choose = Some(previous_index);
+                }
+                draw_play_and_stop(ui, edit, clips, selected, loaded, play);
+                let next = icon_button(ui, ButtonIcon::SkipForward, "Next", many, text_dark());
+                mark_button(ui, "\u{25B6}", next.rect);
+                if next.clicked() {
+                    choose = Some(next_index);
+                }
+                draw_loop_button(ui, edit);
+            });
+            return;
+        }
+        let previous = icon_button(ui, ButtonIcon::SkipBack, "Previous", many, text_dark());
         mark_button(ui, "\u{25C0}", previous.rect);
         if previous.clicked() {
-            choose = Some(order[(rank + order.len() - 1) % order.len()]);
+            choose = Some(previous_index);
         }
         let width = (ui.available_width() - 90.0).clamp(160.0, 420.0);
         if let Some(index) =
@@ -227,31 +324,32 @@ pub(super) fn draw_clip_player(
         {
             choose = Some(index);
         }
-        let next = icon_button(ui, ButtonIcon::Right, "Next", many, text_dark());
+        let next = icon_button(ui, ButtonIcon::SkipForward, "Next", many, text_dark());
         mark_button(ui, "\u{25B6}", next.rect);
         if next.clicked() {
-            choose = Some(order[(rank + 1) % order.len()]);
+            choose = Some(next_index);
         }
-        if ui
-            .add_enabled(many, egui::Button::new(RANDOM_ICON).min_size(ICON_BUTTON_SIZE))
-            .on_hover_text("Play a random one, as the game picks")
-            .clicked()
-        {
+        let shuffle = icon_button(
+            ui,
+            ButtonIcon::Shuffle,
+            "Play a random one, as the game picks",
+            many,
+            text_dark(),
+        );
+        mark_button(ui, RANDOM_ICON, shuffle.rect);
+        if shuffle.clicked() {
             let next = random_other(selected, clips.len());
             choose = Some(next);
-            // Random always plays: it is how the game would sound.
             queue_play(edit, clips, next, play);
         }
     };
     match header_ui.as_mut() {
-        Some(header_ui) => {
-            header_ui.scope(|ui| {
+        Some(header_ui) => pick(header_ui),
+        None => {
+            ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 pick(ui);
             });
-        }
-        None => {
-            ui.horizontal(pick);
         }
     }
 
@@ -280,121 +378,128 @@ pub(super) fn draw_clip_player(
     if loaded.is_none() && preview.is_none() {
         request_preview(ui, edit, clips, selected, play);
     }
+    publish_deck(ui, header.is_some(), edit, id_salt, clips, &order, play);
     let preview_length = match preview.as_ref().map(|preview| &preview.state) {
         Some(PreviewState::Ready(waveform)) => Some(waveform.duration_secs()),
         _ => None,
     };
+    let (position, duration) = match loaded {
+        Some(playback) => (playback.position, Some(playback.duration)),
+        None => (0.0, clip.duration.or(preview_length)),
+    };
+    let waveform = loaded.map(|playback| playback.waveform.clone()).or(
+        match preview.as_ref().map(|preview| &preview.state) {
+            Some(PreviewState::Ready(waveform)) => Some(waveform.clone()),
+            _ => None,
+        },
+    );
+    let track_width = ui.available_width().max(1.0);
+
+    // The header's time, speed, volume and zoom.
+    if let Some(header_ui) = header_ui.as_mut() {
+        let volume = |ui: &mut Ui, edit: &mut FieldEditContext<'_>| {
+            // Its own box, laid out left to right.
+            let (rect, _) = ui.allocate_exact_size(
+                Vec2::new(VOLUME_CONTROL_WIDTH, ICON_BUTTON_SIZE.y),
+                Sense::hover(),
+            );
+            let mut row = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(rect)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            draw_sound_volume_control(&mut row, edit);
+        };
+        match (second.as_mut(), centred) {
+            (Some(row), Some((_, time))) => {
+                header_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    volume(ui, edit);
+                });
+                draw_play_time_box(row, Some(time), position, duration);
+                row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    draw_zoom_menu(ui, edit, &clip.id, duration, waveform.as_deref(), track_width, loaded);
+                });
+            }
+            _ => {
+                header_ui.add_space(8.0);
+                draw_play_time_box(header_ui, None, position, duration);
+                header_ui.add_space(8.0);
+                draw_sound_speed_stepper(header_ui, edit);
+                header_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    draw_zoom_menu(ui, edit, &clip.id, duration, waveform.as_deref(), track_width, loaded);
+                    ui.add_space(8.0);
+                    volume(ui, edit);
+                });
+            }
+        }
+    }
 
     draw_timeline(ui, edit, clips, selected, loaded, preview.as_ref(), play);
 
-    // Play, Stop and Loop.
-    let mut transport = |ui: &mut Ui, edit: &mut FieldEditContext<'_>| {
-        let (icon, glyph, hover) = if loaded.is_some_and(|playback| playback.playing) {
-            (ButtonIcon::Pause, "\u{23F8}", "Pause (Space)")
-        } else {
-            (ButtonIcon::Play, "\u{25B6}", "Play (Space)")
-        };
-        let toggle = icon_button(ui, icon, hover, true, text_dark());
-        mark_button(ui, glyph, toggle.rect);
-        if toggle.clicked() {
-            toggle_or_play(edit, clips, selected, loaded, play);
-        }
-        let stop_button = icon_button(
-            ui,
-            ButtonIcon::Stop,
-            "Stop, rewind and clear the region (Enter)",
-            true,
-            text_dark(),
-        );
-        mark_button(ui, "\u{25A0}", stop_button.rect);
-        if stop_button.clicked() {
-            stop(ui, edit, &clip.id);
-        }
-        let looping = edit.sound_looping;
-        if selectable_icon_button(ui, ButtonIcon::Loop, "Loop", looping, true).clicked() {
-            edit.sound_play_request
-                .push_back(SoundAction::SetLooping(!looping));
-        }
-    };
-    if let Some(header_ui) = header_ui.as_mut() {
-        header_ui.scope(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            transport(ui, edit);
+    // The region and the status; without a header, the transport, time,
+    // zoom, volume and speed too.
+    let has_region = stored_region(ui, edit.tag_key, &clip.id).is_some();
+    if !in_header || has_region || edit.sound_status.is_some() {
+        ui.horizontal(|ui| {
+            if !in_header {
+                ui.scope(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    draw_play_and_stop(ui, edit, clips, selected, loaded, play);
+                    draw_loop_button(ui, edit);
+                });
+                draw_play_time(ui, position, duration);
+                if let (Some(waveform), Some(duration)) = (waveform.as_ref(), duration) {
+                    let min_span = min_view_span(Some(waveform.pcm().sample_rate), track_width);
+                    let view = load_view(ui, edit.tag_key, &clip.id, duration, min_span);
+                    let around =
+                        loaded.map_or(view.start + view.span / 2.0, |playback| playback.position);
+                    let mut zoomed = None;
+                    if ui.button(ZOOM_OUT_ICON).on_hover_text("Zoom out").clicked() {
+                        zoomed = Some(view.zoomed(0.5, around, duration, min_span));
+                    }
+                    if ui
+                        .button("+")
+                        .on_hover_text("Zoom in (Ctrl/Cmd + wheel)")
+                        .clicked()
+                    {
+                        zoomed = Some(view.zoomed(2.0, around, duration, min_span));
+                    }
+                    if ui
+                        .add_enabled(!view.whole(duration), egui::Button::new("Fit"))
+                        .on_hover_text("Show the whole sound")
+                        .clicked()
+                    {
+                        zoomed = Some(View::fit(duration));
+                    }
+                    if let Some(view) = zoomed {
+                        store_view(ui, edit.tag_key, &clip.id, view, duration);
+                    }
+                }
+            }
+            // Read after Stop, which clears it.
+            if let Some((start, end)) = stored_region(ui, edit.tag_key, &clip.id) {
+                ui.label(
+                    RichText::new(format!(
+                        "{} \u{2013} {} ({})",
+                        format_play_time(start),
+                        format_play_time(end),
+                        format_play_time(end - start)
+                    ))
+                    .monospace()
+                    .color(foundation_blue()),
+                )
+                .on_hover_text(
+                    "The region played; Loop repeats it. Esc or a click outside clears it.",
+                );
+            }
+            ui.add_space(8.0);
+            if in_header {
+                draw_sound_status(ui, edit);
+            } else {
+                draw_sound_output_controls(ui, edit, languages, true);
+            }
         });
     }
-    let in_header = header_ui.is_some();
-
-    // The time, zoom, region, volume and speed.
-    ui.horizontal(|ui| {
-        if !in_header {
-            transport(ui, edit);
-        }
-        let (position, duration) = match loaded {
-            Some(playback) => (playback.position, Some(playback.duration)),
-            None => (0.0, clip.duration.or(preview_length)),
-        };
-        ui.label(
-            RichText::new(format!(
-                "{} / {}",
-                format_play_time(position),
-                duration.map_or_else(|| "-:--.---".to_owned(), format_play_time)
-            ))
-            .monospace()
-            .color(text_dark()),
-        );
-        // Zoom: around the playhead when the clip is loaded, else the middle
-        // of what is shown.
-        let waveform = loaded.map(|playback| playback.waveform.clone()).or(
-            match preview.as_ref().map(|preview| &preview.state) {
-                Some(PreviewState::Ready(waveform)) => Some(waveform.clone()),
-                _ => None,
-            },
-        );
-        if let (Some(waveform), Some(duration)) = (waveform, duration) {
-            let width = ui.available_width().max(1.0);
-            let min_span = min_view_span(Some(waveform.pcm().sample_rate), width);
-            let view = load_view(ui, edit.tag_key, &clip.id, duration, min_span);
-            let around = loaded.map_or(view.start + view.span / 2.0, |playback| playback.position);
-            let mut zoomed = None;
-            if ui.button(ZOOM_OUT_ICON).on_hover_text("Zoom out").clicked() {
-                zoomed = Some(view.zoomed(0.5, around, duration, min_span));
-            }
-            if ui
-                .button("+")
-                .on_hover_text("Zoom in (Ctrl/Cmd + wheel)")
-                .clicked()
-            {
-                zoomed = Some(view.zoomed(2.0, around, duration, min_span));
-            }
-            if ui
-                .add_enabled(!view.whole(duration), egui::Button::new("Fit"))
-                .on_hover_text("Show the whole sound")
-                .clicked()
-            {
-                zoomed = Some(View::fit(duration));
-            }
-            if let Some(view) = zoomed {
-                store_view(ui, edit.tag_key, &clip.id, view, duration);
-            }
-        }
-        if let Some((start, end)) = stored_region(ui, edit.tag_key, &clip.id) {
-            ui.label(
-                RichText::new(format!(
-                    "{} \u{2013} {} ({})",
-                    format_play_time(start),
-                    format_play_time(end),
-                    format_play_time(end - start)
-                ))
-                .monospace()
-                .color(foundation_blue()),
-            )
-            .on_hover_text(
-                "The region played; Loop repeats it. Esc or a click outside clears it.",
-            );
-        }
-        ui.add_space(8.0);
-        draw_sound_output_controls(ui, edit, languages, !in_header);
-    });
     draw_sound_errors(ui, edit);
 
     // Space plays or pauses and Enter stops, in the focused tab, when no text
@@ -414,6 +519,251 @@ pub(super) fn draw_clip_player(
         }
     }
     selected
+}
+
+/// A card player's clips, each with the play it starts, for the mini player
+/// to skip and shuffle through while the tab is out of sight.
+pub(super) struct PlayerDeck {
+    /// Where the tab's player keeps its selected clip, which a skip moves.
+    pub(super) selection_id: egui::Id,
+    /// Where it keeps its region, which belongs to the clip it was drawn on.
+    pub(super) region_id: egui::Id,
+    /// Clip indices in the order the player lists them.
+    pub(super) order: Vec<usize>,
+    /// Each clip's id and the play it starts, if it has one of its own.
+    pub(super) clips: Vec<(String, Option<SoundAction>)>,
+    language: Option<String>,
+}
+
+pub(super) fn deck_id(tag_key: &str) -> egui::Id {
+    egui::Id::unique(("sound_player_deck", tag_key))
+}
+
+/// Keep the tab's [`PlayerDeck`] while its sound is the one loaded: built
+/// once per clip list and language, and dropped once another sound is.
+fn publish_deck(
+    ui: &Ui,
+    card: bool,
+    edit: &FieldEditContext<'_>,
+    id_salt: &str,
+    clips: &[PlayerClip],
+    order: &[usize],
+    play: &mut dyn FnMut(usize) -> Option<ClipPlay>,
+) {
+    if !card {
+        return;
+    }
+    let id = deck_id(edit.tag_key);
+    if edit.sound_playback.is_none() {
+        ui.data_mut(|data| data.remove::<std::sync::Arc<PlayerDeck>>(id));
+        return;
+    }
+    let fresh = ui
+        .data(|data| data.get_temp::<std::sync::Arc<PlayerDeck>>(id))
+        .is_some_and(|deck| {
+            deck.language.as_deref() == edit.sound_language
+                && deck.clips.len() == clips.len()
+                && deck.clips.iter().zip(clips).all(|((id, _), clip)| *id == clip.id)
+        });
+    if fresh {
+        return;
+    }
+    let deck = PlayerDeck {
+        selection_id: clip_selection_id(id_salt, edit.tag_key),
+        region_id: clip_region_id(edit.tag_key),
+        order: order.to_vec(),
+        clips: clips
+            .iter()
+            .enumerate()
+            .map(|(index, clip)| {
+                let action = match play(index) {
+                    Some(ClipPlay::Action(action)) => Some(action),
+                    _ => None,
+                };
+                (clip.id.clone(), action)
+            })
+            .collect(),
+        language: edit.sound_language.map(str::to_owned),
+    };
+    ui.data_mut(|data| data.insert_temp(id, std::sync::Arc::new(deck)));
+}
+
+/// About how wide the header's time, speed, volume and zoom are, with their
+/// gaps.
+const HEADER_TAIL_WIDTH: f32 =
+    TIME_BOX_WIDTH + 150.0 + VOLUME_CONTROL_WIDTH + ZOOM_BUTTON_WIDTH + 2.0 * 8.0 + 3.0 * 16.0;
+
+/// The header's Shuffle, Skip Back, Play, Stop, Skip Forward and Loop.
+const TRANSPORT_WIDTH: f32 = 6.0 * ICON_BUTTON_SIZE.x + 5.0 * 4.0;
+
+/// The header's time readout, wide enough for minutes past ten.
+const TIME_BOX_WIDTH: f32 = 164.0;
+
+/// The Zoom menu's button.
+const ZOOM_BUTTON_WIDTH: f32 = 44.0;
+
+/// The header's time in a read-only cell: where the playhead is, in the
+/// playhead's colour, then how long the clip is. In `rect`, or the next
+/// place along.
+fn draw_play_time_box(ui: &mut Ui, rect: Option<egui::Rect>, position: f64, duration: Option<f64>) {
+    let rect = rect.unwrap_or_else(|| {
+        ui.allocate_exact_size(Vec2::new(TIME_BOX_WIDTH, ICON_BUTTON_SIZE.y), Sense::hover()).0
+    });
+    ui.painter().rect(
+        rect,
+        crate::app::ui_kit::INPUT_CORNER_RADIUS,
+        crate::app::ui_kit::style::foundation_input(),
+        egui::Stroke::new(1.0_f32, crate::app::ui_kit::style::foundation_input_edge()),
+        egui::StrokeKind::Inside,
+    );
+    let font = egui::TextStyle::Monospace.resolve(ui.style());
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        &format_play_time(position),
+        0.0,
+        egui::TextFormat::simple(font.clone(), crate::app::ui_kit::style::playhead()),
+    );
+    job.append(
+        &format!(" / {}", duration.map_or_else(|| "-:--.---".to_owned(), format_play_time)),
+        0.0,
+        egui::TextFormat::simple(font, text_dark()),
+    );
+    ui.put(rect, egui::Label::new(job).selectable(false));
+}
+
+/// Where the playhead is, and how long the clip is.
+fn draw_play_time(ui: &mut Ui, position: f64, duration: Option<f64>) {
+    ui.label(
+        RichText::new(format!(
+            "{} / {}",
+            format_play_time(position),
+            duration.map_or_else(|| "-:--.---".to_owned(), format_play_time)
+        ))
+        .monospace()
+        .color(text_dark()),
+    );
+}
+
+/// The Zoom menu: Fit, then a slider from the whole sound to the closest
+/// view, with zoom out and in at its ends. Greyed out until there is a
+/// waveform to zoom.
+fn draw_zoom_menu(
+    ui: &mut Ui,
+    edit: &FieldEditContext<'_>,
+    clip_id: &str,
+    duration: Option<f64>,
+    waveform: Option<&crate::app::audio::Waveform>,
+    track_width: f32,
+    loaded: Option<&PlaybackView>,
+) {
+    let (Some(duration), Some(waveform)) = (duration.filter(|duration| *duration > 0.0), waveform)
+    else {
+        ui.add_enabled_ui(false, |ui| {
+            icon_dropdown_button(ui, ButtonIcon::Find, "Zoom", |_| {});
+        });
+        return;
+    };
+    let min_span = min_view_span(Some(waveform.pcm().sample_rate), track_width).min(duration);
+    let view = load_view(ui, edit.tag_key, clip_id, duration, min_span);
+    let around = loaded.map_or(view.start + view.span / 2.0, |playback| playback.position);
+    let whole = view.whole(duration);
+    let closest = view.span <= min_span + 1e-9;
+    let mut zoomed = None;
+    icon_dropdown_button(ui, ButtonIcon::Find, "Zoom (Ctrl/Cmd + wheel)", |ui| {
+        ui.horizontal(|ui| {
+            // Buttons as they look outside a menu, which flattens them.
+            ui.style_mut().visuals.widgets = ui.ctx().global_style().visuals.widgets.clone();
+            ui.spacing_mut().item_spacing.x = 4.0;
+            if ui
+                .add_enabled(!whole, egui::Button::new("Fit").min_size(ICON_BUTTON_SIZE))
+                .on_hover_text("Show the whole sound")
+                .clicked()
+            {
+                zoomed = Some(View::fit(duration));
+            }
+            if ui
+                .add_enabled(!whole, egui::Button::new(ZOOM_OUT_ICON).min_size(ICON_BUTTON_SIZE))
+                .on_hover_text("Zoom out")
+                .clicked()
+            {
+                zoomed = Some(view.zoomed(0.5, around, duration, min_span));
+            }
+            // In doublings of the whole sound, so each step looks alike.
+            let deepest = (duration / min_span).max(1.0).log2();
+            let mut level = (duration / view.span.max(1e-9)).max(1.0).log2();
+            ui.spacing_mut().slider_width = 140.0;
+            let background = ui.visuals().window_fill;
+            if plain_railed_slider(
+                ui,
+                egui::Slider::new(&mut level, 0.0..=deepest.max(f64::EPSILON)).show_value(false),
+                deepest > 0.0,
+                background,
+            )
+            .changed()
+            {
+                let span = duration / 2f64.powf(level);
+                let centre = view.start + view.span / 2.0;
+                zoomed = Some(
+                    View {
+                        start: centre - span / 2.0,
+                        span,
+                        follow: false,
+                    }
+                    .clamped(duration, min_span),
+                );
+            }
+            if ui
+                .add_enabled(!closest, egui::Button::new("+").min_size(ICON_BUTTON_SIZE))
+                .on_hover_text("Zoom in")
+                .clicked()
+            {
+                zoomed = Some(view.zoomed(2.0, around, duration, min_span));
+            }
+        });
+    });
+    if let Some(view) = zoomed {
+        store_view(ui, edit.tag_key, clip_id, view, duration);
+    }
+}
+
+/// Play (Pause while playing) and Stop.
+fn draw_play_and_stop(
+    ui: &mut Ui,
+    edit: &mut FieldEditContext<'_>,
+    clips: &[PlayerClip],
+    selected: usize,
+    loaded: Option<&PlaybackView>,
+    play: &mut dyn FnMut(usize) -> Option<ClipPlay>,
+) {
+    let (icon, glyph, hover) = if loaded.is_some_and(|playback| playback.playing) {
+        (ButtonIcon::Pause, "\u{23F8}", "Pause (Space)")
+    } else {
+        (ButtonIcon::Play, "\u{25B6}", "Play (Space)")
+    };
+    let toggle = icon_button(ui, icon, hover, true, text_dark());
+    mark_button(ui, glyph, toggle.rect);
+    if toggle.clicked() {
+        toggle_or_play(edit, clips, selected, loaded, play);
+    }
+    let stop_button = icon_button(
+        ui,
+        ButtonIcon::Stop,
+        "Stop, rewind and clear the region (Enter)",
+        true,
+        text_dark(),
+    );
+    mark_button(ui, "\u{25A0}", stop_button.rect);
+    if stop_button.clicked() {
+        stop(ui, edit, &clips[selected].id);
+    }
+}
+
+fn draw_loop_button(ui: &mut Ui, edit: &mut FieldEditContext<'_>) {
+    let looping = edit.sound_looping;
+    if selectable_icon_button(ui, ButtonIcon::Loop, "Loop", looping, true).clicked() {
+        edit.sound_play_request
+            .push_back(SoundAction::SetLooping(!looping));
+    }
 }
 
 /// Under test, where an icon button of the player was drawn, by the glyph
@@ -622,7 +972,7 @@ fn queued_play_for(edit: &FieldEditContext<'_>, clips: &[PlayerClip], index: usi
 }
 
 /// Another index than `current` out of `len`, at random.
-fn random_other(current: usize, len: usize) -> usize {
+pub(super) fn random_other(current: usize, len: usize) -> usize {
     use std::hash::{BuildHasher, Hasher};
     if len < 2 {
         return current;
@@ -636,6 +986,9 @@ fn random_other(current: usize, len: usize) -> usize {
     let step = 1 + (hasher.finish() % (len as u64 - 1)) as usize;
     (current + step) % len
 }
+
+/// Half the playhead's head, which sits in the ruler over its line.
+const PLAYHEAD_HALF_WIDTH: f32 = 6.0;
 
 /// The timeline: a ruler and a track with the playhead. A click jumps there
 /// and a drag scrubs, the sound carrying on from wherever the playhead is
@@ -772,7 +1125,9 @@ fn draw_timeline(
         }
     }
 
-    let head_color = foundation_jump_cyan();
+    let head_color = playhead();
+    // Unclipped, so the head's half before the start still shows.
+    let painter = ui.painter_at(rect.expand2(Vec2::new(PLAYHEAD_HALF_WIDTH, 0.0)));
     painter.line_segment(
         [
             egui::pos2(head, track.top()),
@@ -782,9 +1137,11 @@ fn draw_timeline(
     );
     painter.add(egui::Shape::convex_polygon(
         vec![
-            egui::pos2(head - 4.0, track.top() - 5.0),
-            egui::pos2(head + 4.0, track.top() - 5.0),
-            egui::pos2(head, track.top()),
+            egui::pos2(head - PLAYHEAD_HALF_WIDTH, track.top() - 13.0),
+            egui::pos2(head + PLAYHEAD_HALF_WIDTH, track.top() - 13.0),
+            egui::pos2(head + PLAYHEAD_HALF_WIDTH, track.top() - 5.0),
+            egui::pos2(head, track.top() + 1.0),
+            egui::pos2(head - PLAYHEAD_HALF_WIDTH, track.top() - 5.0),
         ],
         head_color,
         egui::Stroke::NONE,
@@ -805,7 +1162,9 @@ fn draw_timeline(
     let edge_grab = 5.0;
     let near = |x: f32, seconds: f64| (x - x_of(seconds)).abs() <= edge_grab;
     // The ruler (and the playhead's head) scrub; the lanes select.
-    let in_ruler = |pointer: egui::Pos2| pointer.y < track.top() || (pointer.x - head).abs() <= 4.0;
+    let in_ruler = |pointer: egui::Pos2| {
+        pointer.y < track.top() || (pointer.x - head).abs() <= PLAYHEAD_HALF_WIDTH
+    };
     let (pressed, moved, origin) = ui.input(|input| {
         (
             input.pointer.any_pressed(),

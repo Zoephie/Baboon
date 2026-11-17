@@ -351,11 +351,11 @@ fn closing_its_tab_disposes_of_the_sound_and_what_is_coming_for_it() {
         ..Default::default()
     };
 
-    audio.follow_tabs(None, |owner| owner.key != "file:b.sound");
+    audio.follow_tabs(|owner| owner.key != "file:b.sound");
     assert!(audio.voice.is_some() && audio.wwise_deferred.is_some());
     assert_eq!(audio.play_request, 7, "another tab closing cancels nothing");
 
-    audio.follow_tabs(None, |owner| owner.key != "file:a.sound");
+    audio.follow_tabs(|owner| owner.key != "file:a.sound");
     assert!(
         audio.voice.is_none(),
         "the closed tab's sound is disposed of"
@@ -435,10 +435,10 @@ fn on_the_audio_thread(test: impl FnOnce() + Send + 'static) {
     }
 }
 
-/// Focus moving to another tab pauses the sound; coming back does not
-/// start it again. Needs an output device, so it skips without one.
+/// Focus moving to another tab leaves the sound playing, for the mini
+/// player to stop. Needs an output device, so it skips without one.
 #[test]
-fn another_tab_taking_focus_pauses_the_sound() {
+fn another_tab_taking_focus_leaves_the_sound_playing() {
     on_the_audio_thread(|| {
         let a = owner(1, "file:a.sound");
         let b = owner(1, "file:b.sound");
@@ -454,24 +454,14 @@ fn another_tab_taking_focus_pauses_the_sound() {
         audio.play_decoded(wave(30_000), "a", Some(a.clone()), None);
         assert!(audio.playback(Some(&a)).unwrap().playing);
 
-        audio.follow_tabs(Some(&a), |_| true);
+        audio.follow_tabs(|_| true);
         assert!(
             audio.playback(Some(&a)).unwrap().playing,
-            "its own tab keeps it playing"
+            "another tab's focus leaves it playing"
         );
+        assert_eq!(audio.now_playing().map(|(owner, _)| owner), Some(a.clone()));
 
-        audio.follow_tabs(Some(&b), |_| true);
-        assert!(
-            !audio.playback(Some(&a)).unwrap().playing,
-            "another tab's focus pauses it"
-        );
-
-        audio.follow_tabs(Some(&a), |_| true);
-        assert!(
-            !audio.playback(Some(&a)).unwrap().playing,
-            "returning does not resume it"
-        );
-
+        // The mini player's Pause speaks for the sound's own tab.
         audio.pending.push_back(SoundRequest {
             owner: Some(a.clone()),
             clip: None,
@@ -479,7 +469,20 @@ fn another_tab_taking_focus_pauses_the_sound() {
             action: SoundAction::TogglePause,
         });
         audio.process(None, &egui::Context::default());
-        assert!(audio.playback(Some(&a)).unwrap().playing, "play resumes it");
+        assert!(!audio.playback(Some(&a)).unwrap().playing, "its Pause pauses it");
+
+        // Another tab's controls do not reach it.
+        audio.pending.push_back(SoundRequest {
+            owner: Some(b.clone()),
+            clip: None,
+            preview: false,
+            action: SoundAction::TogglePause,
+        });
+        audio.process(None, &egui::Context::default());
+        assert!(!audio.playback(Some(&a)).unwrap().playing, "b's Play leaves it");
+
+        audio.follow_tabs(|owner| owner != &a);
+        assert!(audio.now_playing().is_none(), "closing its tab disposes of it");
     });
 }
 
@@ -563,7 +566,7 @@ fn a_status_line_shows_only_in_the_tab_that_caused_it() {
     audio.process(None, &egui::Context::default());
     assert!(audio.status_is_for(&a) && !audio.status_is_for(&b));
 
-    audio.follow_tabs(None, |owner| owner != &a);
+    audio.follow_tabs(|owner| owner != &a);
     assert!(audio.status.is_none(), "closing a left its status behind");
 
     audio.apply_job(AudioDone::Extracted("extracted 3 file(s)".to_owned()));
@@ -654,7 +657,7 @@ fn a_preview_decodes_without_disturbing_playback() {
         "the previewed clip was decoded again"
     );
 
-    audio.follow_tabs(None, |owner| owner != &b);
+    audio.follow_tabs(|owner| owner != &b);
     assert!(
         audio.preview_for(&b).is_none(),
         "closing b kept its preview"
