@@ -20,7 +20,11 @@ pub(in crate::app) fn value_stepper(
             let button = egui::Rect::from_min_size(
                 rect.min + Vec2::new(0.0, if up { 0.0 } else { 13.0 }), Vec2::new(20.0, 11.0),
             );
-            let response = ui.interact(button, id.with(up), Sense::click()).on_hover_text(tooltip);
+            // Not `id.with(up)`: egui names the cell's tooltip `id.with(0)`, which
+            // `false` hashes the same as, and a widget may not be in two layers.
+            let response = ui
+                .interact(button, id.with(if up { "step_up" } else { "step_down" }), Sense::click())
+                .on_hover_text(tooltip);
             let visuals = ui.style().interact(&response);
             let corners = egui::CornerRadius { nw: 0, sw: 0, ne: if up { 2 } else { 0 }, se: if up { 0 } else { 2 } };
             // Filled as a button is, so the arrows show on any background.
@@ -1181,6 +1185,34 @@ pub(in crate::app) fn search_clear_control_at(
 
 #[cfg(test)]
 mod tests {
+    /// The Sound Player's Speed draws a value cell and its stepper under one
+    /// id. With the cell's tooltip up, egui names that tooltip `id.with(0)`,
+    /// which the down arrow once shared, and the debug build stopped.
+    #[test]
+    fn a_value_cells_tooltip_does_not_clash_with_its_stepper() {
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        ctx.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let id = egui::Id::new("stepped_value");
+        let mut cell = egui::Rect::NOTHING;
+        for pass in 0..4 {
+            let mut input = egui::RawInput::default();
+            if pass > 0 {
+                input.events.push(egui::Event::PointerMoved(cell.center()));
+            }
+            input.time = Some(pass as f64);
+            let _ = crate::app::run_ui_test(&ctx, input, |ui| {
+                ui.horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(56.0, 24.0), Sense::hover());
+                    let response = ui.interact(rect, id, Sense::click());
+                    cell = response.rect;
+                    response.on_hover_text("value");
+                    value_stepper(ui, id, true, "up", "down");
+                });
+            });
+        }
+    }
+
     #[test]
     fn searchable_picker_rows_fill_the_list_width() {
         let ctx = egui::Context::default();
