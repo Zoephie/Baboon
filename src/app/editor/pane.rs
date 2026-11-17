@@ -398,6 +398,7 @@ pub(in crate::app) fn draw_tag_pane(
         string_list_checkboxes: cx.model.prefs.string_list_checkboxes,
         string_list_wrap_text: cx.model.prefs.string_list_wrap_text,
         string_list_help_requested: false,
+        sound_help_requested: false,
         string_row_document: Some(string_row_clipboard::RowDocument { kit: kit_id, key: key.clone(), id: doc.id }),
         string_row_request: None,
         buffers: &mut view.edit_buffers,
@@ -530,6 +531,11 @@ pub(in crate::app) fn draw_tag_pane(
         if model_preview.perspective != model_preview_perspective {
             let perspective = model_preview.perspective;
             cx.edit_prefs(move |prefs| prefs.model_preview_perspective = perspective);
+        }
+        if edit_context.sound_help_requested {
+            cx.send(crate::app::help::HelpCommand::ShowDocSection(
+                crate::app::help::SOUND_PLAYER_HELP_SECTION,
+            ));
         }
         if std::mem::take(&mut model_preview.help_requested) {
             cx.send(crate::app::help::HelpCommand::ShowDocSection(

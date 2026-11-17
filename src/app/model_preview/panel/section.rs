@@ -120,8 +120,10 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
         let width = ui.available_width().max(1.0);
         let animation_header = title == "Animation Player";
         // Cards whose header holds a picker and controls after the title.
-        let leading_header =
-            animation_header || matches!(title, "Sound Player" | "Sound Looping Player");
+        // Cards whose header holds a picker and controls after the title; an
+        // untitled card's start at its left.
+        let leading_header = animation_header
+            || matches!(title, "Sound Player" | "Sound Looping Player" | "");
         let bitmap_header = title == "Bitmap Preview";
         let wrapped_bitmap_header = bitmap_header
             && header_wrap_width
@@ -182,7 +184,8 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
                 .x;
             egui::Rect::from_min_max(
                 egui::pos2(
-                    header_content_rect.min.x + title_width + 16.0,
+                    header_content_rect.min.x
+                        + if title.is_empty() { 0.0 } else { title_width + 16.0 },
                     header_content_rect.min.y,
                 ),
                 header_content_rect.max,

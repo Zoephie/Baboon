@@ -25,6 +25,7 @@ pub(in crate::app) const STRING_EDITOR_HELP_SECTION: &str = "Strings Editor";
 pub(in crate::app) const FIND_REPLACE_HELP_SECTION: &str = "Find and Replace";
 pub(in crate::app) const RENAMING_HELP_SECTION: &str = "Renaming";
 pub(in crate::app) const MODEL_PREVIEW_HELP_SECTION: &str = "Model Preview";
+pub(in crate::app) const SOUND_PLAYER_HELP_SECTION: &str = "Sound Player";
 
 /// Help: the About and help windows, tutorials, HaloScript and field docs, tag
 /// compatibility and map names.

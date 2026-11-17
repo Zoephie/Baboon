@@ -277,6 +277,15 @@
           ]
         },
         {
+          "title": "Sound Player",
+          "blocks": [
+            {
+              "kind": "markdown",
+              "file": "sound-player.md"
+            }
+          ]
+        },
+        {
           "title": "Halo: Campaign Evolved",
           "blocks": [
             {

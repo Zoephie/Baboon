@@ -543,6 +543,8 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) string_list_checkboxes: bool,
     pub(in crate::app) string_list_wrap_text: bool,
     pub(in crate::app) string_list_help_requested: bool,
+    /// The Sound Player's About was pressed.
+    pub(in crate::app) sound_help_requested: bool,
     pub(in crate::app) string_row_document: Option<super::string_row_clipboard::RowDocument>,
     pub(in crate::app) string_row_request: Option<super::string_row_clipboard::RowRequest>,
     pub(in crate::app) buffers: &'a mut EditDrafts,
@@ -792,6 +794,7 @@ impl<'a> FieldEditContext<'a> {
             string_list_checkboxes: false,
             string_list_wrap_text: false,
             string_list_help_requested: false,
+            sound_help_requested: false,
             string_row_document: None,
             string_row_request: None,
             buffers: &mut sinks.buffers,

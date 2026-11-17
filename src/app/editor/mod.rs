@@ -80,21 +80,6 @@ pub(super) fn draw_tag(
     if expert_mode {
         draw_tag_metadata(ui, tag, entry, names);
     }
-    if is_sound_classes_group(entry.group_tag) {
-        draw_sound_classes_summary(ui, tag);
-    }
-    if is_sound_group(entry.group_tag) {
-        draw_sound_player(ui, tag, edit);
-    }
-    if is_dialogue_group(entry.group_tag) {
-        draw_dialogue_summary(ui, tag, edit);
-    }
-    if is_sound_looping_group(entry.group_tag) {
-        draw_sound_looping_player(ui, tag, edit);
-    }
-    if is_material_effects_group(entry.group_tag) {
-        draw_material_effects_summary(ui, tag, edit);
-    }
 
     if crate::app::editor::string_list::supports_group(entry.group_tag)
         && draw_string_list_tag(ui, tag, document_revision, source_game, expert_mode, edit)
@@ -317,12 +302,33 @@ fn draw_tag_fields_scroll(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             scroll_during_drag(ui);
+            draw_group_summaries(ui, tag, entry, edit);
             if is_object_family {
                 draw_inherited_object_fields(ui, tag.root(), names, expert_mode, edit);
             } else {
                 draw_struct_fields(ui, tag.root(), names, 0, expert_mode, "", edit);
             }
         });
+}
+
+/// What a sound, dialogue, looping sound or material effects tag shows above
+/// its fields: its player or overview, scrolling with them.
+fn draw_group_summaries(ui: &mut Ui, tag: &TagFile, entry: &TagEntry, edit: &mut FieldEditContext<'_>) {
+    if is_sound_classes_group(entry.group_tag) {
+        draw_sound_classes_summary(ui, tag);
+    }
+    if is_sound_group(entry.group_tag) {
+        draw_sound_player(ui, tag, edit);
+    }
+    if is_dialogue_group(entry.group_tag) {
+        draw_dialogue_summary(ui, tag, edit);
+    }
+    if is_sound_looping_group(entry.group_tag) {
+        draw_sound_looping_player(ui, tag, edit);
+    }
+    if is_material_effects_group(entry.group_tag) {
+        draw_material_effects_summary(ui, tag, edit);
+    }
 }
 
 const TAG_FIELD_SCROLL_MIN_WIDTH: f32 = 980.0;

@@ -510,10 +510,12 @@ fn percent_slider<'a>(value: &'a mut f32, max: f32, icon: &str) -> egui::Slider<
 }
 
 /// Volume, the language choice and the status line, shared by every player.
+/// `with_language` false leaves the language to the player's header.
 pub(super) fn draw_sound_output_controls(
     ui: &mut Ui,
     edit: &mut FieldEditContext<'_>,
     languages: &[LanguageChoice],
+    with_language: bool,
 ) {
     let error_status = sound_error_status(edit);
     let mut volume = edit.sound_volume;
@@ -559,11 +561,24 @@ pub(super) fn draw_sound_output_controls(
         edit.sound_play_request
             .push_back(super::audio::SoundAction::SetSpeed(speed));
     }
-    // Language selector — picks which localized audio plays and is
-    // extracted (to `data_<lang>\`). A language this source lacks shows as
-    // the default, which is what plays.
-    if !languages.is_empty() {
+    if with_language && !languages.is_empty() {
         ui.separator();
+        draw_sound_language_picker(ui, edit, languages);
+    }
+    if let Some(status) = edit.sound_status.filter(|_| error_status.is_none()) {
+        ui.label(RichText::new(status).color(subtle_dark()));
+    }
+}
+
+/// The language a localized sound plays and extracts (to `data_<lang>\`),
+/// with the Strings Editor's language icon. A language this source lacks
+/// shows as the default, which is what plays.
+pub(super) fn draw_sound_language_picker(
+    ui: &mut Ui,
+    edit: &mut FieldEditContext<'_>,
+    languages: &[LanguageChoice],
+) {
+    {
         let current = edit.sound_language.map(str::to_owned);
         let shown = languages
             .iter()
@@ -580,25 +595,26 @@ pub(super) fn draw_sound_output_controls(
         // H3 continues opening that missing bank while the combo says
         // "default".
         let before = current;
-        crate::app::ui_kit::ValueComboBox::from_id_salt("sound_language")
-            .selected_text(format!(
-                "\u{1F310} {}",
-                shown.map_or("default", |choice| choice.label.as_str())
-            ))
-            .show_ui(ui, |ui| {
+        let label = shown.map_or("default", |choice| choice.label.as_str()).to_owned();
+        ui.push_id("sound_language", |ui| {
+            fixed_width_icon_text_dropdown_button(ui, ButtonIcon::Localization, &label, 120.0, |ui| {
                 for choice in languages {
                     let response = ui
                         .add_enabled_ui(choice.available, |ui| {
                             ui.selectable_value(&mut selected, choice.value.clone(), &choice.label)
                         })
                         .inner;
+                    if response.clicked() {
+                        ui.close();
+                    }
                     if let Some(reason) = &choice.unavailable_reason {
                         response.on_hover_text(reason);
                     }
                 }
-            })
-            .response
-            .on_hover_text(format!(
+            });
+        })
+        .response
+        .on_hover_text(format!(
                 "Language to play and extract ({} of {} available)",
                 languages.iter().filter(|choice| choice.available).count(),
                 languages.len()
@@ -607,9 +623,6 @@ pub(super) fn draw_sound_output_controls(
             edit.sound_play_request
                 .push_back(super::audio::SoundAction::SetLanguage(selected));
         }
-    }
-    if let Some(status) = edit.sound_status.filter(|_| error_status.is_none()) {
-        ui.label(RichText::new(status).color(subtle_dark()));
     }
 }
 
@@ -1195,7 +1208,8 @@ fn draw_wwise_event_player(
     // Name the field each event comes from only when there is more than one
     // kind of them.
     let grouped = events.iter().any(|(label, _)| *label != events[0].0);
-    sound_card(ui, "Sound Player", "", |ui, header| {
+    let title = if languages.is_empty() { "Sound Player" } else { "" };
+    sound_card(ui, title, "", |ui, header| {
         let language = edit.sound_language.unwrap_or("");
         let clips: Vec<PlayerClip> = events
             .iter()
@@ -1225,8 +1239,7 @@ fn draw_wwise_event_player(
         );
         let (label, name) = &events[selected];
         ui.horizontal(|ui| {
-            if ui
-                .button(RichText::new(format!("\u{2B07} {name}")))
+            if icon_text_button(ui, ButtonIcon::Export, name.as_str(), true)
                 .on_hover_text("Extract this event to WAV")
                 .clicked()
                 && let Some(path) = rfd::FileDialog::new()
@@ -1256,6 +1269,32 @@ fn draw_wwise_event_player(
 /// About a tenth of the game's sound tags are like this — Reach metadata kept
 /// for the simulation with no audio asset behind them. Saying so is the whole
 /// point: the alternative is a player that looks playable and never is.
+/// A sound card's footer: a band along the card's foot, edge to edge, its
+/// contents in one row, as the Model Preview's stats footer has them.
+fn sound_card_footer(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+    const HEIGHT: f32 = 36.0;
+    // The card body's inner margin, which the band runs out over.
+    const MARGIN: f32 = 8.0;
+    let width = ui.available_width().max(1.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, HEIGHT - MARGIN), Sense::hover());
+    let band = egui::Rect::from_min_max(
+        rect.min - Vec2::new(MARGIN, 0.0),
+        rect.max + Vec2::splat(MARGIN),
+    );
+    ui.painter().rect_filled(
+        band,
+        egui::CornerRadius { nw: 0, ne: 0, sw: 5, se: 5 },
+        foundation_section_bar(),
+    );
+    let mut footer = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(band.shrink(6.0))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    footer.spacing_mut().item_spacing.x = 8.0;
+    add(&mut footer);
+}
+
 /// A sound tag's player, boxed as the Model Preview's Animation Player is:
 /// `title` in the header bar with `note` at its right, `body` under it.
 /// `body` is given the header's room after the title, where the player puts
@@ -1320,7 +1359,8 @@ fn draw_ce_wwise_player(
     let media = binding.media_for_language(&selected);
 
     let language_picker = language_choices(edit, None);
-    sound_card(ui, "Sound Player", "", |ui, header| {
+    let title = if language_picker.is_empty() { "Sound Player" } else { "" };
+    sound_card(ui, title, "", |ui, header| {
         if media.is_empty() {
             ui.label(RichText::new("(no media in this language)").color(subtle_dark()));
             return;
@@ -1381,8 +1421,7 @@ fn draw_ce_wwise_player(
         let m = media[chosen];
         ui.horizontal_wrapped(|ui| {
             if let Some(root) = edit.ce_paks_root
-                && ui
-                    .button(RichText::new("\u{2B07} Extract all"))
+                && icon_text_button(ui, ButtonIcon::Export, "Extract all", true)
                     .on_hover_text("Extract every permutation of this language to WAV")
                     .clicked()
                 && let Some(base) = rfd::FileDialog::new()
@@ -1410,8 +1449,7 @@ fn draw_ce_wwise_player(
                 });
             }
 
-            if ui
-                .button(RichText::new(format!("\u{2B07} {}", m.display_name())))
+            if icon_text_button(ui, ButtonIcon::Export, m.display_name(), true)
                 .on_hover_text(format!(
                     "Extract this permutation to WAV\n{}",
                     m.source_name
@@ -1701,7 +1739,8 @@ pub(in crate::app) fn draw_sound_player(
         || (is_fmod_language_game(edit.game) && !shared_fmod_audio);
     let language_name = language_label(language.unwrap_or(H2_DEFAULT_LANGUAGE));
 
-    sound_card(ui, "Sound Player", "", |ui, header| {
+    let title = if languages.is_empty() { "Sound Player" } else { "" };
+    sound_card(ui, title, "", |ui, header| {
         let clips: Vec<PlayerClip> = rows
             .iter()
             .map(|row| PlayerClip {
@@ -1723,7 +1762,6 @@ pub(in crate::app) fn draw_sound_player(
             row_play_action(tag, &rows[index], source, tags_root).map(ClipPlay::Action)
         });
         let row = &rows[selected];
-        draw_sound_format_line(ui, tag, &rows, source);
         if let Some(missing) = &missing_language {
             ui.label(
                 RichText::new(format!(
@@ -1768,130 +1806,14 @@ pub(in crate::app) fn draw_sound_player(
             .filter(|row| row_duration(row, source).1)
             .count();
         let (_, fallback) = row_duration(row, source);
-        ui.horizontal_wrapped(|ui| {
-            let mut extract_hover = match &extract_base {
-                Some(dir) => format!("Extract every permutation to {}", dir.display()),
-                None => "Choose a folder and extract every permutation".to_owned(),
-            };
-            if missing_count > 0 {
-                extract_hover.push_str(&format!(
-                    "\n{missing_count} permutation(s) have no {language_name} audio and are skipped"
-                ));
-            }
-            if !format_note.is_empty() {
-                extract_hover.push_str(&format!("\nFor tool.exe reimport: {format_note}"));
-            }
-            let extract_label = if localized {
-                format!("\u{2B07} Extract all ({language_name})")
-            } else {
-                "\u{2B07} Extract all".to_owned()
-            };
-            if ui
-                .button(RichText::new(extract_label))
-                .on_hover_text(extract_hover)
+        // The footer: About, what the sound is, then extracting it.
+        sound_card_footer(ui, |ui| {
+            if icon_button(ui, ButtonIcon::About, "About the Sound Player", true, text_dark())
                 .clicked()
             {
-                let base = extract_base.clone().or_else(|| {
-                    rfd::FileDialog::new()
-                        .set_title("Extract sound permutations")
-                        .pick_folder()
-                });
-                if let Some(base) = base {
-                    let items = build_extract_items(tag, &rows, source, &base, raw_ce);
-                    let label = base
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "sound".to_owned());
-                    *edit.sound_extract_request = Some(ExtractRequest {
-                        items,
-                        tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
-                        label,
-                    });
-                }
+                edit.sound_help_requested = true;
             }
-            if let Some(h2) = h2.as_ref().filter(|_| localized) {
-                let all_hover = if extract_base.is_some() {
-                    format!(
-                        "Extract all {} languages: English to data\\\u{2026}, the others to \
-                         data_<language>\\\u{2026}",
-                        h2.languages.len()
-                    )
-                } else {
-                    format!(
-                        "Choose a folder and extract all {} languages, one subfolder each",
-                        h2.languages.len()
-                    )
-                };
-                if ui
-                    .button(RichText::new("\u{2B07} All languages"))
-                    .on_hover_text(all_hover)
-                    .clicked()
-                {
-                    // Loose tags extract beside the kit's data roots; anywhere
-                    // else, into one chosen folder with a subfolder per language.
-                    let picked = if extract_base.is_some() {
-                        None
-                    } else {
-                        rfd::FileDialog::new()
-                            .set_title("Extract every language")
-                            .pick_folder()
-                    };
-                    if extract_base.is_some() || picked.is_some() {
-                        let mut items = Vec::new();
-                        for each in &h2.languages {
-                            let base = match &picked {
-                                Some(folder) => Some(folder.join(each)),
-                                None => base_for(Some(each)),
-                            };
-                            let Some(base) = base else {
-                                continue;
-                            };
-                            let each_source = RowSource {
-                                language: Some(each),
-                                ..source
-                            };
-                            items.extend(build_extract_items(
-                                tag,
-                                &rows,
-                                each_source,
-                                &base,
-                                false,
-                            ));
-                        }
-                        *edit.sound_extract_request = Some(ExtractRequest {
-                            items,
-                            tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
-                            label: "all languages".to_owned(),
-                        });
-                    }
-                }
-            }
-            // Third: the selected permutation alone, then what is particular to it.
-            if ui
-                .button(RichText::new(format!("\u{2B07} {}", row.name)))
-                .on_hover_text(format!(
-                    "Extract this permutation to a file\n{}",
-                    row_details(row, h2.as_ref())
-                ))
-                .clicked()
-            {
-                let ext = row_extract_ext(&row.kind, raw_ce);
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_title("Extract permutation")
-                    .set_file_name(format!("{}.{ext}", sanitize_component(&row.name)))
-                    .save_file()
-                    && let Some(item_source) = row_extract_source(tag, row, source, raw_ce, false)
-                {
-                    *edit.sound_extract_request = Some(ExtractRequest {
-                        items: vec![ExtractItem {
-                            out_path: path,
-                            source: item_source,
-                        }],
-                        tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
-                        label: row.name.clone(),
-                    });
-                }
-            }
+            draw_sound_format_line(ui, tag, &rows, source);
             if fallback {
                 ui.label(
                     RichText::new(format!("no {language_name} \u{00B7} plays English"))
@@ -1905,12 +1827,134 @@ pub(in crate::app) fn draw_sound_player(
                 ui.label(RichText::new(format!("skip {:.0}%", skip * 100.0)).color(subtle_dark()))
                     .on_hover_text("Fraction of requests for this permutation that are ignored");
             }
-            if has_inline_ogg {
-                ui.baboon_checkbox(&mut raw_ce, "raw .ogg").on_hover_text(
-                    "Extract CE audio as the tag's original Ogg stream (lossless) \
-                     instead of decoding to WAV",
-                );
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Right to left: the selected permutation's own, then every one.
+                if icon_text_button(ui, ButtonIcon::Export, row.name.as_str(), true)
+                    .on_hover_text(format!(
+                        "Extract this permutation to a file\n{}",
+                        row_details(row, h2.as_ref())
+                    ))
+                    .clicked()
+                {
+                    let ext = row_extract_ext(&row.kind, raw_ce);
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_title("Extract permutation")
+                        .set_file_name(format!("{}.{ext}", sanitize_component(&row.name)))
+                        .save_file()
+                        && let Some(item_source) = row_extract_source(tag, row, source, raw_ce, false)
+                    {
+                        *edit.sound_extract_request = Some(ExtractRequest {
+                            items: vec![ExtractItem {
+                                out_path: path,
+                                source: item_source,
+                            }],
+                            tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
+                            label: row.name.clone(),
+                        });
+                    }
+                }
+                if let Some(h2) = h2.as_ref().filter(|_| localized) {
+                    let all_hover = if extract_base.is_some() {
+                        format!(
+                            "Extract all {} languages: English to data\\\u{2026}, the others to \
+                             data_<language>\\\u{2026}",
+                            h2.languages.len()
+                        )
+                    } else {
+                        format!(
+                            "Choose a folder and extract all {} languages, one subfolder each",
+                            h2.languages.len()
+                        )
+                    };
+                    if icon_text_button(ui, ButtonIcon::Export, "All languages", true)
+                        .on_hover_text(all_hover)
+                        .clicked()
+                    {
+                        // Loose tags extract beside the kit's data roots; anywhere
+                        // else, into one chosen folder with a subfolder per language.
+                        let picked = if extract_base.is_some() {
+                            None
+                        } else {
+                            rfd::FileDialog::new()
+                                .set_title("Extract every language")
+                                .pick_folder()
+                        };
+                        if extract_base.is_some() || picked.is_some() {
+                            let mut items = Vec::new();
+                            for each in &h2.languages {
+                                let base = match &picked {
+                                    Some(folder) => Some(folder.join(each)),
+                                    None => base_for(Some(each)),
+                                };
+                                let Some(base) = base else {
+                                    continue;
+                                };
+                                let each_source = RowSource {
+                                    language: Some(each),
+                                    ..source
+                                };
+                                items.extend(build_extract_items(
+                                    tag,
+                                    &rows,
+                                    each_source,
+                                    &base,
+                                    false,
+                                ));
+                            }
+                            *edit.sound_extract_request = Some(ExtractRequest {
+                                items,
+                                tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
+                                label: "all languages".to_owned(),
+                            });
+                        }
+                    }
+                }
+                let mut extract_hover = match &extract_base {
+                    Some(dir) => format!("Extract every permutation to {}", dir.display()),
+                    None => "Choose a folder and extract every permutation".to_owned(),
+                };
+                if missing_count > 0 {
+                    extract_hover.push_str(&format!(
+                        "\n{missing_count} permutation(s) have no {language_name} audio and are skipped"
+                    ));
+                }
+                if !format_note.is_empty() {
+                    extract_hover.push_str(&format!("\nFor tool.exe reimport: {format_note}"));
+                }
+                let extract_label = if localized {
+                    format!("Extract all ({language_name})")
+                } else {
+                    "Extract all".to_owned()
+                };
+                if icon_text_button(ui, ButtonIcon::Export, extract_label, true)
+                    .on_hover_text(extract_hover)
+                    .clicked()
+                {
+                    let base = extract_base.clone().or_else(|| {
+                        rfd::FileDialog::new()
+                            .set_title("Extract sound permutations")
+                            .pick_folder()
+                    });
+                    if let Some(base) = base {
+                        let items = build_extract_items(tag, &rows, source, &base, raw_ce);
+                        let label = base
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "sound".to_owned());
+                        *edit.sound_extract_request = Some(ExtractRequest {
+                            items,
+                            tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
+                            label,
+                        });
+                    }
+                }
+                if has_inline_ogg {
+                    ui.baboon_checkbox(&mut raw_ce, "raw .ogg").on_hover_text(
+                        "Extract CE audio as the tag's original Ogg stream (lossless) \
+                         instead of decoding to WAV",
+                    );
+                }
+            });
         });
         ui.data_mut(|d| d.insert_temp(raw_ce_id, raw_ce));
     });
@@ -2368,7 +2412,7 @@ pub(in crate::app) fn draw_dialogue_summary(
     .show(ui, |ui| {
         if clips.is_empty() {
             // Nothing to play: just the volume, language and status.
-            ui.horizontal(|ui| draw_sound_output_controls(ui, edit, &languages));
+            ui.horizontal(|ui| draw_sound_output_controls(ui, edit, &languages, true));
             draw_sound_errors(ui, edit);
         } else {
             draw_clip_player(ui, None, edit, "dialogue", &clips, &languages, &mut play);
@@ -2526,7 +2570,8 @@ pub(in crate::app) fn draw_sound_looping_player(
             container_source,
         )
     };
-    sound_card(ui, "Sound Looping Player", "", |ui, header| {
+    let title = if languages.is_empty() { "Sound Looping Player" } else { "" };
+    sound_card(ui, title, "", |ui, header| {
         let selected = draw_clip_player(ui, header, edit, "looping", &clips, &languages, &mut play);
         // The selected component: open it, or extract it.
         let (_, group, path) = &refs[selected];
@@ -4035,7 +4080,7 @@ mod tests {
             // The clip's length, read from its inline samples before any decode.
             "0:00.000 / 0:01.000",
             "pcm \u{b7} mono \u{b7} 22.05 kHz",
-            "\u{2B07} Extract all",
+            "Extract all",
         ] {
             assert!(
                 painted.iter().any(|text| text == expected),

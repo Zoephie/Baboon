@@ -198,7 +198,22 @@ pub(super) fn draw_clip_player(
         .iter()
         .position(|&index| index == selected)
         .unwrap_or(0);
-    // In a card's header bar when the player has one, else its own row.
+    // A card's header bar holds the language, the clip choice and the
+    // transport, in that order; without a card each has its own row.
+    let mut header_ui = header.map(|rect| {
+        let mut header_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        header_ui.spacing_mut().item_spacing.x = 8.0;
+        header_ui
+    });
+    if let Some(header_ui) = header_ui.as_mut()
+        && !languages.is_empty()
+    {
+        draw_sound_language_picker(header_ui, edit, languages);
+    }
     let mut pick = |ui: &mut Ui| {
         let many = clips.len() > 1;
         let previous = icon_button(ui, ButtonIcon::Left, "Previous", many, text_dark());
@@ -228,15 +243,12 @@ pub(super) fn draw_clip_player(
             queue_play(edit, clips, next, play);
         }
     };
-    match header {
-        Some(rect) => {
-            let mut header_ui = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(rect)
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            );
-            header_ui.spacing_mut().item_spacing.x = 8.0;
-            pick(&mut header_ui);
+    match header_ui.as_mut() {
+        Some(header_ui) => {
+            header_ui.scope(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                pick(ui);
+            });
         }
         None => {
             ui.horizontal(pick);
@@ -275,8 +287,8 @@ pub(super) fn draw_clip_player(
 
     draw_timeline(ui, edit, clips, selected, loaded, preview.as_ref(), play);
 
-    // Transport.
-    ui.horizontal(|ui| {
+    // Play, Stop and Loop.
+    let mut transport = |ui: &mut Ui, edit: &mut FieldEditContext<'_>| {
         let (icon, glyph, hover) = if loaded.is_some_and(|playback| playback.playing) {
             (ButtonIcon::Pause, "\u{23F8}", "Pause (Space)")
         } else {
@@ -302,6 +314,20 @@ pub(super) fn draw_clip_player(
         if selectable_icon_button(ui, ButtonIcon::Loop, "Loop", looping, true).clicked() {
             edit.sound_play_request
                 .push_back(SoundAction::SetLooping(!looping));
+        }
+    };
+    if let Some(header_ui) = header_ui.as_mut() {
+        header_ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            transport(ui, edit);
+        });
+    }
+    let in_header = header_ui.is_some();
+
+    // The time, zoom, region, volume and speed.
+    ui.horizontal(|ui| {
+        if !in_header {
+            transport(ui, edit);
         }
         let (position, duration) = match loaded {
             Some(playback) => (playback.position, Some(playback.duration)),
@@ -367,7 +393,7 @@ pub(super) fn draw_clip_player(
             );
         }
         ui.add_space(8.0);
-        draw_sound_output_controls(ui, edit, languages);
+        draw_sound_output_controls(ui, edit, languages, !in_header);
     });
     draw_sound_errors(ui, edit);
 
@@ -395,7 +421,7 @@ pub(super) fn draw_clip_player(
 #[cfg(test)]
 fn mark_button(ui: &Ui, glyph: &str, rect: egui::Rect) {
     ui.ctx().data_mut(|data| {
-        data.get_temp_mut_or_default::<Vec<(String, egui::Rect)>>(egui::Id::new("player_button_marks"))
+        data.get_temp_mut_or_default::<Vec<(String, egui::Rect)>>(egui::Id::unique("player_button_marks"))
             .push((glyph.to_owned(), rect));
     });
 }
@@ -407,7 +433,7 @@ fn mark_button(_: &Ui, _: &str, _: egui::Rect) {}
 #[cfg(test)]
 pub(in crate::app::editor) fn take_button_marks(ctx: &egui::Context) -> Vec<(String, egui::Rect)> {
     ctx.data_mut(|data| {
-        data.remove_temp::<Vec<(String, egui::Rect)>>(egui::Id::new("player_button_marks"))
+        data.remove_temp::<Vec<(String, egui::Rect)>>(egui::Id::unique("player_button_marks"))
             .unwrap_or_default()
     })
 }
