@@ -3983,6 +3983,7 @@ mod tests {
                     )),
                     _ => None,
                 })
+                .chain(super::player::take_button_marks(&ctx))
                 .collect::<Vec<_>>()
         };
         frame(Vec::new(), &mut queued);

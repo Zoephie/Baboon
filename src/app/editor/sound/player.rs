@@ -201,11 +201,9 @@ pub(super) fn draw_clip_player(
     // In a card's header bar when the player has one, else its own row.
     let mut pick = |ui: &mut Ui| {
         let many = clips.len() > 1;
-        if ui
-            .add_enabled(many, egui::Button::new("\u{25C0}"))
-            .on_hover_text("Previous")
-            .clicked()
-        {
+        let previous = icon_button(ui, ButtonIcon::Left, "Previous", many, text_dark());
+        mark_button(ui, "\u{25C0}", previous.rect);
+        if previous.clicked() {
             choose = Some(order[(rank + order.len() - 1) % order.len()]);
         }
         let width = (ui.available_width() - 90.0).clamp(160.0, 420.0);
@@ -214,15 +212,13 @@ pub(super) fn draw_clip_player(
         {
             choose = Some(index);
         }
-        if ui
-            .add_enabled(many, egui::Button::new("\u{25B6}"))
-            .on_hover_text("Next")
-            .clicked()
-        {
+        let next = icon_button(ui, ButtonIcon::Right, "Next", many, text_dark());
+        mark_button(ui, "\u{25B6}", next.rect);
+        if next.clicked() {
             choose = Some(order[(rank + 1) % order.len()]);
         }
         if ui
-            .add_enabled(many, egui::Button::new(RANDOM_ICON))
+            .add_enabled(many, egui::Button::new(RANDOM_ICON).min_size(ICON_BUTTON_SIZE))
             .on_hover_text("Play a random one, as the game picks")
             .clicked()
         {
@@ -281,19 +277,25 @@ pub(super) fn draw_clip_player(
 
     // Transport.
     ui.horizontal(|ui| {
-        let (icon, hover) = if loaded.is_some_and(|playback| playback.playing) {
-            ("\u{23F8}", "Pause (Space)")
+        let (icon, glyph, hover) = if loaded.is_some_and(|playback| playback.playing) {
+            (ButtonIcon::Pause, "\u{23F8}", "Pause (Space)")
         } else {
-            ("\u{25B6}", "Play (Space)")
+            (ButtonIcon::Play, "\u{25B6}", "Play (Space)")
         };
-        if ui.button(icon).on_hover_text(hover).clicked() {
+        let toggle = icon_button(ui, icon, hover, true, text_dark());
+        mark_button(ui, glyph, toggle.rect);
+        if toggle.clicked() {
             toggle_or_play(edit, clips, selected, loaded, play);
         }
-        if ui
-            .button("\u{25A0}")
-            .on_hover_text("Stop, rewind and clear the region (Enter)")
-            .clicked()
-        {
+        let stop_button = icon_button(
+            ui,
+            ButtonIcon::Stop,
+            "Stop, rewind and clear the region (Enter)",
+            true,
+            text_dark(),
+        );
+        mark_button(ui, "\u{25A0}", stop_button.rect);
+        if stop_button.clicked() {
             stop(ui, edit, &clip.id);
         }
         let looping = edit.sound_looping;
@@ -386,6 +388,28 @@ pub(super) fn draw_clip_player(
         }
     }
     selected
+}
+
+/// Under test, where an icon button of the player was drawn, by the glyph
+/// it showed before it had an icon, so the tests find it as painted text.
+#[cfg(test)]
+fn mark_button(ui: &Ui, glyph: &str, rect: egui::Rect) {
+    ui.ctx().data_mut(|data| {
+        data.get_temp_mut_or_default::<Vec<(String, egui::Rect)>>(egui::Id::new("player_button_marks"))
+            .push((glyph.to_owned(), rect));
+    });
+}
+
+#[cfg(not(test))]
+fn mark_button(_: &Ui, _: &str, _: egui::Rect) {}
+
+/// The buttons [`mark_button`] marked since this was last asked.
+#[cfg(test)]
+pub(in crate::app::editor) fn take_button_marks(ctx: &egui::Context) -> Vec<(String, egui::Rect)> {
+    ctx.data_mut(|data| {
+        data.remove_temp::<Vec<(String, egui::Rect)>>(egui::Id::new("player_button_marks"))
+            .unwrap_or_default()
+    })
 }
 
 /// Where a tab's player keeps the id of its selected clip. Not tied to the
@@ -1572,6 +1596,7 @@ mod tests {
                     )),
                     _ => None,
                 })
+                .chain(take_button_marks(&self.ctx))
                 .collect();
             // The track is the widest stroke-filled rect: find it through the
             // ruler's first label, which sits on its left edge.
@@ -2778,6 +2803,7 @@ mod tests {
                     )),
                     _ => None,
                 })
+                .chain(take_button_marks(&ctx))
                 .collect::<Vec<_>>()
         };
         frame(Vec::new(), &mut queued);
