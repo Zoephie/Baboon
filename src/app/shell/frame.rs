@@ -169,7 +169,7 @@ pub(in crate::app) fn paint_connected_tab(ui: &Ui, rect: egui::Rect, fill: Color
             }
         }
         points.push(r.right_bottom());
-        let border = if focused { focused_tab_border(ui.visuals().dark_mode) } else { grid_line() };
+        let border = if focused { focused_tab_border_in(ui) } else { grid_line() };
         ui.painter().add(egui::Shape::line(points, Stroke::new(1.0, border)));
     }
 }
@@ -178,7 +178,7 @@ pub(in crate::app) fn paint_connected_tab(ui: &Ui, rect: egui::Rect, fill: Color
 pub(in crate::app) fn paint_page_outline(
     ui: &Ui, rect: egui::Rect, corners: egui::CornerRadius, tab: Option<&egui::Rect>, focused: bool,
 ) {
-    let stroke = Stroke::new(1.0, if focused { focused_tab_border(ui.visuals().dark_mode) } else { grid_line() });
+    let stroke = Stroke::new(1.0, if focused { focused_tab_border_in(ui) } else { grid_line() });
     let Some(tab) = tab else {
         ui.painter().rect_stroke(rect, corners, stroke, egui::StrokeKind::Inside);
         return;
@@ -235,7 +235,7 @@ pub(in crate::app) fn paint_kit_split_grips(ui: &Ui, tree: &egui_tiles::Tree<Kit
                 painter.vline(center.x, toolbar_bottom..=parent.top(), Stroke::new(2.0, divider_color));
             }
             let color = if hovered {
-                if is_dark_mode() { Color32::WHITE } else { Color32::BLACK }
+                text_strong()
             } else { subtle_dark() };
             ui.painter().rect_filled(egui::Rect::from_center_size(center, size), 2.0, color);
         }
@@ -308,11 +308,7 @@ pub(in crate::app) fn pane_header_breadcrumbs(
             ui.painter().rect_filled(
                 rect,
                 egui::CornerRadius::same(4),
-                if is_dark_mode() {
-                    Color32::from_white_alpha(26)
-                } else {
-                    Color32::from_black_alpha(26)
-                },
+                menu_row_hover(),
             );
         }
         let text_position = egui::Align2::CENTER_CENTER
@@ -545,11 +541,11 @@ pub(in crate::app) fn editing_kit_menu_row_with_read_only(
 pub(in crate::app) fn terminal_line_color(severity: TerminalLineSeverity) -> Color32 {
     match severity {
         TerminalLineSeverity::Normal | TerminalLineSeverity::Summary => {
-            Color32::from_rgb(232, 232, 228)
+            terminal_text()
         }
-        TerminalLineSeverity::Warning => Color32::from_rgb(238, 196, 91),
-        TerminalLineSeverity::Error => Color32::from_rgb(244, 105, 105),
-        TerminalLineSeverity::Success => Color32::from_rgb(123, 184, 137),
+        TerminalLineSeverity::Warning => terminal_warning_text(),
+        TerminalLineSeverity::Error => terminal_error_text(),
+        TerminalLineSeverity::Success => terminal_success_text(),
     }
 }
 
@@ -564,16 +560,8 @@ pub(in crate::app) fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction:
     let size = egui::vec2(width, 18.0);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let radius = 6.0;
-    let bg = if is_dark_mode() {
-        Color32::from_rgb(31, 31, 30)
-    } else {
-        Color32::from_rgb(226, 208, 194)
-    };
-    let fill = if is_dark_mode() {
-        Color32::from_rgb(69, 111, 132)
-    } else {
-        Color32::from_rgb(91, 146, 172)
-    };
+    let bg = progress_track();
+    let fill = progress_fill();
     ui.painter().rect_filled(rect, radius, bg);
     if let Some(fraction) = fraction {
         let fill_width = rect.width() * fraction.clamp(0.0, 1.0);
@@ -801,11 +789,7 @@ fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
     let width = TEXT_PADDING + galley.size().x + REMOVE_WIDTH + 4.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, BUTTON_HEIGHT), Sense::hover());
     let background = editor_bg();
-    let target = if is_dark_mode() {
-        Color32::WHITE
-    } else {
-        Color32::BLACK
-    };
+    let target = lift_target();
     let blend =
         |base: u8, overlay: u8| (base as f32 + (overlay as f32 - base as f32) * 0.05).round() as u8;
     let fill = Color32::from_rgb(

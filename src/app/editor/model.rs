@@ -149,18 +149,13 @@ pub(in crate::app) fn draw_tag_metadata(
         if let Some(reason) = unsaveable_reason(entry, tag) {
             ui.label(
                 RichText::new("Cannot be saved")
-                    .color(READ_ONLY_BADGE_COLOR)
+                    .color(read_only_badge())
                     .strong(),
             )
             .on_hover_text(reason);
         }
     });
 }
-
-/// Amber, for the header note on a tag whose edits have nowhere to be written.
-/// Warning-coloured rather than error-coloured: nothing is wrong, and the tag
-/// is fully editable — the edits just do not outlive the session.
-pub(in crate::app) const READ_ONLY_BADGE_COLOR: Color32 = Color32::from_rgb(210, 145, 60);
 
 #[cfg(test)]
 mod object_family_tests {

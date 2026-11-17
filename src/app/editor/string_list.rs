@@ -2211,7 +2211,8 @@ fn paint_swatch(painter: &egui::Painter, rect: egui::Rect, argb: u32) {
     for (x, y) in [(0.0, 0.0), (half, 0.0), (0.0, half), (half, half)] {
         let light = (x == 0.0) == (y == 0.0);
         let cell = egui::Rect::from_min_size(rect.min + Vec2::new(x, y), Vec2::splat(half));
-        painter.rect_filled(cell, 0.0, if light { Color32::from_gray(230) } else { Color32::from_gray(160) });
+        // fixed: a checker under a colour swatch, toned to the swatch
+            painter.rect_filled(cell, 0.0, if light { Color32::from_gray(230) } else { Color32::from_gray(160) });
     }
     painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(r, g, b, a));
     painter.rect_stroke(rect, 0.0, Stroke::new(1.0, text_dark()), egui::StrokeKind::Inside);
@@ -2495,7 +2496,7 @@ fn string_find_job(
         for cut in cuts.windows(2) {
             let mut format = section.format.clone();
             if let Some(range) = ranges.iter().find(|range| range.contains(&cut[0])) {
-                format.background = if active == Some(range) { Color32::from_rgb(255, 168, 38) } else { Color32::from_rgb(255, 220, 70) };
+                format.background = if active == Some(range) { search_active_match_bg() } else { search_match_bg() };
                 format.color = Color32::BLACK;
             }
             job.append(&shown[cut[0]..cut[1]], if cut[0] == start { section.leading_space } else { 0.0 }, format);

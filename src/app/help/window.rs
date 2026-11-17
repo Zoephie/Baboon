@@ -577,11 +577,7 @@ fn draw_script_doc_detail(ui: &mut Ui, detail: &ScriptDocDetail) {
 
 fn script_code(ui: &mut Ui, code: &str) {
     Frame::NONE
-        .fill(if is_dark_mode() {
-            Color32::from_rgb(24, 27, 29)
-        } else {
-            Color32::from_rgb(247, 238, 231)
-        })
+        .fill(help_code_bg())
         .inner_margin(egui::Margin::same(6))
         .show(ui, |ui| {
             ui.add(
@@ -911,8 +907,10 @@ fn draw_tutorial_play_overlay(ui: &Ui, rect: egui::Rect, hovered: bool) {
     let center = rect.center();
     let radius = 28.0;
     let background = if hovered {
+        // fixed: a play button over the tutorial thumbnail
         Color32::from_black_alpha(220)
     } else {
+        // fixed: as above
         Color32::from_black_alpha(185)
     };
     ui.painter().circle_filled(center, radius, background);

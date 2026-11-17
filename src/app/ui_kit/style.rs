@@ -1047,6 +1047,493 @@ pub(in crate::app) const MATERIAL_PARAMETER_SECTIONS: &[&str] = &[
     "ATMOSPHERE PROPERTIES",
     "MISC",
 ];
+
+// ---------------------------------------------------------------------------
+// Named colours that used to be written inline where they were drawn. Each
+// returns exactly what its call sites painted before; the names say what the
+// colour is for, so a later change to one role does not drag another along.
+// ---------------------------------------------------------------------------
+
+/// The strongest text colour: white on dark, black on light. For a hovered
+/// splitter grip and the clear button's cross.
+pub(in crate::app) fn text_strong() -> Color32 {
+    if is_dark_mode() { Color32::WHITE } else { Color32::BLACK }
+}
+
+/// The colour a neutral surface is nudged toward to lift it off its
+/// background (the keyword pills in the search bar).
+pub(in crate::app) fn lift_target() -> Color32 {
+    text_strong()
+}
+
+/// Hover wash behind a row of a custom menu.
+pub(in crate::app) fn menu_row_hover() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_white_alpha(26)
+    } else {
+        Color32::from_black_alpha(26)
+    }
+}
+
+/// Dims the window behind a modal panel.
+pub(in crate::app) fn modal_scrim() -> Color32 {
+    Color32::from_black_alpha(140)
+}
+
+/// Whether the visuals `ui` paints with are the dark ones. For caches keyed
+/// by theme, which must follow the visuals they were laid out with.
+pub(in crate::app) fn visuals_are_dark(ui: &Ui) -> bool {
+    ui.visuals().dark_mode
+}
+
+/// The egui theme matching the app's.
+pub(in crate::app) fn egui_theme() -> egui::Theme {
+    if is_dark_mode() { egui::Theme::Dark } else { egui::Theme::Light }
+}
+
+/// [`focused_tab_border`] for the visuals `ui` paints with.
+pub(in crate::app) fn focused_tab_border_in(ui: &Ui) -> Color32 {
+    focused_tab_border(ui.visuals().dark_mode)
+}
+
+// Diffs and edited tags.
+
+/// Colour for a tag that this workspace created, with no counterpart in the
+/// game. Paired with a `+` marker wherever it is used, so the meaning does not
+/// rest on colour alone.
+pub(in crate::app) fn added_text() -> Color32 {
+    Color32::from_rgb(126, 186, 108)
+}
+
+/// Background wash behind the shipped side of a diff, and behind the edited
+/// side. Kept dark: the editor draws its own widgets on top, and a strong fill
+/// would fight them rather than frame them.
+pub(in crate::app) fn removed_wash() -> Color32 {
+    Color32::from_rgb(52, 30, 30)
+}
+
+pub(in crate::app) fn added_wash() -> Color32 {
+    Color32::from_rgb(28, 46, 32)
+}
+
+/// Colour for a value or element that is going away. Paired with a `-` marker,
+/// so red and green never carry the meaning by themselves.
+pub(in crate::app) fn removed_text() -> Color32 {
+    Color32::from_rgb(214, 106, 106)
+}
+
+/// Colour for a tag or folder holding edits that are not written into the game.
+/// The same goldenrod the workspace tab is tinted with.
+pub(in crate::app) fn modified_text() -> Color32 {
+    Color32::from_rgb(214, 168, 46)
+}
+
+/// A mod-export row with nothing to write.
+pub(in crate::app) fn unchanged_text() -> Color32 {
+    Color32::from_gray(130)
+}
+
+/// The goldenrod a Chimp document tab is tinted toward while it has unsaved
+/// edits.
+pub(in crate::app) fn dirty_tab_tint() -> Color32 {
+    Color32::from_rgb(184, 134, 11)
+}
+
+/// Accent on a shader parameter edited away from its template's value.
+pub(in crate::app) fn shader_modified_accent() -> Color32 {
+    Color32::from_rgb(224, 158, 62)
+}
+
+/// A value lower than the other side's in a tag comparison.
+pub(in crate::app) fn value_decreased() -> Color32 {
+    material_delete_text()
+}
+
+/// A tick for two things that match: an identical tag, a finished step.
+pub(in crate::app) fn match_tick() -> Color32 {
+    disclosure_triangle_green()
+}
+
+/// An open folder's icon in the tag tree.
+pub(in crate::app) fn open_folder_icon() -> Color32 {
+    disclosure_triangle_green()
+}
+
+/// Icons for actions that remove something: Clear, Delete, Remove.
+pub(in crate::app) fn destructive_icon() -> Color32 {
+    material_delete_text()
+}
+
+/// A shader parameter the template no longer uses.
+pub(in crate::app) fn unused_value_text() -> Color32 {
+    material_delete_text()
+}
+
+// Badges, highlights and markers.
+
+/// The four-character group badge beside a tag in the tree.
+pub(in crate::app) fn group_badge_fill() -> Color32 {
+    Color32::from_rgb(48, 58, 66)
+}
+
+pub(in crate::app) fn group_badge_edge() -> Color32 {
+    Color32::from_rgb(76, 89, 98)
+}
+
+pub(in crate::app) fn group_badge_text() -> Color32 {
+    Color32::from_rgb(226, 235, 240)
+}
+
+/// A favourite's filled star.
+pub(in crate::app) fn favourite_star() -> Color32 {
+    Color32::from_rgb(242, 196, 48)
+}
+
+/// Marks string rows waiting to be pasted: cut rows, then copied rows.
+pub(in crate::app) fn clipboard_cut_mark() -> Color32 {
+    Color32::from_rgb(255, 209, 56)
+}
+
+pub(in crate::app) fn clipboard_copy_mark() -> Color32 {
+    Color32::from_rgb(71, 174, 235)
+}
+
+/// Background behind text matching a find, and behind the match the find
+/// is on. Text over either is [`search_match_text`].
+pub(in crate::app) fn search_match_bg() -> Color32 {
+    Color32::from_rgb(255, 220, 70)
+}
+
+pub(in crate::app) fn search_active_match_bg() -> Color32 {
+    Color32::from_rgb(255, 168, 38)
+}
+
+pub(in crate::app) fn search_match_text() -> Color32 {
+    Color32::BLACK
+}
+
+/// The glow behind a block a reference jump landed on.
+pub(in crate::app) fn jump_glow() -> Color32 {
+    Color32::from_rgba_unmultiplied(255, 214, 0, 38)
+}
+
+/// The blue "?" beside a field name with documentation.
+pub(in crate::app) fn help_cue() -> Color32 {
+    Color32::from_rgb(61, 161, 204)
+}
+
+/// A tag saved with a different layout than its definitions (the triangle,
+/// and the "!" painted on it), and the header note on a tag whose edits have
+/// nowhere to be written. Warning-coloured rather than error-coloured: nothing
+/// is wrong, and the tag is fully editable.
+pub(in crate::app) fn read_only_badge() -> Color32 {
+    Color32::from_rgb(210, 145, 60)
+}
+
+pub(in crate::app) fn read_only_badge_mark() -> Color32 {
+    Color32::from_rgb(30, 30, 30)
+}
+
+/// The filled Import button on the Blam! surface: dark green with white text
+/// in both themes.
+pub(in crate::app) fn import_button_fill() -> Color32 {
+    Color32::from_rgb(40, 122, 62)
+}
+
+// Function graphs.
+
+/// The two curves of a function graph: the first, then the second.
+pub(in crate::app) fn graph_curve(graph: usize) -> Color32 {
+    if graph == 0 {
+        Color32::from_rgb(42, 190, 72)
+    } else {
+        Color32::from_rgb(220, 55, 55)
+    }
+}
+
+/// The wash under a function graph's curve.
+pub(in crate::app) fn graph_curve_fill(graph: usize) -> Color32 {
+    if graph == 0 {
+        Color32::from_rgba_unmultiplied(42, 190, 72, 26)
+    } else {
+        Color32::from_rgba_unmultiplied(220, 55, 55, 26)
+    }
+}
+
+/// The box a function graph sits in.
+pub(in crate::app) fn graph_container_fill() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_black_alpha(64)
+    } else {
+        Color32::BLACK
+    }
+}
+
+/// The band a function's exclusion range covers, and its edges.
+pub(in crate::app) fn graph_band_fill() -> Color32 {
+    Color32::from_white_alpha(28)
+}
+
+pub(in crate::app) fn graph_band_edge() -> Color32 {
+    Color32::from_white_alpha(120)
+}
+
+// Terminal, progress and help.
+
+/// The terminal pane's background, dark in both themes.
+pub(in crate::app) fn terminal_bg() -> Color32 {
+    Color32::from_rgb(24, 24, 23)
+}
+
+/// Terminal text: ordinary lines, then warnings, errors and successes.
+pub(in crate::app) fn terminal_text() -> Color32 {
+    Color32::from_rgb(232, 232, 228)
+}
+
+pub(in crate::app) fn terminal_warning_text() -> Color32 {
+    Color32::from_rgb(238, 196, 91)
+}
+
+pub(in crate::app) fn terminal_error_text() -> Color32 {
+    Color32::from_rgb(244, 105, 105)
+}
+
+pub(in crate::app) fn terminal_success_text() -> Color32 {
+    Color32::from_rgb(123, 184, 137)
+}
+
+/// A progress bar's track and its fill.
+pub(in crate::app) fn progress_track() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(31, 31, 30)
+    } else {
+        Color32::from_rgb(226, 208, 194)
+    }
+}
+
+pub(in crate::app) fn progress_fill() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(69, 111, 132)
+    } else {
+        Color32::from_rgb(91, 146, 172)
+    }
+}
+
+/// Behind a block of script in the help window.
+pub(in crate::app) fn help_code_bg() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(24, 27, 29)
+    } else {
+        Color32::from_rgb(247, 238, 231)
+    }
+}
+
+// Settings cards.
+
+/// A settings card, and one holding a setting that does not work.
+pub(in crate::app) fn settings_card_fill() -> Color32 {
+    settings_card_fill_for(is_dark_mode())
+}
+
+fn settings_card_fill_for(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        Color32::from_rgba_premultiplied(13, 13, 13, 13)
+    } else {
+        Color32::from_black_alpha(13)
+    }
+}
+
+pub(in crate::app) fn settings_card_invalid_fill() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(98, 40, 36)
+    } else {
+        Color32::from_rgb(255, 222, 216)
+    }
+}
+
+/// Widgets inside a light settings card get opaque fills over the card's
+/// tint, so they read as they do elsewhere; dark cards keep the default.
+pub(in crate::app) fn settings_card_widget_fills(ui: &mut Ui) {
+    if !ui.visuals().dark_mode {
+        let background = editor_bg().blend(settings_card_fill_for(false));
+        opaque_widget_fills(ui.visuals_mut(), background);
+    }
+}
+
+// Chimp's JSON view.
+
+/// Syntax colours for JSON text in Chimp's documents.
+pub(in crate::app) struct JsonSyntaxColors {
+    pub(in crate::app) plain: Color32,
+    pub(in crate::app) key: Color32,
+    pub(in crate::app) string: Color32,
+    pub(in crate::app) path: Color32,
+    pub(in crate::app) number: Color32,
+    pub(in crate::app) literal: Color32,
+    pub(in crate::app) punctuation: Color32,
+}
+
+pub(in crate::app) fn json_syntax_colors(dark_mode: bool) -> JsonSyntaxColors {
+    if dark_mode {
+        JsonSyntaxColors {
+            plain: Color32::from_rgb(210, 214, 222),
+            key: Color32::from_rgb(244, 191, 92),
+            string: Color32::from_rgb(190, 235, 125),
+            path: Color32::from_rgb(232, 157, 222),
+            number: Color32::from_rgb(242, 139, 130),
+            literal: Color32::from_rgb(105, 190, 255),
+            punctuation: Color32::from_rgb(105, 210, 225),
+        }
+    } else {
+        JsonSyntaxColors {
+            plain: Color32::from_rgb(45, 50, 58),
+            key: Color32::from_rgb(145, 91, 0),
+            string: Color32::from_rgb(55, 112, 15),
+            path: Color32::from_rgb(154, 52, 136),
+            number: Color32::from_rgb(185, 62, 48),
+            literal: Color32::from_rgb(0, 104, 178),
+            punctuation: Color32::from_rgb(0, 112, 128),
+        }
+    }
+}
+
+// Bitmap channel buttons.
+
+/// A bitmap channel toggle when on: its 40% fill and its icon colour. The
+/// premultiplied values are deliberate: `from_rgba_unmultiplied` converts
+/// saturated colours through linear space, which looks much brighter than a
+/// restrained UI fill.
+pub(in crate::app) fn bitmap_channel_colors(icon: ButtonIcon) -> (Color32, Color32) {
+    match icon {
+        ButtonIcon::ChannelRed => (
+            Color32::from_rgba_premultiplied(102, 0, 0, 102),
+            Color32::from_rgb(255, 0, 0),
+        ),
+        ButtonIcon::ChannelGreen => (
+            Color32::from_rgba_premultiplied(0, 102, 0, 102),
+            Color32::from_rgb(0, 255, 0),
+        ),
+        ButtonIcon::ChannelBlue => (
+            Color32::from_rgba_premultiplied(0, 0, 102, 102),
+            Color32::from_rgb(0, 0, 255),
+        ),
+        ButtonIcon::ChannelAlpha if is_dark_mode() => (
+            Color32::from_rgba_premultiplied(102, 102, 102, 102),
+            Color32::WHITE,
+        ),
+        ButtonIcon::ChannelAlpha => (
+            Color32::from_rgba_premultiplied(0, 0, 0, 102),
+            Color32::BLACK,
+        ),
+        _ => (Color32::TRANSPARENT, Color32::TRANSPARENT),
+    }
+}
+
+// Status colours still to be unified. Each is a status (an error, a warning,
+// a success) drawn in its own shade; they keep their shades for now and are
+// meant to become invalid_value_text, unapplied_value_text and good_news.
+
+/// Warnings in the import, compatibility and cache windows.
+pub(in crate::app) fn import_warning_text() -> Color32 {
+    Color32::from_rgb(242, 196, 48)
+}
+
+/// Notes that an action will replace or lose something: mods, Chimp,
+/// closing documents, container dumps.
+pub(in crate::app) fn replace_warning_text() -> Color32 {
+    Color32::from_rgb(210, 120, 90)
+}
+
+/// Errors in Chimp's property editor and save dialog.
+pub(in crate::app) fn chimp_error_text() -> Color32 {
+    Color32::from_rgb(210, 120, 80)
+}
+
+/// A save or close that failed, and a missing source folder.
+pub(in crate::app) fn save_error_text() -> Color32 {
+    Color32::from_rgb(180, 48, 40)
+}
+
+/// Saving over the installed game's containers.
+pub(in crate::app) fn installed_overwrite_text() -> Color32 {
+    Color32::from_rgb(190, 72, 56)
+}
+
+/// Errors in Chimp's document view and the Model Preview's panels.
+pub(in crate::app) fn panel_error_text() -> Color32 {
+    Color32::from_rgb(150, 56, 44)
+}
+
+/// A bitmap that could not be shown.
+pub(in crate::app) fn bitmap_error_text() -> Color32 {
+    Color32::from_rgb(130, 32, 24)
+}
+
+/// Read-only and missing notes in Chimp's headers and the New Tag window.
+pub(in crate::app) fn header_notice_text() -> Color32 {
+    Color32::from_rgb(170, 130, 60)
+}
+
+/// A browser filter that cannot match as typed.
+pub(in crate::app) fn filter_warning_text() -> Color32 {
+    Color32::from_rgb(184, 134, 11)
+}
+
+/// Settings that need attention.
+pub(in crate::app) fn settings_warning_text() -> Color32 {
+    Color32::from_rgb(220, 170, 70)
+}
+
+/// Expert mode's note in the reference picker.
+pub(in crate::app) fn expert_mode_text() -> Color32 {
+    Color32::from_rgb(214, 166, 64)
+}
+
+/// A drop target that will take what is dragged over it, and a search's
+/// result count.
+pub(in crate::app) fn accept_text() -> Color32 {
+    Color32::from_rgb(120, 170, 90)
+}
+
+/// The Add icon on a shortcut row.
+pub(in crate::app) fn add_icon() -> Color32 {
+    Color32::from_rgb(126, 211, 75)
+}
+
+/// Errors and archive names in Chimp's browser.
+pub(in crate::app) fn chimp_browser_error_text() -> Color32 {
+    Color32::from_rgb(210, 80, 80)
+}
+
+pub(in crate::app) fn chimp_archive_text() -> Color32 {
+    Color32::from_rgb(210, 150, 70)
+}
+
+/// Untyped bytes Chimp keeps read-only.
+pub(in crate::app) fn chimp_raw_value_text() -> Color32 {
+    Color32::from_rgb(190, 150, 70)
+}
+
+/// Errors in the git review window.
+pub(in crate::app) fn review_error_text() -> Color32 {
+    Color32::from_rgb(225, 105, 105)
+}
+
+/// Errors in the first-run window.
+pub(in crate::app) fn first_run_error_text() -> Color32 {
+    Color32::from_rgb(220, 70, 70)
+}
+
+/// A reference to a tag that is not in the kit.
+pub(in crate::app) fn reference_missing_text() -> Color32 {
+    Color32::from_rgb(216, 92, 92)
+}
+
+/// An error message in a window.
+pub(in crate::app) fn error_text() -> Color32 {
+    material_delete_text()
+}
+
 /// How long a status message stays on the status line before it clears.
 /// Without this the last thing that happened sits there indefinitely, which
 /// reads as current state long after it stopped being true.

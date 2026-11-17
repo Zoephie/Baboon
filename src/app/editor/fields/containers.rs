@@ -409,7 +409,7 @@ pub(in crate::app) fn draw_field(
     let glow = edit
         .field_nav
         .is_some_and(|_| edit.field_nav_glow(&field_path, ui.input(|i| i.time)));
-    let glow_fill = egui::Color32::from_rgba_unmultiplied(255, 214, 0, 38);
+    let glow_fill = jump_glow();
     if let Some(function) = field.as_function() {
         if glow {
             egui::Frame::NONE.fill(glow_fill).show(ui, |ui| {

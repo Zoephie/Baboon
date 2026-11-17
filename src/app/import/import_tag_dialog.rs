@@ -121,7 +121,7 @@ impl Dialog for ImportTagDialog {
                                 "⟳ Overwrites existing tag  {logical}.{}",
                                 dialog.extension
                             ))
-                            .color(Color32::from_rgb(242, 196, 48))
+                            .color(import_warning_text())
                             .small(),
                         );
                     }
@@ -145,7 +145,7 @@ impl Dialog for ImportTagDialog {
                     ImportMode::Convert { source_game, draft } => {
                         ui.label(
                             RichText::new(format!("⟳ This is a {source_game} tag"))
-                                .color(Color32::from_rgb(242, 196, 48))
+                                .color(import_warning_text())
                                 .small(),
                         );
                         ui.label(
@@ -207,7 +207,7 @@ impl Dialog for ImportTagDialog {
                             blam_tags::LayoutSeverity::Match => {
                                 ui.label(
                                     RichText::new(format!("✔ Schema matches {group_name}"))
-                                        .color(disclosure_triangle_green())
+                                        .color(match_tick())
                                         .small(),
                                 );
                             }
@@ -218,7 +218,7 @@ impl Dialog for ImportTagDialog {
                                          matches), and no other game claims this tag. Safe to \
                                          import.",
                                     )
-                                    .color(Color32::from_rgb(242, 196, 48))
+                                    .color(import_warning_text())
                                     .small(),
                                 );
                                 ui.baboon_checkbox(import_anyway, "Import anyway");
@@ -229,7 +229,7 @@ impl Dialog for ImportTagDialog {
                                         "✖ Schema is incompatible (group, version, or size \
                                          differs) — this tag does not match the base game.",
                                     )
-                                    .color(material_delete_text())
+                                    .color(error_text())
                                     .small(),
                                 );
                             }
@@ -253,13 +253,13 @@ impl Dialog for ImportTagDialog {
                             for (game, fit) in &dialog.profile_verdicts {
                                 let (mark, color) = match fit {
                                     ProfileFit::Identical => {
-                                        ("✔ identical", disclosure_triangle_green())
+                                        ("✔ identical", match_tick())
                                     }
                                     ProfileFit::Diverges(_) => {
-                                        ("⚠ differs", Color32::from_rgb(242, 196, 48))
+                                        ("⚠ differs", import_warning_text())
                                     }
                                     ProfileFit::WrongGroup => {
-                                        ("✖ different group", material_delete_text())
+                                        ("✖ different group", error_text())
                                     }
                                 };
                                 ui.label(
@@ -280,7 +280,7 @@ impl Dialog for ImportTagDialog {
 
                 if let Some(error) = &dialog.error {
                     ui.add_space(6.0);
-                    ui.label(RichText::new(error).color(material_delete_text()));
+                    ui.label(RichText::new(error).color(error_text()));
                 }
 
                 ui.add_space(10.0);

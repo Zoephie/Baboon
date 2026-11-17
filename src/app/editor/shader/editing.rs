@@ -4,8 +4,6 @@
 use super::*;
 use crate::core::tag_path_completion::Wanted;
 
-const SHADER_MODIFIED_ACCENT: Color32 = Color32::from_rgb(224, 158, 62);
-
 /// Queue a shader row's commit, or put why it was refused on the status line.
 /// A number box used to drop text that wasn't a number without a word.
 fn push_shader_commit(edit: &mut FieldEditContext<'_>, commit: Result<DeferredOps, String>) {
@@ -505,7 +503,7 @@ fn shader_action_button(
     let mut child = ui.new_child(egui::UiBuilder::new().id_salt(id).max_rect(rect));
     child.spacing_mut().interact_size.y = BUTTON_HEIGHT;
     let color = if icon == ButtonIcon::Clear {
-        material_delete_text()
+        destructive_icon()
     } else {
         text_dark()
     };
@@ -846,9 +844,9 @@ fn draw_shader_grid_row_inner(
             egui::Rect::from_min_size(rect.left_top(), Vec2::new(3.0, height)),
             0.0,
             if unused_delete.is_some() {
-                material_delete_text()
+                unused_value_text()
             } else {
-                SHADER_MODIFIED_ACCENT
+                shader_modified_accent()
             },
         );
     }
@@ -898,7 +896,7 @@ fn draw_shader_grid_row_inner(
         truncate_for_cell(&row.label, label_rect.width() - 12.0),
         FontId::proportional(12.5),
         if unused_delete.is_some() {
-            material_delete_text()
+            unused_value_text()
         } else {
             row_text
         },
@@ -2838,8 +2836,8 @@ fn draw_shader_reference_cell(
         let accepts = |payload: &DraggedTagRef| payload.group_tag == cell.group_tag;
         if let Some(drag) = crate::app::browser::drag_move::hovered_tag(&drop) {
             let color = match drag {
-                crate::app::browser::drag_move::TagDrag::Tag(payload) if accepts(&payload) => Color32::from_rgb(120, 170, 90),
-                _ => REFERENCE_MISSING_COLOR,
+                crate::app::browser::drag_move::TagDrag::Tag(payload) if accepts(&payload) => accept_text(),
+                _ => reference_missing_text(),
             };
             ui.painter().rect_stroke(
                 text_rect,
@@ -3593,7 +3591,7 @@ mod tests {
                 draw_unused_shader_grid_row(ui, &row, &mut None, &mut None, edit, &delete);
             });
         });
-        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "unused_value" && text.fallback_color == material_delete_text())));
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "unused_value" && text.fallback_color == unused_value_text())));
     }
 
     #[test]

@@ -47,7 +47,7 @@ impl Dialog for ExportedMod {
                             "{skipped} tag(s) in this workspace's project could not be resolved \
                              and are NOT in this mod."
                         ))
-                        .color(egui::Color32::from_rgb(210, 120, 90)),
+                        .color(replace_warning_text()),
                     );
                 }
                 ui.add_space(10.0);

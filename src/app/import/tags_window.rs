@@ -136,7 +136,7 @@ impl Dialog for TagImportDialog {
                         ui.horizontal(|ui| {
                             ui.label(
                                 RichText::new("This path has not been checked yet.")
-                                    .color(Color32::from_rgb(242, 196, 48))
+                                    .color(import_warning_text())
                                     .small(),
                             );
                             if ui.small_button("Check").clicked() {
@@ -155,7 +155,7 @@ impl Dialog for TagImportDialog {
                             ui.label(
                                 RichText::new(summary)
                                     .color(if facts.tag_files == 0 {
-                                        material_delete_text()
+                                        error_text()
                                     } else {
                                         text_dark()
                                     })
@@ -265,7 +265,7 @@ impl Dialog for TagImportDialog {
                             } else {
                                 "\u{27f3} Replaces the tag already at this path"
                             })
-                            .color(Color32::from_rgb(242, 196, 48))
+                            .color(import_warning_text())
                             .small(),
                         );
                     }
@@ -290,7 +290,7 @@ impl Dialog for TagImportDialog {
                                 dialog.pending_losses.len(),
                                 dialog.target_game
                             ))
-                            .color(Color32::from_rgb(242, 196, 48)),
+                            .color(import_warning_text()),
                         );
                         crate::app::ScrollArea::vertical()
                             .id_salt("tag_import_losses")
@@ -333,7 +333,7 @@ impl Dialog for TagImportDialog {
                         ui.add_space(6.0);
                         ui.label(
                             RichText::new(format!("\u{2714} {written}"))
-                                .color(disclosure_triangle_green()),
+                                .color(match_tick()),
                         );
                     }
 
@@ -362,7 +362,7 @@ impl Dialog for TagImportDialog {
                                     dialog.source_game,
                                     dialog.target_game,
                                 ))
-                                .color(Color32::from_rgb(242, 196, 48))
+                                .color(import_warning_text())
                                 .small(),
                             );
                         }
@@ -394,7 +394,7 @@ impl Dialog for TagImportDialog {
                                         shown.display(),
                                         draft.target_group_name
                                     ))
-                                    .color(Color32::from_rgb(242, 196, 48))
+                                    .color(import_warning_text())
                                     .small(),
                                 );
                             }
@@ -444,7 +444,7 @@ impl Dialog for TagImportDialog {
                                     report.held_back.len(),
                                     report.target_game
                                 ))
-                                .color(Color32::from_rgb(242, 196, 48)),
+                                .color(import_warning_text()),
                             );
                             egui::CollapsingHeader::new("What each of them gives up")
                                 .id_salt("tag_import_held_back")
@@ -481,7 +481,7 @@ impl Dialog for TagImportDialog {
 
                     if let Some(error) = dialog.error.as_ref() {
                         ui.add_space(6.0);
-                        ui.label(RichText::new(error).color(material_delete_text()));
+                        ui.label(RichText::new(error).color(error_text()));
                     }
                     ui.add_space(12.0);
                     popup_footer(ui, |ui| {

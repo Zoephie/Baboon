@@ -443,9 +443,9 @@ fn draw_function_editor_contents(
                     let mut input_height = 0.0;
                     for slot in 0..2 {
                         let fill = if slot == 0 {
-                            Color32::from_rgba_unmultiplied(42, 190, 72, 26)
+                            graph_curve_fill(0)
                         } else {
-                            Color32::from_rgba_unmultiplied(220, 55, 55, 26)
+                            graph_curve_fill(1)
                         };
                         let panel = egui::Frame::new()
                             .fill(fill)

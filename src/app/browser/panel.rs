@@ -352,7 +352,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
                 ui.label(
                     RichText::new(warning)
                         .small()
-                        .color(Color32::from_rgb(184, 134, 11)),
+                        .color(filter_warning_text()),
                 );
             }
             if before_sort != (pane.sort, folders_before_tags) { invalidate_browser_navigation(ui.ctx()); }
@@ -987,7 +987,7 @@ fn draw_kit_browser_inner(
             ui.label(
                 RichText::new(warning)
                     .small()
-                    .color(Color32::from_rgb(184, 134, 11)),
+                    .color(filter_warning_text()),
             );
         }
         ui.add_space(6.0);

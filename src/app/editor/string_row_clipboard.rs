@@ -53,7 +53,7 @@ pub(in crate::app) struct ActiveRows {
 
 impl ActiveRows {
     pub(in crate::app) fn border_color(&self) -> Color32 {
-        if self.cutting { Color32::from_rgb(255, 209, 56) } else { Color32::from_rgb(71, 174, 235) }
+        if self.cutting { clipboard_cut_mark() } else { clipboard_copy_mark() }
     }
 }
 

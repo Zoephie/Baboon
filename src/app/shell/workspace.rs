@@ -19,7 +19,7 @@ impl Baboon {
             // Setup draws alone, over an empty window.
             ctx.set_zoom_factor(self.model.prefs.ui_scale);
             set_dark_mode(self.model.prefs.effective_dark_mode(ctx.system_theme()));
-            ctx.set_theme(if is_dark_mode() { egui::Theme::Dark } else { egui::Theme::Light });
+            ctx.set_theme(egui_theme());
             ctx.set_visuals(foundation_visuals());
             egui::CentralPanel::default().show(ui, |_ui| {});
             self.dialogs.draw(&cx!(self, ctx), &app_reads!(self));
@@ -267,7 +267,7 @@ impl Baboon {
         self.handle_pixels_per_point_change(ctx);
         self.maybe_refresh_entry_index(ctx.clone());
         set_dark_mode(self.model.prefs.effective_dark_mode(ctx.system_theme()));
-        ctx.set_theme(if is_dark_mode() { egui::Theme::Dark } else { egui::Theme::Light });
+        ctx.set_theme(egui_theme());
         // Pushed the same way and for the same reason as the theme: the two
         // halves of the angle conversion are free functions on opposite sides
         // of the frame, and neither can reach `Baboon`.
@@ -893,7 +893,7 @@ pub(in crate::app) fn draw_terminal_panel(
                 egui::CentralPanel::default()
                     .frame(
                         Frame::NONE
-                            .fill(Color32::from_rgb(24, 24, 23))
+                            .fill(terminal_bg())
                             .inner_margin(egui::Margin {
                                 left: 6,
                                 right: 6,
@@ -929,7 +929,7 @@ pub(in crate::app) fn draw_folder_refactor_lock(ctx: &egui::Context, folder_refa
             let (rect, _) =
                 ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
             ui.painter()
-                .rect_filled(rect, 0.0, Color32::from_black_alpha(140));
+                .rect_filled(rect, 0.0, modal_scrim());
             let panel = egui::Rect::from_center_size(rect.center(), egui::vec2(window_width(ctx, 460.0), if control.is_some_and(|control| !control.is_applying()) { 210.0 } else { 160.0 }));
             ui.scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| {
                 Frame::window(&ctx.global_style()).show(ui, |ui| {

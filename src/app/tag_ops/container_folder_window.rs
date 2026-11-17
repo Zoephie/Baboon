@@ -143,7 +143,7 @@ impl Dialog for ContainerFolderDialog {
 
                     if let Some(error) = state.error.as_deref() {
                         ui.add_space(4.0);
-                        ui.label(RichText::new(error).color(material_delete_text()).small());
+                        ui.label(RichText::new(error).color(error_text()).small());
                     }
 
                     ui.add_space(8.0);

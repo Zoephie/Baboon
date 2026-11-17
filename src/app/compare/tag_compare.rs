@@ -769,7 +769,7 @@ pub(in crate::app) fn draw_tag_diff_list(
                         } else if let Some((direction, amount)) = numeric_delta(diff) {
                             let (arrow, color) = match direction {
                                 Ordering::Greater => ("▲", good_news()),
-                                Ordering::Less => ("▼", material_delete_text()),
+                                Ordering::Less => ("▼", value_decreased()),
                                 Ordering::Equal => unreachable!(),
                             };
                             ui.painter().text(
@@ -1685,7 +1685,7 @@ impl Dialog for TagDiffState {
                                                         ("▲", good_news(), "Increased")
                                                     }
                                                     Ordering::Less => {
-                                                        ("▼", material_delete_text(), "Decreased")
+                                                        ("▼", value_decreased(), "Decreased")
                                                     }
                                                     Ordering::Equal => unreachable!(),
                                                 };

@@ -97,7 +97,7 @@ fn loading_image_uri(part: &str, theme: &str, raster_pixels: u32, pixels_per_poi
 }
 
 fn paint_loading_art(ui: &Ui, rect: egui::Rect, include_background: bool) {
-    let dark_mode = ui.visuals().dark_mode;
+    let dark_mode = visuals_are_dark(ui);
     let theme = if dark_mode { "dark" } else { "light" };
     let size = rect.width().min(rect.height());
     let pixels_per_point = ui.ctx().pixels_per_point();

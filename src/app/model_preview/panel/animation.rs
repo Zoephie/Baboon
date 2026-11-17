@@ -12,7 +12,7 @@ use super::section::{
     ModelPreviewSectionPart, animation_extra_header_height, draw_model_preview_section,
 };
 use eframe::egui;
-use eframe::egui::{Color32, FontId, RichText, Ui, Vec2};
+use eframe::egui::{FontId, RichText, Ui, Vec2};
 
 pub(in crate::app::model_preview) fn animation_frame_position(
     playback: &PreviewAnimationPlayback,
@@ -418,7 +418,7 @@ pub(in crate::app::model_preview) fn draw_animation_scrubber(
         }
     });
     if let Some(error) = state.animation.error.clone() {
-        ui.label(RichText::new(error).color(Color32::from_rgb(150, 56, 44)));
+        ui.label(RichText::new(error).color(crate::app::ui_kit::panel_error_text()));
     }
 }
 

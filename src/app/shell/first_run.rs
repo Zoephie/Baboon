@@ -294,7 +294,7 @@ fn draw_first_run_editing_kits(ui: &mut Ui, s: &mut FirstRunDraw) {
 fn draw_first_run_error(ui: &mut Ui, wizard: &FirstRunWizardState) {
     if let Some(error) = wizard.validation_error.as_deref() {
         ui.add_space(8.0);
-        ui.colored_label(Color32::from_rgb(220, 70, 70), error);
+        ui.colored_label(first_run_error_text(), error);
     }
 }
 

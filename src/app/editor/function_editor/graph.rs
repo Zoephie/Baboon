@@ -104,11 +104,7 @@ fn pasted_function_shape(
 }
 
 fn function_curve_color(graph: usize) -> Color32 {
-    if graph == 0 {
-        Color32::from_rgb(42, 190, 72)
-    } else {
-        Color32::from_rgb(220, 55, 55)
-    }
+    graph_curve(graph)
 }
 
 fn function_handle_diamond(center: egui::Pos2, radius: f32) -> Vec<egui::Pos2> {
@@ -644,11 +640,7 @@ pub(super) fn draw_foundation_graph_with_preview(
 
     let function = editor.function();
     let painter = &ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    let container_fill = if is_dark_mode() {
-        Color32::from_black_alpha(64)
-    } else {
-        Color32::BLACK
-    };
+    let container_fill = graph_container_fill();
     painter.rect_filled(rect, 4.0, container_fill);
     painter.rect_stroke(
         rect,
@@ -679,12 +671,12 @@ pub(super) fn draw_foundation_graph_with_preview(
                 egui::pos2(plot.right(), bottom),
             ),
             0.0,
-            Color32::from_white_alpha(28),
+            graph_band_fill(),
         );
         for y in [top, bottom] {
             painter.line_segment(
                 [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
-                Stroke::new(1.0, Color32::from_white_alpha(120)),
+                Stroke::new(1.0, graph_band_edge()),
             );
         }
     }
@@ -897,11 +889,7 @@ pub(super) fn draw_function_preview_container(
     width: f32,
     function: &TagFunction,
 ) {
-    let container_fill = if is_dark_mode() {
-        Color32::from_black_alpha(64)
-    } else {
-        Color32::BLACK
-    };
+    let container_fill = graph_container_fill();
     painter.rect_filled(bar_container, 4.0, container_fill);
     painter.rect_stroke(
         bar_container,

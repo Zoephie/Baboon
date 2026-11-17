@@ -28,10 +28,10 @@ impl BitmapPreviewBg {
         match self {
             // Match the dark-mode page background rather than the lighter
             // Foundation section/header surfaces.
-            Self::DarkGray => egui::Color32::from_rgb(40, 40, 40),
+            Self::DarkGray => egui::Color32::from_rgb(40, 40, 40), // fixed: a backdrop the user picks
             Self::Black => egui::Color32::BLACK,
             Self::White => egui::Color32::WHITE,
-            Self::Magenta => egui::Color32::from_rgb(255, 0, 255),
+            Self::Magenta => egui::Color32::from_rgb(255, 0, 255), // fixed: a backdrop the user picks
         }
     }
 

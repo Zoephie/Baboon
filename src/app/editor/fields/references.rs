@@ -49,7 +49,7 @@ pub(in crate::app) fn draw_tag_reference_catalog_picker_contents(
     if catalog.expert_mode {
         ui.label(
             RichText::new("Expert mode: showing all tag groups")
-                .color(Color32::from_rgb(214, 166, 64))
+                .color(expert_mode_text())
                 .small(),
         );
     }
@@ -495,8 +495,8 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
         };
         if let Some(drag) = crate::app::browser::drag_move::hovered_tag(&row_response) {
             let color = match drag {
-                crate::app::browser::drag_move::TagDrag::Tag(payload) if accepts(&payload) => Color32::from_rgb(120, 170, 90),
-                _ => REFERENCE_MISSING_COLOR,
+                crate::app::browser::drag_move::TagDrag::Tag(payload) if accepts(&payload) => accept_text(),
+                _ => reference_missing_text(),
             };
             ui.painter()
                 .rect_stroke(

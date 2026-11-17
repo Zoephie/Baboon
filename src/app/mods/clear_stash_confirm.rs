@@ -66,7 +66,7 @@ impl Dialog for ClearStashConfirm {
                         "This cannot be undone. Tags already saved into the game's pak files, \
                          and mods you have already exported, are not affected.",
                     )
-                    .color(egui::Color32::from_rgb(210, 120, 90)),
+                    .color(replace_warning_text()),
                 );
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {

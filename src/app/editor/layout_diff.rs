@@ -283,9 +283,9 @@ pub(in crate::app) fn draw_layout_badge(
     let rect = egui::Rect::from_min_size(icon_rect.right_bottom() - Vec2::splat(size - 2.0), Vec2::splat(size));
     let response = ui.interact(rect, open_id(tag_key).with("badge"), Sense::click());
     let fill = if response.hovered() {
-        READ_ONLY_BADGE_COLOR.gamma_multiply(1.25)
+        read_only_badge().gamma_multiply(1.25)
     } else {
-        READ_ONLY_BADGE_COLOR
+        read_only_badge()
     };
     let painter = ui.painter();
     painter.add(egui::Shape::convex_polygon(
@@ -304,7 +304,7 @@ pub(in crate::app) fn draw_layout_badge(
         Align2::CENTER_CENTER,
         "!",
         bold_font(11.0),
-        Color32::from_rgb(30, 30, 30),
+        read_only_badge_mark(),
     );
     let response = response.on_hover_text(format!(
         "{}\n\nThis tag was saved with a different layout than the {} definitions. Click to see what changed.",
@@ -431,10 +431,10 @@ pub(in crate::app) fn draw_layout_diff(
                             (format!("+ {}  {type_name}, added since", change.name), good_news())
                         }
                         FieldChangeKind::Removed { type_name } => {
-                            (format!("− {}  {type_name}, not in the definitions", change.name), REFERENCE_MISSING_COLOR)
+                            (format!("− {}  {type_name}, not in the definitions", change.name), reference_missing_text())
                         }
                         FieldChangeKind::Retyped { from, to } => {
-                            (format!("~ {}  {from} → {to}", change.name), READ_ONLY_BADGE_COLOR)
+                            (format!("~ {}  {from} → {to}", change.name), read_only_badge())
                         }
                         FieldChangeKind::Moved => (format!("↕ {}  moved", change.name), subtle_dark()),
                         FieldChangeKind::BlockMaximum { from, to } => {

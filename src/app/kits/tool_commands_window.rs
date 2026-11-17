@@ -96,7 +96,7 @@ impl Dialog for ToolCommandsUiState {
                 return;
             }
             if let Some(error) = self.error.as_ref() {
-                ui.label(RichText::new(error).color(material_delete_text()));
+                ui.label(RichText::new(error).color(error_text()));
                 return;
             }
             if self.commands.is_empty() {
@@ -346,7 +346,7 @@ fn draw_selected_tool_command(
         if let Some(missing) = missing {
             ui.label(
                 RichText::new(format!("Required argument missing: {missing}"))
-                    .color(material_delete_text()),
+                    .color(error_text()),
             );
         }
     });

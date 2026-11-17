@@ -29,7 +29,7 @@ use super::view_menu::{
 use super::viewport_size::draw_model_viewport_with_stats;
 use blam_tags::TagFile;
 use eframe::egui;
-use eframe::egui::{Color32, Rect, RichText, Sense, Ui, Vec2};
+use eframe::egui::{Rect, RichText, Sense, Ui, Vec2};
 
 /// The narrowest the viewport is squeezed to by a wide sidebar.
 pub(in crate::app::model_preview) const MIN_MODEL_VIEWPORT_WIDTH: f32 = 320.0;
@@ -140,7 +140,7 @@ pub(in crate::app) fn draw_model_preview_panel(
         Ok(data) => data,
         Err(error) => {
             in_rect(ui, page, "model_preview_error", |ui| {
-                ui.colored_label(Color32::from_rgb(150, 56, 44), error);
+                ui.colored_label(crate::app::ui_kit::panel_error_text(), error);
             });
             state.data = restore_data.take();
             return;

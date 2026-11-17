@@ -580,7 +580,7 @@ pub(in crate::app) fn render_save_changes_prompt(
             }
             ui.add_space(8.0);
             if let Some(error) = prompt.error.as_deref() {
-                ui.label(RichText::new(error).color(Color32::from_rgb(180, 48, 40)));
+                ui.label(RichText::new(error).color(save_error_text()));
                 ui.add_space(6.0);
             }
             // Spelling out what the destructive button costs, and where from.
@@ -604,7 +604,7 @@ pub(in crate::app) fn render_save_changes_prompt(
                              already exported are not affected."
                         ),
                     })
-                    .color(Color32::from_rgb(210, 120, 90)),
+                    .color(replace_warning_text()),
                 );
                 ui.add_space(6.0);
             }

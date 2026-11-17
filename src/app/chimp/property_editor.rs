@@ -70,7 +70,7 @@ pub(super) fn draw_chimp_export_editor(
             }
         },
         Err(error) => {
-            ui.colored_label(Color32::from_rgb(210, 120, 80), error);
+            ui.colored_label(chimp_error_text(), error);
             ui.label("The raw export remains available for extraction and is never rewritten.");
             None
         }
@@ -461,7 +461,7 @@ fn draw_chimp_value(
                         return true;
                     }
                     Err(error) => {
-                        ui.colored_label(Color32::from_rgb(210, 120, 80), error.to_string());
+                        ui.colored_label(chimp_error_text(), error.to_string());
                     }
                 }
             } else {
@@ -471,7 +471,7 @@ fn draw_chimp_value(
         }
         PropValue::Raw(bytes) => {
             ui.colored_label(
-                Color32::from_rgb(190, 150, 70),
+                chimp_raw_value_text(),
                 format!("{} untyped bytes · preserved read-only", bytes.len()),
             );
             false
@@ -745,7 +745,7 @@ fn draw_chimp_sequence(
             *values = before;
             changed = false;
             ui.colored_label(
-                Color32::from_rgb(210, 120, 80),
+                chimp_error_text(),
                 "Sets cannot contain duplicate values.",
             );
         }
@@ -807,7 +807,7 @@ fn draw_chimp_map(
         *values = before;
         changed = false;
         ui.colored_label(
-            Color32::from_rgb(210, 120, 80),
+            chimp_error_text(),
             "Maps cannot contain duplicate keys.",
         );
     }

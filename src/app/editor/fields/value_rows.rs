@@ -1104,9 +1104,6 @@ fn draw_foundation_cell_row_at(
     });
 }
 
-/// Red used to flag tag references whose target file is missing on disk.
-pub(in crate::app) const REFERENCE_MISSING_COLOR: Color32 = Color32::from_rgb(216, 92, 92);
-
 fn is_block_flags(value: &TagFieldData) -> bool {
     matches!(
         value,

@@ -238,7 +238,7 @@ pub(in crate::app) fn draw_bitmap_preview_data(
     let data = match decoded {
         Ok(data) => data,
         Err(error) => {
-            ui.colored_label(Color32::from_rgb(130, 32, 24), &error);
+            ui.colored_label(bitmap_error_text(), &error);
             preview.decoded = Some(Err(error));
             return;
         }
@@ -713,32 +713,7 @@ fn apply_bitmap_channel_action(
 }
 
 fn bitmap_channel_active_colors(icon: ButtonIcon) -> (Color32, Color32) {
-    // Use explicit premultiplied values here. `from_rgba_unmultiplied` converts
-    // saturated colors through linear space, which looks much brighter than a
-    // restrained UI fill. These are explicit 40%-opacity channel colors.
-    match icon {
-        ButtonIcon::ChannelRed => (
-            Color32::from_rgba_premultiplied(102, 0, 0, 102),
-            Color32::from_rgb(255, 0, 0),
-        ),
-        ButtonIcon::ChannelGreen => (
-            Color32::from_rgba_premultiplied(0, 102, 0, 102),
-            Color32::from_rgb(0, 255, 0),
-        ),
-        ButtonIcon::ChannelBlue => (
-            Color32::from_rgba_premultiplied(0, 0, 102, 102),
-            Color32::from_rgb(0, 0, 255),
-        ),
-        ButtonIcon::ChannelAlpha if is_dark_mode() => (
-            Color32::from_rgba_premultiplied(102, 102, 102, 102),
-            Color32::WHITE,
-        ),
-        ButtonIcon::ChannelAlpha => (
-            Color32::from_rgba_premultiplied(0, 0, 0, 102),
-            Color32::BLACK,
-        ),
-        _ => (Color32::TRANSPARENT, Color32::TRANSPARENT),
-    }
+    bitmap_channel_colors(icon)
 }
 
 fn draw_bitmap_camera_menu(ui: &mut Ui, preview: &mut BitmapPreviewState, has_selection: bool) {
@@ -931,8 +906,10 @@ fn draw_bitmap_canvas_and_footer(
     );
     if preview.show_border {
         let color = if preview.bg == BitmapPreviewBg::White {
+            // fixed: an image border, against the backdrop the user picked
             Color32::from_black_alpha(153)
         } else {
+            // fixed: an image border, against the backdrop the user picked
             Color32::from_white_alpha(153)
         };
         painter.with_clip_rect(canvas_rect).rect_stroke(
@@ -986,7 +963,7 @@ fn draw_bitmap_canvas_and_footer(
                 let box_min =
                     egui::pos2(canvas_rect.left() + 6.0, canvas_rect.bottom() - box_h - 6.0);
                 let box_rect = egui::Rect::from_min_size(box_min, egui::vec2(box_w, box_h));
-                painter.rect_filled(box_rect, 3.0, Color32::from_black_alpha(190));
+                painter.rect_filled(box_rect, 3.0, Color32::from_black_alpha(190)); // fixed: a label box over the image
                 let swatch_rect = egui::Rect::from_min_size(
                     box_min + egui::vec2(pad, (box_h - swatch) * 0.5),
                     egui::vec2(swatch, swatch),

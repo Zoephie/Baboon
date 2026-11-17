@@ -568,7 +568,7 @@ impl Dialog for SaveBeforeFolderOperation {
             .id(egui::Id::unique("save_before_folder_operation")).open(&mut open).resizable(false)
             .show(cx.egui, |ui| {
                 ui.label("Save all unsaved tags in this workspace before checking references and moving or copying folders.");
-                if let Some(error) = &self.error { ui.colored_label(material_delete_text(), error); }
+                if let Some(error) = &self.error { ui.colored_label(error_text(), error); }
                 if ui.button("Save All and Continue").clicked() { cx.send(TagOpsCommand::SaveBeforeFolderOperation); }
                 if ui.button("Cancel").clicked() { cx.send(TagOpsCommand::CancelFolderOperationSave); }
             });

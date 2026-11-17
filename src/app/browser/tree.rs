@@ -228,6 +228,7 @@ pub(in crate::app) fn context_menu_button(ui: &mut Ui, label: &str) -> egui::Res
                 .tint(if enabled {
                     Color32::WHITE
                 } else {
+                    // fixed: dims the icon image itself
                     Color32::from_white_alpha(90)
                 })
                 .paint_at(ui, icon_rect);
@@ -2238,8 +2239,8 @@ fn show_group_tree_header<R>(
                 content = content.union(ui.label(RichText::new(display_name).color(label_color)));
             }
             let badge = Frame::NONE
-                .fill(Color32::from_rgb(48, 58, 66))
-                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(76, 89, 98)))
+                .fill(group_badge_fill())
+                .stroke(Stroke::new(1.0_f32, group_badge_edge()))
                 .corner_radius(egui::CornerRadius::same(4))
                 // A 6 by 1 inset: egui counts the stroke as padding.
                 .inner_margin(egui::Margin::symmetric(5, 0))
@@ -2247,7 +2248,7 @@ fn show_group_tree_header<R>(
                     ui.label(
                         RichText::new(fourcc)
                             .monospace()
-                            .color(Color32::from_rgb(226, 235, 240)),
+                            .color(group_badge_text()),
                     )
                 })
                 .response;
@@ -2366,7 +2367,7 @@ fn show_folder_tree_header<R>(
             let (icon_rect, icon_response) =
                 ui.allocate_exact_size(Vec2::splat(BROWSER_TREE_ICON_SIZE), Sense::hover());
             let (icon, color) = if state.is_open() {
-                (ButtonIcon::FolderOpen, disclosure_triangle_green())
+                (ButtonIcon::FolderOpen, open_folder_icon())
             } else {
                 (ButtonIcon::FolderClosed, disclosure_triangle_blue())
             };
@@ -3348,7 +3349,7 @@ pub(in crate::app) fn draw_favorites(
 
 fn show_favorites_section<R>(ui: &mut Ui, add_body: impl FnOnce(&mut Ui) -> R) -> egui::Response {
     show_browser_navigation_section(ui, "browser_favorites", "Favorites",
-        ButtonIcon::FavouriteFilled, Color32::from_rgb(242, 196, 48), add_body)
+        ButtonIcon::FavouriteFilled, favourite_star(), add_body)
 }
 
 /// Bind the sidebar's collapsing headers to explicit preferences instead of
@@ -3436,7 +3437,7 @@ pub(in crate::app) fn show_browser_navigation_section_with_add<R>(
                 if hovered || add_response.is_pointer_button_down_on() {
                     paint_button_icon_at(ui, ButtonIcon::Add,
                         egui::Rect::from_center_size(add_rect.center(), Vec2::splat(BUTTON_ICON_SIZE)),
-                        Color32::from_rgb(126, 211, 75));
+                        add_icon());
                 }
                 content = content.union(add_response.on_hover_text("Add Shortcut"));
             }

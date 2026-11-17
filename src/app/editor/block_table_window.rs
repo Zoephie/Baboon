@@ -183,7 +183,7 @@ fn draw_block_table(ctx: &egui::Context, table: &mut BlockTableState) -> BlockTa
                 crate::app::ui_kit::autoscroll::register(ui, site, &scroll, egui::Vec2b::new(false, true));
             });
             if count == 0 { ui.label(RichText::new("Empty block").color(subtle_dark())); }
-            if let Some(status) = &table.status { ui.label(RichText::new(status).color(REFERENCE_MISSING_COLOR)); }
+            if let Some(status) = &table.status { ui.label(RichText::new(status).color(reference_missing_text())); }
             let mut footer_painter = painter.clone();
             footer_painter.set_clip_rect(ui.clip_rect().expand(margin.sum().max_elem()).intersect(ctx.content_rect()));
             let footer_background = footer_painter.add(egui::Shape::Noop);

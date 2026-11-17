@@ -533,7 +533,7 @@ pub(in crate::app) fn icon_for_foundation_button(label: &str) -> Option<ButtonIc
 
 fn icon_color(icon: ButtonIcon, fallback: Color32) -> Color32 {
     match icon {
-        ButtonIcon::Clear | ButtonIcon::Garbage | ButtonIcon::Remove => material_delete_text(),
+        ButtonIcon::Clear | ButtonIcon::Garbage | ButtonIcon::Remove => destructive_icon(),
         _ => fallback,
     }
 }
@@ -1554,7 +1554,7 @@ mod tests {
                 |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {
                         let rect = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), Vec2::splat(BUTTON_ICON_SIZE));
-                        paint_button_icon_at(ui, ButtonIcon::Clear, rect, material_delete_text());
+                        paint_button_icon_at(ui, ButtonIcon::Clear, rect, destructive_icon());
                         if (1..3).contains(&pass) {
                             ui.add_space(40.0);
                             icon_text_button(ui, ButtonIcon::Clear, "Cancel", true);

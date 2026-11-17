@@ -167,11 +167,11 @@ fn findable_layout_job(
             0.0,
             egui::TextFormat {
                 font_id: font_id.clone(),
-                color: Color32::BLACK,
+                color: search_match_text(),
                 background: if active.as_ref() == Some(&range) {
-                    Color32::from_rgb(255, 168, 38)
+                    search_active_match_bg()
                 } else {
-                    Color32::from_rgb(255, 220, 70)
+                    search_match_bg()
                 },
                 ..Default::default()
             },
@@ -222,7 +222,7 @@ fn foundation_label_cell_inner(ui: &mut Ui, text: &str, help: Option<&str>, stac
             Align2::LEFT_CENTER,
             "?",
             bold_font(12.5),
-            Color32::from_rgb(61, 161, 204),
+            help_cue(),
         );
     }
     paint_findable_text(
@@ -1133,12 +1133,7 @@ pub(in crate::app) fn search_clear_control_at(
             ui.visuals().widgets.hovered.weak_bg_fill,
         );
     }
-    let color = if is_dark_mode() {
-        Color32::WHITE
-    } else {
-        Color32::BLACK
-    }
-    .gamma_multiply(0.5);
+    let color = text_strong().gamma_multiply(0.5);
     let icon_rect = clear_rect.shrink((clear_rect.width() - 10.0) * 0.5);
     let stroke = Stroke::new(1.5_f32, color);
     ui.painter()
