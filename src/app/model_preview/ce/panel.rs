@@ -1,7 +1,9 @@
 //! The panel's controls for a Halo CE object's functions and effects.
 
 use super::super::load::{ObjectControls, SectionControls};
-use super::super::panel::{carry_through_reload, weapon_dropdown};
+use super::super::panel::{
+    CardRows, carry_through_reload, draw_held_regions, name_column_width, weapon_dropdown,
+};
 use super::super::{ModelPreviewData, ModelPreviewState, frame};
 use crate::app::model_preview::ce::functions::{
     CeEventCounts, CeFunctionInputs, CeObjectFunctions, CeObjectKey, OUTPUTS, object_time,
@@ -332,12 +334,19 @@ pub(in crate::app::model_preview) fn draw_ce_weapon_picker(
             })
             .collect()
     });
-    let held = options
-        .iter()
-        .flatten()
-        .find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
+    let mut rows = CardRows::default();
+    let label_width = name_column_width(ui, ["Weapon"], ui.available_width());
     let salt = ("ce_weapon_picker", data.render_model_path.as_str());
-    let pick = weapon_dropdown(ui, "Weapon", salt, options.as_deref(), held);
+    let held = state.weapon.clone();
+    let pick = weapon_dropdown(
+        ui,
+        &mut rows,
+        "Weapon",
+        label_width,
+        salt,
+        options.as_deref(),
+        held.as_deref(),
+    );
     if pick.opened && options.is_none() {
         state.list_weapons = true;
     }
@@ -345,4 +354,6 @@ pub(in crate::app::model_preview) fn draw_ce_weapon_picker(
         carry_through_reload(data, state);
         state.weapon = choice;
     }
+    let held = state.loaded_weapon.clone();
+    draw_held_regions(ui, data, state, &mut rows, held.as_deref());
 }

@@ -5,10 +5,9 @@
 
 use super::super::super::ui_kit::button_icons::{ButtonIcon, icon_text_button};
 use super::super::super::ui_kit::dock::{
-    SidebarLimits, SidebarSplit, draw_sidebar_resize_handle,
-    sidebar_scroll_gutter, split_sidebar,
+    SidebarLimits, SidebarSplit, draw_sidebar_resize_handle, split_sidebar,
 };
-use super::super::super::ui_kit::style::subtle_dark;
+use super::super::super::ui_kit::style::{foundation_group_edge, subtle_dark};
 use super::super::super::{GameId, TagEntry, TagNameIndex};
 use super::super::{
     FieldEditContext, MAX_MODEL_SETUP_WIDTH, MIN_MODEL_SETUP_WIDTH, ModelPreviewData,
@@ -162,12 +161,29 @@ pub(in crate::app) fn draw_model_preview_panel(
     in_rect(ui, rects.preview, "model_preview_viewport_card", |ui| {
         draw_preview_card(ui, &panel, state, &mut requests, rects.preview.height());
     });
-    in_rect(ui, rects.setup, "model_preview_setup_cards", |ui| {
-        draw_setup_cards(ui, &panel, state, edit, &mut requests);
+    // After a reload, the page before it stays beside the new viewport
+    // until what follows the load has arrived.
+    let now = ui.input(|input| input.time);
+    let settling = state.settling.take().and_then(|mut settling| {
+        settling.since.get_or_insert(now);
+        (!state.page_settled(&settling, data, now)).then_some(settling)
     });
-    in_rect(ui, rects.animation, "model_preview_animation_card", |ui| {
-        draw_animation_player(ui, &panel, state);
-    });
+    if let Some(settling) = &settling {
+        let held = PreviewPanel {
+            data: &settling.page.data,
+            ..panel
+        };
+        draw_still_page(ui, &rects, &held, state, settling.page.animation.display_copy(), edit);
+        ui.ctx().request_repaint();
+    } else {
+        in_rect(ui, rects.setup, "model_preview_setup_cards", |ui| {
+            draw_setup_cards(ui, &panel, state, edit, &mut requests);
+        });
+        in_rect(ui, rects.animation, "model_preview_animation_card", |ui| {
+            draw_animation_player(ui, &panel, state);
+        });
+    }
+    state.settling = settling;
     if requests.mutation {
         state.invalidate_load();
     } else if !requests.reload {
@@ -201,6 +217,20 @@ fn draw_reloading_page(
     if requests.reload {
         state.invalidate_load();
     }
+    draw_still_page(ui, rects, panel, state, shown_animation, edit);
+    requests.reload
+}
+
+/// The sidebar and player of `panel`, with its player as `shown_animation`,
+/// drawn as they look but taking no clicks.
+fn draw_still_page(
+    ui: &mut Ui,
+    rects: &PanelRects,
+    panel: &PreviewPanel<'_>,
+    state: &mut ModelPreviewState,
+    shown_animation: PreviewAnimationPlayback,
+    edit: &mut FieldEditContext<'_>,
+) {
     // Shown, not worked: what is picked here would be lost to the load's
     // own carry, and the player's clip indexes the old model's list.
     let live = std::mem::replace(&mut state.animation, shown_animation);
@@ -212,7 +242,6 @@ fn draw_reloading_page(
         draw_animation_player(ui, panel, state);
     });
     state.animation = live;
-    requests.reload
 }
 
 /// `add_contents` in `rect`, drawn as it looks but taking no clicks.
@@ -345,14 +374,28 @@ pub(in crate::app::model_preview) fn draw_setup_cards(
     edit: &mut FieldEditContext<'_>,
     requests: &mut SetupRequests,
 ) {
-    let gutter = setup_scroll_gutter(ui);
+    // One bordered panel holds the cards, so they read as one sidebar, with
+    // the same padding all round. The scroll area reaches the border at the
+    // right, so its scroll bar, which floats and shows only while used,
+    // rides in that padding rather than taking room of its own.
+    let padding = SETUP_PANEL_PADDING as i8;
+    egui::Frame::NONE
+        .stroke(egui::Stroke::new(1.0, foundation_group_edge()))
+        .corner_radius(egui::CornerRadius::same(5))
+        .inner_margin(egui::Margin {
+            left: padding,
+            right: 0,
+            top: padding,
+            bottom: padding,
+        })
+        .show(ui, |ui| {
     crate::app::ScrollArea::vertical()
         .id_salt("model_setup_body")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             egui::Frame::NONE
                 .inner_margin(egui::Margin {
-                    right: gutter as i8,
+                    right: padding,
                     ..Default::default()
                 })
                 .show(ui, |ui| {
@@ -365,13 +408,11 @@ pub(in crate::app::model_preview) fn draw_setup_cards(
                     })
                 });
         });
+        });
 }
 
-/// The room the sidebar's cards leave at their right: the scroll bar at its
-/// widest, and its margin from the cards.
-pub(in crate::app::model_preview) fn setup_scroll_gutter(ui: &Ui) -> f32 {
-    sidebar_scroll_gutter(ui)
-}
+/// The room between the setup panel's border and its cards.
+pub(in crate::app) const SETUP_PANEL_PADDING: f32 = 8.0;
 
 /// The Model Preview card's header. Right to left: the View and Shading
 /// menus, then Refresh Model. At the left, the model and armature

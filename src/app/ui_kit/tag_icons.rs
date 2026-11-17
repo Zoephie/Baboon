@@ -26,6 +26,9 @@ macro_rules! tag_icon {
 
 const DEFAULT_ICON: TagIcon = tag_icon!("default_tag");
 const SHADER_ICON: TagIcon = tag_icon!("shader");
+/// A model's armature, its bones: no group's icon, so every game's model
+/// preview shows the same one, Halo CE's too.
+pub(in crate::app) const ARMATURE_ICON: TagIcon = tag_icon!("armature");
 
 /// Each icon with the groups it stands for, each as its FOURCC and the
 /// group's name. A FOURCC alone is not enough: games reuse them for other

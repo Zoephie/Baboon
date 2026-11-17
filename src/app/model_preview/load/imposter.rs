@@ -260,6 +260,7 @@ fn append_mesh(
             index_count: indices.len() as u32,
             flat_color: Some(color),
             layer: ModelPreviewLayer::Render,
+            outline: Default::default(),
             sort_position: None,
         });
     }

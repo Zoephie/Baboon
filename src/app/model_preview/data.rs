@@ -155,9 +155,24 @@ pub(crate) struct RenderModelPreviewBatch {
     /// this separate from `region_name` lets collision geometry retain its
     /// real region/permutation taxonomy for variant selection.
     pub layer: ModelPreviewLayer,
+    /// How the collision and physics pass outlines it; see [`BatchOutline`].
+    pub outline: BatchOutline,
     /// Where its part sorts among the transparents, and the node that carries
     /// that point: Halo CE's part centroid, read only by the CE sort.
     pub sort_position: Option<([f32; 3], usize)>,
+}
+
+/// How a collision or physics batch is outlined, over its see-through faces.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum BatchOutline {
+    /// Its triangles' own edges: a mesh, as collision is.
+    #[default]
+    Triangles,
+    /// Faces alone: another batch outlines them, as a physics pill's rings.
+    Hidden,
+    /// Index pairs drawn as lines, never filled: the outline of `Hidden`
+    /// faces.
+    Lines,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

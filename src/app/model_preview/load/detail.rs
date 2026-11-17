@@ -10,7 +10,8 @@ use blam_tags::render_model::RenderModel;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DetailLevels {
     pub labels: &'static [&'static str],
-    /// Per level, whether a permutation has geometry there.
+    /// Per level, whether a permutation has geometry of its own there: not
+    /// what it draws a level lower too, as a tag fills a level it lacks.
     pub available: Vec<bool>,
     /// The level drawn: the one picked, else the highest a permutation has.
     pub shown: usize,
@@ -81,14 +82,7 @@ pub(super) fn apply_detail_level(
         }
         permutations.push(levels);
     }
-    let available: Vec<bool> = (0..fields.len())
-        .map(|level| {
-            permutations
-                .iter()
-                .flatten()
-                .any(|levels| levels[level].is_some())
-        })
-        .collect();
+    let available = own_levels(permutations.iter().flatten(), fields.len());
     let highest = available.iter().rposition(|&has| has)?;
     let shown = picked.filter(|&level| level < fields.len()).unwrap_or(highest);
     for (region, levels) in model.regions.iter_mut().zip(&permutations) {
@@ -106,6 +100,26 @@ pub(super) fn apply_detail_level(
     })
 }
 
+/// Per level of `count`, whether any of `permutations` (each its geometry
+/// per level, lowest first) has geometry there other than what it draws at
+/// the nearest lower level it has.
+fn own_levels<'a>(
+    permutations: impl Iterator<Item = &'a Vec<Option<i16>>> + Clone,
+    count: usize,
+) -> Vec<bool> {
+    (0..count)
+        .map(|level| {
+            permutations.clone().any(|levels| {
+                let Some(index) = levels.get(level).copied().flatten() else {
+                    return false;
+                };
+                let below = levels[..level].iter().rev().find_map(|index| *index);
+                below != Some(index)
+            })
+        })
+        .collect()
+}
+
 /// `levels[level]`, else the nearest higher level's, else the nearest lower.
 fn level_or_nearest(levels: &[Option<i16>], level: usize) -> Option<i16> {
     let level = level.min(levels.len().saturating_sub(1));
@@ -118,6 +132,23 @@ fn level_or_nearest(levels: &[Option<i16>], level: usize) -> Option<i16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A level only repeating the one below it, as a tag fills a level it
+    /// lacks, is not one of its own.
+    #[test]
+    fn a_level_repeating_the_one_below_is_not_its_own() {
+        let permutations = vec![
+            vec![Some(0), Some(0), Some(1), Some(1), Some(2)],
+            vec![None, Some(3), Some(3), Some(3), Some(3)],
+        ];
+        assert_eq!(
+            own_levels(permutations.iter(), 5),
+            [true, true, true, false, true],
+        );
+        // One permutation's own geometry is enough, whatever the others do.
+        let one = vec![vec![Some(0), Some(0), Some(0)], vec![Some(1), Some(2), Some(2)]];
+        assert_eq!(own_levels(one.iter(), 3), [true, true, false]);
+    }
 
     #[test]
     fn a_missing_level_takes_the_nearest_higher_then_lower() {

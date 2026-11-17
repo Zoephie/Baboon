@@ -282,6 +282,7 @@ pub(in crate::app::model_preview) fn read_cloth<
             index_count: cloth.indices.len() as u32 * 2,
             flat_color: None,
             layer: ModelPreviewLayer::Render,
+            outline: Default::default(),
             sort_position: None,
         });
         // The games' per-vertex streams stay parallel to the vertices.

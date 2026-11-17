@@ -151,6 +151,7 @@ pub(in crate::app::model_preview) fn build_particle_model_preview(
             index_count,
             flat_color: None,
             layer: ModelPreviewLayer::Render,
+            outline: Default::default(),
             sort_position: None,
         });
     }
@@ -476,6 +477,7 @@ fn instances_batch(
         index_count,
         flat_color: None,
         layer: ModelPreviewLayer::Render,
+        outline: Default::default(),
         sort_position: None,
     });
 }
@@ -563,6 +565,7 @@ fn append_render_mesh_to_preview(
                 index_count,
                 flat_color: None,
                 layer: ModelPreviewLayer::Render,
+                outline: Default::default(),
                 sort_position,
             });
         }

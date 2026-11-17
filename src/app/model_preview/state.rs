@@ -24,6 +24,11 @@ pub(in crate::app) struct ModelPreviewState {
     /// began loading it again: the page keeps drawing from it, and only the
     /// viewport waits on the load.
     pub(in crate::app) reloading: Option<ReloadingPreview>,
+    /// The page as it was before that reload, still drawn beside the new
+    /// model's viewport while what follows the load (its materials, its
+    /// collision and physics, its weapons, its clip) arrives, so the
+    /// sidebar and player change once, not card by card.
+    pub(in crate::app) settling: Option<SettlingPreview>,
     pub(in crate::app) active_tab: ModelTagPanelTab,
     pub(in crate::app) new_variant_name: String,
     pub(in crate::app) selected_variant: Option<usize>,
@@ -152,12 +157,24 @@ pub(in crate::app) struct ReloadingPreview {
     pub(in crate::app) animation: super::PreviewAnimationPlayback,
 }
 
+/// A reload's page before it, held until the new model's page is complete.
+pub(in crate::app) struct SettlingPreview {
+    pub(in crate::app) page: ReloadingPreview,
+    /// When the panel first drew it, by the UI clock.
+    pub(in crate::app) since: Option<f64>,
+}
+
+/// The longest the old page stands in for the new one, in seconds: what
+/// follows a load can fail, and the page must not stay still for good.
+const MAX_SETTLE_SECONDS: f64 = 3.0;
+
 impl Default for ModelPreviewState {
     fn default() -> Self {
         Self {
             loaded_key: None,
             preview_load_id: None,
             reloading: None,
+            settling: None,
             render_model_path: None,
             data: None,
             active_tab: ModelTagPanelTab::Fields,
@@ -227,7 +244,33 @@ impl ModelPreviewState {
         self.loaded_key = None;
         self.data = None;
         self.reloading = None;
+        self.settling = None;
         self.preview_load_id = None;
+    }
+
+    /// Whether the new model's page, `data`, has what the old one showed:
+    /// its materials (which the Object Functions card reads), its
+    /// collision and physics, its weapons and its clip. At `now`, a page
+    /// held past [`MAX_SETTLE_SECONDS`] counts as settled.
+    pub(in crate::app) fn page_settled(
+        &self,
+        settling: &SettlingPreview,
+        data: &ModelPreviewData,
+        now: f64,
+    ) -> bool {
+        if settling.since.is_some_and(|since| now - since > MAX_SETTLE_SECONDS) {
+            return true;
+        }
+        let had_overlays = settling.page.data.preview.batches.iter().any(|batch| {
+            matches!(batch.layer, super::ModelPreviewLayer::Collision | super::ModelPreviewLayer::Physics)
+        });
+        let materials = !self.render_mode.uses_textures()
+            || data.preview.materials.is_empty()
+            || data.textures_for(self.game_shaders).is_some();
+        let overlays = !had_overlays || self.overlays_loaded;
+        let weapons = !self.list_weapons && !self.weapons_pending;
+        let clip = !self.animation.resume_on_decode;
+        materials && overlays && weapons && clip
     }
 
     /// Note the clip and variant selected, by name, for the reload to choose
@@ -258,14 +301,20 @@ impl ModelPreviewState {
     /// One predicate for the panel's spinner gate and the loader's early
     /// return, so the two can never disagree about what needs a rebuild.
     pub(in crate::app) fn needs_preview_load(&self, entry_key: &str) -> bool {
-        self.loaded_key.as_deref() != Some(entry_key)
-            || self.data.is_none()
-            || !self.campaign_evolved.loaded_as_set()
-            || self.loaded_weapon != self.weapon
-            || self.loaded_secondary_weapon != self.secondary_weapon
-            || self.loaded_game_shaders != self.game_shaders
-            || self.loaded_detail_level != self.detail_level
-            || self.loaded_scenario_selection != self.scenario_bsp_selection
+        self.data.is_none() || !self.load_settings_match(entry_key)
+    }
+
+    /// Whether the last load asked for was of `entry_key` with every
+    /// setting as it is now. The loader asks this before starting one, so
+    /// a setting that marks the page out of date always starts its load.
+    pub(in crate::app) fn load_settings_match(&self, entry_key: &str) -> bool {
+        self.loaded_key.as_deref() == Some(entry_key)
+            && self.campaign_evolved.loaded_as_set()
+            && self.loaded_weapon == self.weapon
+            && self.loaded_secondary_weapon == self.secondary_weapon
+            && self.loaded_game_shaders == self.game_shaders
+            && self.loaded_detail_level == self.detail_level
+            && self.loaded_scenario_selection == self.scenario_bsp_selection
     }
 }
 

@@ -82,6 +82,8 @@ pub(in crate::app) use panel::{
     ModelPreviewSectionPart, draw_model_preview_panel, draw_model_preview_section_with_header_wrap,
     draw_standalone_mesh_preview, preview_panel_title, standalone_mesh_preview,
 };
+#[cfg(test)]
+pub(in crate::app) use panel::SETUP_PANEL_PADDING;
 
 #[cfg(test)]
 use animation::PreviewAnimationPose;
@@ -92,7 +94,7 @@ use animation::{
 use ce::frame::object_states;
 use data::{MODEL_ERROR_FALLBACK_COLOR, NEXT_MODEL_GEOMETRY_ID, model_preview_data};
 pub(in crate::app) use data::{
-    ModelErrorPoint, ModelErrorPrimitive, ModelErrorShape, ModelPreviewData, ModelPreviewLayer,
+    BatchOutline, ModelErrorPoint, ModelErrorPrimitive, ModelErrorShape, ModelPreviewData, ModelPreviewLayer,
     ModelVariantPreview, RenderModelPreview, RenderModelPreviewBatch, RenderModelPreviewMarker,
     RenderModelPreviewMaterial, RenderModelPreviewNode, RenderModelPreviewRegion,
     RenderModelPreviewVertex,

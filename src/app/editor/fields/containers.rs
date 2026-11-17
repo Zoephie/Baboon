@@ -992,7 +992,7 @@ pub(in crate::app) fn draw_resettable_box(
     let tooltip = format!("Reset {title}");
     draw_foundation_box(ui, title.to_owned(), id_salt, |ui, part| {
         if part == BoxPart::Trailing {
-            reset = icon_button(ui, ButtonIcon::Undo, &tooltip, changed, foundation_block_text())
+            reset = icon_button(ui, ButtonIcon::Reset, &tooltip, changed, foundation_block_text())
                 .clicked();
         } else {
             contents(ui, part);

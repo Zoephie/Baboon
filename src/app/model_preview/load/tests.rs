@@ -117,8 +117,8 @@ fn face_normal_agreement(preview: &RenderModelPreview) -> Option<f32> {
 }
 
 /// The panel gate opens for particle models — and `is_model_group` stays
-/// closed, so `find_model_reference` does not start treating a
-/// `particle`'s `Model` field as an object's model link.
+/// closed, so a `particle`'s `Model` field never reads as an object's
+/// model link.
 #[test]
 fn particle_model_is_previewable_without_becoming_a_model() {
     let names = bundled_names();
@@ -1480,5 +1480,19 @@ fn a_gbxmodel_preview_loads_on_a_worker() {
             [1.0, 2.0, 3.0]
         };
         assert_eq!(data.preview.bounds_max, apex, "edited: {edited}");
+
+        // Another level of detail picked: the page waits on a load of it,
+        // so one must start.
+        let state = app.views[app.model.kits[0].id]
+            .caches
+            .model_previews
+            .get_mut(&entry.key)
+            .unwrap();
+        state.detail_level = Some(0);
+        assert!(state.needs_preview_load(&entry.key));
+        app.maybe_request_model_preview(0, &entry.key, &ctx);
+        let state = &app.views[app.model.kits[0].id].caches.model_previews[&entry.key];
+        assert!(state.preview_load_id.is_some(), "the level's load never started");
+        assert_eq!(state.loaded_detail_level, Some(0));
     }
 }

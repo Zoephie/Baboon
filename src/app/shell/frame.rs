@@ -5467,18 +5467,20 @@ mod tests {
             .unwrap();
         assert!(refresh.right() < shading.left(), "refresh {refresh:?}, shading {shading:?}");
         assert!(refresh.right() < setup.left(), "in the sidebar: {refresh:?}");
-        // The sidebar's first card starts level with the viewport's card.
+        // The sidebar's panel starts level with the viewport's card, and
+        // its first card inside it, past its border and padding.
+        let inset = crate::app::model_preview::SETUP_PANEL_PADDING + 1.0;
         assert!(
-            (setup.center().y - title.center().y).abs() < 1.0,
+            (setup.center().y - title.center().y - inset).abs() < 1.0,
             "first card {setup:?}, viewport title {title:?}"
         );
-        // Its cards stop short of the sidebar's right edge by the scroll
-        // bar's width: the rightmost control on the card's title row is its
+        // Its cards stop short of the sidebar's right edge by the same
+        // border and padding as at the left; the scroll bar floats over that
+        // padding. The rightmost control on the card's title row is its
         // Reset. The sidebar starts 36 points left of the card's title (8 of
-        // padding, a 24-point toggle and a 4-point gap).
-        let sidebar_right = setup.left() - 36.0 + h.app.model.prefs.model_setup_width;
-        let scroll = h.ctx.global_style().spacing.scroll;
-        let gutter = scroll.bar_width + scroll.bar_inner_margin;
+        // padding, a 24-point toggle and a 4-point gap), and the panel's
+        // border and padding before that.
+        let sidebar_right = setup.left() - 36.0 - inset + h.app.model.prefs.model_setup_width;
         let reset = h.ctx.viewport(|viewport| {
             viewport
                 .prev_pass
@@ -5496,8 +5498,8 @@ mod tests {
                 .expect("the card's Reset")
         });
         assert!(
-            reset.right() <= sidebar_right - gutter - 7.0,
-            "Reset {reset:?} under the scroll bar of a sidebar ending at {sidebar_right}"
+            reset.right() <= sidebar_right - inset - 7.0,
+            "Reset {reset:?} in the padding of a sidebar ending at {sidebar_right}"
         );
         assert!((refresh.center().y - title.center().y).abs() < 4.0, "not on the header row");
         let id = h.app.model.kits[h.app.model.active].id;
@@ -7905,6 +7907,84 @@ mod tests {
         h.shoot(&dir.join("app_banshee_model_with_imposter.png"));
     }
 
+    /// Halo 2's brute biped, Game Shaders on and a clip playing, switched to
+    /// its lowest level of detail: only the viewport changes. The sidebar's
+    /// cards and the player stay as they were, frame by frame, while the
+    /// model loads and while its materials, collision and physics, weapons
+    /// and clip follow. With `BLAM_TEST_H2EK` naming the kit's tags.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn a_level_of_detail_switch_keeps_the_page_steady() {
+        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let mut h = Harness::recording();
+        h.frame(Vec::new());
+        let entries =
+            install_kit_subtree(&mut h, &root, GameId::Halo2, "objects/characters/covenant/brute");
+        let key = open_model_page(&mut h, &entries, "objects/characters/covenant/brute/brute.biped");
+        let id = h.app.model.kits[h.app.model.active].id;
+        let state = h.app.views[id].caches.model_previews.get_mut(&key).unwrap();
+        state.set_shading(crate::app::model_preview::ModelShading::GameShaders);
+        let started = Instant::now();
+        let watch = [
+            "Permutations", "Weapons", "Effects", "Object Functions", "Primary", "body",
+            "Animation Player", "combat:rifle:idle", "physics",
+        ];
+        let shown = |h: &Harness| -> Vec<&str> {
+            watch
+                .iter()
+                .copied()
+                .filter(|label| h.painted.iter().any(|text| text.contains(label)))
+                .collect()
+        };
+        // Settled: Game Shaders' cards drawn and the clip playing.
+        let mut picked = false;
+        loop {
+            h.frame(Vec::new());
+            let state = h.app.views[id].caches.model_previews.get_mut(&key).unwrap();
+            if !picked
+                && !state.needs_preview_load(&key)
+                && let Some(Ok(data)) = &state.data
+                && let Some(animations) = &data.animations
+            {
+                state.animation.selected =
+                    animations.iter().position(|entry| entry.name.contains("rifle:idle"));
+                picked = true;
+            }
+            let now = shown(&h);
+            if now.contains(&"Object Functions") && now.contains(&"combat:rifle:idle") {
+                break;
+            }
+            assert!(started.elapsed().as_secs() < 120, "never settled: {now:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        h.idle(30);
+        let before = shown(&h);
+        assert!(!before.contains(&"physics"), "the physics overlay is no region: {before:?}");
+        h.app.views[id].caches.model_previews.get_mut(&key).unwrap().detail_level = Some(0);
+        let started = Instant::now();
+        let mut frame = 0;
+        loop {
+            h.frame(Vec::new());
+            assert_eq!(shown(&h), before, "frame {frame} of the switch");
+            let state = &h.app.views[id].caches.model_previews[&key];
+            if !state.needs_preview_load(&key) && state.settling.is_none() {
+                break;
+            }
+            assert!(started.elapsed().as_secs() < 120, "the switch never settled");
+            frame += 1;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // The page drawn live again is the page it held.
+        h.idle(30);
+        assert_eq!(shown(&h), before, "after the switch");
+        let state = &h.app.views[id].caches.model_previews[&key];
+        assert_eq!(state.loaded_detail_level, Some(0));
+        assert!(frame > 0, "the switch loaded nothing");
+    }
+
     /// A screenshot of Halo 2's brute on its Model Preview tab in light
     /// mode, as `model_light.png` in `BABOON_APP_SHOTS`, with
     /// `BLAM_TEST_H2EK` naming the kit's tags. With `BABOON_SHOT_CLICK` as
@@ -7924,13 +8004,82 @@ mod tests {
         let tag = std::env::var("BABOON_SHOT_TAG")
             .unwrap_or_else(|_| "objects/characters/covenant/brute/brute.model".to_owned());
         let subtree = tag.rsplit_once('/').map_or("", |(folder, _)| folder).to_owned();
+        // BABOON_SHOT_GAME names the kit's game ("halo3_mcc"; Halo 2 by
+        // default), and BABOON_SHOT_DARK shoots the dark theme instead.
+        let game = std::env::var("BABOON_SHOT_GAME")
+            .map_or(GameId::Halo2, |id| id.parse().expect("a game id"));
+        let dark = std::env::var_os("BABOON_SHOT_DARK").is_some();
+        let theme = if dark { "dark" } else { "light" };
         let mut h = Harness::recording();
         h.app.model.prefs.follow_system_theme = false;
-        h.app.model.prefs.dark_mode = false;
+        h.app.model.prefs.dark_mode = dark;
         h.frame(Vec::new());
-        let entries = install_kit_subtree(&mut h, &root, GameId::Halo2, &subtree);
+        let entries = install_kit_subtree(&mut h, &root, game, &subtree);
         let key = open_model_page(&mut h, &entries, &tag);
-        h.shoot(&dir.join("model_light.png"));
+        // BABOON_SHOT_SHADERS turns Game Shaders on, for the Effects and
+        // Object Functions cards; BABOON_SHOT_WEAPON holds a weapon tag;
+        // BABOON_SHOT_OVERLAYS shows collision and physics ("physics" for
+        // physics alone); BABOON_SHOT_LOD picks a level of detail, lowest
+        // first (Halo CE and Halo 2).
+        let shaders = std::env::var_os("BABOON_SHOT_SHADERS").is_some();
+        let weapon = std::env::var("BABOON_SHOT_WEAPON").ok();
+        let overlays = std::env::var("BABOON_SHOT_OVERLAYS").ok();
+        let physics_only = overlays.as_deref() == Some("physics");
+        let overlays = overlays.is_some();
+        let lod = std::env::var("BABOON_SHOT_LOD").ok().map(|level| level.parse::<usize>().unwrap());
+        if shaders || weapon.is_some() || overlays || lod.is_some() {
+            let id = h.app.model.kits[h.app.model.active].id;
+            let state = h.app.views[id].caches.model_previews.get_mut(&key).unwrap();
+            if shaders {
+                state.set_shading(crate::app::model_preview::ModelShading::GameShaders);
+            }
+            if weapon.is_some() {
+                state.weapon = weapon;
+            }
+            if overlays {
+                state.show_collision = !physics_only;
+                state.show_physics = true;
+            }
+            if lod.is_some() {
+                state.detail_level = lod;
+            }
+            let started = Instant::now();
+            loop {
+                h.frame(Vec::new());
+                let state = &h.app.views[id].caches.model_previews[&key];
+                if !state.needs_preview_load(&key)
+                    && state.data.as_ref().is_some_and(|data| data.is_ok())
+                    && (!overlays || state.overlays_loaded)
+                {
+                    break;
+                }
+                assert!(started.elapsed().as_secs() < 120, "{tag} never reloaded");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            for _ in 0..60 {
+                h.frame(Vec::new());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        // BABOON_SHOT_SCROLL ("x,y,points") turns the wheel over a point
+        // first, as to scroll the setup cards.
+        if let Ok(scroll) = std::env::var("BABOON_SHOT_SCROLL") {
+            let parts: Vec<f32> = scroll.split(',').map(|part| part.trim().parse().unwrap()).collect();
+            let at = egui::pos2(parts[0], parts[1]);
+            h.frame(vec![pointer_at(at)]);
+            h.frame(vec![egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -parts[2]),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            for _ in 0..30 {
+                h.frame(Vec::new());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        h.shoot(&dir.join(format!("model_{theme}.png")));
         // BABOON_SHOT_CLIP names an animation to play, by part of its name,
         // for a shot of the Animation Player's scrubber.
         if let Ok(clip) = std::env::var("BABOON_SHOT_CLIP") {
@@ -7958,7 +8107,7 @@ mod tests {
                 h.frame(Vec::new());
                 std::thread::sleep(Duration::from_millis(10));
             }
-            h.shoot(&dir.join("model_light_clip.png"));
+            h.shoot(&dir.join(format!("model_{theme}_clip.png")));
         }
         let Ok(click) = std::env::var("BABOON_SHOT_CLICK") else {
             return;
@@ -7978,7 +8127,7 @@ mod tests {
             h.frame(Vec::new());
             std::thread::sleep(Duration::from_millis(10));
         }
-        h.shoot(&dir.join("model_light_clicked.png"));
+        h.shoot(&dir.join(format!("model_{theme}_clicked.png")));
     }
 
     /// Screenshots of the whole app on Halo 2's brute `.model` Tag Fields

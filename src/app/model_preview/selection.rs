@@ -122,7 +122,7 @@ pub(super) fn selected_variant_regions(
         .iter()
         .filter_map(|region| {
             // Physics is an overlay toggle, not a .model variant region.
-            if is_model_physics_overlay_region(data, state, region) {
+            if is_model_physics_overlay_region(data, region) {
                 return None;
             }
             let selection = state.region_selections.get(&region.name)?;
@@ -147,12 +147,19 @@ pub(super) fn selected_variant_regions(
 /// from Model Setup while preserving its internal selection for draw filtering.
 /// A genuine render region named `physics` (or a standalone physics tag) must
 /// still appear normally.
+///
+/// Told by the model drawn, not by whether its overlays have loaded: the
+/// page drawn from a model while it loads again has its overlays though the
+/// new load's are yet to come. A physics tag opened on its own is physics
+/// alone.
 pub(super) fn is_model_physics_overlay_region(
     data: &ModelPreviewData,
-    state: &ModelPreviewState,
     region: &RenderModelPreviewRegion,
 ) -> bool {
-    state.overlays_loaded
+    data.preview
+        .batches
+        .iter()
+        .any(|batch| batch.layer != ModelPreviewLayer::Physics)
         && region.name == PHYSICS_REGION
         && data.preview.batches.iter().any(|batch| {
             batch.layer == ModelPreviewLayer::Physics && batch.region_name == region.name

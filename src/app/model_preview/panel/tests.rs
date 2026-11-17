@@ -1,5 +1,5 @@
 use super::super::super::ui_kit::button_icons::{
-    ButtonIcon, icon_text_button, icon_text_dropdown_button, selectable_icon_text_button,
+    ButtonIcon, icon_button, icon_text_button, icon_text_dropdown_button, selectable_icon_text_button,
 };
 use super::super::super::ui_kit::style::{
     BUTTON_HEIGHT, ICON_BUTTON_SIZE, foundation_fonts, foundation_style,
@@ -165,8 +165,69 @@ fn bitmap_header_moves_actions_to_a_second_row_below_its_wrap_width() {
     assert!(narrow_right > narrow_left + BUTTON_HEIGHT);
 }
 
+/// The Permutations card's first row holds the variant picker between its
+/// arrows and, at the row's right end, Save then Delete, all on one line
+/// and inside the card from the narrowest sidebar up.
+#[test]
+fn variant_row_keeps_save_and_delete_beside_the_picker() {
+    let data = model_preview_data(
+        String::new(),
+        String::new(),
+        RenderModelPreview::default(),
+        Vec::new(),
+    );
+    for width in [MIN_MODEL_SETUP_WIDTH, 360.0, 520.0] {
+        let context = egui::Context::default();
+        context.set_fonts(foundation_fonts());
+        context.set_global_style(foundation_style());
+        let mut state = ModelPreviewState::default();
+        let (mut row, mut save, mut delete) =
+            (egui::Rect::NOTHING, egui::Rect::NOTHING, egui::Rect::NOTHING);
+        let _ = crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(width, 200.0),
+                )),
+                ..Default::default()
+            },
+            |context| {
+                egui::CentralPanel::default().show(context, |ui| {
+                    let top = ui.cursor().top();
+                    let mut rows = super::rows::CardRows::default();
+                    draw_variant_selector(ui, &data, &mut state, &mut rows, &mut |ui, _| {
+                        delete = icon_button(
+                            ui,
+                            ButtonIcon::Garbage,
+                            "Delete selected variant",
+                            true,
+                            egui::Color32::BLACK,
+                        )
+                        .rect;
+                        save = icon_text_dropdown_button(ui, ButtonIcon::Save, "Save", |_| {})
+                            .response
+                            .rect;
+                    });
+                    row = egui::Rect::from_min_max(
+                        egui::pos2(0.0, top),
+                        egui::pos2(width, ui.cursor().top()),
+                    );
+                });
+            },
+        );
+        assert!(save.right() <= delete.left(), "width {width}: Save {save:?}, Delete {delete:?}");
+        assert!(
+            (save.center().y - delete.center().y).abs() < 1.0,
+            "width {width}: Save {save:?}, Delete {delete:?}"
+        );
+        assert!(delete.right() <= width, "width {width}: Delete {delete:?} past the pane");
+        assert!(row.height() < 2.0 * BUTTON_HEIGHT, "width {width}: row {row:?} wrapped");
+    }
+}
+
 /// A sidebar card's header keeps its Reset at the right end of the title
-/// row; the variant picker and actions follow the title where they fit and
+/// row; header controls (a picker and actions) follow the title where they fit and
 /// take a row of their own under it where they do not, inside the card at
 /// every width.
 #[test]
@@ -209,7 +270,21 @@ fn setup_card_header_wraps_its_controls_under_the_title_when_narrow() {
                             draw_foundation_box(ui, "Permutations".into(), "card", |ui, part| {
                                 match part {
                                     BoxPart::Controls => {
-                                        draw_variant_selector(ui, &data, &mut state);
+                                        // A picker between arrows, as a
+                                        // header's controls might be.
+                                        let _ = (&data, &mut state);
+                                        ui.add_sized(
+                                            Vec2::new(24.0, BUTTON_HEIGHT),
+                                            egui::Button::new("<"),
+                                        );
+                                        ui.add_sized(
+                                            Vec2::new(150.0, BUTTON_HEIGHT),
+                                            egui::Button::new("0. default"),
+                                        );
+                                        ui.add_sized(
+                                            Vec2::new(24.0, BUTTON_HEIGHT),
+                                            egui::Button::new(">"),
+                                        );
                                         icon_text_dropdown_button(
                                             ui,
                                             ButtonIcon::Save,
@@ -323,7 +398,6 @@ fn physics_overlay_is_not_a_model_setup_variant_region() {
 
     assert!(is_model_physics_overlay_region(
         &data,
-        &state,
         &data.preview.regions[1]
     ));
     assert!(state.region_selections[PHYSICS_REGION].enabled);
@@ -333,11 +407,19 @@ fn physics_overlay_is_not_a_model_setup_variant_region() {
         "body"
     );
 
+    // Its overlays loading again, the model drawn still has them.
     state.overlays_loaded = false;
-    assert!(!is_model_physics_overlay_region(
+    assert!(is_model_physics_overlay_region(
         &data,
-        &state,
         &data.preview.regions[1]
+    ));
+    // A physics tag opened on its own lists its region.
+    let mut alone = (*data.preview).clone();
+    alone.batches.retain(|batch| batch.layer == ModelPreviewLayer::Physics);
+    let alone = model_preview_data(String::new(), String::new(), alone, Vec::new());
+    assert!(!is_model_physics_overlay_region(
+        &alone,
+        &alone.preview.regions[1]
     ));
 }
 
@@ -532,7 +614,8 @@ fn permutation_rows_fit_a_narrow_setup_card() {
                     let available = ui.available_width();
                     card_rect = draw_model_preview_section(ui, "Model Setup", None, |ui, part| {
                         if part == ModelPreviewSectionPart::Body {
-                            draw_variant_controls(ui, &data, &mut state);
+                            let mut rows = super::rows::CardRows::default();
+                            draw_variant_controls(ui, &data, &mut state, &mut rows);
                         }
                     });
                     assert!(
@@ -573,7 +656,7 @@ fn variant_rows_are_not_capped_shorter_than_the_setup_card() {
         |context| {
             egui::CentralPanel::default().show(context, |ui| {
                 let top = ui.next_widget_position().y;
-                draw_variant_controls(ui, &data, &mut state);
+                draw_variant_controls(ui, &data, &mut state, &mut super::rows::CardRows::default());
                 assert!(ui.min_rect().bottom() - top > 500.0);
             });
         },

@@ -113,6 +113,7 @@ fn push_derived_batch(
             PHYSICS_REGION => ModelPreviewLayer::Physics,
             _ => ModelPreviewLayer::Render,
         },
+        outline: Default::default(),
         sort_position: None,
     });
     ensure_preview_region(preview, region_name);

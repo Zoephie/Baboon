@@ -275,13 +275,9 @@ impl Baboon {
         if state.active_tab != ModelTagPanelTab::ModelPreview {
             return false;
         }
-        let desired_matches = state.loaded_key.as_deref() == Some(key)
-            && state.campaign_evolved.loaded_as_set()
-            && state.loaded_scenario_selection == state.scenario_bsp_selection
-            && state.loaded_weapon == state.weapon
-            && state.loaded_secondary_weapon == state.secondary_weapon
-            && state.loaded_game_shaders == state.game_shaders;
-        if desired_matches && (state.data.is_some() || state.preview_load_id.is_some()) {
+        if state.load_settings_match(key)
+            && (state.data.is_some() || state.preview_load_id.is_some())
+        {
             return false;
         }
 
@@ -326,9 +322,11 @@ impl Baboon {
             }),
             _ => None,
         };
-        // A load asked for again (one dropped as stale) keeps what it showed.
+        // A load asked for again (one dropped as stale) keeps what it showed,
+        // and one asked for while the last settles keeps the page it holds.
+        let settled_page = state.settling.take().map(|settling| settling.page);
         state.reloading = if same_model {
-            previous.or(state.reloading.take())
+            settled_page.or(previous).or(state.reloading.take())
         } else {
             None
         };
@@ -410,7 +408,11 @@ impl Baboon {
         if stale {
             return true;
         }
-        state.reloading = None;
+        // The page it stood in for is held until the new one is complete.
+        let page = state.reloading.take();
+        state.settling = page
+            .filter(|_| result.is_ok())
+            .map(|page| super::super::state::SettlingPreview { page, since: None });
         if let Ok(data) = &result {
             state.render_model_path = Some(data.render_model_path.clone());
             // The variant chosen before the reload, by name, else the canonical

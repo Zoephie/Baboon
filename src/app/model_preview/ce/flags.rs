@@ -151,6 +151,7 @@ fn read_flag(
         index_count: preview.indices.len() as u32 - index_start,
         flat_color: None,
         layer: ModelPreviewLayer::Render,
+        outline: Default::default(),
         sort_position: None,
     });
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);

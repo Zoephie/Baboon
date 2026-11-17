@@ -4,8 +4,8 @@
 use super::dx9::passes::Dx9Layer;
 use super::functions::change_colors_for;
 use super::{
-    MaterialTextures, ModelGpuCamera, ModelPreviewData, ModelPreviewState, ModelRenderMode,
-    PreviewCamera, RenderModelPreview, animation_skinning_rows, ce, common,
+    MaterialTextures, ModelGpuCamera, ModelPreviewData, ModelPreviewLayer, ModelPreviewState,
+    ModelRenderMode, PreviewCamera, RenderModelPreview, animation_skinning_rows, ce, common,
 };
 use eframe::egui;
 use eframe::egui::Ui;
@@ -45,6 +45,8 @@ pub(in crate::app::model_preview) fn build_frame(
     let camera = PreviewCamera::new(data, state, rect);
     let preview = Arc::clone(&data.preview);
     let mut visible_batches = visible_batch_indices(&preview, state);
+    // Collision and physics draw in a pass of their own, over the model.
+    let overlay_batches = take_overlay_batches(&mut visible_batches, &preview);
     let shield_batches = visible_batches.clone();
     without_shield_parts(
         &mut visible_batches,
@@ -66,6 +68,7 @@ pub(in crate::app::model_preview) fn build_frame(
         mesh_id: data.mesh_id,
         textures_id: data.textures_id,
         visible_batches,
+        overlay_batches,
         shield_batches,
         camera: camera.gpu_uniforms(),
         render_mode: state.render_mode,
@@ -105,6 +108,18 @@ pub(in crate::app::model_preview) fn build_frame(
     frame
 }
 
+/// Moves `visible`'s collision and physics batches out, and returns them.
+fn take_overlay_batches(visible: &mut Vec<usize>, preview: &RenderModelPreview) -> Vec<usize> {
+    let is_overlay = |index: &usize| {
+        preview.batches.get(*index).is_some_and(|batch| {
+            matches!(batch.layer, ModelPreviewLayer::Collision | ModelPreviewLayer::Physics)
+        })
+    };
+    let overlays = visible.iter().copied().filter(is_overlay).collect();
+    visible.retain(|index| !is_overlay(index));
+    overlays
+}
+
 #[derive(Clone)]
 pub(in crate::app::model_preview) struct ModelGpuFrame {
     pub(in crate::app::model_preview) preview: Arc<RenderModelPreview>,
@@ -114,6 +129,10 @@ pub(in crate::app::model_preview) struct ModelGpuFrame {
     /// What `textures` belongs to; see `ModelPreviewData::textures_id`.
     pub(in crate::app::model_preview) textures_id: u64,
     pub(in crate::app::model_preview) visible_batches: Vec<usize>,
+    /// The visible collision and physics batches, left out of
+    /// `visible_batches`: they draw see-through with solid edges, over the
+    /// model, whatever the render mode.
+    pub(in crate::app::model_preview) overlay_batches: Vec<usize>,
     /// `visible_batches` with the parts only a shield draws.
     pub(in crate::app::model_preview) shield_batches: Vec<usize>,
     pub(in crate::app::model_preview) camera: ModelGpuCamera,

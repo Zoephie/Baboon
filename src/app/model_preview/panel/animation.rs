@@ -1,9 +1,8 @@
 //! The animation player: the clip picker, the transport, the scrubber and its clock.
 
 use super::super::super::ui_kit::button_icons::{ButtonIcon, selectable_icon_button};
-use super::super::super::ui_kit::style::{
-    BUTTON_HEIGHT, foundation_input, foundation_input_edge, is_dark_mode, subtle_dark, text_dark,
-};
+use super::super::super::ui_kit::railed_slider;
+use super::super::super::ui_kit::style::{BUTTON_HEIGHT, subtle_dark, text_dark};
 use super::super::{
     ANIMATION_FRAME_RATE, ModelPreviewState, PreviewAnimationEntry, PreviewAnimationPlayback,
     picker_button, picker_popup_width, picker_results, picker_search_field,
@@ -388,59 +387,24 @@ pub(in crate::app::model_preview) fn draw_animation_scrubber(
     ui.scope(|ui| {
         let mut scrub = animation_frame_position(&state.animation, pose_frames);
         ui.spacing_mut().slider_width = (ui.available_width() - 2.0).max(1.0);
-        // The rail is painted here rather than by egui, which fills it with
-        // the handle's own colour: near-white on a near-white panel in light
-        // mode. Reserved before the slider so rail and ticks lie under its
-        // handle, the ticks over the rail.
-        let rail_height = ui.spacing().slider_rail_height;
-        let rail_fill = if is_dark_mode() {
-            ui.visuals().widgets.inactive.bg_fill
-        } else {
-            foundation_input()
-        };
-        ui.spacing_mut().slider_rail_height = 0.0;
-        let ticks = ui.painter().add(egui::Shape::Noop);
         let mut slider = egui::Slider::new(&mut scrub, 0.0..=last_frame.max(1.0)).show_value(false);
         if !state.animation.interpolate {
             slider = slider.step_by(1.0);
         }
-        let response = ui.add_enabled(controls_enabled, slider);
-        let tick_xs = frame_tick_xs(
-            response.rect,
-            ui.style().visuals.handle_shape,
-            last_frame.max(1.0),
-            pose_frames,
-        );
-        let rail_y = response.rect.center().y;
-        let rail = egui::Rect::from_x_y_ranges(
-            response.rect.x_range(),
-            egui::Rangef::point(rail_y).expand(rail_height / 2.0),
-        );
-        let rail_edge = if is_dark_mode() {
-            egui::Stroke::NONE
-        } else {
-            egui::Stroke::new(1.0, foundation_input_edge())
-        };
-        let fade = if controls_enabled { 1.0 } else { 0.5 };
-        let mut shapes = vec![egui::Shape::rect_filled(
-            rail,
-            ui.visuals().widgets.inactive.corner_radius,
-            rail_fill.gamma_multiply(fade),
-        )];
-        shapes.push(egui::Shape::rect_stroke(
-            rail,
-            ui.visuals().widgets.inactive.corner_radius,
-            egui::Stroke::new(rail_edge.width, rail_edge.color.gamma_multiply(fade)),
-            egui::StrokeKind::Inside,
-        ));
-        let stroke = egui::Stroke::new(1.0, subtle_dark().gamma_multiply(fade));
-        shapes.extend(tick_xs.into_iter().map(|x| {
-            egui::Shape::line_segment(
-                [egui::pos2(x, rail_y - 5.0), egui::pos2(x, rail_y + 5.0)],
-                stroke,
-            )
-        }));
-        ui.painter().set(ticks, egui::Shape::Vec(shapes));
+        let handle_shape = ui.style().visuals.handle_shape;
+        let response = railed_slider(ui, slider, controls_enabled, |rect| {
+            let rail_y = rect.center().y;
+            let stroke = egui::Stroke::new(1.0, subtle_dark());
+            frame_tick_xs(rect, handle_shape, last_frame.max(1.0), pose_frames)
+                .into_iter()
+                .map(|x| {
+                    egui::Shape::line_segment(
+                        [egui::pos2(x, rail_y - 5.0), egui::pos2(x, rail_y + 5.0)],
+                        stroke,
+                    )
+                })
+                .collect()
+        });
         if response.changed() {
             state.animation.time = scrub / ANIMATION_FRAME_RATE;
             state.animation.playing = false;

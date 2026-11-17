@@ -12,7 +12,7 @@ use super::super::super::ui_kit::style::{
     text_dark,
 };
 use super::super::super::ui_kit::tag_icons::{
-    paint_tag_icon_at, tag_icon, tag_icon_accent, tag_icon_image_in,
+    ARMATURE_ICON, TagIcon, tag_icon, tag_icon_accent, tag_icon_image, tag_icon_image_in,
 };
 use super::super::load::{DetailLevels, OwnViewSettings};
 use super::carry_through_reload;
@@ -284,7 +284,7 @@ pub(in crate::app::model_preview) fn draw_model_other_menu(
 
 /// Halo CE's and Halo 2's levels of detail as choices, the highest first and
 /// the one drawn picked.
-/// A level no permutation has is greyed out. Picking one reloads the model,
+/// A level with no geometry of its own, only the level below's, is greyed out. Picking one reloads the model,
 /// keeping the regions picked.
 fn draw_detail_levels(
     ui: &mut Ui,
@@ -298,7 +298,9 @@ fn draw_detail_levels(
         let response = ui
             .add_enabled_ui(available, |ui| menu_choice(ui, label, levels.shown == level))
             .inner
-            .on_disabled_hover_text("No permutation of this model has geometry at this level.");
+            .on_disabled_hover_text(
+                "This model has no geometry of its own at this level: it draws the level below.",
+            );
         if response.clicked() && levels.shown != level {
             carry_through_reload(data, state);
             state.detail_level = Some(level);
@@ -433,15 +435,16 @@ impl ModelLayer {
     }
 
     /// The tag group whose icon the toggle shows.
-    fn group(self) -> [u8; 4] {
-        match self {
-            Self::Render => *b"mode",
+    /// Its button's icon: its tag group's in `game`, or the armature's.
+    fn icon(self, game: Option<GameId>) -> TagIcon {
+        let group = match self {
+            Self::Render | Self::LodModel => *b"mode",
             Self::Collision => *b"coll",
             Self::Physics => *b"phmo",
-            Self::LodModel => *b"mode",
             Self::Imposter => *b"impo",
-            Self::Armature => *b"jmad",
-        }
+            Self::Armature => return ARMATURE_ICON,
+        };
+        tag_icon(Some(u32::from_be_bytes(group)), game)
     }
 
     fn flag(self, state: &mut ModelPreviewState) -> &mut bool {
@@ -520,8 +523,7 @@ fn layer_toggle(
     game: Option<GameId>,
     enabled: bool,
 ) -> (egui::Response, LayerAction) {
-    let group = layer.group();
-    let icon = tag_icon(Some(u32::from_be_bytes(group)), game);
+    let icon = layer.icon(game);
     let accent = tag_icon_accent(icon).filter(|_| on && enabled);
     let response = ui
         .add_enabled_ui(enabled, |ui| {
@@ -541,7 +543,9 @@ fn layer_toggle(
                 Some(_) => tag_icon_image_in(ui.ctx(), icon, 16.0, egui::Color32::WHITE)
                     .fit_to_exact_size(icon_rect.size())
                     .paint_at(ui, icon_rect),
-                None => paint_tag_icon_at(ui, Some(u32::from_be_bytes(group)), game, icon_rect),
+                None => tag_icon_image(ui.ctx(), icon, 16.0)
+                    .fit_to_exact_size(icon_rect.size())
+                    .paint_at(ui, icon_rect),
             }
             response
         })

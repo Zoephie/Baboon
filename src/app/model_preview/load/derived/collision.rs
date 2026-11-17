@@ -141,6 +141,7 @@ pub(super) fn append_collision_jms(
             index_count,
             flat_color: Some(COLLISION_COLOR),
             layer: ModelPreviewLayer::Collision,
+            outline: Default::default(),
             sort_position: None,
         });
         ensure_preview_region_permutation(preview, &region_name, &permutation_name);
