@@ -3601,7 +3601,7 @@ mod tests {
                 |h| {
                     fixture::open_document(&mut h.app, "sound\\smoke.sound", sound_tag());
                 },
-                &["smoke.sound", "2 permutations"],
+                &["smoke.sound", "Sound Player", "(2)"],
             ),
             case(
                 "pane_bitmap",

@@ -119,6 +119,9 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
     ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
         let width = ui.available_width().max(1.0);
         let animation_header = title == "Animation Player";
+        // Cards whose header holds a picker and controls after the title.
+        let leading_header =
+            animation_header || matches!(title, "Sound Player" | "Sound Looping Player");
         let bitmap_header = title == "Bitmap Preview";
         let wrapped_bitmap_header = bitmap_header
             && header_wrap_width
@@ -171,7 +174,7 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
                 ),
                 header_content_rect.max,
             )
-        } else if animation_header {
+        } else if leading_header {
             let title_width = ui
                 .painter()
                 .layout_no_wrap(title.to_owned(), bold_font(12.5), foundation_block_text())
@@ -193,7 +196,7 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
                 add_contents(ui, ModelPreviewSectionPart::Header);
             });
-        } else if animation_header || bitmap_header {
+        } else if leading_header || bitmap_header {
             actions_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 add_contents(ui, ModelPreviewSectionPart::Header);

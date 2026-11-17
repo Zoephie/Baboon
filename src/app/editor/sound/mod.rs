@@ -1195,8 +1195,7 @@ fn draw_wwise_event_player(
     // Name the field each event comes from only when there is more than one
     // kind of them.
     let grouped = events.iter().any(|(label, _)| *label != events[0].0);
-    let note = format!("Wwise event ({})", events.len());
-    sound_card(ui, "Sound Player", &note, |ui| {
+    sound_card(ui, "Sound Player", "", |ui, header| {
         let language = edit.sound_language.unwrap_or("");
         let clips: Vec<PlayerClip> = events
             .iter()
@@ -1209,7 +1208,7 @@ fn draw_wwise_event_player(
             .collect();
         let tags_root = edit.tags_root;
         let selected =
-            draw_clip_player(ui, edit, "wwise_event", &clips, &languages, &mut |index| {
+            draw_clip_player(ui, header, edit, "wwise_event", &clips, &languages, &mut |index| {
                 let name = &events[index].1;
                 Some(ClipPlay::Action(super::audio::SoundAction::PlayEvent {
                     event_name: name.clone(),
@@ -1259,8 +1258,11 @@ fn draw_wwise_event_player(
 /// point: the alternative is a player that looks playable and never is.
 /// A sound tag's player, boxed as the Model Preview's Animation Player is:
 /// `title` in the header bar with `note` at its right, `body` under it.
-fn sound_card(ui: &mut Ui, title: &str, note: &str, body: impl FnOnce(&mut Ui)) {
+/// `body` is given the header's room after the title, where the player puts
+/// its clip picker.
+fn sound_card(ui: &mut Ui, title: &str, note: &str, body: impl FnOnce(&mut Ui, Option<egui::Rect>)) {
     let mut body = Some(body);
+    let mut header = None;
     crate::app::model_preview::draw_model_preview_section_with_header_wrap(
         ui,
         title,
@@ -1268,11 +1270,16 @@ fn sound_card(ui: &mut Ui, title: &str, note: &str, body: impl FnOnce(&mut Ui)) 
         None,
         |ui, part| match part {
             crate::app::model_preview::ModelPreviewSectionPart::Header => {
-                ui.label(RichText::new(note).color(subtle_dark()));
+                header = Some(ui.max_rect());
+                if !note.is_empty() {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(note).color(subtle_dark()));
+                    });
+                }
             }
             crate::app::model_preview::ModelPreviewSectionPart::Body => {
                 if let Some(body) = body.take() {
-                    ui.push_id(title, body);
+                    ui.push_id(title, |ui| body(ui, header));
                 }
             }
         },
@@ -1280,7 +1287,7 @@ fn sound_card(ui: &mut Ui, title: &str, note: &str, body: impl FnOnce(&mut Ui)) 
 }
 
 fn draw_ce_unbound_note(ui: &mut Ui) {
-    sound_card(ui, "Sound Player", "no audio bound", |ui| {
+    sound_card(ui, "Sound Player", "no audio bound", |ui, _| {
             ui.label(
                 RichText::new(
                     "This tag's permutation table is inherited Reach metadata. Campaign \
@@ -1313,12 +1320,7 @@ fn draw_ce_wwise_player(
     let media = binding.media_for_language(&selected);
 
     let language_picker = language_choices(edit, None);
-    let note = format!(
-        "Wwise media, {} permutation{}",
-        media.len(),
-        if media.len() == 1 { "" } else { "s" }
-    );
-    sound_card(ui, "Sound Player", &note, |ui| {
+    sound_card(ui, "Sound Player", "", |ui, header| {
         if media.is_empty() {
             ui.label(RichText::new("(no media in this language)").color(subtle_dark()));
             return;
@@ -1338,6 +1340,7 @@ fn draw_ce_wwise_player(
         let paks_root = edit.ce_paks_root;
         let chosen = draw_clip_player(
             ui,
+            header,
             edit,
             "ce_media",
             &clips,
@@ -1698,8 +1701,7 @@ pub(in crate::app) fn draw_sound_player(
         || (is_fmod_language_game(edit.game) && !shared_fmod_audio);
     let language_name = language_label(language.unwrap_or(H2_DEFAULT_LANGUAGE));
 
-    let note = format!("{} permutation{}", rows.len(), if rows.len() == 1 { "" } else { "s" });
-    sound_card(ui, "Sound Player", &note, |ui| {
+    sound_card(ui, "Sound Player", "", |ui, header| {
         let clips: Vec<PlayerClip> = rows
             .iter()
             .map(|row| PlayerClip {
@@ -1717,7 +1719,7 @@ pub(in crate::app) fn draw_sound_player(
             })
             .collect();
         let tags_root = edit.tags_root;
-        let selected = draw_clip_player(ui, edit, "sound", &clips, &languages, &mut |index| {
+        let selected = draw_clip_player(ui, header, edit, "sound", &clips, &languages, &mut |index| {
             row_play_action(tag, &rows[index], source, tags_root).map(ClipPlay::Action)
         });
         let row = &rows[selected];
@@ -2369,7 +2371,7 @@ pub(in crate::app) fn draw_dialogue_summary(
             ui.horizontal(|ui| draw_sound_output_controls(ui, edit, &languages));
             draw_sound_errors(ui, edit);
         } else {
-            draw_clip_player(ui, edit, "dialogue", &clips, &languages, &mut play);
+            draw_clip_player(ui, None, edit, "dialogue", &clips, &languages, &mut play);
         }
         if total == 0 {
             ui.label(RichText::new("(no vocalizations)").color(subtle_dark()));
@@ -2524,13 +2526,8 @@ pub(in crate::app) fn draw_sound_looping_player(
             container_source,
         )
     };
-    let note = format!(
-        "{} component sound{}",
-        refs.len(),
-        if refs.len() == 1 { "" } else { "s" }
-    );
-    sound_card(ui, "Sound Looping Player", &note, |ui| {
-        let selected = draw_clip_player(ui, edit, "looping", &clips, &languages, &mut play);
+    sound_card(ui, "Sound Looping Player", "", |ui, header| {
+        let selected = draw_clip_player(ui, header, edit, "looping", &clips, &languages, &mut play);
         // The selected component: open it, or extract it.
         let (_, group, path) = &refs[selected];
         clicked.take_from(draw_referenced_sound_cell(
@@ -4033,7 +4030,7 @@ mod tests {
         let (painted, queued) = run(&tag, &[]);
         for expected in [
             "Sound Player",
-            "3 permutations",
+            "(3)",
             // The clip's length, read from its inline samples before any decode.
             "0:00.000 / 0:01.000",
             "pcm \u{b7} mono \u{b7} 22.05 kHz",
@@ -4127,7 +4124,7 @@ mod tests {
         });
         for expected in [
             "Sound Looping Player",
-            "3 component sounds",
+            "(3)",
             "ambience \u{25B8} in \u{b7} loop_in",
             // Its length is unknown until the referenced tag is decoded.
             "0:00.000 / -:--.---",

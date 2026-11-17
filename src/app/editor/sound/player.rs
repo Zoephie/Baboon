@@ -161,6 +161,7 @@ fn draw_clip_selector(
 /// by clip id, so it survives the rows being rebuilt.
 pub(super) fn draw_clip_player(
     ui: &mut Ui,
+    header: Option<egui::Rect>,
     edit: &mut FieldEditContext<'_>,
     id_salt: &str,
     clips: &[PlayerClip],
@@ -197,7 +198,8 @@ pub(super) fn draw_clip_player(
         .iter()
         .position(|&index| index == selected)
         .unwrap_or(0);
-    ui.horizontal(|ui| {
+    // In a card's header bar when the player has one, else its own row.
+    let mut pick = |ui: &mut Ui| {
         let many = clips.len() > 1;
         if ui
             .add_enabled(many, egui::Button::new("\u{25C0}"))
@@ -229,7 +231,21 @@ pub(super) fn draw_clip_player(
             // Random always plays: it is how the game would sound.
             queue_play(edit, clips, next, play);
         }
-    });
+    };
+    match header {
+        Some(rect) => {
+            let mut header_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(rect)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            header_ui.spacing_mut().item_spacing.x = 8.0;
+            pick(&mut header_ui);
+        }
+        None => {
+            ui.horizontal(pick);
+        }
+    }
 
     // Changing clip while this tab's sound plays carries on with the new one.
     if let Some(index) = choose.filter(|index| *index != selected) {
@@ -280,14 +296,10 @@ pub(super) fn draw_clip_player(
         {
             stop(ui, edit, &clip.id);
         }
-        let mut looping = edit.sound_looping;
-        if ui
-            .toggle_value(&mut looping, "\u{27F2}")
-            .on_hover_text("Loop")
-            .changed()
-        {
+        let looping = edit.sound_looping;
+        if selectable_icon_button(ui, ButtonIcon::Loop, "Loop", looping, true).clicked() {
             edit.sound_play_request
-                .push_back(SoundAction::SetLooping(looping));
+                .push_back(SoundAction::SetLooping(!looping));
         }
         let (position, duration) = match loaded {
             Some(playback) => (playback.position, Some(playback.duration)),
@@ -349,7 +361,7 @@ pub(super) fn draw_clip_player(
                 .color(foundation_blue()),
             )
             .on_hover_text(
-                "The region played; \u{27F2} loops it. Esc or a click outside clears it.",
+                "The region played; Loop repeats it. Esc or a click outside clears it.",
             );
         }
         ui.add_space(8.0);
@@ -1495,7 +1507,7 @@ mod tests {
                         edit.sound_speed = speed;
                         edit.sound_has_focus = focused;
                         let top = ui.cursor().top();
-                        draw_clip_player(ui, &mut edit, "test", &clips, &[], &mut |index| {
+                        draw_clip_player(ui, None, &mut edit, "test", &clips, &[], &mut |index| {
                             Some(ClipPlay::Action(SoundAction::PlayEvent {
                                 event_name: clips[index].name.clone(),
                                 label: clips[index].name.clone(),
