@@ -225,6 +225,8 @@ pub(in crate::app) enum EditorCommand {
     ReimportBitmap { kit: KitId, key: String },
     /// Proceed with the folder-wide Halo 2 bitmap reimport held by its dialog.
     ConfirmBitmapReimport,
+    /// Read the bitmap at `key` in `kit` from disk again: Refresh Bitmap.
+    RefreshBitmap { kit: KitId, key: String },
     /// Set the reference field at `field_path` of the tag at `tag_key` in
     /// `kit` to the picked `input`.
     PickTagReference {
@@ -270,6 +272,17 @@ impl Baboon {
                 }
             }
             EditorCommand::ConfirmBitmapReimport => self.confirm_reimport_bitmap(ctx),
+            EditorCommand::RefreshBitmap { kit, key } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    // Unsaved edits would be dropped, so the button is greyed
+                    // out for them; a reload landing on one is ignored too.
+                    if self.model.kits[index].parsed_tags.get(&key).is_some_and(|doc| doc.dirty.is_set()) {
+                        self.model.status = "Save or undo the bitmap's edits before refreshing it".to_owned();
+                    } else {
+                        self.load_tag_in(index, key, ctx.clone(), true);
+                    }
+                }
+            }
             EditorCommand::ApplyTsvPaste => self.apply_tsv_paste(),
             EditorCommand::ApplyBlockConfirm => self.apply_block_confirm(),
             EditorCommand::SaveBlockTable => self.save_block_table(ctx),

@@ -323,6 +323,7 @@ pub(in crate::app) fn draw_bitmap_preview_data(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         draw_bitmap_view_menu(ui, preview, canvas.is_some());
                         draw_bitmap_camera_menu(ui, preview, has_selection);
+                        draw_bitmap_refresh_button(ui, preview);
                         draw_bitmap_header_separator(ui);
                         let previous_spacing = ui.spacing().item_spacing.x;
                         ui.spacing_mut().item_spacing.x = 4.0;
@@ -407,6 +408,25 @@ pub(in crate::app) fn draw_bitmap_preview_data(
     }
 }
 
+const REFRESH_BITMAP_LABEL: &str = "Refresh Bitmap";
+
+/// Refresh Bitmap, as Model Preview's Refresh Model: it reads the tag from
+/// disk again, after a reimport outside Baboon. Only a bitmap tag's own
+/// preview offers it.
+fn draw_bitmap_refresh_button(ui: &mut Ui, preview: &mut BitmapPreviewState) {
+    let Some(enabled) = preview.refresh else {
+        return;
+    };
+    let response = icon_text_button(ui, ButtonIcon::Refresh, REFRESH_BITMAP_LABEL, enabled)
+        .on_hover_text("Load the bitmap again from its tag on disk, as after a reimport outside Baboon.")
+        .on_disabled_hover_text(
+            "Save or undo your edits first: refreshing reads the tag from disk and would drop them.",
+        );
+    if response.clicked() {
+        preview.refresh_clicked = true;
+    }
+}
+
 fn bitmap_header_wrap_width(
     ui: &Ui,
     data: &BitmapPreviewData,
@@ -460,8 +480,18 @@ fn bitmap_header_wrap_width(
             + ui.spacing().button_padding.x * 2.0
     };
     let zoom_label = format!("Zoom: {:.0}%", preview.zoom * 100.0);
-    let action_width =
-        menu_width("View") + menu_width(&zoom_label) + 4.0 * BUTTON_HEIGHT + 3.0 * 4.0 + 1.0 + 24.0;
+    let refresh_width = if preview.refresh.is_some() {
+        menu_width(REFRESH_BITMAP_LABEL) + ui.spacing().item_spacing.x
+    } else {
+        0.0
+    };
+    let action_width = menu_width("View")
+        + menu_width(&zoom_label)
+        + refresh_width
+        + 4.0 * BUTTON_HEIGHT
+        + 3.0 * 4.0
+        + 1.0
+        + 24.0;
 
     // Include the section's 8 px inset on both sides and retain an 8 px gap
     // between the selector and action groups at the point where they wrap.

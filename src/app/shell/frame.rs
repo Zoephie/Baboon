@@ -8116,6 +8116,95 @@ mod tests {
         h.shoot(&dir.join("app_banshee_model_with_imposter.png"));
     }
 
+    /// Refresh Bitmap reads the tag from disk again: a bitmap reimported
+    /// outside Baboon shows its new image without closing the tab. It is
+    /// greyed out while the tag has unsaved edits, which a reload would
+    /// drop. With `BLAM_TEST_H2EK` naming the kit's tags.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn refresh_bitmap_shows_the_bitmap_changed_on_disk() {
+        let Ok(kit) = std::env::var("BLAM_TEST_H2EK") else {
+            return;
+        };
+        let kit = std::path::PathBuf::from(kit.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let root = std::env::temp_dir().join(format!(
+            "baboon-refresh-bitmap-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let folder = root.join("ui").join("refresh");
+        std::fs::create_dir_all(&folder).unwrap();
+        let tag = folder.join("picture.bitmap");
+        let blip = kit.join(r"ui\hud\bitmaps\hud_sensor_blip.bitmap");
+        let null = kit.join(r"ui\global_bitmaps\null.bitmap");
+        std::fs::copy(&blip, &tag).unwrap();
+
+        let mut h = Harness::recording();
+        h.frame(Vec::new());
+        let entries = install_kit_subtree(&mut h, &root, GameId::Halo2, "ui/refresh");
+        let key = entries[0].key.clone();
+        h.app.select_entry(key.clone(), h.ctx.clone());
+        let id = h.app.model.kits[h.app.model.active].id;
+        let decoded = |h: &Harness| {
+            h.app.views[id].caches.bitmap_previews.get(&key).and_then(|preview| {
+                preview.decoded.as_ref().and_then(|data| data.as_ref().ok()).map(|data| {
+                    (data.width, data.height, data.rgba.clone())
+                })
+            })
+        };
+        let settle = |h: &mut Harness, what: &str, done: &dyn Fn(&Harness) -> bool| {
+            let started = Instant::now();
+            while !done(h) {
+                h.frame(Vec::new());
+                if h.painted.iter().any(|text| text == "Bitmap Preview")
+                    && !h.painted.iter().any(|text| text.trim() == "Refresh Bitmap")
+                {
+                    h.click("Bitmap Preview", 0);
+                }
+                assert!(started.elapsed().as_secs() < 60, "{what}: {:?}", h.painted);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            h.idle(5);
+        };
+        settle(&mut h, "the first decode", &|h| {
+            decoded(h).is_some() && h.painted.iter().any(|text| text.trim() == "Refresh Bitmap")
+        });
+        let before = decoded(&h).unwrap();
+        // BABOON_APP_SHOTS saves the header with Refresh Bitmap.
+        if let Some(dir) = std::env::var_os("BABOON_APP_SHOTS") {
+            h.shoot(&std::path::PathBuf::from(dir).join("refresh_bitmap.png"));
+        }
+
+        // Reimported outside Baboon: the tab still shows the old image.
+        std::fs::copy(&null, &tag).unwrap();
+        h.idle(5);
+        assert_eq!(decoded(&h).unwrap(), before, "nothing reads the disk on its own");
+
+        h.click("Refresh Bitmap", 0);
+        settle(&mut h, "the refreshed decode", &|h| {
+            decoded(h).is_some_and(|now| now != before)
+        });
+        assert_eq!(h.app.model.status, "Tag reloaded");
+
+        // Unsaved edits grey it out rather than drop them.
+        h.app.model.kits[h.app.model.active]
+            .parsed_tags
+            .get_mut(&key)
+            .unwrap()
+            .dirty
+            .touch();
+        h.idle(3);
+        assert_eq!(
+            h.app.views[id].caches.bitmap_previews[&key].refresh,
+            Some(false),
+            "greyed out with unsaved edits",
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Halo 2's brute biped, Game Shaders on and a clip playing, switched to
     /// its lowest level of detail: only the viewport changes. The sidebar's
     /// cards and the player stay as they were, frame by frame, while the
@@ -8503,6 +8592,7 @@ mod tests {
             h.shoot(&dir.join(format!("keyword_suggestions_{theme}.png")));
         }
     }
+
 
     /// `BABOON_APP_SHOTS` shots of the theme with `BABOON_SHOT_TAG` open.
     #[cfg(any(target_os = "macos", windows))]

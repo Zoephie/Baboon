@@ -459,6 +459,7 @@ pub(in crate::app) fn draw_tag_pane(
     if is_bitmap_tag(entry) {
         let preview = view.caches.bitmap_previews.entry(key.clone()).or_default();
         preview.apply_view_settings(bitmap_preview_view);
+        preview.refresh = Some(!doc.dirty.is_set() && !kit.loading_tags.contains(&key));
         draw_bitmap_tag(
             ui,
             ctx,
@@ -471,6 +472,9 @@ pub(in crate::app) fn draw_tag_pane(
             &mut edit_context,
             (doc.id, doc.dirty.revision()),
         );
+        if std::mem::take(&mut preview.refresh_clicked) {
+            cx.send(crate::app::editor::EditorCommand::RefreshBitmap { kit: kit_id, key: key.clone() });
+        }
         if preview.view_settings() != bitmap_preview_view {
             let settings = preview.view_settings();
             cx.edit_prefs(move |prefs| prefs.bitmap_preview_view = settings);

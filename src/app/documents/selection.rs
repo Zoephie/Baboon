@@ -26,12 +26,17 @@ impl Baboon {
                 // A user edit made while a refresh was reading wins over the
                 // older disk snapshot returned by that read.
                 if self.model.kits[index].parsed_tags.get(&key).is_some_and(|doc| doc.dirty.is_set()) { return false; }
-                if !self.model.kits[index].parsed_tags.contains_key(&key) {
-                    self.model.status = "Tag loaded".to_owned();
-                }
+                let reloaded = self.model.kits[index].parsed_tags.contains_key(&key);
+                self.model.status = if reloaded { "Tag reloaded" } else { "Tag loaded" }.to_owned();
                 self.model.kits[index]
                     .parsed_tags
                     .insert(key.clone(), TagDocument::clean(tag));
+                // Read again from disk (Refresh Bitmap, or after a rename):
+                // previews drawn from the old bytes go, or a reimported
+                // bitmap kept showing its old image.
+                if reloaded {
+                    self.invalidate_tag_caches_in(index, &key);
+                }
                 // A restored session stages this tag's undo history before the
                 // read that produces the document, so it is waiting here.
                 self.apply_pending_history(index, &key);

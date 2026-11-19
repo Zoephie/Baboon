@@ -219,7 +219,8 @@
                 "Use image and mip selectors to inspect multi-image bitmaps and mip levels.",
                 "Toggle R, G, B, and A channels, including alpha-only inspection.",
                 "Zoom to cursor, drag to pan, use preset zoom levels, or fit the image.",
-                "The preview reports pixel coordinates, RGBA values, format, dimensions, and image count."
+                "The preview reports pixel coordinates, RGBA values, format, dimensions, and image count.",
+                "Refresh Bitmap reads the tag from disk again, so a bitmap reimported outside Baboon shows its new image without closing the tab. It is greyed out while the tag has unsaved edits."
               ]
             }
           ]
