@@ -16,7 +16,7 @@ use crate::app::shell::frame::browser_favorites_divider;
 use crate::app::shell::frame::draw_game_banner_header;
 use crate::app::shell::frame::sidebar_source_path_label;
 use crate::app::shell::frame::navigate_folder_browser;
-use crate::app::shell::frame::browser_search_field;
+use crate::app::shell::frame::browser_search_field_with_keywords;
 use crate::app::shell::frame::is_file_cached;
 
 const FOLDER_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT: f32 = 900.0;
@@ -191,7 +191,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
     // The whole pane, for saying why a drag can't land here.
     let pane_rect = ui.max_rect();
     let generation = cx.model.kits[kit_index].generation;
-    let before_view = (pane.mode, pane.assets_view, pane.filter.clone(), pane.search_scope, pane.asset_bitmaps, pane.asset_models);
+    let before_view = (pane.mode, pane.assets_view, pane.search_query(), pane.search_scope, pane.asset_bitmaps, pane.asset_models);
     let before_sort = (pane.sort, cx.model.prefs.folders_before_tags);
     ui.data_mut(|data|data.insert_temp(browser_selection_owner_id().with("drawing"),(kit_id,pane_key.to_owned())));
     set_browser_selected_tag(ui, pane.selected_tag.clone());
@@ -242,6 +242,8 @@ pub(in crate::app) fn draw_folder_browser_pane(
     let mut load_requests = Vec::new();
     let scanning = cx.model.kits[kit_index].scanning_entries;
     let table_keywords = cx.model.kits[kit_index].keywords.snapshot();
+    let table_catalog = Arc::new(cx.model.keyword_catalog.clone());
+    let keyword_reads = (&cx.model.kits[kit_index].keywords, &cx.model.keyword_catalog);
     let source = cx.model.kits[kit_index].source.as_ref();
     let (bitmap_library, model_library) = (&mut view.bitmap_browser, &mut view.model_browser);
 
@@ -321,7 +323,13 @@ pub(in crate::app) fn draw_folder_browser_pane(
             let header = egui::Frame::NONE.inner_margin(6)
                 .show(ui, |ui| {
             if folder_browser_search_stacks(ui.available_width()) {
-                let search_response = browser_search_field(ui, &mut pane.filter, &search_hint);
+                let search_response = browser_search_field_with_keywords(
+                    ui,
+                    &mut pane.filter,
+                    &mut pane.keyword_terms,
+                    &search_hint,
+                    pane.search_scope.keywords.then_some(keyword_reads),
+                );
                 ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
                     draw_folder_browser_controls(
@@ -345,7 +353,13 @@ pub(in crate::app) fn draw_folder_browser_pane(
                         &mut action,
                     );
                     ui.add_space(6.0);
-                    browser_search_field(ui, &mut pane.filter, &search_hint)
+                    browser_search_field_with_keywords(
+                        ui,
+                        &mut pane.filter,
+                        &mut pane.keyword_terms,
+                        &search_hint,
+                        pane.search_scope.keywords.then_some(keyword_reads),
+                    )
                 })
                 .inner
             }
@@ -366,7 +380,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
                 );
             }
             if before_sort != (pane.sort, folders_before_tags) { invalidate_browser_navigation(ui.ctx()); }
-            if before_view != (pane.mode, pane.assets_view, pane.filter.clone(), pane.search_scope, pane.asset_bitmaps, pane.asset_models) { invalidate_browser_navigation(ui.ctx()); pane.selection.clear(); pane.selected_tag = None; set_browser_selected_tag(ui,None); }
+            if before_view != (pane.mode, pane.assets_view, pane.search_query(), pane.search_scope, pane.asset_bitmaps, pane.asset_models) { invalidate_browser_navigation(ui.ctx()); pane.selection.clear(); pane.selected_tag = None; set_browser_selected_tag(ui,None); }
             let body_height = (ui.available_height() - BUTTON_HEIGHT - 12.0 - ui.spacing().item_spacing.y).max(0.0);
             ui.allocate_ui_with_layout(Vec2::new(ui.available_width(),body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
             egui::Frame::NONE.inner_margin(6).show(ui, |ui| {
@@ -386,7 +400,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
                 }
                 pane.filter_cache.refresh_scoped_async(
                     generation,
-                    &pane.filter,
+                    &pane.search_query(),
                     source.full_entry_set(),
                     false,
                     &pane.rel_path,
@@ -431,6 +445,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
                         ui,
                         search_root.map(Path::to_path_buf),
                         Arc::clone(&table_keywords),
+                        Arc::clone(&table_catalog),
                         pane.date_cache.clone(),
                         &mut pane.table_layout,
                     );
@@ -694,7 +709,7 @@ fn draw_folder_pane_tree(
     action: &mut Option<BrowserAction>,
 ) {
     let game = source.game;
-    let filter = pane.filter.trim().to_owned();
+    let filter = pane.search_query();
     let groups_mode = pane.mode == BrowserMode::Groups;
     let needs_complete_index = reads.is_loose && (groups_mode || !filter.is_empty());
     if needs_complete_index && !source.complete_scan {
@@ -992,7 +1007,16 @@ fn draw_kit_browser_inner(
         let mut show_prefixes = cx.model.prefs.show_browser_prefixes;
         let mut folders_before_tags = cx.model.prefs.folders_before_tags;
         let prev_filter_empty = view.browser.filter.is_empty();
-        browser_search_field(ui, &mut view.browser.filter, &view.browser.search_scope.hint());
+        browser_search_field_with_keywords(
+            ui,
+            &mut view.browser.filter,
+            &mut view.browser.keyword_terms,
+            &view.browser.search_scope.hint(),
+            view.browser
+                .search_scope
+                .keywords
+                .then_some((&cx.model.kits[kit_index].keywords, &cx.model.keyword_catalog)),
+        );
         if let Some(warning) = browser::browser_filter_warning(&view.browser.filter) {
             ui.label(
                 RichText::new(warning)
@@ -1040,7 +1064,7 @@ fn draw_kit_browser_inner(
         }
         ui.add_space(4.0);
         let selected = current_browser_item(kit, view);
-        let filter = view.browser.filter.trim().to_owned();
+        let filter = keyword_query(&view.browser.filter, &view.browser.keyword_terms);
         let mode = view.browser.mode;
         edit_browser_prefs(cx, show_prefixes, folders_before_tags);
         let double_click_to_open = cx.model.prefs.double_click_to_open_tags;

@@ -237,6 +237,10 @@ impl Baboon {
                 keyword_notice = Some(notice);
             }
         }
+        self.model.keyword_catalog.save_if_dirty();
+        if let Some(notice) = self.model.keyword_catalog.take_notice() {
+            keyword_notice = Some(notice);
+        }
         if let Some(notice) = keyword_notice {
             self.model.status = notice;
         }

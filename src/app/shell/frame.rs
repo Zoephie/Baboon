@@ -68,6 +68,29 @@ fn pane_header_input_stroke(ui: &Ui, hovered: bool, focused: bool) -> Stroke {
 /// The shared browser search field. Its icon lives inside the 24-point pill so
 /// the compact sidebar and a wide folder pane use exactly the same geometry.
 pub(in crate::app) fn browser_search_field(ui: &mut Ui, value: &mut String, hint: &str) -> egui::Response {
+    browser_search_field_with_keywords(ui, value, &mut Vec::new(), hint, None)
+}
+
+/// What a search box reads to suggest keywords: the kit's keywords and the
+/// shared list's spelling, colours and order.
+pub(in crate::app) type KeywordReads<'a> = (
+    &'a crate::core::keywords::KeywordStore,
+    &'a crate::core::keyword_catalog::KeywordCatalog,
+);
+
+/// [`browser_search_field`] with keyword pills: `pills` show inside the box
+/// ahead of the text, each with its own ×, and Backspace in an empty box
+/// takes off the last. Given `keywords` (the Keywords scope is on), the word
+/// being typed suggests matching keywords, and picking one makes it a pill.
+pub(in crate::app) fn browser_search_field_with_keywords(
+    ui: &mut Ui,
+    value: &mut String,
+    pills: &mut Vec<String>,
+    hint: &str,
+    keywords: Option<KeywordReads<'_>>,
+) -> egui::Response {
+    const PILL_HEIGHT: f32 = 18.0;
+    const PILL_REMOVE: f32 = 16.0;
     let width = ui.available_width().max(BROWSER_SEARCH_HEIGHT);
     let (rect, background_response) =
         ui.allocate_exact_size(Vec2::new(width, BROWSER_SEARCH_HEIGHT), Sense::hover());
@@ -96,13 +119,76 @@ pub(in crate::app) fn browser_search_field(ui: &mut Ui, value: &mut String, hint
         Vec2::splat(BROWSER_SEARCH_ICON_SIZE),
     );
 
+    let edit_id = background_response.id.with("search_text");
+    // Backspace in an empty box takes off the last pill, before the text
+    // edit sees the key.
+    let edit_focused = ui.memory(|memory| memory.has_focus(edit_id));
+    let mut pills_changed = false;
+    if edit_focused
+        && value.is_empty()
+        && !pills.is_empty()
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace))
+    {
+        pills.pop();
+        pills_changed = true;
+    }
+    let mut x = icon_rect.right() + BROWSER_SEARCH_ICON_TEXT_GAP;
+    let pill_font = FontId::proportional(12.0);
+    let mut removed = None;
+    for (index, pill) in pills.iter().enumerate() {
+        let (label, colour) = match keywords {
+            Some((_, catalog)) => (catalog.display(pill).to_owned(), catalog.colour(pill)),
+            None => (pill.clone(), None),
+        };
+        let pill_width = crate::app::ui_kit::keyword_pill_width(
+            ui.painter(),
+            &label,
+            &pill_font,
+            colour,
+            PILL_REMOVE + 2.0,
+        );
+        // Keep room for some text after the pills.
+        if x + pill_width > clear_rect.left() - 60.0 {
+            break;
+        }
+        let pill_rect = egui::Rect::from_min_size(
+            egui::pos2(x, rect.center().y - PILL_HEIGHT / 2.0),
+            Vec2::new(pill_width, PILL_HEIGHT),
+        );
+        crate::app::ui_kit::paint_keyword_pill(ui.painter(), pill_rect, &label, &pill_font, colour);
+        let remove_rect = egui::Rect::from_center_size(
+            egui::pos2(pill_rect.right() - PILL_REMOVE / 2.0 - 1.0, pill_rect.center().y),
+            Vec2::splat(14.0),
+        );
+        let remove = ui
+            .interact(remove_rect, background_response.id.with(("remove_pill", index)), Sense::click())
+            .on_hover_text("Remove keyword from search");
+        crate::app::ui_kit::paint_close_control(ui, &remove);
+        if remove.clicked() {
+            removed = Some(index);
+        }
+        x = pill_rect.right() + 4.0;
+    }
+    if let Some(index) = removed {
+        pills.remove(index);
+        pills_changed = true;
+    }
     let edit_rect = egui::Rect::from_min_max(
-        egui::pos2(icon_rect.right() + BROWSER_SEARCH_ICON_TEXT_GAP, rect.top()),
+        egui::pos2(x, rect.top()),
         egui::pos2(clear_rect.left() - BROWSER_SEARCH_ICON_TEXT_GAP, rect.bottom()),
     );
+    let hint = if pills.is_empty() { hint } else { "" };
+    // While suggestions show, Tab picks one rather than moving on.
+    let suggesting = keywords.is_some()
+        && ui.data(|data| {
+            data.get_temp::<egui::Rect>(edit_id.with("keyword_suggestions").with("suggestions"))
+                .is_some()
+        });
     let edit_response = ui.put(
         edit_rect,
         crate::app::ui_kit::singleline_text_edit(value)
+            .id(edit_id)
+            .lock_focus(suggesting)
             .hint_text(placeholder_text(hint))
             .text_color(text_dark())
             .frame(egui::Frame::NONE)
@@ -116,7 +202,66 @@ pub(in crate::app) fn browser_search_field(ui: &mut Ui, value: &mut String, hint
     let mut response = background_response
         .union(icon_response)
         .union(edit_response.clone());
-    if !value.is_empty() {
+    if pills_changed {
+        edit_response.request_focus();
+        response.mark_changed();
+    }
+    // The word being typed suggests keywords; picking one makes it a pill.
+    if let Some((store, catalog)) = keywords {
+        // The longest run of typed words, at the end, that some keyword
+        // matches: "to be d" can be one keyword, and "elite wi" text then
+        // a keyword.
+        let starts = std::iter::once(0).chain(
+            value
+                .char_indices()
+                .filter(|(_, c)| c.is_whitespace())
+                .map(|(at, c)| at + c.len_utf8()),
+        );
+        let mut start = value.len();
+        for candidate in starts {
+            let fragment = value[candidate..].trim();
+            if !fragment.is_empty()
+                && !keyword_suggestions(store, catalog, fragment, pills).is_empty()
+            {
+                start = candidate;
+                break;
+            }
+        }
+        let mut word = value[start..].trim().to_owned();
+        if !word.is_empty() && !word.starts_with('^') && !word.contains('|') {
+            let typed = word.clone();
+            let picked = draw_keyword_suggestions(
+                ui,
+                edit_id.with("keyword_suggestions"),
+                &edit_response,
+                rect,
+                store,
+                catalog,
+                pills,
+                &mut word,
+            );
+            let entered = edit_response.lost_focus()
+                && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            // Tab fills the word in: in a search box, that picks it.
+            let keyword = match picked {
+                KeywordPick::Clicked(keyword) => Some(keyword),
+                KeywordPick::Highlighted(keyword) if entered => Some(keyword),
+                _ if word != typed => Some(word.clone()),
+                _ => None,
+            };
+            if let Some(keyword) = keyword {
+                value.truncate(start);
+                let kept = value.trim_end().len();
+                value.truncate(kept);
+                if !pills.contains(&keyword) {
+                    pills.push(keyword);
+                }
+                edit_response.request_focus();
+                response.mark_changed();
+            }
+        }
+    }
+    if !value.is_empty() || !pills.is_empty() {
         let clear = search_clear_control_at(
             ui,
             clear_rect,
@@ -125,6 +270,7 @@ pub(in crate::app) fn browser_search_field(ui: &mut Ui, value: &mut String, hint
         );
         if clear.clicked() {
             value.clear();
+            pills.clear();
             edit_response.request_focus();
             response.mark_changed();
         }
@@ -347,6 +493,7 @@ pub(in crate::app) fn navigate_folder_browser(pane: &mut FolderBrowserState, pat
     pane.rel_path = path;
     pane.label = label;
     pane.filter.clear();
+    pane.keyword_terms.clear();
     pane.cached_generation = u64::MAX;
     pane.cached_source_len = usize::MAX;
     pane.tree = TagTree::default();
@@ -779,34 +926,25 @@ fn scenario_launcher_button(
     )
 }
 
-fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
-    const TEXT_PADDING: f32 = 8.0;
+fn keyword_pill(
+    ui: &mut Ui,
+    tag_key: &str,
+    keyword: &str,
+    catalog: &crate::core::keyword_catalog::KeywordCatalog,
+) -> bool {
     const REMOVE_WIDTH: f32 = 20.0;
     let font_id = egui::TextStyle::Button.resolve(ui.style());
-    let galley = ui
-        .painter()
-        .layout_no_wrap(keyword.to_owned(), font_id, text_dark());
-    let width = TEXT_PADDING + galley.size().x + REMOVE_WIDTH + 4.0;
+    let label = catalog.display(keyword);
+    let colour = catalog.colour(keyword);
+    let width = crate::app::ui_kit::keyword_pill_width(
+        ui.painter(),
+        label,
+        &font_id,
+        colour,
+        REMOVE_WIDTH + 4.0,
+    );
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, BUTTON_HEIGHT), Sense::hover());
-    let background = editor_bg();
-    let target = lift_target();
-    let blend =
-        |base: u8, overlay: u8| (base as f32 + (overlay as f32 - base as f32) * 0.05).round() as u8;
-    let fill = Color32::from_rgb(
-        blend(background.r(), target.r()),
-        blend(background.g(), target.g()),
-        blend(background.b(), target.b()),
-    );
-    ui.painter()
-        .rect_filled(rect, egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8), fill);
-    let text_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + TEXT_PADDING, rect.top()),
-        egui::pos2(rect.right() - REMOVE_WIDTH, rect.bottom()),
-    );
-    let text_pos = egui::Align2::LEFT_CENTER
-        .align_size_within_rect(galley.size(), text_rect)
-        .min;
-    ui.painter().galley(text_pos, galley, text_dark());
+    crate::app::ui_kit::paint_keyword_pill(ui.painter(), rect, label, &font_id, colour);
 
     // The tabs' close button, shown while the pointer is on the keyword;
     // only the button itself removes it.
@@ -911,10 +1049,11 @@ pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, 
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         ui.label(RichText::new("Keywords:").color(subtle_dark()));
-        let existing = cx.model.kits[kit_index].keywords.keywords(tag_key).to_vec();
+        let catalog = &cx.model.keyword_catalog;
+        let existing = catalog.ordered(cx.model.kits[kit_index].keywords.keywords(tag_key));
         let mut remove: Option<String> = None;
         for keyword in &existing {
-            if keyword_pill(ui, tag_key, keyword) {
+            if keyword_pill(ui, tag_key, keyword, catalog) {
                 remove = Some(keyword.clone());
             }
         }
@@ -931,6 +1070,8 @@ pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, 
         let mut draft = ui
             .data_mut(|data| data.get_temp::<String>(draft_id))
             .unwrap_or_default();
+        let suggesting =
+            ui.data(|data| data.get_temp::<egui::Rect>(draft_id.with("suggestions")).is_some());
         let keyword_field = Frame::NONE
             .fill(browser_search_bg())
             .corner_radius(egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8))
@@ -942,6 +1083,9 @@ pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, 
                 ui.horizontal(|ui| {
                     let resp = ui.add(
                         crate::app::ui_kit::singleline_text_edit(&mut draft)
+                            // While suggestions show, Tab fills one in rather
+                            // than moving on.
+                            .lock_focus(suggesting)
                             .hint_text(placeholder_text("add keyword"))
                             .desired_width(120.0)
                             .frame(egui::Frame::NONE),
@@ -984,6 +1128,7 @@ pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, 
             &resp,
             keyword_field.response.rect,
             &cx.model.kits[kit_index].keywords,
+            &cx.model.keyword_catalog,
             &existing,
             &mut draft,
         );
@@ -1006,6 +1151,23 @@ pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, 
     });
 }
 
+/// Keywords matching `typed`, leaving out `existing`: those starting with it
+/// first, then those containing it, each in the user's order. Keywords used
+/// only in other games are offered too, at a count of 0.
+pub(in crate::app) fn keyword_suggestions(
+    keywords: &crate::core::keywords::KeywordStore,
+    catalog: &crate::core::keyword_catalog::KeywordCatalog,
+    typed: &str,
+    existing: &[String],
+) -> Vec<(String, usize)> {
+    let elsewhere: Vec<String> = catalog.entries().iter().map(|entry| entry.key()).collect();
+    let mut found = keywords.suggestions_with(typed, existing, usize::MAX, &elsewhere);
+    let typed = typed.trim().to_ascii_lowercase();
+    found.sort_by_key(|(keyword, _)| (!keyword.starts_with(&typed), catalog.rank(keyword)));
+    found.truncate(8);
+    found
+}
+
 /// What the keyword suggestions gave this frame.
 enum KeywordPick {
     None,
@@ -1025,6 +1187,7 @@ fn draw_keyword_suggestions(
     field: &egui::Response,
     field_rect: egui::Rect,
     keywords: &crate::core::keywords::KeywordStore,
+    catalog: &crate::core::keyword_catalog::KeywordCatalog,
     existing: &[String],
     draft: &mut String,
 ) -> KeywordPick {
@@ -1047,7 +1210,7 @@ fn draw_keyword_suggestions(
         });
         return KeywordPick::None;
     }
-    let suggestions = keywords.suggestions(draft, existing, 8);
+    let suggestions = keyword_suggestions(keywords, catalog, draft, existing);
     let mut highlight = ui
         .data(|data| data.get_temp::<usize>(highlight_id))
         .filter(|index| *index < suggestions.len());
@@ -1096,27 +1259,35 @@ fn draw_keyword_suggestions(
     let mut clicked = None;
     let area = egui::Area::new(list_id)
         .order(egui::Order::Foreground)
-        .fixed_pos(field_rect.left_bottom() + Vec2::new(0.0, 4.0))
+        .fixed_pos(field_rect.left_bottom() + Vec2::new(-0.5, 4.0))
         .show(ui.ctx(), |ui| {
-            Frame::popup(ui.style()).show(ui, |ui| {
-                // As wide as the field, or enough for a longer keyword.
-                ui.set_width(field_rect.width().max(200.0));
+            let frame = Frame::popup(ui.style());
+            // Exactly as wide as the field it hangs from, border included.
+            let inner_width = (field_rect.width() - frame.total_margin().sum().x + 1.5).max(40.0);
+            frame.show(ui, |ui| {
+                ui.set_width(inner_width);
                 ui.spacing_mut().item_spacing.y = 0.0;
+                let font = egui::TextStyle::Button.resolve(ui.style());
                 for (index, (keyword, count)) in suggestions.iter().enumerate() {
                     let row = ui
                         .add(
-                            egui::Button::selectable(
-                                highlight == Some(index),
-                                RichText::new(keyword).color(text_dark()),
-                            )
-                            .right_text(RichText::new(count.to_string()).color(subtle_dark()))
-                            .min_size(Vec2::new(ui.available_width(), 22.0)),
+                            egui::Button::selectable(highlight == Some(index), "")
+                                .right_text(RichText::new(count.to_string()).color(subtle_dark()))
+                                .min_size(Vec2::new(ui.available_width(), 24.0)),
                         )
                         .on_hover_text(format!(
-                            "Used on {count} tag{} or folder{}",
+                            "Used on {count} tag{} or folder{} in this kit",
                             if *count == 1 { "" } else { "s" },
                             if *count == 1 { "" } else { "s" }
                         ));
+                    let label = catalog.display(keyword);
+                    let colour = catalog.colour(keyword);
+                    let width = crate::app::ui_kit::keyword_pill_width(ui.painter(), label, &font, colour, 0.0);
+                    let pill = egui::Rect::from_min_size(
+                        egui::pos2(row.rect.left() + 4.0, row.rect.center().y - 9.0),
+                        Vec2::new(width, 18.0),
+                    );
+                    crate::app::ui_kit::paint_keyword_pill(ui.painter(), pill, label, &font, colour);
                     if row.clicked() {
                         clicked = Some(keyword.clone());
                     }
@@ -4910,12 +5081,28 @@ mod tests {
                 &["Export Mod", "Smoke_P.utoc"],
             ),
             case(
-                "keyword_chooser",
-                &["dialog:KeywordChooser"],
-                &["browser/keyword_chooser.rs"],
+                "keyword_manager",
+                &["dialog:KeywordManager"],
+                &["browser/keyword_manager.rs"],
                 memory_kit,
-                |h| h.app.dialogs.open(KeywordChooser),
-                &["Keywords"],
+                |h| h.app.dialogs.open(KeywordManager::new()),
+                &["Manage Keywords", "Add New Keyword"],
+            ),
+            case(
+                "keyword_change_confirm",
+                &["dialog:KeywordChangeConfirm"],
+                &["browser/keyword_manager.rs"],
+                memory_kit,
+                |h| {
+                    h.app.dialogs.open(crate::app::browser::keyword_manager::KeywordChangeConfirm {
+                        old: "wip".to_owned(),
+                        old_name: "WIP".to_owned(),
+                        into: None,
+                        here: 1,
+                        everywhere: 3,
+                    })
+                },
+                &["Delete Keyword?", "All your editing kits", "3 tags and folders", "This can't be undone."],
             ),
             case(
                 "layout_diff",
@@ -8653,5 +8840,177 @@ mod tests {
             let name = if dark { "theme_dark.png" } else { "theme_light.png" };
             h.shoot(&dir.join(name));
         }
+    }
+
+
+
+
+
+
+
+
+    /// A tag in a scratch kit, with the keywords that tests below give it.
+    fn keyword_kit(name: &str) -> (LooseKit, Harness, KitId, String, String) {
+        let kit = LooseKit::new(name, "halo3_mcc");
+        kit.write_mcc("objects\\alpha", "scenery", |_| {});
+        kit.write_mcc("objects\\beta", "scenery", |_| {});
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        let started = Instant::now();
+        while h.app.model.kits[h.app.model.active]
+            .source
+            .as_ref()
+            .is_none_or(|source| source.entries.len() < 2)
+        {
+            h.frame(Vec::new());
+            assert!(started.elapsed().as_secs() < 20, "the scratch kit's tags");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let active = h.app.model.active;
+        let kit_id = h.app.model.kits[active].id;
+        let key = |name: &str| {
+            h.app.model.kits[active]
+                .source
+                .as_ref()
+                .unwrap()
+                .entries
+                .iter()
+                .find(|entry| entry.display_path.contains(name))
+                .unwrap()
+                .key
+                .clone()
+        };
+        let (alpha, beta) = (key("alpha"), key("beta"));
+        (kit, h, kit_id, alpha, beta)
+    }
+
+    fn add_keyword(h: &mut Harness, kit: KitId, key: &str, keyword: &str) {
+        let ctx = h.ctx.clone();
+        h.app.apply_browser_command(
+            BrowserCommand::AddKeyword { kit, key: key.to_owned(), keyword: keyword.to_owned() },
+            &ctx,
+        );
+    }
+
+    /// Manage Keywords lists keywords as typed, in the user's order; Search
+    /// opens the kit's root in a folder window holding the keyword's pill and
+    /// finds only the tag carrying it; a merge and a delete ask first.
+    #[test]
+    fn manage_keywords_searches_merges_and_asks_before_deleting() {
+        let (_kit, mut h, kit, alpha, beta) = keyword_kit("manage-keywords");
+        add_keyword(&mut h, kit, &alpha, "Mk Ready");
+        add_keyword(&mut h, kit, &beta, "Mk Draft");
+        let ctx = h.ctx.clone();
+        let mut command = |h: &mut Harness, command: BrowserCommand| {
+            h.app.apply_browser_command(command, &ctx);
+            h.idle(3);
+        };
+        command(&mut h, BrowserCommand::SetKeywordColour {
+            keyword: "mk ready".into(),
+            colour: Some(crate::core::keyword_catalog::KeywordColour::Green),
+        });
+        h.app.dialogs.open(KeywordManager::new());
+        h.idle(3);
+        assert!(h.painted_contains("Manage Keywords"), "{:?}", h.painted);
+        assert!(h.painted_contains("Mk Ready") && h.painted_contains("Mk Draft"));
+        assert!(h.painted_contains("Add New Keyword"));
+        let catalog = &h.app.model.keyword_catalog;
+        let ready = catalog.position("mk ready").unwrap();
+        let draft = catalog.position("mk draft").unwrap();
+        assert!(ready < draft);
+        command(&mut h, BrowserCommand::MoveKeyword { from: draft, to: ready });
+        let keywords = ["mk ready".to_owned(), "mk draft".to_owned()];
+        assert_eq!(h.app.model.keyword_catalog.ordered(&keywords), ["mk draft", "mk ready"]);
+
+        // Search: a root folder window whose box holds the pill.
+        command(&mut h, BrowserCommand::SearchKeyword("mk ready".into()));
+        let root = h.app.views[kit]
+            .browser
+            .folder_browsers
+            .values()
+            .find(|pane| pane.rel_path.as_os_str().is_empty())
+            .expect("a root folder window");
+        assert_eq!(root.keyword_terms, ["mk ready"]);
+        assert!(root.filter.is_empty() && root.search_scope.keywords);
+        let started = Instant::now();
+        loop {
+            h.frame(Vec::new());
+            let pane = h.app.views[kit]
+                .browser
+                .folder_browsers
+                .values()
+                .find(|pane| pane.rel_path.as_os_str().is_empty())
+                .unwrap();
+            let found: Vec<String> =
+                pane.filter_cache.entries.iter().map(|entry| entry.key.clone()).collect();
+            if !pane.filter_cache.is_searching() && !found.is_empty() {
+                assert_eq!(found, [alpha.clone()]);
+                break;
+            }
+            assert!(started.elapsed().as_secs() < 20, "{:?}", h.painted);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // Renaming onto another keyword merges them, after asking.
+        command(&mut h, BrowserCommand::RenameKeyword { old: "mk draft".into(), new: "MK READY".into() });
+        assert!(h.painted_contains("Merge Keywords?"), "{:?}", h.painted);
+        assert_eq!(h.app.model.kits[h.app.model.active].keywords.keywords(&beta), ["mk draft"]);
+        h.click("Merge", 0);
+        h.idle(3);
+        let store = &h.app.model.kits[h.app.model.active].keywords;
+        assert_eq!(store.keywords(&beta), ["mk ready"]);
+        assert!(h.app.model.keyword_catalog.get("mk draft").is_none());
+        assert_eq!(h.app.model.keyword_catalog.display("mk ready"), "Mk Ready");
+
+        // A plain rename respells it, straight away.
+        command(&mut h, BrowserCommand::RenameKeyword { old: "mk ready".into(), new: "Mk Done".into() });
+        assert_eq!(h.app.model.kits[h.app.model.active].keywords.keywords(&alpha), ["mk done"]);
+        let root = h.app.views[kit]
+            .browser
+            .folder_browsers
+            .values()
+            .find(|pane| pane.rel_path.as_os_str().is_empty())
+            .unwrap();
+        assert_eq!(root.keyword_terms, ["mk done"], "the search pill follows the rename");
+        assert_eq!(h.app.model.keyword_catalog.colour("mk done"), Some(crate::core::keyword_catalog::KeywordColour::Green));
+
+        // Delete asks, and Cancel keeps it.
+        command(&mut h, BrowserCommand::DeleteKeyword("mk done".into()));
+        assert!(h.painted_contains("Delete Keyword?"), "{:?}", h.painted);
+        assert!(h.painted_contains("Remove \u{201c}Mk Done\u{201d} from every tag and folder"), "{:?}", h.painted);
+        assert!(h.painted_contains("This editing kit") && h.painted_contains("2 tags and folders"), "{:?}", h.painted);
+        h.click("Cancel", 0);
+        h.idle(3);
+        assert_eq!(h.app.model.kits[h.app.model.active].keywords.count_of("mk done"), 2);
+        command(&mut h, BrowserCommand::DeleteKeyword("mk done".into()));
+        h.click("Delete Keyword", 0);
+        h.idle(3);
+        assert_eq!(h.app.model.kits[h.app.model.active].keywords.count_of("mk done"), 0);
+        assert!(h.app.model.keyword_catalog.get("mk done").is_none());
+    }
+
+    /// With Keywords ticked, a word typed in the search box suggests the
+    /// keywords it matches; Tab makes the pick a pill, and Backspace in the
+    /// empty box takes it off again.
+    #[test]
+    fn typing_a_keyword_in_the_search_box_makes_a_pill() {
+        let (_kit, mut h, kit, alpha, _beta) = keyword_kit("search-pills");
+        add_keyword(&mut h, kit, &alpha, "Sp Ready");
+        h.app.views[kit].browser.search_scope.keywords = true;
+        h.idle(2);
+        let hint = h.app.views[kit].browser.search_scope.hint();
+        h.click(&hint, 0);
+        h.frame(vec![egui::Event::Text("sp re".to_owned())]);
+        h.idle(2);
+        assert!(h.painted_contains("Sp Ready"), "the suggestion: {:?}", h.painted);
+        press_key(&mut h, egui::Key::Tab, egui::Modifiers::NONE);
+        h.idle(2);
+        let browser = &h.app.views[kit].browser;
+        assert_eq!(browser.keyword_terms, ["sp ready"]);
+        assert_eq!(browser.filter, "");
+        assert!(h.painted_contains("Sp Ready"), "the pill: {:?}", h.painted);
+        press_key(&mut h, egui::Key::Backspace, egui::Modifiers::NONE);
+        h.idle(2);
+        assert!(h.app.views[kit].browser.keyword_terms.is_empty());
     }
 }

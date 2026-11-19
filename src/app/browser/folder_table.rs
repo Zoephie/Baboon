@@ -157,6 +157,8 @@ struct FolderTable {
     sort: Option<(FolderColumn, bool)>,
     root: Option<PathBuf>,
     keywords: Arc<BTreeMap<String, Vec<String>>>,
+    /// Each keyword's spelling, colour and order.
+    catalog: Arc<crate::core::keyword_catalog::KeywordCatalog>,
     dates: FolderDateCache,
 }
 fn table_id() -> egui::Id {
@@ -171,6 +173,7 @@ pub(in crate::app) fn begin_folder_table(
     ui: &mut Ui,
     root: Option<PathBuf>,
     keywords: Arc<BTreeMap<String, Vec<String>>>,
+    catalog: Arc<crate::core::keyword_catalog::KeywordCatalog>,
     dates: FolderDateCache,
     layout: &mut FolderTableLayout,
 ) {
@@ -280,6 +283,7 @@ pub(in crate::app) fn begin_folder_table(
                 sort: layout.sort,
                 root,
                 keywords,
+                catalog,
                 dates,
             },
         )
@@ -331,31 +335,28 @@ pub(in crate::app) fn paint_folder_columns(
             let Some(keywords) = table.keywords.get(&key) else {
                 continue;
             };
+            let catalog = &table.catalog;
+            let keywords = catalog.ordered(keywords);
+            let font = FontId::proportional(12.0);
             let mut x = cell.left();
-            for keyword in keywords {
-                let galley = painter.layout_no_wrap(
-                    keyword.clone(),
-                    FontId::proportional(12.0),
-                    text_dark(),
-                );
+            for keyword in &keywords {
+                let label = catalog.display(keyword);
+                let colour = catalog.colour(keyword);
+                let width = crate::app::ui_kit::keyword_pill_width(&painter, label, &font, colour, 0.0);
                 let pill = egui::Rect::from_min_size(
                     egui::pos2(x, rect.center().y - 9.0),
-                    Vec2::new(galley.size().x + 14.0, 18.0),
+                    Vec2::new(width, 18.0),
                 );
-                painter.rect_filled(pill, 9.0, ui.visuals().widgets.inactive.weak_bg_fill);
-                painter.galley(
-                    egui::pos2(x + 7.0, rect.center().y - galley.size().y * 0.5),
-                    galley,
-                    text_dark(),
-                );
+                crate::app::ui_kit::paint_keyword_pill(&painter, pill, label, &font, colour);
                 x = pill.right() + 4.0;
             }
+            let names: Vec<&str> = keywords.iter().map(|keyword| catalog.display(keyword)).collect();
             ui.interact(
                 cell,
                 ui.make_persistent_id(("folder_keywords", &key)),
                 Sense::hover(),
             )
-            .on_hover_text(keywords.join(", "));
+            .on_hover_text(names.join(", "));
         } else {
             let text = match column {
                 FolderColumn::Modified => details
@@ -576,6 +577,7 @@ mod tests {
                             ui,
                             None,
                             Arc::new(BTreeMap::new()),
+                            Arc::default(),
                             FolderDateCache::default(),
                             layout,
                         );
@@ -681,14 +683,14 @@ mod tests {
                     FolderColumn::Keywords,
                 ] {
                     layout.sort = Some((column, false));
-                    begin_folder_table(ui, None, Arc::clone(&keywords), cache.clone(), &mut layout);
+                    begin_folder_table(ui, None, Arc::clone(&keywords), Arc::default(), cache.clone(), &mut layout);
                     assert_eq!(
                         table_order_entries(ui, &[0, 1, 2], &entries),
                         Some(vec![0, 1, 2])
                     );
                     end_folder_table(ui);
                     layout.toggle_sort(column);
-                    begin_folder_table(ui, None, Arc::clone(&keywords), cache.clone(), &mut layout);
+                    begin_folder_table(ui, None, Arc::clone(&keywords), Arc::default(), cache.clone(), &mut layout);
                     assert_eq!(
                         table_order_entries(ui, &[0, 1, 2], &entries),
                         Some(vec![1, 0, 2])
@@ -697,7 +699,7 @@ mod tests {
                 }
                 // Sorting receives one sibling list: entries in other branches remain untouched.
                 layout.sort = Some((FolderColumn::Name, true));
-                begin_folder_table(ui, None, Arc::clone(&keywords), cache.clone(), &mut layout);
+                begin_folder_table(ui, None, Arc::clone(&keywords), Arc::default(), cache.clone(), &mut layout);
                 assert_eq!(table_order_entries(ui, &[0, 1], &entries), Some(vec![0, 1]));
                 end_folder_table(ui);
                 assert_eq!(table_order_entries(ui, &[0, 1], &entries), None);
@@ -741,6 +743,7 @@ mod tests {
                         ui,
                         None,
                         Arc::new(keyword_map.clone()),
+                        Arc::default(),
                         FolderDateCache::default(),
                         &mut FolderTableLayout::default(),
                     );

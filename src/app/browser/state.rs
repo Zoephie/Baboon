@@ -162,6 +162,8 @@ pub(in crate::app) struct FolderBrowserState {
     pub(in crate::app) rel_path: PathBuf,
     pub(in crate::app) label: String,
     pub(in crate::app) filter: String,
+    /// Keyword pills in the search box: each must be on a match exactly.
+    pub(in crate::app) keyword_terms: Vec<String>,
     pub(in crate::app) focus_search: bool,
     pub(in crate::app) mode: BrowserMode,
     pub(in crate::app) sort: BrowserSort,
@@ -179,6 +181,13 @@ pub(in crate::app) struct FolderBrowserState {
     pub(in crate::app) asset_bitmaps: bool,
     pub(in crate::app) asset_models: bool,
     pub(in crate::app) asset_cell_size: f32,
+}
+
+impl FolderBrowserState {
+    /// What the search box asks for: its text and its keyword pills.
+    pub(in crate::app) fn search_query(&self) -> String {
+        keyword_query(&self.filter, &self.keyword_terms)
+    }
 }
 
 pub(in crate::app) const FOLDER_PANE_PREFIX: &str = "\u{1f}folder:";

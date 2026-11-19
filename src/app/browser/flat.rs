@@ -61,12 +61,13 @@ pub(super) fn draw(
     let entries = source.full_entry_set();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     let sort = folder_table_sort_signature(ui);
+    let query = pane.search_query();
     (
         generation,
         entries.as_ptr() as usize,
         entries.len(),
         &prefix,
-        &pane.filter,
+        &query,
         pane.search_scope,
         pane.sort,
         folders_first,
@@ -98,7 +99,7 @@ pub(super) fn draw(
             if parent.eq_ignore_ascii_case(&prefix) {
                 if scoped_entry_matches(
                     entry,
-                    &pane.filter,
+                    &query,
                     pane.search_scope,
                     keywords.get(&entry.key).map(Vec::as_slice).unwrap_or(&[]),
                 ) {
@@ -137,11 +138,11 @@ pub(super) fn draw(
         let nodes: Vec<_> = folders
             .into_iter()
             .filter(|(_, path)| {
-                pane.filter.is_empty()
+                query.is_empty()
                     || (pane.search_scope.folders
                         && scoped_folder_matches(
                             &path.file_name().unwrap_or_default().to_string_lossy(),
-                            &pane.filter,
+                            &query,
                         ))
             })
             .map(|(_, path)| TagTreeNode {

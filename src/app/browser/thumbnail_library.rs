@@ -1189,6 +1189,7 @@ mod tests {
             asset_bitmaps: true,
             asset_models: true,
             asset_cell_size: DEFAULT_CELL,
+            keyword_terms: Vec::new(),
         }
     }
 

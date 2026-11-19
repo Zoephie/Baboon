@@ -183,6 +183,7 @@ impl KeywordStore {
     }
 
     /// Folder keys carrying `keyword`.
+    #[cfg(test)]
     pub(crate) fn folders_with(&self, keyword: &str) -> Vec<String> {
         self.by_tag
             .iter()
@@ -199,15 +200,33 @@ impl KeywordStore {
     /// `typed` first, then those containing it, the most used first within
     /// each, leaving out `except` (those the tag already has). Empty `typed`
     /// lists the most used.
+    #[cfg(test)]
     pub(crate) fn suggestions(
         &self,
         typed: &str,
         except: &[String],
         limit: usize,
     ) -> Vec<(String, usize)> {
+        self.suggestions_with(typed, except, limit, &[])
+    }
+
+    /// [`Self::suggestions`], also offering `elsewhere`, keywords used in
+    /// other games (lowercase), at a count of 0 when this kit has none.
+    pub(crate) fn suggestions_with(
+        &self,
+        typed: &str,
+        except: &[String],
+        limit: usize,
+        elsewhere: &[String],
+    ) -> Vec<(String, usize)> {
         let typed = typed.trim().to_ascii_lowercase();
-        let mut matches: Vec<(bool, String, usize)> = self
-            .all_keywords()
+        let mut all = self.all_keywords();
+        for keyword in elsewhere {
+            if !all.iter().any(|(existing, _)| existing == keyword) {
+                all.push((keyword.clone(), 0));
+            }
+        }
+        let mut matches: Vec<(bool, String, usize)> = all
             .into_iter()
             .filter(|(keyword, _)| !except.contains(keyword))
             .filter_map(|(keyword, count)| {
@@ -234,7 +253,38 @@ impl KeywordStore {
         counts.into_iter().collect()
     }
 
+    /// The sidecar this store reads and writes.
+    pub(crate) fn path(&self) -> Option<&std::path::Path> {
+        self.path.as_deref()
+    }
+
+    /// How many tags and folders carry `keyword`.
+    pub(crate) fn count_of(&self, keyword: &str) -> usize {
+        count_in(&self.by_tag, keyword)
+    }
+
+    /// Rename `old` to `new` on every tag and folder carrying it (`new`
+    /// `None` removes it), as Manage Keywords does across games. Returns how
+    /// many changed.
+    pub(crate) fn replace_keyword(&mut self, old: &str, new: Option<&str>) -> usize {
+        let old = old.trim().to_ascii_lowercase();
+        let keys: Vec<String> = self
+            .by_tag
+            .iter()
+            .filter(|(_, keywords)| keywords.contains(&old))
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in &keys {
+            self.remove(key, &old);
+            if let Some(new) = new {
+                self.add(key, new);
+            }
+        }
+        keys.len()
+    }
+
     /// Tag keys carrying `keyword`.
+    #[cfg(test)]
     pub(crate) fn tags_with(&self, keyword: &str) -> Vec<String> {
         self.by_tag
             .iter()
@@ -322,6 +372,41 @@ impl KeywordStore {
     }
 }
 
+fn count_in(by_tag: &BTreeMap<String, Vec<String>>, keyword: &str) -> usize {
+    let keyword = keyword.trim().to_ascii_lowercase();
+    by_tag.values().filter(|keywords| keywords.contains(&keyword)).count()
+}
+
+/// How many tags and folders carry `keyword` in the sidecar at `path`, for a
+/// game with no kit open; 0 when it can't be read.
+pub(crate) fn count_in_sidecar(path: &std::path::Path, keyword: &str) -> usize {
+    read_sidecar(path).map_or(0, |by_tag| count_in(&by_tag, keyword))
+}
+
+/// [`KeywordStore::replace_keyword`] on the sidecar at `path`, for a game
+/// with no kit open: read, change and written back at once. A missing file
+/// is left missing.
+pub(crate) fn replace_in_sidecar(
+    path: &std::path::Path,
+    old: &str,
+    new: Option<&str>,
+) -> Result<usize, String> {
+    if !path.exists() {
+        return Ok(0);
+    }
+    let mut store = KeywordStore {
+        by_tag: Arc::new(read_sidecar(path).map_err(|error| error.message())?),
+        path: Some(path.to_owned()),
+        ..KeywordStore::default()
+    };
+    let changed = store.replace_keyword(old, new);
+    store.save_if_dirty();
+    match store.take_notice() {
+        Some(notice) => Err(notice),
+        None => Ok(changed),
+    }
+}
+
 /// Why a sidecar on disk could not be used as a merge base.
 #[derive(Debug)]
 enum SidecarError {
@@ -376,7 +461,7 @@ fn set_aside(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
 
 /// Replace `path` with `text` so a crash leaves either the old file or the
 /// new one, never a truncated one.
-fn write_atomic(path: &std::path::Path, text: &str) -> Result<(), String> {
+pub(crate) fn write_atomic(path: &std::path::Path, text: &str) -> Result<(), String> {
     use std::io::Write as _;
     let mut file =
         atomic_write_file::AtomicWriteFile::open(path).map_err(|error| error.to_string())?;
@@ -608,5 +693,33 @@ mod tests {
         let written: Value = serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
         assert_eq!(written, json!({ key("file_posix"): ["storm"] }));
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// Manage Keywords' rename and delete: every tag and folder carrying the
+    /// keyword changes, in an open kit's store and in a game's file alike.
+    #[test]
+    fn a_keyword_is_renamed_or_removed_everywhere_it_is_used() {
+        let mut store = KeywordStore::default();
+        store.add("a", "brutes");
+        store.add("b", "brutes");
+        store.add("b", "brute");
+        store.add("c", "other");
+        assert_eq!(store.count_of("Brutes"), 2);
+        assert_eq!(store.replace_keyword("brutes", Some("Brute")), 2);
+        assert_eq!(store.keywords("a"), ["brute"]);
+        assert_eq!(store.keywords("b"), ["brute"]);
+        assert_eq!(store.replace_keyword("other", None), 1);
+        assert!(store.keywords("c").is_empty());
+
+        let dir = unique_temp_dir("keyword_replace");
+        let path = dir.join("halo2_mcc_keywords.json");
+        std::fs::write(&path, r#"{"x": ["wip", "keep"], "y": ["wip"]}"#).unwrap();
+        assert_eq!(count_in_sidecar(&path, "WIP"), 2);
+        assert_eq!(replace_in_sidecar(&path, "wip", None), Ok(2));
+        let written: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(written, json!({ "x": ["keep"] }));
+        assert_eq!(replace_in_sidecar(&dir.join("missing.json"), "wip", None), Ok(0));
+        assert!(!dir.join("missing.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

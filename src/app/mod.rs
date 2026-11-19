@@ -526,6 +526,15 @@ impl Baboon {
                 next_kit_id: 1,
                 prefs: live_prefs,
                 status: "Ready".to_owned(),
+                keyword_catalog: {
+                    use crate::core::keyword_catalog::KeywordCatalog;
+                    let mut catalog = KeywordCatalog::default();
+                    // Tests keep it in memory: they run side by side.
+                    if !cfg!(test) {
+                        catalog.load_at(Some(KeywordCatalog::default_path()));
+                    }
+                    catalog
+                },
             },
         }
     }

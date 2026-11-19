@@ -1114,6 +1114,8 @@ mod tests {
             mode: _,
             sort: _,
             filter: _,
+            // Keywords, not tag keys.
+            keyword_terms: _,
         } = KitBrowser::default();
         let EditorCaches {
             // Carried by `rekey_tag_in_kit`.

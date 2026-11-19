@@ -1953,3 +1953,73 @@ mod tests {
         assert!(matches!(visuals.handle_shape, egui::style::HandleShape::Circle));
     }
 }
+
+/// A keyword pill's colours, from its Manage Keywords colour.
+pub(in crate::app) struct KeywordPillColours {
+    pub(in crate::app) fill: Color32,
+    pub(in crate::app) border: Option<Color32>,
+    pub(in crate::app) dot: Option<Color32>,
+    pub(in crate::app) text: Color32,
+}
+
+/// A keyword pill's colours: no colour is the neutral pill, the page lifted
+/// a touch; a colour tints the fill and border and adds a dot, a darker
+/// version of each colour for dark mode.
+pub(in crate::app) fn keyword_pill_colours(
+    colour: Option<crate::core::keyword_catalog::KeywordColour>,
+) -> KeywordPillColours {
+    use crate::core::keyword_catalog::KeywordColour as K;
+    let mix = |base: Color32, over: Color32, amount: f32| {
+        let channel = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * amount).round() as u8;
+        Color32::from_rgb(
+            channel(base.r(), over.r()),
+            channel(base.g(), over.g()),
+            channel(base.b(), over.b()),
+        )
+    };
+    let background = editor_bg();
+    let Some(colour) = colour else {
+        return KeywordPillColours {
+            fill: mix(background, lift_target(), 0.05),
+            border: None,
+            dot: None,
+            text: text_dark(),
+        };
+    };
+    let dark = is_dark_mode();
+    let hue = match (colour, dark) {
+        (K::Red, false) => Color32::from_rgb(238, 120, 120),
+        (K::Orange, false) => Color32::from_rgb(238, 170, 112),
+        (K::Yellow, false) => Color32::from_rgb(230, 208, 104),
+        (K::Green, false) => Color32::from_rgb(112, 212, 112),
+        (K::Teal, false) => Color32::from_rgb(104, 214, 186),
+        (K::Blue, false) => Color32::from_rgb(120, 170, 238),
+        (K::Purple, false) => Color32::from_rgb(170, 136, 238),
+        (K::Pink, false) => Color32::from_rgb(236, 128, 200),
+        (K::Grey, false) => Color32::from_rgb(172, 172, 172),
+        (K::Red, true) => Color32::from_rgb(204, 72, 72),
+        (K::Orange, true) => Color32::from_rgb(204, 128, 64),
+        (K::Yellow, true) => Color32::from_rgb(192, 170, 64),
+        (K::Green, true) => Color32::from_rgb(72, 172, 72),
+        (K::Teal, true) => Color32::from_rgb(64, 172, 140),
+        (K::Blue, true) => Color32::from_rgb(72, 132, 204),
+        (K::Purple, true) => Color32::from_rgb(132, 98, 204),
+        (K::Pink, true) => Color32::from_rgb(192, 72, 142),
+        (K::Grey, true) => Color32::from_rgb(128, 128, 128),
+    };
+    if dark {
+        KeywordPillColours {
+            fill: mix(background, hue, 0.32),
+            border: Some(mix(background, hue, 0.58)),
+            dot: Some(hue),
+            text: mix(Color32::from_rgb(240, 240, 240), hue, 0.18),
+        }
+    } else {
+        KeywordPillColours {
+            fill: mix(background, hue, 0.38),
+            border: Some(mix(hue, Color32::from_rgb(96, 88, 84), 0.45)),
+            dot: Some(hue),
+            text: mix(Color32::from_rgb(44, 40, 38), hue, 0.22),
+        }
+    }
+}

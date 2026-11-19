@@ -15,6 +15,7 @@ pub(crate) mod ce_pixel_shader;
 pub(crate) mod h2_pixel_shader;
 pub(crate) mod hlsl;
 pub(crate) mod index_targets;
+pub(crate) mod keyword_catalog;
 pub(crate) mod keywords;
 pub(crate) mod process;
 pub(crate) mod recovery;

@@ -26,16 +26,48 @@ selection, with fewer file-management actions because assets may span folders.
 
 A folder carries keywords as a tag does: add them on the **Keywords** bar in
 its header, and they show in its row's Keywords column. Typing in the bar
-lists the keywords already in use that match, the most used first, so similar
-tags and folders share one spelling: click one to add it, or use Up and Down
-and press Enter; Tab fills the highlighted one in. A search with **Keywords**
-ticked finds folders by their own keywords as well as tags by theirs, and the
-Keywords window names the folders that carry the one picked. A folder's
-keywords are not given to the tags inside it.
+lists the keywords that match, so similar tags and folders share one
+spelling: click one to add it, or use Up and Down and press Enter; Tab fills
+the highlighted one in. Keywords used in other games are offered too. A
+folder's keywords are not given to the tags inside it.
 
-Keywords live in Baboon's own data, not in the tags, one file per game shared
-by that game's kits. Renaming or moving a folder in Baboon carries its
-keywords, and those of the folders inside it, along; deleting it drops them.
+**Tools → Manage Keywords** lists every keyword, in every game, in your
+order, with how many tags and folders in this kit carry each:
+
+- Drag a row by its handle to reorder. Keyword pills everywhere (headers,
+  the Keywords column, suggestions, the search box) follow this order.
+- Click a keyword's pill to give it a colour, or none. Each colour has a
+  light and a dark version.
+- **Search** (magnifier) opens the kit's root in a folder window, in Folders
+  view, with the keyword in its search box.
+- **Rename** (pencil) renames it on every tag and folder in every game.
+  Renaming it to another keyword merges the two, after asking.
+- **Delete** removes it from every tag and folder in every game, after
+  asking. It can't be undone.
+
+The row's count is this kit's only. The Merge and Delete warnings show both
+this kit's count and the total across all your editing kits, since a
+keyword unused here may still be used in another kit.
+- **Add New Keyword** adds one before anything carries it.
+
+Keywords keep the spelling they were first typed with ("To Be Deleted") and
+match without letter case.
+
+### Keyword pills in the search box
+
+With **Keywords** ticked, typing in a search box suggests matching keywords.
+Picking one (click, Tab, or Up/Down then Enter) makes it a pill in the box. A
+pill matches its keyword exactly, so "wip" doesn't find "wip-old". Text typed
+beside a pill searches as usual, and both must match: a **WIP** pill with
+`model` finds tags named "model" that carry WIP. `^`, `$` and `|` still work,
+and with `|` the pill applies to each alternative. Each pill has its own ×,
+and Backspace in an empty box removes the last one.
+
+Which tags and folders carry which keyword lives in Baboon's own data, not in
+the tags, one file per game shared by that game's kits. The list of keywords,
+their spelling, colours and order is one file for every game. Renaming or
+moving a folder in Baboon carries its keywords, and those of the folders
+inside it, along; deleting it drops them.
 
 ## Selection and keyboard navigation
 

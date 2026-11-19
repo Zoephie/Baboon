@@ -102,7 +102,7 @@ pub(in crate::app) enum AppAction {
     CompareTags { kit: KitId, key: String },
     FixDependencies,
     OpenFieldValueSearch,
-    OpenKeywordChooser,
+    OpenKeywordManager,
     FindUnreferencedTags,
     ListMapIds,
     ListSoundsByClass,
@@ -230,7 +230,7 @@ impl Baboon {
                     self.dialogs.open(FieldValueSearchWindow::default());
                 }
             }
-            AppAction::OpenKeywordChooser => self.dialogs.open(KeywordChooser),
+            AppAction::OpenKeywordManager => self.dialogs.open(KeywordManager::new()),
             AppAction::FindUnreferencedTags => self.show_unreferenced_tags(),
             AppAction::ListMapIds => self.show_map_ids(ctx),
             AppAction::ListSoundsByClass => self.show_sounds_by_class(ctx),

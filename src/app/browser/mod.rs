@@ -337,8 +337,8 @@ pub(in crate::app) mod thumbnail_library;
 pub(in crate::app) use thumbnail_library::*;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
-pub(in crate::app) mod keyword_chooser;
-pub(in crate::app) use keyword_chooser::KeywordChooser;
+pub(in crate::app) mod keyword_manager;
+pub(in crate::app) use keyword_manager::KeywordManager;
 
 /// The browser: a tag waiting to be revealed.
 pub(in crate::app) struct BrowserFeature {
@@ -362,6 +362,8 @@ pub(in crate::app) struct KitBrowser {
     pub(in crate::app) mode: BrowserMode,
     pub(in crate::app) sort: BrowserSort,
     pub(in crate::app) filter: String,
+    /// Keyword pills in the search box: each must be on a match exactly.
+    pub(in crate::app) keyword_terms: Vec<String>,
     pub(in crate::app) filter_cache: FilterCache,
     /// What the search box matches: tag names, folder names, keywords.
     pub(in crate::app) search_scope: BrowserSearchScope,
@@ -447,8 +449,23 @@ pub(in crate::app) enum BrowserCommand {
         key: String,
         keyword: String,
     },
-    /// List the active kit's tags carrying a keyword.
-    ShowTagsWithKeyword(String),
+    /// Show the active kit's tags and folders carrying a keyword.
+    SearchKeyword(String),
+    /// Manage Keywords: move the keyword at `from` to `to` in the order.
+    MoveKeyword { from: usize, to: usize },
+    /// Manage Keywords: a keyword's colour; `None` is the neutral pill.
+    SetKeywordColour {
+        keyword: String,
+        colour: Option<crate::core::keyword_catalog::KeywordColour>,
+    },
+    /// Manage Keywords' Add New Keyword.
+    NewKeyword(String),
+    /// Manage Keywords' Rename; asks first when it merges two keywords.
+    RenameKeyword { old: String, new: String },
+    /// Manage Keywords' Delete; asks first when anything carries it.
+    DeleteKeyword(String),
+    /// A confirmed merge (`new`) or delete (`None`), in every game.
+    ChangeKeywordEverywhere { old: String, new: Option<String> },
     /// Load the folders at `paths` in one of `kit`'s lazy loose-folder trees,
     /// which a browser drew open before they had loaded.
     LoadFolders {
@@ -480,9 +497,28 @@ impl Baboon {
             BrowserCommand::AddKeyword { kit, key, keyword } => {
                 if let Some(index) = self.model.kit_index(kit) {
                     self.model.kits[index].keywords.add(&key, &keyword);
+                    // Spelled as typed in the shared list, if it's new.
+                    self.model.keyword_catalog.ensure(&keyword);
                 }
             }
-            BrowserCommand::ShowTagsWithKeyword(keyword) => self.show_tags_with_keyword(&keyword),
+            BrowserCommand::SearchKeyword(keyword) => self.search_keyword(&keyword, ctx),
+            BrowserCommand::MoveKeyword { from, to } => self.model.keyword_catalog.move_to(from, to),
+            BrowserCommand::SetKeywordColour { keyword, colour } => {
+                self.model.keyword_catalog.set_colour(&keyword, colour);
+            }
+            BrowserCommand::NewKeyword(name) => {
+                if !self.model.keyword_catalog.ensure(&name) {
+                    self.model.status = format!(
+                        "\u{201c}{}\u{201d} is already a keyword",
+                        self.model.keyword_catalog.display(&name)
+                    );
+                }
+            }
+            BrowserCommand::RenameKeyword { old, new } => self.rename_keyword(&old, &new),
+            BrowserCommand::DeleteKeyword(keyword) => self.delete_keyword(&keyword),
+            BrowserCommand::ChangeKeywordEverywhere { old, new } => {
+                self.change_keyword_everywhere(&old, new.as_deref());
+            }
             BrowserCommand::LoadFolders { kit, tree, paths } => self.load_browser_folders(kit, tree, &paths),
             BrowserCommand::ScanAllEntries { kit } => {
                 if let Some(index) = self.model.kit_index(kit) {

@@ -156,6 +156,12 @@ impl Baboon {
             .map(|layout| layout.root);
         view.terminal.open = terminal_open;
         kit.keywords.load_for_game(game.map(GameId::as_str));
+        // Keywords from before the shared list, or added by another Baboon,
+        // join its end.
+        let found = kit.keywords.all_keywords();
+        self.model
+            .keyword_catalog
+            .ensure_all(found.iter().map(|(keyword, _)| keyword.as_str()));
     }
 
     /// Applies `WorkerMessage::AllEntriesScanned`, rejecting stale source generations.

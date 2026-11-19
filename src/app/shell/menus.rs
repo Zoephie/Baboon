@@ -606,9 +606,9 @@ fn draw_tools_menu(cx: &Ctx, ui: &mut Ui) {
         close_menu(ui);
         cx.send(AppAction::OpenFieldValueSearch);
     }
-    if ui.button("Browse Keywords...").clicked() {
+    if ui.button("Manage Keywords...").clicked() {
         close_menu(ui);
-        cx.send(AppAction::OpenKeywordChooser);
+        cx.send(AppAction::OpenKeywordManager);
     }
     if ui.button("Find Unreferenced Tags...").clicked() {
         close_menu(ui);

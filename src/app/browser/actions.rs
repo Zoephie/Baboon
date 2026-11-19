@@ -656,6 +656,7 @@ impl Baboon {
                         asset_bitmaps: true,
                         asset_models: true,
                         asset_cell_size: DEFAULT_CELL,
+                        keyword_terms: Vec::new(),
                     });
                 self.kit_and_view(self.model.active).open_tag_pane(&key);
             }
@@ -892,7 +893,7 @@ impl Baboon {
         let kit=self.model.active_kit_id();
         if let Some(path)=self.views[kit].browser.folder_browsers.get(key).map(|pane|pane.rel_path.clone()) {
             let browser=&mut self.views[kit].browser;
-            browser.filter.clear();browser.mode=BrowserMode::Folders;
+            browser.filter.clear();browser.keyword_terms.clear();browser.mode=BrowserMode::Folders;
             browser.selected_tag=Some(folder_pane_key(&path));
             self.views[kit].navigation_hidden=false;
             let relative=tag_path::relative_tag_path(&path);
@@ -905,6 +906,7 @@ impl Baboon {
         };
         self.views[self.model.kits[self.model.active].id].navigation_hidden = false;
         self.views[self.model.kits[self.model.active].id].browser.filter.clear();
+        self.views[self.model.kits[self.model.active].id].browser.keyword_terms.clear();
         self.views[self.model.kits[self.model.active].id].browser.mode = BrowserMode::Folders;
         // An open tag comes to the front as well as being selected; one that is
         // not open is only revealed. Selecting a tag with no tab would leave

@@ -144,6 +144,13 @@ impl<'a> SinglelineTextEdit<'a> {
         self
     }
 
+    /// Keep the keyboard on this field when Tab is pressed, as while a
+    /// suggestion list under it takes Tab to pick.
+    pub(in crate::app) fn lock_focus(mut self, lock: bool) -> Self {
+        self.edit = self.edit.lock_focus(lock);
+        self
+    }
+
     pub(in crate::app) fn frame(mut self, frame: egui::Frame) -> Self {
         self.edit = self.edit.frame(frame);
         self.custom_frame = true;
