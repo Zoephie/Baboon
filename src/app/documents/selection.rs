@@ -26,8 +26,12 @@ impl Baboon {
                 // A user edit made while a refresh was reading wins over the
                 // older disk snapshot returned by that read.
                 if self.model.kits[index].parsed_tags.get(&key).is_some_and(|doc| doc.dirty.is_set()) { return false; }
+                // A read again (after a rename, say) leaves the status alone:
+                // it holds what the action that asked for it said.
                 let reloaded = self.model.kits[index].parsed_tags.contains_key(&key);
-                self.model.status = if reloaded { "Tag reloaded" } else { "Tag loaded" }.to_owned();
+                if !reloaded {
+                    self.model.status = "Tag loaded".to_owned();
+                }
                 self.model.kits[index]
                     .parsed_tags
                     .insert(key.clone(), TagDocument::clean(tag));

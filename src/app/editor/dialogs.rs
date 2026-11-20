@@ -280,6 +280,9 @@ impl Baboon {
                         self.model.status = "Save or undo the bitmap's edits before refreshing it".to_owned();
                     } else {
                         self.load_tag_in(index, key, ctx.clone(), true);
+                        // Said now: the read landing leaves the status alone,
+                        // and one that fails says so instead.
+                        self.model.status = "Bitmap refreshed from disk".to_owned();
                     }
                 }
             }

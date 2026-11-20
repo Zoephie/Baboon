@@ -8390,7 +8390,7 @@ mod tests {
         settle(&mut h, "the refreshed decode", &|h| {
             decoded(h).is_some_and(|now| now != before)
         });
-        assert_eq!(h.app.model.status, "Tag reloaded");
+        assert_eq!(h.app.model.status, "Bitmap refreshed from disk");
 
         // Unsaved edits grey it out rather than drop them.
         h.app.model.kits[h.app.model.active]
