@@ -216,7 +216,7 @@ impl KeywordManager {
             return;
         }
         let colour = entry.colour;
-        let width = crate::app::ui_kit::keyword_pill_width(ui.painter(), &entry.name, font, colour, 0.0);
+        let width = crate::app::ui_kit::keyword_pill_width(ui.painter(), &entry.name, font, 0.0);
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, PILL_HEIGHT), Sense::click());
         crate::app::ui_kit::paint_keyword_pill(ui.painter(), rect, &entry.name, font, colour);
         if response.hovered() {

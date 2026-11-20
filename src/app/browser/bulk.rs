@@ -67,6 +67,9 @@ pub(in crate::app) struct BulkOutcome {
     pub deleted: Vec<String>,
     pub deleted_folders: Vec<PathBuf>,
     pub renamed: bool,
+    /// What went with a selected folder, for a copy, which has no review to
+    /// say it in.
+    pub note: Option<String>,
 }
 
 impl Baboon {
@@ -242,6 +245,9 @@ impl Baboon {
         };
         let root = root.clone();
         let (kept, covered) = without_covered(&request.keys, source.full_entry_set(), request.action);
+        // The save prompt keeps the whole selection, so the items inside a
+        // selected folder are found, and said, again when it comes back.
+        let selected = request.keys.clone();
         let mut request = request;
         request.keys = kept;
         let mut paths = Vec::new();
@@ -270,6 +276,7 @@ impl Baboon {
             .values()
             .any(|doc| doc.dirty.is_set());
         if dirty && !confirmed {
+            request.keys = selected;
             self.dialogs.open(BulkPrompt {
                 message: "Save all unsaved tags in this workspace and continue?".into(),
                 request,
@@ -344,11 +351,12 @@ impl Baboon {
                     action,
                     selected: selection_rows(&root, &roots, &previous),
                     game,
-                    covered,
+                    covered: covered.clone(),
                 });
             }
         }
         let stamp = request.stamp;
+        let copying = request.action == BulkAction::Copy;
         let tx = self.tx.clone();
         // A delete first only checks what it would remove, so it is shown as
         // the question it leads to rather than as a delete in progress.
@@ -379,6 +387,7 @@ impl Baboon {
                     previous,
                     index,
                     context,
+                    covered.filter(|_| copying),
                     &tx,
                 ),
             },
@@ -403,9 +412,9 @@ impl Baboon {
             Ok(outcome) => outcome,
             Err(error) => return self.handle_folder_refactor_finished(stamp, Err(error), ctx),
         };
+        self.model.kits[index].keywords.forget_tags(outcome.deleted.iter().map(String::as_str));
         for key in &outcome.deleted {
             self.forget_campaign_overlay(index, key);
-            self.model.kits[index].keywords.forget_tag(key);
             let mut both = self.kit_and_view(index);
             both.close_tag_pane(key);
             both.drop_document(key);
@@ -445,6 +454,9 @@ impl Baboon {
         let completed = outcome.completed;
         let pane = outcome.pane;
         self.handle_folder_refactor_finished(stamp, Ok(outcome.done), ctx);
+        if let Some(note) = outcome.note {
+            self.model.status = format!("{} {note}", self.model.status);
+        }
         self.refresh_favorite_entries_for(index);
         self.model.kits[index].field_index.invalidate();
         if let Some(pane) = self.views[kit].browser.folder_browsers.get_mut(&pane) {
@@ -495,6 +507,7 @@ fn run_files(
     previous: Vec<TagEntry>,
     index: Option<ReverseDependencyIndex>,
     context: folder_merge_ops::MergeContext,
+    note: Option<String>,
     tx: &Sender<WorkerMessage>,
 ) -> Result<BulkOutcome, String> {
     let moving = request.action == BulkAction::Move;
@@ -582,6 +595,7 @@ fn run_files(
         done,
         pane: request.pane,
         renamed: false,
+        note,
         completed,
         deleted,
         deleted_folders: if request.action == BulkAction::Delete {
@@ -606,8 +620,6 @@ fn entries_by_path(entries: &[TagEntry]) -> HashMap<&Path, &TagEntry> {
         .collect()
 }
 
-/// The selected items of a bulk delete or move as review rows: folders with a folder
-/// icon, tags with their group's icon, other files with the generic icon.
 /// `keys` without the items inside a selected folder, which go with it,
 /// and what to tell the user about them.
 pub(in crate::app) fn without_covered(
@@ -615,10 +627,14 @@ pub(in crate::app) fn without_covered(
     entries: &[TagEntry],
     action: BulkAction,
 ) -> (Vec<String>, Option<String>) {
-    let folders: Vec<String> = keys
+    // Each selected folder lowercased to match, and as it is spelled.
+    let folders: Vec<(String, String)> = keys
         .iter()
         .filter_map(|key| key.strip_prefix(FOLDER_PANE_PREFIX))
-        .map(|path| path.replace('/', "\\").to_ascii_lowercase())
+        .map(|path| {
+            let path = path.replace('/', "\\");
+            (path.to_ascii_lowercase(), path)
+        })
         .collect();
     if folders.is_empty() {
         return (keys.to_vec(), None);
@@ -637,9 +653,9 @@ pub(in crate::app) fn without_covered(
         let lower = path.to_ascii_lowercase();
         folders
             .iter()
-            .filter(|folder| lower != **folder && tag_path::is_within(&lower, folder))
-            .min_by_key(|folder| folder.len())
-            .cloned()
+            .filter(|(folder, _)| lower != *folder && tag_path::is_within(&lower, folder))
+            .min_by_key(|(folder, _)| folder.len())
+            .map(|(_, spelled)| spelled.clone())
     };
     let mut kept = Vec::new();
     let mut covered = Vec::new();
@@ -669,6 +685,8 @@ pub(in crate::app) fn without_covered(
     (kept, note)
 }
 
+/// The selected items of a bulk delete or move as review rows: folders with a folder
+/// icon, tags with their group's icon, other files with the generic icon.
 pub(in crate::app) fn selection_rows(
     root: &Path,
     roots: &[PathBuf],
@@ -1021,6 +1039,7 @@ mod tests {
             kit.entries(),
             Some(kit.index()),
             context(kit),
+            None,
             &tx,
         );
         drop(tx);
@@ -1248,6 +1267,7 @@ mod tests {
             kit.entries(),
             Some(kit.index()),
             context(&kit),
+            None,
             &tx,
         );
         drop(tx);
@@ -1340,6 +1360,7 @@ mod tests {
             kit.entries(),
             Some(kit.index()),
             context(&kit),
+            None,
             &tx,
         );
         drop(tx);
@@ -1442,13 +1463,13 @@ mod tests {
             entry("elite", "objects\\characters\\elite\\elite.biped"),
             entry("bruteish", "objects\\characters\\brute_old\\a.biped"),
         ];
-        let folder = folder_pane_key(Path::new("objects").join("characters").join("brute").as_path());
+        let folder = folder_pane_key(Path::new("objects").join("characters").join("Brute").as_path());
         let keys = vec![folder.clone(), "brute".to_owned(), "elite".to_owned(), "bruteish".to_owned()];
         let (kept, note) = without_covered(&keys, &entries, BulkAction::Move);
         assert_eq!(kept, [folder, "elite".to_owned(), "bruteish".to_owned()]);
         assert_eq!(
             note.as_deref(),
-            Some("\u{201c}brute.biped\u{201d} moves with its folder \u{201c}brute\u{201d}, which is also selected.")
+            Some("\u{201c}brute.biped\u{201d} moves with its folder \u{201c}Brute\u{201d}, which is also selected.")
         );
         let (_, note) = without_covered(&keys[1..], &entries, BulkAction::Delete);
         assert!(note.is_none());
@@ -1516,6 +1537,7 @@ mod tests {
             kit.entries(),
             Some(kit.index()),
             context(kit),
+            None,
             &tx,
         );
         drop(tx);

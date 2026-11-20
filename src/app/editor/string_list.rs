@@ -2212,7 +2212,7 @@ fn paint_swatch(painter: &egui::Painter, rect: egui::Rect, argb: u32) {
         let light = (x == 0.0) == (y == 0.0);
         let cell = egui::Rect::from_min_size(rect.min + Vec2::new(x, y), Vec2::splat(half));
         // fixed: a checker under a colour swatch, toned to the swatch
-            painter.rect_filled(cell, 0.0, if light { Color32::from_gray(230) } else { Color32::from_gray(160) });
+        painter.rect_filled(cell, 0.0, if light { Color32::from_gray(230) } else { Color32::from_gray(160) });
     }
     painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(r, g, b, a));
     painter.rect_stroke(rect, 0.0, Stroke::new(1.0, text_dark()), egui::StrokeKind::Inside);

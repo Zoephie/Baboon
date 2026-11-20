@@ -147,7 +147,6 @@ pub(in crate::app) fn browser_search_field_with_keywords(
             ui.painter(),
             &label,
             &pill_font,
-            colour,
             PILL_REMOVE + 2.0,
         );
         // Keep room for some text after the pills.
@@ -943,7 +942,6 @@ fn keyword_pill(
         ui.painter(),
         label,
         &font_id,
-        colour,
         REMOVE_WIDTH + 4.0,
     );
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, BUTTON_HEIGHT), Sense::hover());
@@ -1285,7 +1283,7 @@ fn draw_keyword_suggestions(
                         ));
                     let label = catalog.display(keyword);
                     let colour = catalog.colour(keyword);
-                    let width = crate::app::ui_kit::keyword_pill_width(ui.painter(), label, &font, colour, 0.0);
+                    let width = crate::app::ui_kit::keyword_pill_width(ui.painter(), label, &font, 0.0);
                     let pill = egui::Rect::from_min_size(
                         egui::pos2(row.rect.left() + 4.0, row.rect.center().y - 9.0),
                         Vec2::new(width, 18.0),
@@ -8287,6 +8285,7 @@ mod tests {
     /// `BLAM_TEST_HREK` naming the kit's tags.
     #[cfg(any(target_os = "macos", windows))]
     #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
     fn app_shots_of_the_banshee_imposter() {
         let (Some(dir), Ok(root)) = (
             std::env::var_os("BABOON_APP_SHOTS"),
@@ -8494,6 +8493,7 @@ mod tests {
     /// `model_light_clicked.png`.
     #[cfg(any(target_os = "macos", windows))]
     #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
     fn app_shots_of_the_model_preview() {
         let (Some(dir), Ok(root)) = (
             std::env::var_os("BABOON_APP_SHOTS"),
@@ -8637,6 +8637,7 @@ mod tests {
     /// `BLAM_TEST_H2EK` naming the kit's tags: for judging the themes.
     #[cfg(any(target_os = "macos", windows))]
     #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
     fn app_shots_of_the_sound_players() {
         let (Some(dir), Ok(root), Ok(tag), Ok(other)) = (
             std::env::var_os("BABOON_APP_SHOTS"),
@@ -8722,6 +8723,7 @@ mod tests {
     /// "bru" typed. Light and dark.
     #[cfg(any(target_os = "macos", windows))]
     #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
     fn app_shots_of_folder_keywords() {
         let (Some(dir), Ok(root), Ok(folder)) = (
             std::env::var_os("BABOON_APP_SHOTS"),
@@ -8801,6 +8803,7 @@ mod tests {
     /// `BABOON_APP_SHOTS` shots of the theme with `BABOON_SHOT_TAG` open.
     #[cfg(any(target_os = "macos", windows))]
     #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
     fn app_shots_of_the_themes() {
         let (Some(dir), Ok(root)) = (
             std::env::var_os("BABOON_APP_SHOTS"),
@@ -8858,15 +8861,6 @@ mod tests {
             h.shoot(&dir.join(name));
         }
     }
-
-
-
-
-
-
-
-
-
 
     /// A tag in a scratch kit, with the keywords that tests below give it.
     fn keyword_kit(name: &str) -> (LooseKit, Harness, KitId, String, String) {

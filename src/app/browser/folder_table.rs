@@ -343,7 +343,7 @@ pub(in crate::app) fn paint_folder_columns(
             for keyword in &keywords {
                 let label = catalog.display(keyword);
                 let colour = catalog.colour(keyword);
-                let width = crate::app::ui_kit::keyword_pill_width(&painter, label, &font, colour, 0.0);
+                let width = crate::app::ui_kit::keyword_pill_width(&painter, label, &font, 0.0);
                 let pill = egui::Rect::from_min_size(
                     egui::pos2(x, rect.center().y - 9.0),
                     Vec2::new(width, 18.0),

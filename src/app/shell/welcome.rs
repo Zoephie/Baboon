@@ -128,7 +128,7 @@ pub(in crate::app) fn draw_welcome_screen(
                             format!("v{}", env!("CARGO_PKG_VERSION")),
                             FontId::proportional(12.0 * banner_scale.max(0.8)),
                             // fixed: the version over the banner art
-            Color32::from_rgb(255, 190, 151),
+                            Color32::from_rgb(255, 190, 151),
                         );
 
                         Frame::NONE

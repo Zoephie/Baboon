@@ -11,9 +11,7 @@ const DOT_GAP: f32 = 5.0;
 
 /// Where a pill's text starts, from its left edge: after its dot. Every
 /// pill has one, the uncoloured (grey) one too.
-fn text_left(_: Option<KeywordColour>) -> f32 {
-    DOT_LEFT + DOT + DOT_GAP
-}
+const TEXT_LEFT: f32 = DOT_LEFT + DOT + DOT_GAP;
 
 /// The width a pill needs for `label` in `font`. `trailing` leaves room for
 /// a button inside its right end; 0 gives the usual padding.
@@ -21,11 +19,10 @@ pub(in crate::app) fn keyword_pill_width(
     painter: &egui::Painter,
     label: &str,
     font: &FontId,
-    colour: Option<KeywordColour>,
     trailing: f32,
 ) -> f32 {
     let text = painter.layout_no_wrap(label.to_owned(), font.clone(), text_dark()).size().x;
-    text_left(colour) + text + if trailing > 0.0 { trailing } else { PADDING }
+    TEXT_LEFT + text + if trailing > 0.0 { trailing } else { PADDING }
 }
 
 /// Paint a keyword pill filling `rect`: fill, border and dot from its
@@ -49,7 +46,7 @@ pub(in crate::app) fn paint_keyword_pill(
     }
     let galley = painter.layout_no_wrap(label.to_owned(), font.clone(), colours.text);
     let at = egui::pos2(
-        rect.left() + text_left(colour),
+        rect.left() + TEXT_LEFT,
         rect.center().y - galley.size().y / 2.0,
     );
     painter.galley(at, galley, colours.text);

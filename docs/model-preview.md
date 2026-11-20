@@ -52,7 +52,7 @@ The **Other** menu (the **…** button beside the model buttons):
 
 ## The footer
 
-The footer counts the model's vertices and triangles, leaving out an imposter drawn with it. While **LOD Model** is ticked it counts the LOD model's instead. When part of the preview was left out, or a material drew without its textures, it says so there; hover the note for why.
+The footer counts the model's own vertices and triangles, leaving out the collision, physics and imposter geometry drawn with it. While **LOD Model** is ticked it counts the LOD model's instead. When part of the preview was left out, or a material drew without its textures, it says so there; hover the note for why.
 
 ## The Model Setup sidebar
 

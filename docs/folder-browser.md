@@ -71,11 +71,13 @@ order, with how many tags and folders in this kit carry each:
   Renaming it to another keyword merges the two, after asking.
 - **Delete** removes it from every tag and folder in every game, after
   asking. It can't be undone.
+- **Add New Keyword** adds one before anything carries it.
 
 The row's count is this kit's only. The Merge and Delete warnings show both
 this kit's count and the total across all your editing kits, since a
-keyword unused here may still be used in another kit.
-- **Add New Keyword** adds one before anything carries it.
+keyword unused here may still be used in another kit. If another game's
+keyword file can't be read, a rename or delete changes nothing and says
+which file it was.
 
 Keywords keep the spelling they were first typed with ("To Be Deleted") and
 match without letter case.
@@ -87,14 +89,16 @@ Picking one (click, Tab, or Up/Down then Enter) makes it a pill in the box. A
 pill matches its keyword exactly, so "wip" doesn't find "wip-old". Text typed
 beside a pill searches as usual, and both must match: a **WIP** pill with
 `model` finds tags named "model" that carry WIP. `^`, `$` and `|` still work,
-and with `|` the pill applies to each alternative. Each pill has its own ×,
+and with `|` the pill applies to each alternative. An empty side of `|`
+matches nothing, as it does without a pill. Each pill has its own ×,
 and Backspace in an empty box removes the last one.
 
 Which tags and folders carry which keyword lives in Baboon's own data, not in
 the tags, one file per game shared by that game's kits. The list of keywords,
 their spelling, colours and order is one file for every game. Renaming or
 moving a folder in Baboon carries its keywords, and those of the folders
-inside it, along; deleting it drops them.
+inside it, along, including the folders that moved whole when some of it
+stayed behind; deleting it drops them.
 
 ## Selection and keyboard navigation
 

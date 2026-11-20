@@ -187,7 +187,9 @@ fn launch_vscode(file: &Path) -> std::io::Result<()> {
     #[cfg(not(test))]
     {
         let program = vscode_program().ok_or_else(|| std::io::Error::other(NO_VSCODE))?;
-        std::process::Command::new(program).arg(file).spawn().map(drop)
+        // Out of sight: `code.cmd` runs through cmd, whose console window
+        // would otherwise flash up over Baboon. VS Code's own window shows.
+        crate::core::process::background_command(program).arg(file).spawn().map(drop)
     }
 }
 
@@ -208,7 +210,24 @@ fn vscode_program() -> Option<PathBuf> {
         // A batch file, which Rust runs through cmd for us.
         "code.cmd",
     );
-    #[cfg(not(windows))]
+    // The app bundle's `code`, in the Applications folder or the user's own.
+    #[cfg(target_os = "macos")]
+    let (installed, command) = (
+        [Some(PathBuf::from("/Applications")), std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Applications"))]
+            .into_iter()
+            .flatten()
+            .map(|root| {
+                root.join("Visual Studio Code.app")
+                    .join("Contents")
+                    .join("Resources")
+                    .join("app")
+                    .join("bin")
+                    .join("code")
+            })
+            .find(|program| program.is_file()),
+        "code",
+    );
+    #[cfg(not(any(windows, target_os = "macos")))]
     let (installed, command) = (None, "code");
     installed.or_else(|| {
         std::env::split_paths(&std::env::var_os("PATH")?)
@@ -303,7 +322,15 @@ mod tests {
         app.open_script_in_vscode(&kit.key(r"levels\a\scripts\a_mission.scenario_hs_source_file"));
         let file = kit.root.parent().unwrap().join("data").join("levels").join("a").join("scripts").join("a_mission.hsc");
         assert!(!file.exists());
-        assert!(!app.model.status.starts_with("Opened"), "{}", app.model.status);
+        // Says why: the missing data file, or first that VS Code is missing
+        // on a machine without it.
+        let status = &app.model.status;
+        if super::vscode_program().is_some() {
+            assert!(status.starts_with("This script has no data file to open"), "{status}");
+            assert!(status.contains("a_mission.hsc"), "{status}");
+        } else {
+            assert_eq!(status, super::NO_VSCODE);
+        }
     }
 
     #[test]

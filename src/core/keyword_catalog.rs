@@ -95,6 +95,9 @@ pub(crate) struct KeywordCatalog {
     removed: Vec<String>,
     /// A problem with the file the user has not been told about yet.
     notice: Option<String>,
+    /// The last failed write's message, so a retry that fails the same way
+    /// isn't reported again.
+    last_failure: Option<String>,
 }
 
 impl KeywordCatalog {
@@ -279,10 +282,16 @@ impl KeywordCatalog {
             Ok(()) => {
                 self.dirty = false;
                 self.removed.clear();
+                self.last_failure = None;
             }
+            // Possibly passing (a sharing violation, say): the changes stay
+            // unsaved and are tried again later, telling the user once.
             Err(error) => {
-                self.notice = Some(format!("Keywords not saved to {}: {error}", path.display()));
-                self.dirty = false;
+                let message = format!("Keywords not saved to {}: {error}", path.display());
+                if self.last_failure.as_deref() != Some(message.as_str()) {
+                    self.notice = Some(message.clone());
+                    self.last_failure = Some(message);
+                }
             }
         }
     }

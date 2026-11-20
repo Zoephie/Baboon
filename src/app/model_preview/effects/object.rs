@@ -238,8 +238,17 @@ pub(in crate::app::model_preview) fn object_effects(
         }
         let mut name = event_function_name(&field, &path);
         if !names.insert(name.clone()) {
-            name = format!("{name} @ {marker}");
-            names.insert(name.clone());
+            // Told apart by its marker; with none, or that taken too, by a
+            // number, rather than a bare "boom @ ".
+            let at_marker = format!("{name} @ {marker}");
+            name = if !marker.is_empty() && names.insert(at_marker.clone()) {
+                at_marker
+            } else {
+                (2..)
+                    .map(|number| format!("{name} {number}"))
+                    .find(|numbered| names.insert(numbered.clone()))
+                    .expect("an unbounded range always yields")
+            };
         }
         effects.push(ObjectEffect {
             scale_by: name,

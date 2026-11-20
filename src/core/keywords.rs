@@ -168,15 +168,22 @@ impl KeywordStore {
     /// Drop every keyword attached to a tag that no longer exists, so a deleted
     /// tag stops appearing in keyword browsing and its rows leave the sidecar.
     pub(crate) fn forget_tag(&mut self, tag_key: &str) {
-        let spellings = self.spellings(tag_key);
-        if spellings.is_empty() {
-            return;
+        self.forget_tags([tag_key]);
+    }
+
+    /// [`Self::forget_tag`] for many tags, reindexing once.
+    pub(crate) fn forget_tags<'a>(&mut self, tag_keys: impl IntoIterator<Item = &'a str>) {
+        let mut removed = false;
+        for tag_key in tag_keys {
+            for key in self.spellings(tag_key) {
+                Arc::make_mut(&mut self.by_tag).remove(&key);
+                self.touched.insert(key);
+                removed = true;
+            }
         }
-        for key in spellings {
-            Arc::make_mut(&mut self.by_tag).remove(&key);
-            self.touched.insert(key);
+        if removed {
+            self.reindex();
         }
-        self.reindex();
     }
 
     /// Carry a tag's keywords to its new key after a rename.
@@ -258,9 +265,7 @@ impl KeywordStore {
             })
             .cloned()
             .collect();
-        for key in gone {
-            self.forget_tag(&key);
-        }
+        self.forget_tags(gone.iter().map(String::as_str));
     }
 
     /// Folder keys carrying `keyword`.

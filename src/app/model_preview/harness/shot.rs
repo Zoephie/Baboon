@@ -900,7 +900,7 @@ fn imposter_shots() {
         let pixels = render(&gl, &mut renderer, &source, &shot, &options).pixels;
         // Something drew: not every pixel is the background's.
         assert!(
-            pixels.chunks_exact(4).any(|pixel| pixel != &pixels[..4]),
+            pixels.chunks(4).any(|pixel| pixel != &pixels[..4]),
             "banshee_{name}: nothing drawn"
         );
         let row = SHOT_SIZE[0] as usize * 4;

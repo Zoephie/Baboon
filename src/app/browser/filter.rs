@@ -76,7 +76,10 @@ pub(in crate::app) fn keyword_query(text: &str, pills: &[String]) -> String {
     if text.is_empty() {
         return terms;
     }
+    // An empty side of `|` matches nothing, as it does without pills, rather
+    // than becoming the pills alone and finding everything they tag.
     text.split('|')
+        .filter(|branch| !branch.trim().is_empty())
         .map(|branch| format!("{} {terms}", branch.trim()))
         .collect::<Vec<_>>()
         .join(" | ")
@@ -589,6 +592,9 @@ mod tests {
         assert!(!scoped_entry_matches(&wip, &with_text, scope, &wip_keywords));
         let either = keyword_query("wip | old", &["wip".to_owned()]);
         assert!(scoped_entry_matches(&wip, &either, scope, &wip_keywords));
+        // An empty side of `|` finds nothing, not everything with the pill.
+        let open_bar = keyword_query("old |", &["wip".to_owned()]);
+        assert!(!scoped_entry_matches(&wip, &open_bar, scope, &wip_keywords));
         assert!(!scoped_folder_matches("wip", &pill), "a pill never matches a folder's name");
         assert_eq!(keyword_query(" plain ", &[]), "plain");
 

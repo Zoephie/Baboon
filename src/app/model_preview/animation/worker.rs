@@ -245,6 +245,11 @@ impl Baboon {
             }
             Err(error) => state.animation.error = Some(error),
         }
+        // A clip the new geometry lacks has nothing to resume: the next one
+        // picked plays from the top.
+        if state.animation.selected.is_none() {
+            state.animation.resume_on_decode = false;
+        }
         false
     }
 

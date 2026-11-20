@@ -849,17 +849,24 @@ fn run_batch(
             reverse_dependencies: Some(index),
             old_to_new_keys,
             moved: moving,
+            // A folder left behind in part still moved those of its
+            // folders that went whole, which carry their keywords along.
             moved_folders: if moving {
                 roots
                     .iter()
-                    .filter(|(source, _)| !source.exists())
-                    .filter_map(|(source, _)| {
-                        plan.target_folder(source).map(|target| {
-                            (
-                                source.strip_prefix(&root).unwrap().to_owned(),
-                                target.strip_prefix(&root).unwrap().to_owned(),
-                            )
-                        })
+                    .filter_map(|(source, _)| Some((source, plan.target_folder(source)?)))
+                    .flat_map(|(source, target)| {
+                        if source.exists() {
+                            gone_subfolders(source, target)
+                        } else {
+                            vec![(source.to_path_buf(), target.to_path_buf())]
+                        }
+                    })
+                    .map(|(source, target)| {
+                        (
+                            source.strip_prefix(&root).unwrap().to_owned(),
+                            target.strip_prefix(&root).unwrap().to_owned(),
+                        )
                     })
                     .collect()
             } else {
@@ -1309,4 +1316,50 @@ fn rewrite_transactional(
         result.changed_keys.push(entry.key.clone());
     }
     Ok(result)
+}
+
+/// The folders of `target` that came whole from `source`, which a move left
+/// behind in part: those with no folder of their name left in `source`,
+/// with where they were. A folder that came whole brings its own along.
+fn gone_subfolders(
+    source: &std::path::Path,
+    target: &std::path::Path,
+) -> Vec<(std::path::PathBuf, std::path::PathBuf)> {
+    let Ok(children) = std::fs::read_dir(target) else {
+        return Vec::new();
+    };
+    let mut gone = Vec::new();
+    for child in children.flatten() {
+        if !child.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let was = source.join(child.file_name());
+        if was.exists() {
+            gone.extend(gone_subfolders(&was, &child.path()));
+        } else {
+            gone.push((was, child.path()));
+        }
+    }
+    gone.sort();
+    gone
+}
+
+#[cfg(test)]
+mod gone_subfolder_tests {
+    /// A move that left `a` behind in part reports `a\whole`, which went
+    /// whole, and not `a\part`, which stayed in part.
+    #[test]
+    fn a_partial_move_reports_the_folders_that_went_whole() {
+        let root = std::env::temp_dir().join(format!("baboon-gone-subfolders-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (source, target) = (root.join("a"), root.join("b").join("a"));
+        for folder in [source.join("part"), target.join("part"), target.join("whole").join("deep")] {
+            std::fs::create_dir_all(folder).unwrap();
+        }
+        assert_eq!(
+            super::gone_subfolders(&source, &target),
+            [(source.join("whole"), target.join("whole"))]
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
