@@ -5835,14 +5835,19 @@ mod tests {
         );
         assert!((refresh.center().y - title.center().y).abs() < 4.0, "not on the header row");
         let id = h.app.model.kits[h.app.model.active].id;
+        // The geometry the page shows, once loaded: every load gets a new
+        // id. A small model can load again within the click's frames, so
+        // the check is that it's not the same load, not that it's loading.
         let loaded = |h: &Harness| {
             let previews = &h.app.views[id].caches.model_previews;
             let (key, state) = previews.iter().next().unwrap();
-            !state.needs_preview_load(key)
+            let data = state.data.as_ref().and_then(|data| data.as_ref().ok());
+            data.filter(|_| !state.needs_preview_load(key)).map(|data| data.geometry_id)
         };
-        assert!(loaded(&h));
+        let before = loaded(&h);
+        assert!(before.is_some());
         h.click("Refresh Model", 0);
-        assert!(!loaded(&h), "Refresh Model left the preview as loaded");
+        assert_ne!(loaded(&h), before, "Refresh Model left the same load in place");
     }
 
     /// Switching Game Shaders loads the model again, and only the viewport
