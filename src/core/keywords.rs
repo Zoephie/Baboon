@@ -6,6 +6,49 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use crate::core::tag_key::key_identity;
+
+/// `by_tag` keyed by [`key_identity`], each list the union of every spelling.
+fn by_identity(by_tag: &BTreeMap<String, Vec<String>>) -> BTreeMap<String, Vec<String>> {
+    let mut merged: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (key, keywords) in by_tag {
+        let list = merged.entry(key_identity(key)).or_default();
+        for keyword in keywords {
+            if !list.contains(keyword) {
+                list.push(keyword.clone());
+            }
+        }
+    }
+    for list in merged.values_mut() {
+        list.sort();
+    }
+    merged
+}
+
+/// A tag's or folder's keywords in a map from [`KeywordStore::snapshot`],
+/// however its key is spelled.
+pub(crate) fn keywords_in<'a>(map: &'a BTreeMap<String, Vec<String>>, key: &str) -> &'a [String] {
+    if map.is_empty() {
+        return &[];
+    }
+    map.get(&key_identity(key)).map(Vec::as_slice).unwrap_or(&[])
+}
+
+/// Whether `key` (as [`key_identity`] has it) is a loose tag or folder under
+/// `root`, or, with no root, any other kind of key.
+fn key_is_in_kit(identity: &str, root: Option<&str>) -> bool {
+    let path = identity
+        .strip_prefix("file:")
+        .or_else(|| identity.strip_prefix(crate::core::tag_key::FOLDER_KEY_PREFIX));
+    match (path, root) {
+        (Some(path), Some(root)) => {
+            path == root || (path.starts_with(root) && path[root.len()..].starts_with('\\'))
+        }
+        (Some(_), None) => false,
+        (None, root) => root.is_none(),
+    }
+}
+
 /// One kit's view of its game's keyword sidecar.
 ///
 /// Every kit of a game shares the one sidecar, and several can be open at
@@ -20,6 +63,12 @@ pub(crate) struct KeywordStore {
     /// Shared, so a background search reads a snapshot while edits copy on
     /// write (see [`Self::snapshot`]).
     by_tag: Arc<BTreeMap<String, Vec<String>>>,
+    /// `by_tag` keyed by [`key_identity`] instead, each list the union of
+    /// every spelling of that key: what lookups and counts read. A tag's key
+    /// can be spelled with either separator depending on how it was reached,
+    /// so one tag can sit in the sidecar under two spellings, or under one
+    /// its key today doesn't use.
+    by_identity: Arc<BTreeMap<String, Vec<String>>>,
     /// Tag keys whose keywords this kit changed since it last saved.
     touched: BTreeSet<String>,
     /// A problem with the sidecar the user has not been told about yet.
@@ -43,7 +92,22 @@ impl KeywordStore {
             }
             None => BTreeMap::new(),
         });
+        self.reindex();
         self.path = path;
+    }
+
+    fn reindex(&mut self) {
+        self.by_identity = Arc::new(by_identity(&self.by_tag));
+    }
+
+    /// The stored spellings of `tag_key`.
+    fn spellings(&self, tag_key: &str) -> Vec<String> {
+        let identity = key_identity(tag_key);
+        self.by_tag
+            .keys()
+            .filter(|key| key_identity(key) == identity)
+            .cloned()
+            .collect()
     }
 
     /// The latest sidecar problem, once; the shell shows it in the status line.
@@ -51,14 +115,16 @@ impl KeywordStore {
         self.notice.take()
     }
 
+    /// A tag's or folder's keywords, however its key is spelled.
     pub(crate) fn keywords(&self, tag_key: &str) -> &[String] {
-        self.by_tag.get(tag_key).map(Vec::as_slice).unwrap_or(&[])
+        keywords_in(&self.by_identity, tag_key)
     }
 
     /// Every tag's keywords, shared: what a search started now reads, unchanged
     /// by edits made while it runs. The same snapshot until something changes.
+    /// Keyed by [`key_identity`]: read it with [`keywords_in`].
     pub(crate) fn snapshot(&self) -> Arc<BTreeMap<String, Vec<String>>> {
-        Arc::clone(&self.by_tag)
+        Arc::clone(&self.by_identity)
     }
 
     pub(crate) fn add(&mut self, tag_key: &str, keyword: &str) {
@@ -74,35 +140,43 @@ impl KeywordStore {
             list.sort();
             self.touched.insert(tag_key.to_owned());
         }
+        self.reindex();
     }
 
+    /// Takes `keyword` off the tag under every spelling of its key.
     pub(crate) fn remove(&mut self, tag_key: &str, keyword: &str) {
         if !self.keywords(tag_key).iter().any(|existing| existing == keyword) {
             return;
         }
-        let by_tag = Arc::make_mut(&mut self.by_tag);
-        if let Some(list) = by_tag.get_mut(tag_key) {
-            let before = list.len();
-            list.retain(|existing| existing != keyword);
-            let changed = list.len() != before;
-            if list.is_empty() {
-                by_tag.remove(tag_key);
-            }
-            if changed {
-                self.touched.insert(tag_key.to_owned());
+        for key in self.spellings(tag_key) {
+            let by_tag = Arc::make_mut(&mut self.by_tag);
+            if let Some(list) = by_tag.get_mut(&key) {
+                let before = list.len();
+                list.retain(|existing| existing != keyword);
+                let changed = list.len() != before;
+                if list.is_empty() {
+                    by_tag.remove(&key);
+                }
+                if changed {
+                    self.touched.insert(key);
+                }
             }
         }
+        self.reindex();
     }
 
     /// Drop every keyword attached to a tag that no longer exists, so a deleted
     /// tag stops appearing in keyword browsing and its rows leave the sidecar.
     pub(crate) fn forget_tag(&mut self, tag_key: &str) {
-        if !self.by_tag.contains_key(tag_key) {
+        let spellings = self.spellings(tag_key);
+        if spellings.is_empty() {
             return;
         }
-        if Arc::make_mut(&mut self.by_tag).remove(tag_key).is_some() {
-            self.touched.insert(tag_key.to_owned());
+        for key in spellings {
+            Arc::make_mut(&mut self.by_tag).remove(&key);
+            self.touched.insert(key);
         }
+        self.reindex();
     }
 
     /// Carry a tag's keywords to its new key after a rename.
@@ -116,29 +190,38 @@ impl KeywordStore {
         if old_key == new_key {
             return;
         }
-        if !self.by_tag.contains_key(old_key) {
+        // Every spelling of the old key, but not the new key itself when
+        // only its letter case or separators change.
+        let from: Vec<String> = self
+            .spellings(old_key)
+            .into_iter()
+            .filter(|key| key != new_key)
+            .collect();
+        if from.is_empty() {
             return;
         }
         let by_tag = Arc::make_mut(&mut self.by_tag);
-        let Some(moved) = by_tag.remove(old_key) else {
-            return;
-        };
-        let list = by_tag.entry(new_key.to_owned()).or_default();
-        for keyword in moved {
-            if !list.iter().any(|existing| existing == &keyword) {
-                list.push(keyword);
+        for key in from {
+            let Some(moved) = by_tag.remove(&key) else {
+                continue;
+            };
+            let list = by_tag.entry(new_key.to_owned()).or_default();
+            for keyword in moved {
+                if !list.iter().any(|existing| existing == &keyword) {
+                    list.push(keyword);
+                }
             }
+            list.sort();
+            self.touched.insert(key);
         }
-        list.sort();
-        self.touched.insert(old_key.to_owned());
         self.touched.insert(new_key.to_owned());
+        self.reindex();
     }
 
     /// Carry a folder's keywords, and those of every folder inside it, to its
     /// new key after a rename or move. Keys compare as paths do: letter case
     /// and separators aside.
     pub(crate) fn rekey_folder(&mut self, old_key: &str, new_key: &str) {
-        use crate::core::tag_key::key_identity;
         let old = key_identity(old_key);
         if old == key_identity(new_key) {
             return;
@@ -165,7 +248,6 @@ impl KeywordStore {
 
     /// Drop the keywords of a deleted folder and every folder inside it.
     pub(crate) fn forget_folder(&mut self, folder_key: &str) {
-        use crate::core::tag_key::key_identity;
         let old = key_identity(folder_key);
         let gone: Vec<String> = self
             .by_tag
@@ -245,7 +327,7 @@ impl KeywordStore {
     /// All keywords with how many tags (and folders) carry each, sorted by name.
     pub(crate) fn all_keywords(&self) -> Vec<(String, usize)> {
         let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-        for keywords in self.by_tag.values() {
+        for keywords in self.by_identity.values() {
             for keyword in keywords {
                 *counts.entry(keyword.clone()).or_default() += 1;
             }
@@ -258,9 +340,24 @@ impl KeywordStore {
         self.path.as_deref()
     }
 
-    /// How many tags and folders carry `keyword`.
+    /// How many tags and folders carry `keyword`, in every kit of the game.
     pub(crate) fn count_of(&self, keyword: &str) -> usize {
-        count_in(&self.by_tag, keyword)
+        count_in(&self.by_identity, keyword)
+    }
+
+    /// How many of one kit's tags and folders carry `keyword`: those under
+    /// its loose `root`, or with no root (a cache or containers), those that
+    /// aren't loose files. Kits of a game share one sidecar, so the game's
+    /// count would include other kits' tags, which this kit's search never
+    /// finds.
+    pub(crate) fn count_in_kit(&self, keyword: &str, root: Option<&std::path::Path>) -> usize {
+        let keyword = keyword.trim().to_ascii_lowercase();
+        let root = root.map(crate::core::tag_key::path_identity);
+        let root = root.as_deref().map(|root| root.trim_end_matches('\\'));
+        self.by_identity
+            .iter()
+            .filter(|(key, keywords)| keywords.contains(&keyword) && key_is_in_kit(key, root))
+            .count()
     }
 
     /// Rename `old` to `new` on every tag and folder carrying it (`new`
@@ -274,13 +371,14 @@ impl KeywordStore {
             .filter(|(_, keywords)| keywords.contains(&old))
             .map(|(key, _)| key.clone())
             .collect();
+        let changed: BTreeSet<String> = keys.iter().map(|key| key_identity(key)).collect();
         for key in &keys {
             self.remove(key, &old);
             if let Some(new) = new {
                 self.add(key, new);
             }
         }
-        keys.len()
+        changed.len()
     }
 
     /// Tag keys carrying `keyword`.
@@ -357,6 +455,7 @@ impl KeywordStore {
             }
         }
         self.by_tag = Arc::new(merged);
+        self.reindex();
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -380,7 +479,7 @@ fn count_in(by_tag: &BTreeMap<String, Vec<String>>, keyword: &str) -> usize {
 /// How many tags and folders carry `keyword` in the sidecar at `path`, for a
 /// game with no kit open; 0 when it can't be read.
 pub(crate) fn count_in_sidecar(path: &std::path::Path, keyword: &str) -> usize {
-    read_sidecar(path).map_or(0, |by_tag| count_in(&by_tag, keyword))
+    read_sidecar(path).map_or(0, |by_tag| count_in(&by_identity(&by_tag), keyword))
 }
 
 /// [`KeywordStore::replace_keyword`] on the sidecar at `path`, for a game
@@ -399,6 +498,7 @@ pub(crate) fn replace_in_sidecar(
         path: Some(path.to_owned()),
         ..KeywordStore::default()
     };
+    store.reindex();
     let changed = store.replace_keyword(old, new);
     store.save_if_dirty();
     match store.take_notice() {
@@ -496,6 +596,36 @@ mod tests {
         assert_eq!(before.get("file:a").unwrap(), &["hero"]);
         assert_eq!(store.keywords("file:a"), &["hero", "wip"]);
         assert!(!Arc::ptr_eq(&before, &store.snapshot()));
+    }
+
+    /// A tag's key can be spelled with either separator depending on how
+    /// it was reached, so a sidecar can hold one tag under two spellings, or
+    /// under one its key today doesn't use. Lookups and counts treat them as
+    /// the one tag, removing takes it off every spelling, and a kit counts
+    /// only its own tags: kits of a game share the sidecar.
+    #[test]
+    fn keys_spelled_differently_are_one_tag_and_counts_stay_in_the_kit() {
+        let mut store = KeywordStore::default();
+        store.add("file:C:\\Kit\\tags\\objects/brute\\brute.model", "wip");
+        store.add("file:C:\\Kit\\tags\\objects\\brute\\brute.model", "wip");
+        store.add("file:C:\\Kit\\tags\\objects/brute\\brute.collision_model", "needs work");
+        store.add("folder:C:\\Kit\\tags\\objects\\brute", "wip");
+        store.add("file:C:\\Other\\tags\\objects\\brute\\brute.model", "wip");
+        store.add("file:C:\\Kit\\tags_old\\a.model", "wip");
+        let live = "file:C:\\Kit\\tags\\objects\\brute\\brute.collision_model";
+        assert_eq!(store.keywords(live), ["needs work"]);
+        assert_eq!(keywords_in(&store.snapshot(), live), ["needs work"]);
+        assert_eq!(store.count_of("wip"), 4);
+        let root = std::path::Path::new("C:\\Kit\\tags");
+        assert_eq!(store.count_in_kit("wip", Some(root)), 2);
+        assert_eq!(store.count_in_kit("WIP", Some(std::path::Path::new("c:/kit/tags/"))), 2);
+        assert_eq!(store.count_in_kit("wip", None), 0);
+        store.remove("file:C:\\Kit\\tags\\objects\\brute\\brute.model", "wip");
+        assert_eq!(store.count_in_kit("wip", Some(root)), 1);
+        assert!(store.by_tag.keys().all(|key| !key.ends_with("brute.model") || key.contains("Other")));
+        store.rekey_tag(live, "file:C:\\Kit\\tags\\objects\\brute\\renamed.collision_model");
+        assert!(store.keywords(live).is_empty());
+        assert_eq!(store.count_in_kit("needs work", Some(root)), 1);
     }
 
     /// Suggestions put what starts with the typed text first, then what

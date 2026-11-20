@@ -38,6 +38,8 @@ impl Dialog for KeywordManager {
         let mut open = true;
         let catalog = &cx.model.keyword_catalog;
         let store = &cx.model.kits[cx.model.active].keywords;
+        // Counts are this kit's: what its search finds.
+        let root = cx.model.loaded_tags_root_for(cx.model.active);
         let window_id = egui::Id::unique("keyword_manager");
         let drag_id = window_id.with("dragging");
         egui::Window::new("Manage Keywords")
@@ -66,7 +68,7 @@ impl Dialog for KeywordManager {
                         }
                         for (index, entry) in catalog.entries().iter().enumerate() {
                             let key = entry.key();
-                            let count = store.count_of(&key);
+                            let count = store.count_in_kit(&key, root.as_deref());
                             let row = keyword_row_frame(ui).show(ui, |ui| {
                                 ui.set_min_height(ROW_HEIGHT - 12.0);
                                 ui.horizontal(|ui| {
@@ -232,12 +234,10 @@ impl KeywordManager {
             .show(|ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    let none = colour_swatch(ui, None, colour.is_none()).on_hover_text("No colour");
-                    if none.clicked() {
-                        cx.send(BrowserCommand::SetKeywordColour { keyword: key.to_owned(), colour: None });
-                    }
+                    // No colour draws as grey, so Grey stands for both.
+                    let picked = colour.unwrap_or(KeywordColour::Grey);
                     for choice in KeywordColour::ALL {
-                        let swatch = colour_swatch(ui, Some(choice), colour == Some(choice))
+                        let swatch = colour_swatch(ui, choice, picked == choice)
                             .on_hover_text(choice.label());
                         if swatch.clicked() {
                             cx.send(BrowserCommand::SetKeywordColour {
@@ -291,10 +291,10 @@ impl KeywordManager {
     }
 }
 
-/// One colour in a keyword's colour picker; `None` is the neutral pill.
-fn colour_swatch(ui: &mut Ui, colour: Option<KeywordColour>, picked: bool) -> egui::Response {
+/// One colour in a keyword's colour picker.
+fn colour_swatch(ui: &mut Ui, colour: KeywordColour, picked: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::click());
-    let colours = keyword_pill_colours(colour);
+    let colours = keyword_pill_colours(Some(colour));
     let circle = rect.shrink(3.0);
     ui.painter().circle(
         circle.center(),
@@ -419,6 +419,14 @@ impl Baboon {
             .collect()
     }
 
+    /// How many of the active kit's tags and folders carry `keyword`.
+    fn keywords_here(&self, keyword: &str) -> usize {
+        let active = self.model.active;
+        self.model.kits[active]
+            .keywords
+            .count_in_kit(keyword, self.model.loaded_tags_root_for(active).as_deref())
+    }
+
     /// How many tags and folders carry `keyword` in every game: an open
     /// kit's in-memory keywords where one has that game's file, else the
     /// file itself.
@@ -522,7 +530,7 @@ impl Baboon {
                 old: keyword_key(old),
                 old_name: catalog.display(old).to_owned(),
                 into: Some(catalog.display(new).to_owned()),
-                here: self.model.kits[self.model.active].keywords.count_of(old),
+                here: self.keywords_here(old),
                 everywhere: self.keyword_uses_everywhere(old),
             };
             self.dialogs.open(confirm);
@@ -559,10 +567,6 @@ impl Baboon {
             pane.filter.clear();
             pane.keyword_terms = vec![keyword_key(keyword)];
             pane.search_scope.keywords = true;
-            // Flat lists one folder; Folders searches the whole kit.
-            if pane.mode == BrowserMode::Flat {
-                pane.mode = BrowserMode::Folders;
-            }
             pane.assets_view = false;
             pane.selection.clear();
             pane.selected_tag = None;
@@ -580,7 +584,7 @@ impl Baboon {
             old: keyword_key(keyword),
             old_name: self.model.keyword_catalog.display(keyword).to_owned(),
             into: None,
-            here: self.model.kits[self.model.active].keywords.count_of(keyword),
+            here: self.keywords_here(keyword),
             everywhere,
         };
         self.dialogs.open(confirm);

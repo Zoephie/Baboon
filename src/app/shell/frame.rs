@@ -104,7 +104,8 @@ pub(in crate::app) fn browser_search_field_with_keywords(
         ),
         Vec2::splat(BROWSER_SEARCH_ICON_SIZE),
     );
-    paint_button_icon_at(ui, ButtonIcon::SearchBar, icon_rect, text_dark());
+    // Muted as the hint text is.
+    paint_button_icon_at(ui, ButtonIcon::SearchBar, icon_rect, text_dark().gamma_multiply(0.5));
     let icon_response = ui.interact(
         icon_rect,
         background_response.id.with("search_icon"),
@@ -266,7 +267,6 @@ pub(in crate::app) fn browser_search_field_with_keywords(
             ui,
             clear_rect,
             edit_response.id.with("clear_search"),
-            BROWSER_SEARCH_ICON_SIZE * 0.5,
         );
         if clear.clicked() {
             value.clear();
@@ -4629,10 +4629,11 @@ mod tests {
                             action: crate::app::tag_ops::folder_merge_review::ItemsAction::Delete,
                             selected: vec![("objects/props".into(), RenameIcon::Folder), ("smoke.scenario".into(), RenameIcon::Tag(None))],
                             game: None,
+                            covered: Some("\u{201c}crate.scenery\u{201d} moves with its folder \u{201c}props\u{201d}, which is also selected.".into()),
                         }),
                     });
                 },
-                &["Delete Selected Items?", "2 Items to Delete", "Checking for Missing References…", "Checking references", "Delete"],
+                &["Delete Selected Items?", "2 Items to Delete", "Checking for Missing References…", "Checking references", "Delete", "which is also selected"],
             ),
             case(
                 "bulk_move_review",
@@ -7094,12 +7095,20 @@ mod tests {
             .unwrap()
             .search_scope
             .folders = true;
+        // The search answers from a worker.
+        for _ in 0..400 {
+            idle(&mut h);
+            if !h.app.views[kit].browser.folder_browsers[&key].filter_cache.is_searching() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
         idle(&mut h);
         assert!(
             h.painted
                 .iter()
-                .any(|text| text.starts_with("1 of 2 items · ")),
-            "filtered footer keeps the total: {:?}",
+                .any(|text| text.starts_with("2 results · ")),
+            "a search counts its results: {:?}",
             h.painted
         );
         let pane = h.app.views[kit]
@@ -8849,6 +8858,8 @@ mod tests {
 
 
 
+
+
     /// A tag in a scratch kit, with the keywords that tests below give it.
     fn keyword_kit(name: &str) -> (LooseKit, Harness, KitId, String, String) {
         let kit = LooseKit::new(name, "halo3_mcc");
@@ -8901,7 +8912,7 @@ mod tests {
         add_keyword(&mut h, kit, &alpha, "Mk Ready");
         add_keyword(&mut h, kit, &beta, "Mk Draft");
         let ctx = h.ctx.clone();
-        let mut command = |h: &mut Harness, command: BrowserCommand| {
+        let command = |h: &mut Harness, command: BrowserCommand| {
             h.app.apply_browser_command(command, &ctx);
             h.idle(3);
         };
@@ -8941,9 +8952,9 @@ mod tests {
                 .values()
                 .find(|pane| pane.rel_path.as_os_str().is_empty())
                 .unwrap();
-            let found: Vec<String> =
-                pane.filter_cache.entries.iter().map(|entry| entry.key.clone()).collect();
-            if !pane.filter_cache.is_searching() && !found.is_empty() {
+            // Flat lists every match beneath the root.
+            let found: Vec<String> = pane.selection.rows.iter().map(|row| row.0.clone()).collect();
+            if !found.is_empty() {
                 assert_eq!(found, [alpha.clone()]);
                 break;
             }
@@ -9012,5 +9023,98 @@ mod tests {
         press_key(&mut h, egui::Key::Backspace, egui::Modifiers::NONE);
         h.idle(2);
         assert!(h.app.views[kit].browser.keyword_terms.is_empty());
+    }
+
+    /// Search results start with their folders closed and counted; opening
+    /// one follows a lone path down until it branches, and clearing the
+    /// search leaves the browser's own folders as they were.
+    #[test]
+    /// Clicking a group's arrow opens it, as a folder's does: the row's own
+    /// click once covered the arrow and nothing opened the group.
+    fn clicking_a_group_opens_it() {
+        let kit = LooseKit::new("groups-open", "halo3_mcc");
+        for rel in ["objects/a/one", "objects/b/two", "objects/c/three"] {
+            kit.write_mcc(rel, "scenery", |_| {});
+        }
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        h.idle(2);
+        let id = h.app.model.kits[h.app.model.active].id;
+        let chevron = |h: &mut Harness, label: &str| {
+            let rect = h.painted_rects.iter().find(|(t, _)| t == label).map(|(_, r)| *r).expect("label");
+            let target = egui::pos2(rect.left() - 12.0, rect.center().y);
+            let press = |pressed| egui::Event::PointerButton { pos: target, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            for events in [vec![pointer_at(target)], vec![press(true)], vec![press(false)]] {
+                h.frame(events);
+            }
+            h.idle(30);
+        };
+        h.idle(20);
+        chevron(&mut h, "objects");
+        assert!(h.painted.iter().any(|text| text == "b"), "{:?}", h.painted);
+        h.app.views[id].browser.mode = BrowserMode::Groups;
+        for _ in 0..40 { h.frame(Vec::new()); std::thread::sleep(Duration::from_millis(5)); }
+        chevron(&mut h, "scenery");
+        assert!(h.painted_contains("two.scenery"), "{:?}", h.painted);
+    }
+
+    #[test]
+    fn search_results_open_folder_by_folder() {
+        let kit = LooseKit::new("search-folders", "halo3_mcc");
+        for rel in [
+            "objects\\characters\\brute\\zz_one",
+            "objects\\characters\\brute\\zz_two",
+            "objects\\characters\\elite\\zz_three",
+            "scenarios\\solo\\zz_four",
+            "objects\\plain",
+        ] {
+            kit.write_mcc(rel, "scenery", |_| {});
+        }
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        h.idle(2);
+        let id = h.app.model.kits[h.app.model.active].id;
+        h.app.views[id].browser.filter = "zz".into();
+        let started = Instant::now();
+        h.frame(Vec::new());
+        while h.app.views[id].browser.filter_cache.tree.children.is_empty()
+            || h.app.views[id].browser.filter_cache.is_searching()
+        {
+            assert!(started.elapsed().as_secs() < 20, "{:?}", h.painted);
+            h.frame(Vec::new());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        h.idle(2);
+        let shown = |h: &Harness, text: &str| h.painted.iter().any(|painted| painted == text);
+        assert!(shown(&h, "objects") && shown(&h, "3") && shown(&h, "1"), "{:?}", h.painted);
+        assert!(!shown(&h, "characters") && !shown(&h, "solo"), "{:?}", h.painted);
+
+        // scenarios holds one folder, so it opens through to the tag.
+        h.click("scenarios", 0);
+        h.idle(3);
+        assert!(shown(&h, "solo") && h.painted_contains("zz_four"), "{:?}", h.painted);
+        // objects holds only characters, which holds two folders: stop there.
+        h.click("objects", 0);
+        h.idle(3);
+        assert!(shown(&h, "brute") && shown(&h, "elite"), "{:?}", h.painted);
+        assert!(!h.painted_contains("zz_one"), "{:?}", h.painted);
+
+        // Refining keeps what was opened.
+        h.app.views[id].browser.filter = "zz_".into();
+        let started = Instant::now();
+        while !shown(&h, "brute") || h.app.views[id].browser.filter_cache.waiting_for_results() {
+            assert!(started.elapsed().as_secs() < 20, "{:?}", h.painted);
+            h.frame(Vec::new());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // Collapse All closes everything; clearing shows the plain tree.
+        h.app.views[id].browser.open_all = Some(false);
+        h.idle(3);
+        assert!(!shown(&h, "characters"), "{:?}", h.painted);
+        h.app.views[id].browser.filter.clear();
+        h.idle(3);
+        assert!(shown(&h, "objects") && !shown(&h, "characters"), "{:?}", h.painted);
+        assert!(!shown(&h, "3"), "no counts outside a search: {:?}", h.painted);
     }
 }

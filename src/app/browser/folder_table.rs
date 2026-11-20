@@ -332,9 +332,10 @@ pub(in crate::app) fn paint_folder_columns(
             let Some(key) = key else {
                 continue;
             };
-            let Some(keywords) = table.keywords.get(&key) else {
+            let keywords = crate::core::keywords::keywords_in(&table.keywords, &key);
+            if keywords.is_empty() {
                 continue;
-            };
+            }
             let catalog = &table.catalog;
             let keywords = catalog.ordered(keywords);
             let font = FontId::proportional(12.0);
@@ -428,10 +429,9 @@ impl FolderTable {
                 .and_then(|path| self.dates.details(path).size)
                 .map(SortValue::Size),
             FolderColumn::Keywords => key
-                .and_then(|key| self.keywords.get(key))
+                .map(|key| crate::core::keywords::keywords_in(&self.keywords, key))
                 .filter(|list| !list.is_empty())
-                .cloned()
-                .map(SortValue::Keywords),
+                .map(|list| SortValue::Keywords(list.to_vec())),
         }
     }
 }

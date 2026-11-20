@@ -2115,7 +2115,7 @@ mod tests {
                     if let Some(offset) = offset { area = area.vertical_scroll_offset(offset); }
                     let shown = area.show(ui, |ui| {
                         crate::app::browser::draw_tree(ui, &source.tree, &source.entries, None,
-                            "", true, false, false, false, None, crate::app::browser::BrowserSort::Natural,
+                            "", crate::app::browser::FolderOpening::AllOpen, false, false, false, None, crate::app::browser::BrowserSort::Natural,
                             false, None, false, None);
                     });
                     scroll = shown.state.clamped_offset().y;

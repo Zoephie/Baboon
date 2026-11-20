@@ -16,6 +16,8 @@ use crate::app::export::is_scenario_group;
 mod filter;
 mod folder_table;
 mod tree;
+mod search_folders;
+pub(in crate::app) use search_folders::{search_node_key, SearchFolders};
 mod navigation;
 pub(in crate::app) mod selection;
 mod flat;
@@ -365,6 +367,10 @@ pub(in crate::app) struct KitBrowser {
     /// Keyword pills in the search box: each must be on a match exactly.
     pub(in crate::app) keyword_terms: Vec<String>,
     pub(in crate::app) filter_cache: FilterCache,
+    /// Which of the search's result folders are open.
+    pub(in crate::app) search_folders: SearchFolders,
+    /// View → Expand All (true) or Collapse All (false), for the next draw.
+    pub(in crate::app) open_all: Option<bool>,
     /// What the search box matches: tag names, folder names, keywords.
     pub(in crate::app) search_scope: BrowserSearchScope,
     /// Docked folder browsers, keyed by their synthetic tag-tree pane key.

@@ -1154,32 +1154,19 @@ pub(in crate::app) fn search_clear_control(
         egui::pos2(field_rect.right() - 10.0, field_rect.center().y),
         Vec2::splat(20.0),
     );
-    search_clear_control_at(ui, clear_rect, id, 2.0)
+    search_clear_control_at(ui, clear_rect, id)
 }
 
 pub(in crate::app) fn search_clear_control_at(
     ui: &mut Ui,
     clear_rect: egui::Rect,
     id: egui::Id,
-    corner_radius: f32,
 ) -> egui::Response {
+    // The tabs' close button, hover and all.
     let clear = ui
         .interact(clear_rect, id, Sense::click())
         .on_hover_text("Clear search");
-    if clear.hovered() {
-        ui.painter().rect_filled(
-            clear_rect,
-            corner_radius,
-            ui.visuals().widgets.hovered.weak_bg_fill,
-        );
-    }
-    let color = text_strong().gamma_multiply(0.5);
-    let icon_rect = clear_rect.shrink((clear_rect.width() - 10.0) * 0.5);
-    let stroke = Stroke::new(1.5_f32, color);
-    ui.painter()
-        .line_segment([icon_rect.left_top(), icon_rect.right_bottom()], stroke);
-    ui.painter()
-        .line_segment([icon_rect.right_top(), icon_rect.left_bottom()], stroke);
+    crate::app::ui_kit::paint_close_control(ui, &clear);
     clear
 }
 

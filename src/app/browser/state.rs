@@ -17,6 +17,8 @@ pub(in crate::app) enum BrowserAction {
         open_in_new_tab: bool,
     },
     ToggleFolderFavorite(PathBuf),
+    /// Open the folder a tag is in, in a new folder tab, with it selected.
+    OpenTagFolder(String),
     Select(String),
     ToggleFavorite(String),
     CopyTagName(String),
@@ -174,6 +176,10 @@ pub(in crate::app) struct FolderBrowserState {
     /// The generation and entry count `group_tree` was built from.
     pub(in crate::app) group_tree_for: Option<(u64, usize)>,
     pub(in crate::app) filter_cache: FilterCache,
+    /// Which of the search's result folders are open.
+    pub(in crate::app) search_folders: SearchFolders,
+    /// View → Expand All (true) or Collapse All (false), for the next draw.
+    pub(in crate::app) open_all: Option<bool>,
     pub(in crate::app) date_cache: FolderDateCache,
     pub(in crate::app) table_layout: FolderTableLayout,
     pub(in crate::app) search_scope: BrowserSearchScope,
@@ -514,11 +520,20 @@ pub(in crate::app) struct FilterCache {
     receiver: Option<std::sync::mpsc::Receiver<SearchResults>>,
     pub(in crate::app) entries: Vec<TagEntry>,
     pub(in crate::app) tree: TagTree,
+    /// Matches inside each folder of `tree`, by [`search_node_key`].
+    pub(in crate::app) counts: Arc<std::collections::HashMap<String, usize>>,
+    /// Moves whenever `tree` is replaced.
+    pub(in crate::app) serial: u64,
+    /// Folders the search matched themselves, by name or by their own
+    /// keywords, beneath the folder searched: what Flat lists as folders.
+    pub(in crate::app) found_folders: Arc<Vec<PathBuf>>,
 }
 struct SearchResults {
     signature: u64,
     entries: Vec<TagEntry>,
     tree: TagTree,
+    counts: std::collections::HashMap<String, usize>,
+    found_folders: Vec<PathBuf>,
     folders: Option<Arc<Vec<String>>>,
 }
 struct SearchRequest {
@@ -595,6 +610,9 @@ impl FilterCache {
             if self.query_signature != Some(query_signature) {
                 self.entries.clear();
                 self.tree = TagTree::default();
+                self.counts = Arc::default();
+                self.found_folders = Arc::default();
+                self.serial += 1;
             }
             self.query_signature = Some(query_signature);
         }
@@ -604,6 +622,9 @@ impl FilterCache {
                     if result.signature == signature {
                         self.entries = result.entries;
                         self.tree = result.tree;
+                        self.counts = Arc::new(result.counts);
+                        self.found_folders = Arc::new(result.found_folders);
+                        self.serial += 1;
                         if let Some(folders) = result.folders {
                             self.folder_paths = folders;
                             self.folder_paths_for = root.map(|root| (generation, root.to_owned()));
@@ -720,6 +741,9 @@ impl FilterCache {
         self.scoped_signature = Some(signature);
         self.entries = result.entries;
         self.tree = result.tree;
+        self.counts = Arc::new(result.counts);
+        self.found_folders = Arc::new(result.found_folders);
+        self.serial += 1;
         if let Some(folders) = result.folders {
             self.folder_paths = folders;
             self.folder_paths_for = root.map(|root| (generation, root.to_owned()));
@@ -751,10 +775,7 @@ fn run_browser_search(
             && query.entry(
                 entry,
                 request.scope,
-                keywords
-                    .get(&entry.key)
-                    .map(Vec::as_slice)
-                    .unwrap_or_default(),
+                crate::core::keywords::keywords_in(keywords, &entry.key),
             )
         {
             entries.push(entry.clone());
@@ -762,7 +783,8 @@ fn run_browser_search(
     }
     let mut folders = None;
     let mut extra = Vec::new();
-    if (request.scope.folders || request.scope.keywords)
+    let folder_keywords_count = request.scope.keywords || query.has_keyword_pill();
+    if (request.scope.folders || folder_keywords_count)
         && !request.groups
         && !request.query.trim().is_empty()
     {
@@ -788,9 +810,7 @@ fn run_browser_search(
                 }
             };
             // Folders' own keywords, by the folder's path as tags compare.
-            let folder_keywords: std::collections::HashMap<String, &Vec<String>> = if request
-                .scope
-                .keywords
+            let folder_keywords: std::collections::HashMap<String, &Vec<String>> = if folder_keywords_count
             {
                 keywords
                     .iter()
@@ -849,10 +869,35 @@ fn run_browser_search(
     if cancelled() {
         return None;
     }
+    // A folder found by its own name or keywords counts as a match in the
+    // folders above it, as well as everything inside it.
+    let found: HashSet<String> = extra.iter().map(|path| path.to_ascii_lowercase()).collect();
+    let named = |node: &TagTreeNode| {
+        !request.groups
+            && ((request.scope.folders && query.folder(&node.label))
+                || found.contains(&search_node_key(&node.rel_path)))
+    };
+    let counts = super::search_folders::match_counts(&tree, &named);
+    let mut found_folders = Vec::new();
+    fn collect(
+        nodes: &[TagTreeNode],
+        named: &dyn Fn(&TagTreeNode) -> bool,
+        out: &mut Vec<PathBuf>,
+    ) {
+        for node in nodes {
+            if named(node) {
+                out.push(node.rel_path.clone());
+            }
+            collect(&node.children, named, out);
+        }
+    }
+    collect(&tree.children, &named, &mut found_folders);
     Some(SearchResults {
         signature: request.signature,
         entries,
         tree,
+        counts,
+        found_folders,
         folders,
     })
 }

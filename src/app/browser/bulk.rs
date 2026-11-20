@@ -241,6 +241,9 @@ impl Baboon {
             return;
         };
         let root = root.clone();
+        let (kept, covered) = without_covered(&request.keys, source.full_entry_set(), request.action);
+        let mut request = request;
+        request.keys = kept;
         let mut paths = Vec::new();
         for key in &request.keys {
             let path = if let Some(path) = key.strip_prefix(FOLDER_PANE_PREFIX) {
@@ -341,6 +344,7 @@ impl Baboon {
                     action,
                     selected: selection_rows(&root, &roots, &previous),
                     game,
+                    covered,
                 });
             }
         }
@@ -604,6 +608,65 @@ fn entries_by_path(entries: &[TagEntry]) -> HashMap<&Path, &TagEntry> {
 
 /// The selected items of a bulk delete or move as review rows: folders with a folder
 /// icon, tags with their group's icon, other files with the generic icon.
+/// `keys` without the items inside a selected folder, which go with it,
+/// and what to tell the user about them.
+pub(in crate::app) fn without_covered(
+    keys: &[String],
+    entries: &[TagEntry],
+    action: BulkAction,
+) -> (Vec<String>, Option<String>) {
+    let folders: Vec<String> = keys
+        .iter()
+        .filter_map(|key| key.strip_prefix(FOLDER_PANE_PREFIX))
+        .map(|path| path.replace('/', "\\").to_ascii_lowercase())
+        .collect();
+    let path_of = |key: &str| match key.strip_prefix(FOLDER_PANE_PREFIX) {
+        Some(path) => Some(path.replace('/', "\\")),
+        None => entries
+            .iter()
+            .find(|entry| entry.key == key)
+            .map(|entry| entry.display_path.replace('/', "\\")),
+    };
+    let holder = |path: &str| {
+        let lower = path.to_ascii_lowercase();
+        folders
+            .iter()
+            .filter(|folder| {
+                lower.len() > folder.len()
+                    && lower.starts_with(folder.as_str())
+                    && lower[folder.len()..].starts_with('\\')
+            })
+            .min_by_key(|folder| folder.len())
+            .cloned()
+    };
+    let mut kept = Vec::new();
+    let mut covered = Vec::new();
+    for key in keys {
+        match path_of(key).and_then(|path| holder(&path).map(|folder| (path, folder))) {
+            Some(found) => covered.push(found),
+            None => kept.push(key.clone()),
+        }
+    }
+    let verb = match action {
+        BulkAction::Delete => "is deleted",
+        BulkAction::Copy => "is copied",
+        _ => "moves",
+    };
+    let note = match covered.as_slice() {
+        [] => None,
+        [(path, folder)] => Some(format!(
+            "\u{201c}{}\u{201d} {verb} with its folder \u{201c}{}\u{201d}, which is also selected.",
+            tag_path::name(path),
+            tag_path::name(folder),
+        )),
+        many => Some(format!(
+            "{} selected items are inside selected folders, and go with them.",
+            many.len()
+        )),
+    };
+    (kept, note)
+}
+
 pub(in crate::app) fn selection_rows(
     root: &Path,
     roots: &[PathBuf],
@@ -1360,6 +1423,33 @@ mod tests {
         app.begin_browser_bulk("test".into(), keys, BulkAction::Open, &ctx);
         assert!(app.dialogs.get::<BulkPrompt>().is_none());
         assert_eq!(app.model.kits[0].open_tabs.len(), 10);
+    }
+
+    /// A selected folder covers what is selected inside it: those go with it.
+    #[test]
+    fn items_inside_a_selected_folder_go_with_it() {
+        let entry = |key: &str, path: &str| TagEntry {
+            key: key.into(),
+            display_path: path.into(),
+            group_tag: u32::from_be_bytes(*b"bipd"),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(path.into()),
+        };
+        let entries = [
+            entry("brute", "objects\\characters\\brute\\brute.biped"),
+            entry("elite", "objects\\characters\\elite\\elite.biped"),
+            entry("bruteish", "objects\\characters\\brute_old\\a.biped"),
+        ];
+        let folder = folder_pane_key(Path::new("objects").join("characters").join("brute").as_path());
+        let keys = vec![folder.clone(), "brute".to_owned(), "elite".to_owned(), "bruteish".to_owned()];
+        let (kept, note) = without_covered(&keys, &entries, BulkAction::Move);
+        assert_eq!(kept, [folder, "elite".to_owned(), "bruteish".to_owned()]);
+        assert_eq!(
+            note.as_deref(),
+            Some("\u{201c}brute.biped\u{201d} moves with its folder \u{201c}brute\u{201d}, which is also selected.")
+        );
+        let (_, note) = without_covered(&keys[1..], &entries, BulkAction::Delete);
+        assert!(note.is_none());
     }
 
     /// Run a bulk Move or Delete of `folders` and `tags` in the script

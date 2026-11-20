@@ -1116,6 +1116,8 @@ mod tests {
             filter: _,
             // Keywords, not tag keys.
             keyword_terms: _,
+            search_folders: _,
+            open_all: _,
         } = KitBrowser::default();
         let EditorCaches {
             // Carried by `rekey_tag_in_kit`.

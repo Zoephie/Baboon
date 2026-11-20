@@ -1066,12 +1066,6 @@ pub(in crate::app) fn text_strong() -> Color32 {
     if is_dark_mode() { Color32::WHITE } else { Color32::BLACK }
 }
 
-/// The colour a neutral surface is nudged toward to lift it off its
-/// background (the keyword pills in the search bar).
-pub(in crate::app) fn lift_target() -> Color32 {
-    text_strong()
-}
-
 /// Hover wash behind a row of a custom menu.
 pub(in crate::app) fn menu_row_hover() -> Color32 {
     if is_dark_mode() {
@@ -1178,16 +1172,18 @@ pub(in crate::app) fn unused_value_text() -> Color32 {
 // Badges, highlights and markers.
 
 /// The four-character group badge beside a tag in the tree.
+// A tag group's badge in Groups view: slate in dark mode, a pale slate in
+// light mode.
 pub(in crate::app) fn group_badge_fill() -> Color32 {
-    Color32::from_rgb(48, 58, 66)
+    if is_dark_mode() { Color32::from_rgb(48, 58, 66) } else { Color32::from_rgb(232, 237, 240) }
 }
 
 pub(in crate::app) fn group_badge_edge() -> Color32 {
-    Color32::from_rgb(76, 89, 98)
+    if is_dark_mode() { Color32::from_rgb(76, 89, 98) } else { Color32::from_rgb(196, 206, 213) }
 }
 
 pub(in crate::app) fn group_badge_text() -> Color32 {
-    Color32::from_rgb(226, 235, 240)
+    if is_dark_mode() { Color32::from_rgb(226, 235, 240) } else { Color32::from_rgb(58, 70, 79) }
 }
 
 /// A favourite's filled star.
@@ -1962,9 +1958,9 @@ pub(in crate::app) struct KeywordPillColours {
     pub(in crate::app) text: Color32,
 }
 
-/// A keyword pill's colours: no colour is the neutral pill, the page lifted
-/// a touch; a colour tints the fill and border and adds a dot, a darker
-/// version of each colour for dark mode.
+/// A keyword pill's colours: its colour tints the fill and border and
+/// colours the dot, a darker version of each colour for dark mode. No colour
+/// is grey, so every pill has the same dot and border.
 pub(in crate::app) fn keyword_pill_colours(
     colour: Option<crate::core::keyword_catalog::KeywordColour>,
 ) -> KeywordPillColours {
@@ -1978,14 +1974,7 @@ pub(in crate::app) fn keyword_pill_colours(
         )
     };
     let background = editor_bg();
-    let Some(colour) = colour else {
-        return KeywordPillColours {
-            fill: mix(background, lift_target(), 0.05),
-            border: None,
-            dot: None,
-            text: text_dark(),
-        };
-    };
+    let colour = colour.unwrap_or(K::Grey);
     let dark = is_dark_mode();
     let hue = match (colour, dark) {
         (K::Red, false) => Color32::from_rgb(238, 120, 120),

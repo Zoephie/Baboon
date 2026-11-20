@@ -9,9 +9,10 @@ const DOT: f32 = 8.0;
 const DOT_LEFT: f32 = 6.0;
 const DOT_GAP: f32 = 5.0;
 
-/// Where a pill's text starts, from its left edge.
-fn text_left(colour: Option<KeywordColour>) -> f32 {
-    if colour.is_some() { DOT_LEFT + DOT + DOT_GAP } else { PADDING }
+/// Where a pill's text starts, from its left edge: after its dot. Every
+/// pill has one, the uncoloured (grey) one too.
+fn text_left(_: Option<KeywordColour>) -> f32 {
+    DOT_LEFT + DOT + DOT_GAP
 }
 
 /// The width a pill needs for `label` in `font`. `trailing` leaves room for

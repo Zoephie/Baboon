@@ -450,7 +450,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
                         &mut pane.table_layout,
                     );
                     if pane.mode == BrowserMode::Flat {
-                        flat::draw(ui, &mut pane, pane_key, kit_id, source, generation, folders_before_tags, double_click_to_open, &favorite_keys, &table_keywords, &mut need_scan, &mut action);
+                        flat::draw(ui, &mut pane, pane_key, kit_id, source, generation, folders_before_tags, double_click_to_open, &favorite_keys, &table_keywords, search_root, &mut need_scan, &mut action);
                     } else { draw_folder_pane_tree(
                         ui,
                         &mut pane,
@@ -613,7 +613,12 @@ fn draw_browser_footer(
         total
     };
     let noun = if total == 1 { "item" } else { "items" };
-    let total_label = if shown == total {
+    // A Flat search reaches into every folder beneath, so it can list more
+    // than the folder holds: it counts its results instead.
+    let total_label = if multi && !pane.assets_view && !pane.search_query().is_empty() {
+        let shown = pane.selection.rows.len();
+        format!("{shown} {}", if shown == 1 { "result" } else { "results" })
+    } else if shown == total {
         format!("{total} {noun}")
     } else {
         format!("{shown} of {total} {noun}")
@@ -711,6 +716,10 @@ fn draw_folder_pane_tree(
     let game = source.game;
     let filter = pane.search_query();
     let groups_mode = pane.mode == BrowserMode::Groups;
+    let open_all = pane.open_all.take();
+    if filter.is_empty() {
+        pane.search_folders.clear();
+    }
     let needs_complete_index = reads.is_loose && (groups_mode || !filter.is_empty());
     if needs_complete_index && !source.complete_scan {
         *need_scan = !reads.scanning;
@@ -744,6 +753,7 @@ fn draw_folder_pane_tree(
                     reads.folders_before_tags,
                     Some(reads.favorite_keys),
                     game,
+                    open_all,
                 );
                 if action.is_none() {
                     *action = tree_action;
@@ -781,10 +791,16 @@ fn draw_folder_pane_tree(
             reads.keywords,
             ui.ctx(),
         );
+        pane.search_folders.sync(&pane.filter_cache, groups_mode, open_all);
         (
             &pane.filter_cache.tree,
             pane.filter_cache.entries.as_slice(),
         )
+    };
+    let opening = if filter.is_empty() {
+        FolderOpening::Remembered(open_all)
+    } else {
+        FolderOpening::Search(&pane.search_folders)
     };
     let searching = !filter.is_empty() && pane.filter_cache.waiting_for_results();
     if searching {
@@ -803,15 +819,15 @@ fn draw_folder_pane_tree(
                 }
                 return;
             }
-            // Already filtered by `filter_cache`: drawn with folders open
-            // rather than matched a second time.
+            // Already filtered by `filter_cache`: drawn with the search's own
+            // opening rather than matched a second time.
             let tree_action = draw_tree(
                 ui,
                 tree,
                 visible_entries,
                 reads.selected,
                 "",
-                !filter.is_empty(),
+                opening,
                 reads.show_prefixes,
                 reads.double_click_to_open,
                 groups_mode,
@@ -1040,6 +1056,7 @@ fn draw_kit_browser_inner(
                 &mut view.browser.search_scope,
                 None,
                 true,
+                &mut view.browser.open_all,
             );
             if groups_clicked
                 && matches!(source.source, TagSource::LooseFolder { .. })
@@ -1206,6 +1223,10 @@ fn draw_kit_browser_inner(
                     view.browser.search_scope, &search_keywords, game);
                 browser_favorites_divider(ui, true);
 
+                let open_all = view.browser.open_all.take();
+                if filter.is_empty() {
+                    view.browser.search_folders.clear();
+                }
                 let tree_action = if !filter.is_empty() {
                     // Active search renders a memoized, pruned tree. A loose
                     // source waits for its complete background index first.
@@ -1232,6 +1253,7 @@ fn draw_kit_browser_inner(
                             &search_keywords,
                             ui.ctx(),
                         );
+                        view.browser.search_folders.sync(&view.browser.filter_cache, groups_mode, open_all);
                         let cache = &view.browser.filter_cache;
                         if cache.waiting_for_results() {
                             reloading = true;
@@ -1244,15 +1266,15 @@ fn draw_kit_browser_inner(
                             ui.label(RichText::new("No matching results").color(subtle_dark()));
                             None
                         } else {
-                            // Empty filter → tree renders every (already
-                            // pruned) entry with folders collapsed.
+                            // Empty filter: the tree is already pruned, and
+                            // opens as the search's folders say.
                             draw_tree(
                                 ui,
                                 &cache.tree,
                                 &cache.entries,
                                 selected.as_deref(),
                                 "",
-                                true,
+                                FolderOpening::Search(&view.browser.search_folders),
                                 show_prefixes,
                                 double_click_to_open,
                                 groups_mode,
@@ -1283,6 +1305,7 @@ fn draw_kit_browser_inner(
                                     folders_before_tags,
                                     favorite_context,
                                     game,
+                                    open_all,
                                 )
                             } else {
                                 draw_tree(
@@ -1291,7 +1314,7 @@ fn draw_kit_browser_inner(
                                     &source.entries,
                                     selected.as_deref(),
                                     &filter,
-                                    false,
+                                    FolderOpening::Remembered(open_all),
                                     show_prefixes,
                                     double_click_to_open,
                                     false,
@@ -1324,7 +1347,7 @@ fn draw_kit_browser_inner(
                                     entries,
                                     selected.as_deref(),
                                     &filter,
-                                    false,
+                                    FolderOpening::Remembered(open_all),
                                     show_prefixes,
                                     double_click_to_open,
                                     true,
@@ -1460,6 +1483,7 @@ fn browser_toolbar_controls(
     search_scope: &mut BrowserSearchScope,
     table_layout: Option<&mut FolderTableLayout>,
     show_modes: bool,
+    open_all: &mut Option<bool>,
 ) -> bool {
     style_browser_toolbar(ui);
 
@@ -1469,7 +1493,7 @@ fn browser_toolbar_controls(
     if show_modes {
         icon_text_dropdown_button(ui, ButtonIcon::View, "View", |ui| {
             style_list_menu(ui);
-            if dedicated && selectable_icon_text_button(ui, ButtonIcon::FolderClosed, "Flat", *mode == BrowserMode::Flat).on_hover_text("Current folder only. Mixed multi-selection and bulk actions.").clicked() { *mode = BrowserMode::Flat; close_menu(ui); }
+            if dedicated && selectable_icon_text_button(ui, ButtonIcon::FolderClosed, "Flat", *mode == BrowserMode::Flat).on_hover_text("This folder's items, with mixed multi-selection and bulk actions. A search lists matches from every folder beneath.").clicked() { *mode = BrowserMode::Flat; close_menu(ui); }
             if selectable_icon_text_button(ui, ButtonIcon::FolderOpen, if dedicated { "Tree" } else { "Folders" }, *mode == BrowserMode::Folders).on_hover_text("Expandable folder tree. Single selection; use chevrons to expand.").clicked() {
                 *mode = BrowserMode::Folders;
                 close_menu(ui);
@@ -1478,6 +1502,13 @@ fn browser_toolbar_controls(
                 *mode = BrowserMode::Groups;
                 groups_clicked = true;
                 close_menu(ui);
+            }
+            if *mode != BrowserMode::Flat {
+                ui.separator();
+                if icon_text_button(ui, ButtonIcon::Closed, "Collapse All", true).on_hover_text("Close every folder. Alt-click a folder's arrow to close everything inside it.").clicked() {
+                    *open_all = Some(false);
+                    close_menu(ui);
+                }
             }
             ui.separator();
             ui.baboon_checkbox(show_prefixes, "Show prefixes");
@@ -1541,6 +1572,7 @@ fn draw_folder_browser_controls(
         &mut pane.search_scope,
         Some(&mut pane.table_layout),
         true,
+        &mut pane.open_all,
     );
 }
 
@@ -2164,6 +2196,7 @@ mod tests {
                             &mut scope,
                             None,
                             show_modes,
+                            &mut None,
                         );
                     });
                 });

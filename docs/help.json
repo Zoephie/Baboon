@@ -78,6 +78,8 @@
               "items": [
                 "Recent folders appear in the File menu, on the workspace tab bar, and on the welcome screen; each can be removed individually or cleared.",
                 "Search supports space-separated AND terms, | OR terms, and ^prefix, suffix$, or ^exact$ anchors.",
+                "Search results show their folders closed, with how many matches each holds; opening one follows a lone path down to the matches. View > Collapse All, a folder's right-click menu, or Alt-clicking an open folder's arrow close everything inside.",
+                "A Flat search lists every match beneath the folder, each after its folder path, with bulk actions; right-click one for Open Tag Folder.",
                 "Sort each folder or group naturally, by name, or by type.",
                 "Reveal in tree jumps the browser to a tag and opens its parent folders.",
                 "Background indexing is persisted per game under Baboon's app data folder so later launches can skip the full scan.",

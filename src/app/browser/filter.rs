@@ -100,6 +100,11 @@ impl ScopedSearchQuery {
                 .collect(),
         }
     }
+    /// Whether the search holds a keyword pill, which finds folders by
+    /// their own keywords whatever the scope.
+    pub(in crate::app) fn has_keyword_pill(&self) -> bool {
+        self.branches.iter().flatten().any(|term| keyword_term(term).is_some())
+    }
     fn matches(&self, matches_term: impl Fn(&str) -> bool) -> bool {
         let mut had_term = false;
         for branch in &self.branches {

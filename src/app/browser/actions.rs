@@ -451,6 +451,40 @@ impl Baboon {
         }
     }
 
+    /// Open the folder a tag is in, in a new folder tab, with the tag
+    /// selected: a search result's way back to where it lives.
+    pub(in crate::app) fn open_tag_folder(&mut self, key: &str, ctx: egui::Context) {
+        let Some(display) = self.model.kits[self.model.active]
+            .source
+            .as_ref()
+            .and_then(|source| source.full_entry_set().iter().find(|entry| entry.key == key))
+            .map(|entry| entry.display_path.replace('/', "\\"))
+        else {
+            return;
+        };
+        let parent = tag_path::parent(&display).unwrap_or("").to_owned();
+        let label = if parent.is_empty() { "tags".to_owned() } else { tag_path::name(&parent).to_owned() };
+        let kit = self.model.kits[self.model.active].id;
+        let before: HashSet<String> = self.views[kit].browser.folder_browsers.keys().cloned().collect();
+        self.handle_browser_action(
+            BrowserAction::OpenFolderBrowser {
+                rel_path: PathBuf::from(parent.replace('\\', std::path::MAIN_SEPARATOR_STR)),
+                label,
+                open_in_new_tab: true,
+            },
+            ctx,
+        );
+        if let Some(pane) = self.views[kit]
+            .browser
+            .folder_browsers
+            .iter_mut()
+            .find(|(pane_key, _)| !before.contains(*pane_key))
+            .map(|(_, pane)| pane)
+        {
+            pane.selection.click(key, false, false, false);
+        }
+    }
+
     pub(in crate::app) fn toggle_folder_favorite(&mut self, rel_path: &Path) {
         let Some(root) = self.model.loaded_tags_root() else {
             self.model.status = "Only loose editing-kit folders can be favorited".to_owned();
@@ -657,10 +691,13 @@ impl Baboon {
                         asset_models: true,
                         asset_cell_size: DEFAULT_CELL,
                         keyword_terms: Vec::new(),
+                        search_folders: SearchFolders::default(),
+                        open_all: None,
                     });
                 self.kit_and_view(self.model.active).open_tag_pane(&key);
             }
             BrowserAction::ToggleFolderFavorite(rel_path) => self.toggle_folder_favorite(&rel_path),
+            BrowserAction::OpenTagFolder(key) => self.open_tag_folder(&key, ctx),
             BrowserAction::Select(key) => self.select_entry(key, ctx),
             BrowserAction::ToggleFavorite(key) => self.toggle_favorite(&key),
             BrowserAction::CopyTagName(key) => self.copy_tag_name(&key, &ctx),
@@ -1236,7 +1273,7 @@ mod tests {
                         begin_browser_navigation(ui, egui::Id::unique(("folder_keyboard_test", pane_key.as_deref())));
                         ScrollArea::vertical().show(ui, |ui| {
                             top = ui.cursor().top();
-                            draw_tree(ui, &tree, &entries, None, "", false, false, true, false, None,
+                            draw_tree(ui, &tree, &entries, None, "", FolderOpening::Remembered(None), false, true, false, None,
                                 BrowserSort::Name, false, None, false, Some(GameId::Halo3));
                         });
                         finish_browser_navigation(ui);
@@ -1490,6 +1527,7 @@ mod tests {
         match action {
             A::Bulk { .. } => 52, // Dedicated batch tests cover this compound action.
             A::DropItems { .. } => 53, // So do drop tests: it is a Move or Copy.
+            A::OpenTagFolder(_) => 54, // As does the search result test that opens one.
             A::OpenFolderBrowser { .. } => 0,
             A::ToggleFolderFavorite(_) => 1,
             A::Select(_) => 2,

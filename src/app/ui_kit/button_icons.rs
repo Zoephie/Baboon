@@ -259,6 +259,13 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
 }
 
 pub(in crate::app) fn paint_button_icon_at(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32) {
+    // The SVG is recoloured without alpha, so a see-through colour paints
+    // opaque and its alpha goes on as a tint.
+    if color.a() < 255 {
+        let [r, g, b, a] = color.to_srgba_unmultiplied();
+        paint_icon_tinted(ui, icon, rect, Color32::from_rgb(r, g, b), Color32::from_white_alpha(a));
+        return;
+    }
     paint_icon_tinted(ui, icon, rect, color, Color32::WHITE);
 }
 
