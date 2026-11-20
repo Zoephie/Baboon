@@ -37,15 +37,23 @@ const THEME_READS: &[&str] = &["is_dark_mode()", "visuals().dark_mode", "visuals
 fn is_literal(arg: &str) -> bool {
     let arg = arg.trim();
     let digits = arg.trim_end_matches("u8").trim_end_matches('_');
+    let hex = digits.strip_prefix("0x").or_else(|| digits.strip_prefix("0X"));
     (!digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()))
+        || hex.is_some_and(|hex| !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit() || c == '_'))
         || (arg.starts_with('"') && arg.ends_with('"') && arg.len() >= 2)
 }
 
 /// The lines (1-based) of `source` holding a colour or theme branch that
 /// belongs in the style module.
 fn offending_lines(source: &str) -> Vec<usize> {
-    let source = match source.find("#[cfg(test)]\nmod ") {
-        Some(tests) => &source[..tests],
+    // The scan stops at an inline test module, `mod tests {`; a one-line
+    // `mod fixture;` behind `#[cfg(test)]` is no reason to stop.
+    let inline_tests = source.match_indices("#[cfg(test)]\nmod ").find(|(start, _)| {
+        let line = &source[start + "#[cfg(test)]\n".len()..];
+        line[..line.find('\n').unwrap_or(line.len())].trim_end().ends_with('{')
+    });
+    let source = match inline_tests {
+        Some((tests, _)) => &source[..tests],
         None => source,
     };
     let lines: Vec<&str> = source.split('\n').collect();
@@ -130,10 +138,14 @@ let h = Color32::from_white_alpha(9); // fixed: over an image
 // fixed: over an image
 let i = Color32::from_black_alpha(9);
 let j = ui.visuals().dark_mode;
+let k = Color32::from_rgb(0xEB, 0x47, 0x47);
+#[cfg(test)]
+mod fixture;
+let l = if is_dark_mode() { a } else { b };
 #[cfg(test)]
 mod tests {
-    let k = Color32::from_rgb(1, 2, 3);
+    let m = Color32::from_rgb(1, 2, 3);
 }
 ";
-    assert_eq!(offending_lines(source), vec![1, 2, 5, 6, 13]);
+    assert_eq!(offending_lines(source), vec![1, 2, 5, 6, 13, 14, 17]);
 }

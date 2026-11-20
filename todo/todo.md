@@ -6,16 +6,16 @@ that picking one up does not mean rediscovering it first.
 
 ---
 
-## Model Preview: imposters (Reach, Halo 2 Anniversary)
+## Model Preview: an imposter's own lighting and pose (Reach, Halo 2 Anniversary)
 
-**Status:** built. The Imposter toggle and the `.imposter_model` tab
-(`load/imposter.rs`) draw the imposter's geometry, named after the render
-model's regions and permutations by position.
+**What is missing:** each imposter vertex carries a BRDF (`raw imposter
+data`: diffuse, ambient, specular, shininess), but the preview
+(`load/imposter.rs`) draws only the diffuse, scaled to display range, as
+flat colour per triangle. The imposter isn't posed either.
 
-Left out: an imposter's own lighting. Each vertex carries a BRDF (`raw
-imposter data`: diffuse, ambient, specular, shininess); the preview draws
-only the diffuse, scaled to display range, as flat colour per triangle.
-It is not posed (`node maps` would bind it).
+**What implementing it involves:** a shading pass reading the other BRDF
+terms, and binding the imposter to the model's nodes through its `node
+maps` so it takes the model's animation.
 
 ---
 
