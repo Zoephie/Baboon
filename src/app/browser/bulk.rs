@@ -620,12 +620,18 @@ pub(in crate::app) fn without_covered(
         .filter_map(|key| key.strip_prefix(FOLDER_PANE_PREFIX))
         .map(|path| path.replace('/', "\\").to_ascii_lowercase())
         .collect();
+    if folders.is_empty() {
+        return (keys.to_vec(), None);
+    }
+    let selected: std::collections::HashSet<&str> = keys.iter().map(String::as_str).collect();
+    let paths: std::collections::HashMap<&str, &str> = entries
+        .iter()
+        .filter(|entry| selected.contains(entry.key.as_str()))
+        .map(|entry| (entry.key.as_str(), entry.display_path.as_str()))
+        .collect();
     let path_of = |key: &str| match key.strip_prefix(FOLDER_PANE_PREFIX) {
         Some(path) => Some(path.replace('/', "\\")),
-        None => entries
-            .iter()
-            .find(|entry| entry.key == key)
-            .map(|entry| entry.display_path.replace('/', "\\")),
+        None => paths.get(key).map(|path| path.replace('/', "\\")),
     };
     let holder = |path: &str| {
         let lower = path.to_ascii_lowercase();

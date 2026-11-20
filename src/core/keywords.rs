@@ -372,12 +372,27 @@ impl KeywordStore {
             .map(|(key, _)| key.clone())
             .collect();
         let changed: BTreeSet<String> = keys.iter().map(|key| key_identity(key)).collect();
-        for key in &keys {
-            self.remove(key, &old);
-            if let Some(new) = new {
-                self.add(key, new);
+        let new = new.map(|new| new.trim().to_ascii_lowercase()).filter(|new| !new.is_empty());
+        // Edited in place and indexed once: one rebuild per tag made a
+        // keyword on thousands of tags slow to change.
+        let by_tag = Arc::make_mut(&mut self.by_tag);
+        for key in keys {
+            let Some(list) = by_tag.get_mut(&key) else {
+                continue;
+            };
+            list.retain(|existing| *existing != old);
+            if let Some(new) = &new
+                && !list.contains(new)
+            {
+                list.push(new.clone());
+                list.sort();
             }
+            if list.is_empty() {
+                by_tag.remove(&key);
+            }
+            self.touched.insert(key);
         }
+        self.reindex();
         changed.len()
     }
 

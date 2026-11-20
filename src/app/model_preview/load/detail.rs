@@ -137,7 +137,7 @@ mod tests {
     /// lacks, is not one of its own.
     #[test]
     fn a_level_repeating_the_one_below_is_not_its_own() {
-        let permutations = vec![
+        let permutations = [
             vec![Some(0), Some(0), Some(1), Some(1), Some(2)],
             vec![None, Some(3), Some(3), Some(3), Some(3)],
         ];
@@ -146,7 +146,7 @@ mod tests {
             [true, true, true, false, true],
         );
         // One permutation's own geometry is enough, whatever the others do.
-        let one = vec![vec![Some(0), Some(0), Some(0)], vec![Some(1), Some(2), Some(2)]];
+        let one = [vec![Some(0), Some(0), Some(0)], vec![Some(1), Some(2), Some(2)]];
         assert_eq!(own_levels(one.iter(), 3), [true, true, false]);
     }
 

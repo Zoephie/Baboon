@@ -3248,8 +3248,8 @@ mod tests {
         );
         assert!(plays(&queued).is_empty(), "drawing alone played something");
 
-        // "▶" is Next on the clip row, then Play on the transport.
-        let (_, queued, _) = run(&root, &[("\u{25B6}", 1)], &draw);
+        // The transport's first "▶" is Play; its second is Next.
+        let (_, queued, _) = run(&root, &[("\u{25B6}", 0)], &draw);
         let request = *plays(&queued).first().expect("Play queued nothing");
         assert!(
             request

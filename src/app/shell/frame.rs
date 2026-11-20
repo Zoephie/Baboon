@@ -68,7 +68,7 @@ fn pane_header_input_stroke(ui: &Ui, hovered: bool, focused: bool) -> Stroke {
 /// The shared browser search field. Its icon lives inside the 24-point pill so
 /// the compact sidebar and a wide folder pane use exactly the same geometry.
 pub(in crate::app) fn browser_search_field(ui: &mut Ui, value: &mut String, hint: &str) -> egui::Response {
-    browser_search_field_with_keywords(ui, value, &mut Vec::new(), hint, None)
+    browser_search_field_with_keywords(ui, value, &mut Vec::new(), hint, None, false)
 }
 
 /// What a search box reads to suggest keywords: the kit's keywords and the
@@ -80,14 +80,16 @@ pub(in crate::app) type KeywordReads<'a> = (
 
 /// [`browser_search_field`] with keyword pills: `pills` show inside the box
 /// ahead of the text, each with its own ×, and Backspace in an empty box
-/// takes off the last. Given `keywords` (the Keywords scope is on), the word
-/// being typed suggests matching keywords, and picking one makes it a pill.
+/// takes off the last. `keywords` gives the pills their spelling and colour;
+/// with `suggest` too (the Keywords scope is on), the word being typed
+/// suggests matching keywords, and picking one makes it a pill.
 pub(in crate::app) fn browser_search_field_with_keywords(
     ui: &mut Ui,
     value: &mut String,
     pills: &mut Vec<String>,
     hint: &str,
     keywords: Option<KeywordReads<'_>>,
+    suggest: bool,
 ) -> egui::Response {
     const PILL_HEIGHT: f32 = 18.0;
     const PILL_REMOVE: f32 = 16.0;
@@ -180,7 +182,8 @@ pub(in crate::app) fn browser_search_field_with_keywords(
     );
     let hint = if pills.is_empty() { hint } else { "" };
     // While suggestions show, Tab picks one rather than moving on.
-    let suggesting = keywords.is_some()
+    let suggesting = suggest
+        && keywords.is_some()
         && ui.data(|data| {
             data.get_temp::<egui::Rect>(edit_id.with("keyword_suggestions").with("suggestions"))
                 .is_some()
@@ -208,7 +211,7 @@ pub(in crate::app) fn browser_search_field_with_keywords(
         response.mark_changed();
     }
     // The word being typed suggests keywords; picking one makes it a pill.
-    if let Some((store, catalog)) = keywords {
+    if let Some((store, catalog)) = keywords.filter(|_| suggest) {
         // The longest run of typed words, at the end, that some keyword
         // matches: "to be d" can be one keyword, and "elite wi" text then
         // a keyword.
@@ -8955,7 +8958,7 @@ mod tests {
             // Flat lists every match beneath the root.
             let found: Vec<String> = pane.selection.rows.iter().map(|row| row.0.clone()).collect();
             if !found.is_empty() {
-                assert_eq!(found, [alpha.clone()]);
+                assert_eq!(found, std::slice::from_ref(&alpha));
                 break;
             }
             assert!(started.elapsed().as_secs() < 20, "{:?}", h.painted);

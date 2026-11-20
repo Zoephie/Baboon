@@ -75,7 +75,7 @@ impl SearchFolders {
     }
 
     /// Bring the open folders up to date with the latest results and the
-    /// clicks drawn since; `open_all` is View → Expand All or Collapse All.
+    /// clicks drawn since; `open_all` is Collapse All (Some(false)).
     pub(in crate::app) fn sync(&mut self, cache: &FilterCache, groups: bool, open_all: Option<bool>) {
         let toggles = std::mem::take(&mut *self.toggles.borrow_mut());
         let stale = self.built_for != Some(cache.serial) || self.groups != groups;

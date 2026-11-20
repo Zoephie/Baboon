@@ -50,9 +50,11 @@ pub(in crate::app) fn search_scope_controls(ui: &mut Ui, scope: &mut BrowserSear
 
 /// Marks a search term as a keyword pill: it matches a tag or folder carrying
 /// exactly that keyword, whatever the scope. Spaces inside the keyword are
-/// [`KEYWORD_SPACE`], so the term stays one word.
+/// [`KEYWORD_SPACE`] and bars [`KEYWORD_BAR`], so the term stays one word in
+/// one `|` branch.
 const KEYWORD_TERM: char = '\u{1}';
 const KEYWORD_SPACE: char = '\u{2}';
+const KEYWORD_BAR: char = '\u{3}';
 
 /// The search a box runs: its text, with each keyword pill required too.
 /// The pills join every `|` branch, so `a | b` with a pill finds either with
@@ -64,7 +66,11 @@ pub(in crate::app) fn keyword_query(text: &str, pills: &[String]) -> String {
     }
     let terms: Vec<String> = pills
         .iter()
-        .map(|pill| format!("{KEYWORD_TERM}{}", pill.trim().to_ascii_lowercase().replace(' ', &KEYWORD_SPACE.to_string())))
+        .map(|pill| {
+            let keyword = pill.trim().to_ascii_lowercase();
+            let keyword = keyword.replace(' ', &KEYWORD_SPACE.to_string());
+            format!("{KEYWORD_TERM}{}", keyword.replace('|', &KEYWORD_BAR.to_string()))
+        })
         .collect();
     let terms = terms.join(" ");
     if text.is_empty() {
@@ -79,7 +85,7 @@ pub(in crate::app) fn keyword_query(text: &str, pills: &[String]) -> String {
 /// The keyword a pill's term asks for, or `None` for an ordinary term.
 fn keyword_term(term: &str) -> Option<String> {
     term.strip_prefix(KEYWORD_TERM)
-        .map(|keyword| keyword.replace(KEYWORD_SPACE, " "))
+        .map(|keyword| keyword.replace(KEYWORD_SPACE, " ").replace(KEYWORD_BAR, "|"))
 }
 
 /// Parsed once per search, then matched without per-entry lowercase strings.
@@ -576,6 +582,9 @@ mod tests {
         assert!(!scoped_entry_matches(&old, &pill, scope, &old_keywords));
         let spaced = keyword_query("", &["To Be Deleted".to_owned()]);
         assert!(scoped_entry_matches(&wip, &spaced, scope, &wip_keywords));
+        let barred = keyword_query("", &["wip|old".to_owned()]);
+        assert!(!scoped_entry_matches(&old, &barred, scope, &old_keywords), "a bar is no `|`");
+        assert!(scoped_entry_matches(&old, &barred, scope, &["wip|old".to_owned()]));
         let with_text = keyword_query("old", &["wip".to_owned()]);
         assert!(!scoped_entry_matches(&wip, &with_text, scope, &wip_keywords));
         let either = keyword_query("wip | old", &["wip".to_owned()]);

@@ -812,6 +812,10 @@ fn a_context_without_gen3_shaders_says_so() {
 /// them the same objects draw through more. Each object has transparent
 /// passes, so the check cannot pass by having none.
 #[test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "reads the GL calls, which only the macOS context records"
+)]
 fn without_game_shaders_no_game_pass_draws() {
     let cases = [
         (GameId::HaloCe, "vehicles\\warthog\\warthog"),

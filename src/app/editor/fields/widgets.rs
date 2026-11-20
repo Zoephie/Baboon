@@ -1180,7 +1180,7 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.set_global_style(foundation_style());
         ctx.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
-        let id = egui::Id::new("stepped_value");
+        let id = egui::Id::unique("stepped_value");
         let mut cell = egui::Rect::NOTHING;
         for pass in 0..4 {
             let mut input = egui::RawInput::default();

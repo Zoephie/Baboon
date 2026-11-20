@@ -8,12 +8,9 @@ that picking one up does not mean rediscovering it first.
 
 ## Model Preview: imposters (Reach, Halo 2 Anniversary)
 
-**Status:** built, waiting on blam-tags. The Imposter toggle and the
-`.imposter_model` tab (`load/imposter.rs`) read the imposter's geometry with
-`extract_render_geometry_meshes_at`, which blam-tags gains on
-`feature/geometry-meshes-at-path` (paddythibau/blam-tags). Until that merges
-upstream, Baboon builds against it through an uncommitted `[patch]` in
-`Cargo.toml`; once it does, bump the `blam-tags` rev and drop the patch.
+**Status:** built. The Imposter toggle and the `.imposter_model` tab
+(`load/imposter.rs`) draw the imposter's geometry, named after the render
+model's regions and permutations by position.
 
 Left out: an imposter's own lighting. Each vertex carries a BRDF (`raw
 imposter data`: diffuse, ambient, specular, shininess); the preview draws

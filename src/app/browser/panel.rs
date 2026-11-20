@@ -328,7 +328,8 @@ pub(in crate::app) fn draw_folder_browser_pane(
                     &mut pane.filter,
                     &mut pane.keyword_terms,
                     &search_hint,
-                    pane.search_scope.keywords.then_some(keyword_reads),
+                    Some(keyword_reads),
+                    pane.search_scope.keywords,
                 );
                 ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
@@ -358,7 +359,8 @@ pub(in crate::app) fn draw_folder_browser_pane(
                         &mut pane.filter,
                         &mut pane.keyword_terms,
                         &search_hint,
-                        pane.search_scope.keywords.then_some(keyword_reads),
+                        Some(keyword_reads),
+                        pane.search_scope.keywords,
                     )
                 })
                 .inner
@@ -1028,10 +1030,8 @@ fn draw_kit_browser_inner(
             &mut view.browser.filter,
             &mut view.browser.keyword_terms,
             &view.browser.search_scope.hint(),
-            view.browser
-                .search_scope
-                .keywords
-                .then_some((&cx.model.kits[kit_index].keywords, &cx.model.keyword_catalog)),
+            Some((&cx.model.kits[kit_index].keywords, &cx.model.keyword_catalog)),
+            view.browser.search_scope.keywords,
         );
         if let Some(warning) = browser::browser_filter_warning(&view.browser.filter) {
             ui.label(

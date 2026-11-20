@@ -522,9 +522,10 @@ impl Baboon {
     /// keyword, which merges them and asks first.
     pub(in crate::app) fn rename_keyword(&mut self, old: &str, new: &str) {
         let catalog = &self.model.keyword_catalog;
-        let merges = catalog
-            .position(new)
-            .is_some_and(|into| Some(into) != catalog.position(old));
+        // A game whose kit hasn't been opened can use `new` without the list
+        // knowing it: that merges too.
+        let merges = keyword_key(new) != keyword_key(old)
+            && (catalog.position(new).is_some() || self.keyword_uses_everywhere(new) > 0);
         if merges {
             let confirm = KeywordChangeConfirm {
                 old: keyword_key(old),
