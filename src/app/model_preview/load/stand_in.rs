@@ -1,6 +1,6 @@
 //! A model's stand-in: the simpler model a game swaps in at a distance, as
-//! Halo 3's and ODST's `lod_render_model`. It is drawn where the model is,
-//! on its own layer, which its header toggle shows.
+//! Halo 3's and ODST's `lod_render_model`. It is drawn in the render model's
+//! place, on its own layer, while the Other menu's LOD Model is ticked.
 
 use super::super::{ModelPreviewLayer, RenderModelPreview, TagFile};
 use super::render_model::build_render_preview;
@@ -20,16 +20,26 @@ pub(crate) struct StandIn {
 
 /// Append the LOD render model `model_tag` names to `preview` on the LOD
 /// Model layer, its nodes matched to the model's by name so it takes the
-/// model's pose. `None` when the `.model` names none.
+/// model's pose. `None` when the game's `.model` has no such field; one
+/// that names none is `missing`, so its choice shows, greyed out.
 pub(super) fn append_lod_model(
     model_tag: &TagFile,
     reader: Option<&TagReader>,
     preview: &mut RenderModelPreview,
 ) -> Option<StandIn> {
-    let (_, path) = model_tag.root().read_tag_ref_with_group("lod_render_model")?;
-    let path = path.trim().to_owned();
+    model_tag.root().field("lod_render_model")?;
+    let path = model_tag
+        .root()
+        .read_tag_ref_with_group("lod_render_model")
+        .map(|(_, path)| path.trim().to_owned())
+        .unwrap_or_default();
     if path.is_empty() {
-        return None;
+        return Some(StandIn {
+            path,
+            missing: Some("This model names no LOD model.".to_owned()),
+            vertices: 0,
+            triangles: 0,
+        });
     }
     let mut found = StandIn {
         path,

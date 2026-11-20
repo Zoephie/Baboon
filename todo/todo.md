@@ -18,8 +18,24 @@ upstream, Baboon builds against it through an uncommitted `[patch]` in
 Left out: an imposter's own lighting. Each vertex carries a BRDF (`raw
 imposter data`: diffuse, ambient, specular, shininess); the preview draws
 only the diffuse, scaled to display range, as flat colour per triangle.
-Its regions (`region_00`…) don't name the model's, so it ignores the
-sidebar's picks, and it is not posed (`node maps` would bind it).
+It is not posed (`node maps` would bind it).
+
+---
+
+## Model Preview: the gravity hammer's LOD model draws blank in Textured
+
+**What is missing:** `objects\weapons\melee\gravity_hammer\gravity_hammer.model`
+(Halo 3) with **LOD Model** ticked draws nothing in Textured mode but two
+dots; Solid and Wireframe draw it, and `lod_gravity_hammer.render_model`
+opened alone draws textured. The LOD is an alpha-tested card (28 vertices, 16
+triangles). OpenGL raises 0x501 (invalid value) while drawing it merged.
+Vertices, UVs and textures were compared merged against alone and match, so
+the fault is in how the merged batch's material is bound, not the data. The
+cruiser's LOD swaps correctly. Predates the LOD Model checkbox.
+
+**What implementing it involves:** find the GL call raising 0x501 in the
+merged draw (likely a texture unit or sampler index from the appended
+material) and compare with the standalone path.
 
 ---
 

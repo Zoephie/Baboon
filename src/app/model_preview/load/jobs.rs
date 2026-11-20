@@ -415,6 +415,15 @@ impl Baboon {
             .map(|page| super::super::state::SettlingPreview { page, since: None });
         if let Ok(data) = &result {
             state.render_model_path = Some(data.render_model_path.clone());
+            // The LOD Model swap only holds while there is one to swap in.
+            if !data
+                .preview
+                .lod_model
+                .as_ref()
+                .is_some_and(|lod| lod.missing.is_none())
+            {
+                state.show_lod_model = false;
+            }
             // The variant chosen before the reload, by name, else the canonical
             // one (named `default`, else the first), so both cards arrive in
             // one consistent state.

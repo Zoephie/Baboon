@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) struct RenderModelPreview {
     /// Halo CE's and Halo 2's levels of detail, and the one drawn.
     pub detail_levels: Option<super::load::DetailLevels>,
-    /// Halo 3's and ODST's LOD render model, which the LOD Model toggle
-    /// shows where the model is.
+    /// Halo 3's and ODST's LOD render model, which the Other menu's LOD Model
+    /// swaps in for the render model.
     pub lod_model: Option<super::load::StandIn>,
     /// Reach's and Halo 2 Anniversary's imposter, which the Imposter toggle
     /// shows where the model is.
@@ -181,11 +181,11 @@ pub(crate) enum ModelPreviewLayer {
     Render,
     Collision,
     Physics,
-    /// A stand-in's geometry (Halo 3's and ODST's LOD render model), shown
-    /// by its own toggle and off until it is turned on.
+    /// A stand-in's geometry (Halo 3's and ODST's LOD render model), drawn in
+    /// the render model's place while the Other menu's LOD Model is ticked.
     LodModel,
     /// An imposter's geometry (Reach, Halo 2 Anniversary), shown by its own
-    /// toggle. Its regions are its own, so each draws its first permutation.
+    /// toggle, its parts named as the render model's by position.
     Imposter,
 }
 

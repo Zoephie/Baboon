@@ -79,11 +79,20 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
         .fold((0, 0), |(vertices, triangles), stand_in| {
             (vertices + stand_in.vertices, triangles + stand_in.triangles)
         });
-    footer.label(model_counts(
-        &footer,
-        data.preview.vertices.len().saturating_sub(stand_in_vertices),
-        (data.preview.indices.len() / 3).saturating_sub(stand_in_triangles),
-    ));
+    // While the LOD model stands in for the render model, its counts show.
+    let swapped = data
+        .preview
+        .lod_model
+        .as_ref()
+        .filter(|lod| lod.missing.is_none() && state.show_lod_model && state.show_render);
+    let (vertices, triangles) = match swapped {
+        Some(lod) => (lod.vertices, lod.triangles),
+        None => (
+            data.preview.vertices.len().saturating_sub(stand_in_vertices),
+            (data.preview.indices.len() / 3).saturating_sub(stand_in_triangles),
+        ),
+    };
+    footer.label(model_counts(&footer, vertices, triangles));
     footer.spacing_mut().item_spacing.x = 12.0;
     // What the load left out, which would otherwise just be missing.
     if !data.notes.is_empty() {

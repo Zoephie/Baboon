@@ -62,20 +62,63 @@ pub(super) fn append_imposter(
         })
         .and_then(|tag| build_imposter_preview(&tag));
     match read {
-        Ok(mut imposter) => {
-            found.vertices = imposter.vertices.len();
-            found.triangles = imposter.indices.len() / 3;
-            for batch in &mut imposter.batches {
-                batch.layer = ModelPreviewLayer::Imposter;
+        Ok(mut imposter) => match take_model_names(&mut imposter, &preview.regions) {
+            Ok(()) => {
+                found.vertices = imposter.vertices.len();
+                found.triangles = imposter.indices.len() / 3;
+                for batch in &mut imposter.batches {
+                    batch.layer = ModelPreviewLayer::Imposter;
+                }
+                // Its regions are now the model's, which the sidebar lists.
+                imposter.regions.clear();
+                merge_preview_append(preview, &imposter);
             }
-            // Its regions are its own (`region_00`...), which the sidebar
-            // would list beside the model's; its batches draw without them.
-            imposter.regions.clear();
-            merge_preview_append(preview, &imposter);
-        }
+            Err(error) => found.missing = Some(error),
+        },
         Err(error) => found.missing = Some(error),
     }
     Some(found)
+}
+
+/// Give the imposter's batches the render model's region and permutation
+/// names. Tool names an imposter's parts by position (`region_00`,
+/// `permutation_00`…), and the game matches them to the render model's the
+/// same way: when the two layouts differ it reports a "render model
+/// region/permutation mismatch" and unloads the imposter, which then needs
+/// generating again.
+fn take_model_names(
+    imposter: &mut RenderModelPreview,
+    model: &[RenderModelPreviewRegion],
+) -> Result<(), String> {
+    let same_layout = imposter.regions.len() == model.len()
+        && imposter
+            .regions
+            .iter()
+            .zip(model)
+            .all(|(own, model)| own.permutations.len() == model.permutations.len());
+    if !same_layout {
+        return Err("Its regions and permutations no longer line up with the render \
+                    model's, so the game unloads it. It needs generating again."
+            .to_owned());
+    }
+    let mut names = std::collections::HashMap::new();
+    for (own, model) in imposter.regions.iter().zip(model) {
+        for (own_permutation, model_permutation) in own.permutations.iter().zip(&model.permutations)
+        {
+            names.insert(
+                (own.name.as_str(), own_permutation.as_str()),
+                (model.name.clone(), model_permutation.clone()),
+            );
+        }
+    }
+    for batch in &mut imposter.batches {
+        let key = (batch.region_name.as_str(), batch.permutation_name.as_str());
+        if let Some((region, permutation)) = names.get(&key).cloned() {
+            batch.region_name = region;
+            batch.permutation_name = permutation;
+        }
+    }
+    Ok(())
 }
 
 /// An imposter's geometry, each triangle drawn in the colour baked into its
@@ -328,5 +371,34 @@ mod tests {
             !model.preview.regions.iter().any(|region| region.name.starts_with("region_")),
             "the imposter's regions joined the model's"
         );
+        // Its parts take the model's names by position: region 3, the left
+        // rudder, has the model's two permutations.
+        let rudder: std::collections::BTreeSet<_> = on_layer(ModelPreviewLayer::Imposter)
+            .filter(|batch| batch.region_name == "rudder_left")
+            .map(|batch| batch.permutation_name.as_str())
+            .collect();
+        assert!(rudder.contains("default") && rudder.contains("major"), "{rudder:?}");
+        assert!(
+            on_layer(ModelPreviewLayer::Imposter)
+                .all(|batch| !batch.region_name.starts_with("region_")),
+            "an imposter part kept its own name"
+        );
+    }
+
+    #[test]
+    fn an_imposter_out_of_step_with_its_model_is_left_out() {
+        use super::take_model_names;
+        use crate::app::model_preview::{RenderModelPreview, RenderModelPreviewRegion};
+        let region = |name: &str, permutations: &[&str]| RenderModelPreviewRegion {
+            name: name.to_owned(),
+            permutations: permutations.iter().map(|name| (*name).to_owned()).collect(),
+        };
+        let model = [region("hull", &["base", "damaged"])];
+        let mut imposter = RenderModelPreview {
+            regions: vec![region("region_00", &["permutation_00"])],
+            ..Default::default()
+        };
+        let error = take_model_names(&mut imposter, &model).unwrap_err();
+        assert!(error.contains("generating again"), "{error}");
     }
 }

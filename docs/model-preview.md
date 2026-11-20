@@ -17,9 +17,7 @@ Collision and physics draw in their own colours (pink and red) over the render m
 - **Alt-click** shows only that part, hiding the others.
 - **Shift-click** hides only that part, showing the others.
 
-A Halo 3 or ODST model whose `.model` names an **LOD render model** (the simpler model the game draws at a distance, as the Covenant cruiser's) gets an **LOD Model** button. It draws that model where the model is, following the sidebar's region and permutation picks by name and the model's animation. It starts hidden; Alt-click it to see it alone. If the tag it names can't be read, the button is greyed out; hover it to see why.
-
-A Reach or Halo 2 Anniversary model whose `.model` names an **imposter** (the low, untextured stand-in the game draws far away) gets an **Imposter** button. It draws the imposter where the model is, each triangle in the colour baked into its vertices. An imposter's regions are its own (`region_00` and on), not the model's, so it draws each region's first permutation, the intact one, whatever the sidebar picks, and it doesn't take the model's animation. It starts hidden. An `.imposter_model` opened on its own previews in its own Model Preview tab.
+A Reach or Halo 2 Anniversary model whose `.model` names an **imposter** (the low, untextured stand-in the game draws far away) gets an **Imposter** button. It draws the imposter where the model is, each triangle in the colour baked into its vertices, and it doesn't take the model's animation. It starts hidden. Tool names an imposter's regions and permutations by position (`region_00`, `permutation_00` and on), and the game matches them to the render model's the same way, so the imposter follows the sidebar's region and permutation picks. If the render model's regions or permutations have changed since the imposter was made, they no longer line up: the game then unloads the imposter, and the button is greyed out; it needs generating again. An `.imposter_model` opened on its own previews in its own Model Preview tab, with its own `region_00` names.
 
 ### Shading
 
@@ -44,6 +42,7 @@ The **Other** menu (the **…** button beside the model buttons):
 - **Show Errors** highlights the error and warning reports stored in the tag. Hover one to read its report.
 - **Show Bounding Sphere** (objects only: bipeds, vehicles, weapons, scenery and the rest) outlines the object's **bounding radius** about its **bounding offset**, measured from the model's root node (a biped's pelvis, a vehicle's frame) as the game does. It moves with animations and follows edits to those fields at once.
 - **Level of Detail** (Halo CE and Halo 2 models) picks which of the model's levels is drawn: **Super Low** to **Super High** in Halo CE, **L1 Super Low** to **L6 Hollywood** in Halo 2, listed highest first. The highest level with geometry of its own is drawn until another is picked. A permutation without the level picked draws its nearest higher level. A level that only repeats the geometry of the level below it (tags often fill a missing level that way) is greyed out. The choice only changes the preview, never the tag, and each tag starts at its highest.
+- **LOD Model** (Halo 3 and ODST models) draws the `.model`'s **LOD render model** (the simpler model the game swaps in at a distance, as the Covenant cruiser's) in place of the render model, following the sidebar's picks by name and the model's animation. It is greyed out when the `.model` names none, when the tag it names can't be read, and while the Render Model is hidden; hover it to see why.
 
 ### View
 
@@ -53,7 +52,7 @@ The **Other** menu (the **…** button beside the model buttons):
 
 ## The footer
 
-The footer counts the model's vertices and triangles, leaving out an LOD model drawn with it. When part of the preview was left out, or a material drew without its textures, it says so there; hover the note for why.
+The footer counts the model's vertices and triangles, leaving out an imposter drawn with it. While **LOD Model** is ticked it counts the LOD model's instead. When part of the preview was left out, or a material drew without its textures, it says so there; hover the note for why.
 
 ## The Model Setup sidebar
 

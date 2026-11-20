@@ -279,7 +279,35 @@ pub(in crate::app::model_preview) fn draw_model_other_menu(
             ui.separator();
             draw_detail_levels(ui, data, state, levels);
         }
+        if let Some(lod) = &data.preview.lod_model {
+            ui.separator();
+            draw_lod_model_choice(ui, state, lod);
+        }
     });
+}
+
+/// Halo 3's and ODST's LOD Model: the `.model`'s simpler render model, drawn
+/// in the render model's place. Greyed out while the model names none, or
+/// while the render model is hidden.
+fn draw_lod_model_choice(
+    ui: &mut Ui,
+    state: &mut ModelPreviewState,
+    lod: &super::super::load::StandIn,
+) {
+    ui.label(RichText::new("Level of Detail").color(subtle_dark()).small());
+    let why_not = lod.missing.as_deref().or((!state.show_render).then_some(
+        "The LOD model takes the Render Model's place: show the Render Model first.",
+    ));
+    ui.add_enabled(
+        why_not.is_none(),
+        ThemedCheckbox::new(&mut state.show_lod_model, "LOD Model"),
+    )
+    .on_hover_text(format!(
+        "Draw the simpler model the game swaps in at a distance, in place of the \
+         render model.\n\n{}",
+        lod.path
+    ))
+    .on_disabled_hover_text(why_not.unwrap_or_default());
 }
 
 /// Halo CE's and Halo 2's levels of detail as choices, the highest first and
@@ -393,9 +421,6 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
             );
         }
     }
-    if let Some(lod_model) = &data.preview.lod_model {
-        toggle(ui, ModelLayer::LodModel, lod_model.missing.is_none(), lod_model.missing.as_deref());
-    }
     if let Some(imposter) = &data.preview.imposter {
         toggle(ui, ModelLayer::Imposter, imposter.missing.is_none(), imposter.missing.as_deref());
     }
@@ -415,8 +440,6 @@ pub(in crate::app::model_preview) enum ModelLayer {
     Render,
     Collision,
     Physics,
-    /// Halo 3's and ODST's LOD render model, where the model is.
-    LodModel,
     /// Reach's and Halo 2 Anniversary's imposter, where the model is.
     Imposter,
     Armature,
@@ -428,7 +451,6 @@ impl ModelLayer {
             Self::Render => "Render Model",
             Self::Collision => "Collision Model",
             Self::Physics => "Physics Model",
-            Self::LodModel => "LOD Model",
             Self::Imposter => "Imposter",
             Self::Armature => "Armature",
         }
@@ -438,7 +460,7 @@ impl ModelLayer {
     /// Its button's icon: its tag group's in `game`, or the armature's.
     fn icon(self, game: Option<GameId>) -> TagIcon {
         let group = match self {
-            Self::Render | Self::LodModel => *b"mode",
+            Self::Render => *b"mode",
             Self::Collision => *b"coll",
             Self::Physics => *b"phmo",
             Self::Imposter => *b"impo",
@@ -452,7 +474,6 @@ impl ModelLayer {
             Self::Render => &mut state.show_render,
             Self::Collision => &mut state.show_collision,
             Self::Physics => &mut state.show_physics,
-            Self::LodModel => &mut state.show_lod_model,
             Self::Imposter => &mut state.show_imposter,
             Self::Armature => &mut state.show_armature,
         }
@@ -558,7 +579,6 @@ fn layer_toggle(
     let shown = if on { "shown" } else { "hidden" };
     let extra = match layer {
         ModelLayer::Armature => "\nHover a joint to see its name.",
-        ModelLayer::LodModel => "\nThe simpler model the game draws at a distance.",
         ModelLayer::Imposter => {
             "\nThe untextured stand-in the game draws far away, coloured as baked."
         }
