@@ -50,7 +50,7 @@ impl Dialog for OverwriteConfirm {
                     RichText::new(
                         "This modifies the original game content and cannot be undone without a backup of the pak files.",
                     )
-                    .color(egui::Color32::from_rgb(210, 120, 90)),
+                    .color(replace_warning_text()),
                 );
                 ui.add_space(5.0);
                 ui.label(

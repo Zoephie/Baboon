@@ -51,6 +51,7 @@ pub(in crate::app::model_preview) fn merge_preview_append(
             index_count: (end - start) as u32,
             flat_color: batch.flat_color,
             layer: batch.layer,
+            outline: batch.outline,
             sort_position: batch.sort_position,
         });
     }

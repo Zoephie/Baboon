@@ -1,7 +1,7 @@
 //! Physics models as preview geometry: each shape tessellated and placed by its parent bone.
 
 use super::super::super::{
-    MAX_PREVIEW_BONES, ModelPreviewLayer, RenderModelPreview, RenderModelPreviewBatch,
+    BatchOutline, MAX_PREVIEW_BONES, ModelPreviewLayer, RenderModelPreview, RenderModelPreviewBatch,
     RenderModelPreviewMaterial, RenderModelPreviewVertex, TagFile, physics_jms_for_game,
 };
 use super::super::errors::append_model_errors;
@@ -21,34 +21,39 @@ pub(in crate::app::model_preview) fn build_physics_preview(
     skeleton: Option<&[blam_tags::JmsNode]>,
 ) -> Result<RenderModelPreview, String> {
     let jms = physics_jms_for_game(tag, skeleton).map_err(|error| error.to_string())?;
+    // Each shape's faces, and its outline as the game's debug view draws
+    // it: rings and arcs round a sphere or pill, a box's or hull's corners.
     let mut vertices = Vec::new();
+    let mut lines = Vec::new();
+    let mut place = |triples: &[_], outline: &[_], parent| {
+        append_physics_shape(&mut vertices, triples, parent, &jms, skeleton);
+        append_physics_shape(&mut lines, outline, parent, &jms, skeleton);
+    };
     for sphere in &jms.spheres {
-        let mut triples = Vec::new();
-        push_sphere(
-            &mut triples,
-            &sphere.rotation,
-            point(&sphere.translation),
-            sphere.radius,
-        );
-        append_physics_shape(&mut vertices, &triples, sphere.parent, &jms, skeleton);
+        let (mut triples, mut outline) = (Vec::new(), Vec::new());
+        let center = point(&sphere.translation);
+        push_sphere(&mut triples, &sphere.rotation, center, sphere.radius);
+        push_sphere_outline(&mut outline, &sphere.rotation, center, sphere.radius);
+        place(&triples, &outline, sphere.parent);
     }
     for shape in &jms.boxes {
         let mut triples = Vec::new();
         push_box(&mut triples, shape);
-        append_physics_shape(&mut vertices, &triples, shape.parent, &jms, skeleton);
+        place(&triples, &crease_lines(&triples), shape.parent);
     }
     for capsule in &jms.capsules {
-        let mut triples = Vec::new();
+        let (mut triples, mut outline) = (Vec::new(), Vec::new());
         push_capsule(&mut triples, capsule);
-        append_physics_shape(&mut vertices, &triples, capsule.parent, &jms, skeleton);
+        push_capsule_outline(&mut outline, capsule);
+        place(&triples, &outline, capsule.parent);
     }
     for convex in &jms.convex_shapes {
         let mut triples = Vec::new();
         push_convex(&mut triples, convex);
-        append_physics_shape(&mut vertices, &triples, convex.parent, &jms, skeleton);
+        place(&triples, &crease_lines(&triples), convex.parent);
     }
     let mut preview = empty_preview();
-    push_physics_batch(&mut preview, vertices);
+    push_physics_batch(&mut preview, vertices, lines);
     append_model_errors(tag, &mut preview, ModelPreviewLayer::Physics);
     finish_preview(preview, "physics model")
 }
@@ -90,16 +95,41 @@ pub(super) fn append_physics_shape(
     }
 }
 
-fn push_physics_batch(preview: &mut RenderModelPreview, vertices: Vec<RenderModelPreviewVertex>) {
+/// The shapes' `faces` and the `lines` (point pairs) that outline them, as
+/// two batches sharing one material.
+fn push_physics_batch(
+    preview: &mut RenderModelPreview,
+    faces: Vec<RenderModelPreviewVertex>,
+    lines: Vec<RenderModelPreviewVertex>,
+) {
+    let material_index = preview.materials.len().min(u16::MAX as usize) as u16;
+    let faces = push_physics_part(preview, faces, material_index, BatchOutline::Hidden);
+    let lines = push_physics_part(preview, lines, material_index, BatchOutline::Lines);
+    if faces || lines {
+        preview
+            .materials
+            .push(RenderModelPreviewMaterial::default());
+        ensure_preview_region(preview, PHYSICS_REGION);
+    }
+}
+
+/// One physics batch of `vertices`, each used once; false when there are
+/// none.
+fn push_physics_part(
+    preview: &mut RenderModelPreview,
+    vertices: Vec<RenderModelPreviewVertex>,
+    material_index: u16,
+    outline: BatchOutline,
+) -> bool {
     if vertices.is_empty() {
-        return;
+        return false;
     }
     let Some(vertex_base) = VertexBase::of(
         preview.vertices.len(),
         vertices.len(),
         Overflow::RefusesAppend,
     ) else {
-        return;
+        return false;
     };
     let index_start = preview.indices.len() as u32;
     for vertex in &vertices {
@@ -113,10 +143,6 @@ fn push_physics_batch(preview: &mut RenderModelPreview, vertices: Vec<RenderMode
         .indices
         .extend((0..vertices.len() as u32).map(|offset| vertex_base.offset(offset)));
     preview.vertices.extend(vertices);
-    let material_index = preview.materials.len().min(u16::MAX as usize) as u16;
-    preview
-        .materials
-        .push(RenderModelPreviewMaterial::default());
     preview.batches.push(RenderModelPreviewBatch {
         region_name: PHYSICS_REGION.to_owned(),
         permutation_name: "default".to_owned(),
@@ -125,9 +151,122 @@ fn push_physics_batch(preview: &mut RenderModelPreview, vertices: Vec<RenderMode
         index_count: preview.indices.len() as u32 - index_start,
         flat_color: Some(PHYSICS_COLOR),
         layer: ModelPreviewLayer::Physics,
+        outline,
         sort_position: None,
     });
-    ensure_preview_region(preview, PHYSICS_REGION);
+    true
+}
+
+/// Points round each outline circle or arc's full turn.
+const OUTLINE_SEGMENTS: usize = 32;
+
+/// Line pairs along `points`, a point after point, scaled into world units.
+fn push_polyline(lines: &mut Vec<([f32; 3], [f32; 3])>, points: &[[f32; 3]]) {
+    let scale = |p: [f32; 3]| [p[0] / JMS_SCALE, p[1] / JMS_SCALE, p[2] / JMS_SCALE];
+    for pair in points.windows(2) {
+        lines.push((scale(pair[0]), [0.0, 0.0, 1.0]));
+        lines.push((scale(pair[1]), [0.0, 0.0, 1.0]));
+    }
+}
+
+/// `fraction` of a turn round an arc from `start` radians, `point` placing
+/// each angle.
+fn arc(start: f32, fraction: f32, point: impl Fn(f32) -> [f32; 3]) -> Vec<[f32; 3]> {
+    let steps = ((OUTLINE_SEGMENTS as f32 * fraction).ceil() as usize).max(1);
+    (0..=steps)
+        .map(|step| point(start + std::f32::consts::TAU * fraction * step as f32 / steps as f32))
+        .collect()
+}
+
+/// A sphere's outline: its three great circles on its own axes, as the
+/// object's bounding sphere is drawn.
+pub(super) fn push_sphere_outline(
+    lines: &mut Vec<([f32; 3], [f32; 3])>,
+    rotation: &RealQuaternion,
+    center: [f32; 3],
+    radius: f32,
+) {
+    if !(radius.is_finite() && radius > 0.0) {
+        return;
+    }
+    let place = |local: [f32; 3]| {
+        let r = rotate(rotation, local);
+        [r[0] + center[0], r[1] + center[1], r[2] + center[2]]
+    };
+    let (s, c) = (|a: f32| radius * a.sin(), |a: f32| radius * a.cos());
+    push_polyline(lines, &arc(0.0, 1.0, |a| place([c(a), s(a), 0.0])));
+    push_polyline(lines, &arc(0.0, 1.0, |a| place([c(a), 0.0, s(a)])));
+    push_polyline(lines, &arc(0.0, 1.0, |a| place([0.0, c(a), s(a)])));
+}
+
+/// A pill's outline: a ring round each end of its body, four lines down
+/// its sides, and over each end a cross of half circles.
+pub(super) fn push_capsule_outline(
+    lines: &mut Vec<([f32; 3], [f32; 3])>,
+    capsule: &blam_tags::JmsCapsule,
+) {
+    let radius = capsule.radius;
+    if !(radius.is_finite() && radius > 0.0 && capsule.height.is_finite()) {
+        return;
+    }
+    let center = point(&capsule.translation);
+    let height = capsule.height.max(0.0);
+    // Local +Z is the pill's axis, its body from 0 to `height`, as
+    // `push_capsule` lays it.
+    let place = |local: [f32; 3]| {
+        let r = rotate(&capsule.rotation, local);
+        [r[0] + center[0], r[1] + center[1], r[2] + center[2]]
+    };
+    let (s, c) = (|a: f32| radius * a.sin(), |a: f32| radius * a.cos());
+    for z in [0.0, height] {
+        push_polyline(lines, &arc(0.0, 1.0, |a| place([c(a), s(a), z])));
+    }
+    for quarter in 0..4 {
+        let a = std::f32::consts::FRAC_PI_2 * quarter as f32;
+        push_polyline(lines, &[place([c(a), s(a), 0.0]), place([c(a), s(a), height])]);
+    }
+    // Half circles from one side of the ring, over the end, to the other.
+    for (z, over) in [(height, 1.0), (0.0, -1.0)] {
+        push_polyline(lines, &arc(0.0, 0.5, |a| place([c(a), 0.0, z + over * s(a)])));
+        push_polyline(lines, &arc(0.0, 0.5, |a| place([0.0, c(a), z + over * s(a)])));
+    }
+}
+
+/// The edges of `triples` (flat-shaded triangles) where their faces meet at
+/// an angle, as line pairs: a box's twelve, not the diagonals that split its
+/// sides.
+pub(super) fn crease_lines(triples: &[([f32; 3], [f32; 3])]) -> Vec<([f32; 3], [f32; 3])> {
+    use std::collections::HashMap;
+    // Positions to a micrometre, so shared corners meet as one key.
+    let key = |p: [f32; 3]| p.map(|v| (v * 1.0e6).round() as i64);
+    let mut faces: HashMap<([i64; 3], [i64; 3]), Vec<[f32; 3]>> = HashMap::new();
+    let mut order = Vec::new();
+    for triangle in triples.chunks_exact(3) {
+        let normal = triangle[0].1;
+        for (from, to) in [(0, 1), (1, 2), (2, 0)] {
+            let (a, b) = (triangle[from].0, triangle[to].0);
+            let (ka, kb) = (key(a), key(b));
+            let edge = if ka <= kb { (ka, kb) } else { (kb, ka) };
+            let normals = faces.entry(edge).or_default();
+            if normals.is_empty() {
+                order.push((edge, a, b));
+            }
+            normals.push(normal);
+        }
+    }
+    let mut lines = Vec::new();
+    for (edge, a, b) in order {
+        let normals = &faces[&edge];
+        let flat = normals.len() == 2 && {
+            let (n, m) = (normals[0], normals[1]);
+            n[0] * m[0] + n[1] * m[1] + n[2] * m[2] > 0.999
+        };
+        if !flat {
+            lines.push((a, [0.0, 0.0, 1.0]));
+            lines.push((b, [0.0, 0.0, 1.0]));
+        }
+    }
+    lines
 }
 
 /// Emit one triangle with its flat face normal, ÷100 into world units.

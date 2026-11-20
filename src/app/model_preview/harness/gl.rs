@@ -19,7 +19,7 @@ unsafe extern "C" {
     fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
 }
 
-pub(in crate::app::model_preview) fn headless_gl() -> glow::Context {
+pub(in crate::app) fn headless_gl() -> glow::Context {
     headless_gl_loading(false)
 }
 

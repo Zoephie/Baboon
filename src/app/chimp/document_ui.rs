@@ -158,7 +158,7 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_, '_> {
         let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(package))
             if self.document(package).is_some_and(|document| document.dirty));
         if dirty {
-            chimp_tint_toward(base, Color32::from_rgb(184, 134, 11), 0.20)
+            chimp_tint_toward(base, dirty_tab_tint(), 0.20)
         } else {
             base
         }
@@ -348,7 +348,7 @@ fn draw_chimp_document_pane(
                 "No mounted container provides this package any more. It can still be read and \
                  extracted, but not written back.",
             )
-            .color(Color32::from_rgb(170, 130, 60)),
+            .color(header_notice_text()),
         );
     }
     match pane.pending_switch.take() {
@@ -415,7 +415,7 @@ fn draw_chimp_document_pane(
                     &mut pane.mesh_preview_state,
                 ),
                 Some(Err(error)) => {
-                    ui.colored_label(Color32::from_rgb(150, 56, 44), error);
+                    ui.colored_label(panel_error_text(), error);
                 }
                 None => {
                     ui.label(RichText::new("No mesh geometry found.").color(subtle_dark()));
@@ -624,49 +624,12 @@ fn draw_chimp_texture_preview(
     *view_settings = preview.preview.view_settings();
 }
 
-#[derive(Clone, Copy)]
-struct ChimpJsonPalette {
-    plain: Color32,
-    key: Color32,
-    string: Color32,
-    path: Color32,
-    number: Color32,
-    literal: Color32,
-    punctuation: Color32,
-}
-
-impl ChimpJsonPalette {
-    fn for_dark_mode(dark_mode: bool) -> Self {
-        if dark_mode {
-            Self {
-                plain: Color32::from_rgb(210, 214, 222),
-                key: Color32::from_rgb(244, 191, 92),
-                string: Color32::from_rgb(190, 235, 125),
-                path: Color32::from_rgb(232, 157, 222),
-                number: Color32::from_rgb(242, 139, 130),
-                literal: Color32::from_rgb(105, 190, 255),
-                punctuation: Color32::from_rgb(105, 210, 225),
-            }
-        } else {
-            Self {
-                plain: Color32::from_rgb(45, 50, 58),
-                key: Color32::from_rgb(145, 91, 0),
-                string: Color32::from_rgb(55, 112, 15),
-                path: Color32::from_rgb(154, 52, 136),
-                number: Color32::from_rgb(185, 62, 48),
-                literal: Color32::from_rgb(0, 104, 178),
-                punctuation: Color32::from_rgb(0, 112, 128),
-            }
-        }
-    }
-}
-
 fn chimp_json_layout_job(
     text: &str,
     font_id: egui::FontId,
     dark_mode: bool,
 ) -> egui::text::LayoutJob {
-    let palette = ChimpJsonPalette::for_dark_mode(dark_mode);
+    let palette = json_syntax_colors(dark_mode);
     let mut job = egui::text::LayoutJob::default();
     job.wrap.max_width = f32::INFINITY;
     let bytes = text.as_bytes();
@@ -837,7 +800,7 @@ fn draw_chimp_json_document(
     lines: &mut ChimpJsonLines,
 ) {
     let font_id = TextStyle::Monospace.resolve(ui.style());
-    let lines = lines.lines(text, &font_id, ui.visuals().dark_mode);
+    let lines = lines.lines(text, &font_id, visuals_are_dark(ui));
     ui.horizontal(|ui| {
         ui.label(RichText::new(title).strong().color(subtle_dark()));
         if ui.small_button(copy_label).clicked() {

@@ -9,6 +9,8 @@ pub(in crate::app) mod scroll;
 pub(in crate::app) mod dock;
 
 pub(in crate::app) mod style;
+#[cfg(test)]
+mod palette_gate;
 pub(in crate::app) use style::*;
 mod input;
 pub(in crate::app) use input::*;
@@ -22,11 +24,15 @@ pub(in crate::app) mod button_icons;
 pub(in crate::app) use button_icons::*;
 mod close;
 pub(in crate::app) use close::paint_close_control;
+mod keyword_pill;
+pub(in crate::app) use keyword_pill::{keyword_pill_width, paint_keyword_pill};
 pub(in crate::app) mod tag_icons;
 pub(in crate::app) use tag_icons::*;
 pub(in crate::app) mod game_assets;
 pub(in crate::app) use game_assets::*;
 
+mod slider;
+pub(in crate::app) use slider::{plain_railed_slider, railed_slider};
 pub(in crate::app) mod checkbox;
 pub(in crate::app) use checkbox::*;
 

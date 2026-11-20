@@ -1,6 +1,8 @@
 //! The weapon pickers: what a unit holds, in either hand.
 
 use super::super::super::ui_kit::style::{subtle_dark, text_dark};
+use super::rows::{CardRows, name_cell, name_column_width};
+use super::variants::{draw_region_rows, weapon_region};
 use super::super::{
     ModelPreviewData, ModelPreviewState, picker_button, picker_popup_width, picker_results,
     picker_search_field,
@@ -36,28 +38,39 @@ pub(in crate::app::model_preview) struct WeaponPick {
     pub(in crate::app::model_preview) opened: bool,
 }
 
-/// A dropdown of `weapons`, or of none yet, while `None`: they are listed
-/// once it first opens.
+/// A row of `label` and a dropdown of `weapons`, or of none yet, while
+/// `None`: they are listed once it first opens. `held` is the held weapon's
+/// path, shown by its tag's name until the list has its own.
+#[allow(clippy::too_many_arguments)]
 pub(in crate::app::model_preview) fn weapon_dropdown(
     ui: &mut Ui,
+    rows: &mut CardRows,
     label: &str,
+    label_width: f32,
     salt: (&str, &str),
     weapons: Option<&[super::super::weapons::WeaponOption]>,
-    held: Option<&super::super::weapons::WeaponOption>,
+    held: Option<&str>,
 ) -> WeaponPick {
     let mut chosen = None;
     let mut opened = false;
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        ui.label(label);
+    let held_name = held.map_or("None", |path| {
+        weapons
+            .into_iter()
+            .flatten()
+            .find(|weapon| weapon.path == path)
+            .map_or(crate::core::tag_path::name(path), |weapon| weapon.name.as_str())
+    });
+    rows.row(ui, |ui| {
+        name_cell(ui, label, label_width);
         let popup_id = ui.make_persistent_id(salt);
         let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+        let width = ui.available_width().max(60.0);
         let response = picker_button(
             ui,
             popup_id,
-            held.map_or("None", |weapon| weapon.name.as_str()),
+            held_name,
             weapons.map(<[_]>::len),
-            220.0,
+            width,
             text_dark(),
             true,
         );
@@ -110,7 +123,7 @@ pub(in crate::app::model_preview) fn weapon_dropdown(
                             class = Some(&weapon.class);
                             ui.label(RichText::new(&weapon.class).color(subtle_dark()));
                         }
-                        let is_held = held.is_some_and(|held| held.path == weapon.path);
+                        let is_held = held == Some(weapon.path.as_str());
                         if ui.selectable_label(is_held, &weapon.name).clicked() {
                             chosen = Some(Some(weapon.path.clone()));
                             egui::Popup::close_id(ui.ctx(), popup_id);
@@ -146,12 +159,20 @@ pub(in crate::app::model_preview) fn draw_unit_weapon_pickers(
         return;
     };
     let primaries = weapons.primaries();
-    let held = primaries
-        .iter()
-        .flatten()
-        .find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
+    let mut rows = CardRows::default();
+    let labels = ["Primary", "Secondary"];
+    let label_width = name_column_width(ui, labels, ui.available_width());
     let salt = ("primary_weapon_picker", data.render_model_path.as_str());
-    let pick = weapon_dropdown(ui, "Primary", salt, primaries.as_deref(), held);
+    let held = state.weapon.clone();
+    let pick = weapon_dropdown(
+        ui,
+        &mut rows,
+        labels[0],
+        label_width,
+        salt,
+        primaries.as_deref(),
+        held.as_deref(),
+    );
     if pick.opened && primaries.is_none() {
         state.list_weapons = true;
     }
@@ -166,19 +187,52 @@ pub(in crate::app::model_preview) fn draw_unit_weapon_pickers(
         }
         state.weapon = choice;
     }
+    let primary = state.loaded_weapon.clone();
+    draw_held_regions(ui, data, state, &mut rows, primary.as_deref());
     let secondaries = weapons.secondaries(state.weapon.as_deref());
     if secondaries.is_empty() {
         return;
     }
-    let held = secondaries
-        .iter()
-        .find(|weapon| Some(&weapon.path) == state.secondary_weapon.as_ref());
     let salt = ("secondary_weapon_picker", data.render_model_path.as_str());
-    if let Some(choice) = weapon_dropdown(ui, "Secondary", salt, Some(&secondaries), held)
-        .chosen
-        .filter(|choice| *choice != state.secondary_weapon)
+    let held = state.secondary_weapon.clone();
+    if let Some(choice) = weapon_dropdown(
+        ui,
+        &mut rows,
+        labels[1],
+        label_width,
+        salt,
+        Some(&secondaries),
+        held.as_deref(),
+    )
+    .chosen
+    .filter(|choice| *choice != state.secondary_weapon)
     {
         carry_through_reload(data, state);
         state.secondary_weapon = choice;
     }
+    let secondary = state.loaded_secondary_weapon.clone();
+    draw_held_regions(ui, data, state, &mut rows, secondary.as_deref());
+}
+
+/// The regions of the weapon at `path` the preview holds, as rows under its
+/// dropdown, by their own names.
+pub(in crate::app::model_preview) fn draw_held_regions(
+    ui: &mut Ui,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+    rows: &mut CardRows,
+    path: Option<&str>,
+) {
+    let Some(path) = path else {
+        return;
+    };
+    let weapon = crate::core::tag_path::name(path);
+    let regions: Vec<(usize, &str)> = data
+        .preview
+        .regions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, region)| Some((index, weapon_region(&region.name, weapon)?)))
+        .collect();
+    draw_region_rows(ui, data, state, rows, &regions);
 }

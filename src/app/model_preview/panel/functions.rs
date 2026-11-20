@@ -7,6 +7,7 @@ use super::super::{
     ModelPreviewData, ModelPreviewState, ModelRegionSelection, compute_variant_selection,
     default_permutation, frame, is_model_physics_overlay_region, reset_model_preview_selection,
 };
+use super::rows::CardRows;
 use super::setup::draw_scenario_setup;
 use super::variants::{draw_variant_controls, draw_variant_selector};
 use super::weapons::{carry_through_reload, draw_unit_weapon_pickers};
@@ -32,15 +33,14 @@ pub(in crate::app::model_preview) fn draw_setup_body(
             state.scenario_bsp_selection.clear();
         }
     }
-    if has_permutations(data, state) {
+    if has_permutations(data) {
         let changed = permutations_changed(data, state);
-        if setup_section(ui, "Permutations", changed, |ui, part| match part {
-            BoxPart::Controls => {
-                draw_variant_selector(ui, data, state);
-                variant_actions(ui, state);
+        if setup_section(ui, "Permutations", changed, |ui, part| {
+            if part == BoxPart::Body {
+                let mut rows = CardRows::default();
+                draw_variant_selector(ui, data, state, &mut rows, variant_actions);
+                draw_variant_controls(ui, data, state, &mut rows);
             }
-            BoxPart::Body => draw_variant_controls(ui, data, state),
-            BoxPart::Trailing => {}
         }) {
             reset_model_preview_selection(state, data, state.selected_variant);
         }
@@ -79,8 +79,10 @@ pub(in crate::app::model_preview) fn draw_setup_body(
         let changed = held_inputs(state, key, &events, true) || (own.effects.changed)(data, state);
         if setup_section(ui, "Effects", changed, |ui, part| {
             if part == BoxPart::Body {
+                let mut rows = CardRows::default();
                 super::super::functions::draw_event_effects(
                     ui,
+                    &mut rows,
                     &events,
                     key,
                     &mut state.function_inputs,
@@ -142,11 +144,11 @@ pub(in crate::app::model_preview) fn setup_section(
 }
 
 /// Whether any region shows in the Permutations section.
-fn has_permutations(data: &ModelPreviewData, state: &ModelPreviewState) -> bool {
+fn has_permutations(data: &ModelPreviewData) -> bool {
     data.preview
         .regions
         .iter()
-        .any(|region| !is_model_physics_overlay_region(data, state, region))
+        .any(|region| !is_model_physics_overlay_region(data, region))
 }
 
 /// Whether any region is away from what the variant shown gives it.
@@ -158,7 +160,7 @@ pub(in crate::app::model_preview) fn permutations_changed(
     data.preview
         .regions
         .iter()
-        .filter(|region| !is_model_physics_overlay_region(data, state, region))
+        .filter(|region| !is_model_physics_overlay_region(data, region))
         .any(|region| {
             // A region the panel has not drawn yet starts as it will be drawn.
             let live = state

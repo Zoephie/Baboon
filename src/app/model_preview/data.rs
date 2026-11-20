@@ -14,6 +14,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Baboon (not blam-tags) since it is purely a GUI concern.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RenderModelPreview {
+    /// Halo CE's and Halo 2's levels of detail, and the one drawn.
+    pub detail_levels: Option<super::load::DetailLevels>,
+    /// Halo 3's and ODST's LOD render model, which the Other menu's LOD Model
+    /// swaps in for the render model.
+    pub lod_model: Option<super::load::StandIn>,
+    /// Reach's and Halo 2 Anniversary's imposter, which the Imposter toggle
+    /// shows where the model is.
+    pub imposter: Option<super::load::StandIn>,
     /// The game the opened tag is from: the tag's own generation for Halo CE
     /// and Halo 2, else its kit's. None for geometry no game's tag gave.
     pub game: Option<GameId>,
@@ -147,9 +155,24 @@ pub(crate) struct RenderModelPreviewBatch {
     /// this separate from `region_name` lets collision geometry retain its
     /// real region/permutation taxonomy for variant selection.
     pub layer: ModelPreviewLayer,
+    /// How the collision and physics pass outlines it; see [`BatchOutline`].
+    pub outline: BatchOutline,
     /// Where its part sorts among the transparents, and the node that carries
     /// that point: Halo CE's part centroid, read only by the CE sort.
     pub sort_position: Option<([f32; 3], usize)>,
+}
+
+/// How a collision or physics batch is outlined, over its see-through faces.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum BatchOutline {
+    /// Its triangles' own edges: a mesh, as collision is.
+    #[default]
+    Triangles,
+    /// Faces alone: another batch outlines them, as a physics pill's rings.
+    Hidden,
+    /// Index pairs drawn as lines, never filled: the outline of `Hidden`
+    /// faces.
+    Lines,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -158,6 +181,12 @@ pub(crate) enum ModelPreviewLayer {
     Render,
     Collision,
     Physics,
+    /// A stand-in's geometry (Halo 3's and ODST's LOD render model), drawn in
+    /// the render model's place while the Other menu's LOD Model is ticked.
+    LodModel,
+    /// An imposter's geometry (Reach, Halo 2 Anniversary), shown by its own
+    /// toggle, its parts named as the render model's by position.
+    Imposter,
 }
 
 #[derive(Debug, Clone)]

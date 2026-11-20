@@ -885,7 +885,7 @@ fn restore_workspace_row(ui: &mut Ui, kit: &mut LastOpenedWindowsKit) -> (egui::
     response.on_hover_text(&root);
     if !kit.source_available {
         ui.label(
-            RichText::new(format!("Missing source: {root}")).color(Color32::from_rgb(180, 48, 40)),
+            RichText::new(format!("Missing source: {root}")).color(save_error_text()),
         );
     }
     (rect, text_rect)

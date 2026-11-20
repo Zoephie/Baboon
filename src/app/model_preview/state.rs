@@ -20,6 +20,15 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) preview_load_id: Option<u64>,
     pub(in crate::app) render_model_path: Option<String>,
     pub(in crate::app) data: Option<Result<ModelPreviewData, String>>,
+    /// The model as it was before a settings change (Game Shaders, a weapon)
+    /// began loading it again: the page keeps drawing from it, and only the
+    /// viewport waits on the load.
+    pub(in crate::app) reloading: Option<ReloadingPreview>,
+    /// The page as it was before that reload, still drawn beside the new
+    /// model's viewport while what follows the load (its materials, its
+    /// collision and physics, its weapons, its clip) arrives, so the
+    /// sidebar and player change once, not card by card.
+    pub(in crate::app) settling: Option<SettlingPreview>,
     pub(in crate::app) active_tab: ModelTagPanelTab,
     pub(in crate::app) new_variant_name: String,
     pub(in crate::app) selected_variant: Option<usize>,
@@ -31,6 +40,12 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) show_non_critical_errors: bool,
     /// Draw the model skeleton over the preview, with hoverable bone names.
     pub(in crate::app) show_armature: bool,
+    /// Draw the object's bounding sphere, for a tag that has one.
+    pub(in crate::app) show_bounding_sphere: bool,
+    /// The object's `bounding radius` about its `bounding offset`, read from
+    /// the open tag each pass so an edit shows at once. `None` for a tag
+    /// that is no object.
+    pub(in crate::app) bounding_sphere: Option<super::viewport::BoundingSphere>,
     /// Case-insensitive substring filter on marker names (empty = show all).
     /// Only applied while `show_markers` is on.
     pub(in crate::app) marker_filter: String,
@@ -46,6 +61,10 @@ pub(in crate::app) struct ModelPreviewState {
     /// The `game_shaders` the cached `data` was read for: turned on or off,
     /// the preview reads again (`TagReader::game_shaders`).
     pub(in crate::app) loaded_game_shaders: bool,
+    /// Halo CE's and Halo 2's level of detail picked, lowest first; `None`
+    /// for the highest. A view setting: never written to the tag.
+    pub(in crate::app) detail_level: Option<usize>,
+    pub(in crate::app) loaded_detail_level: Option<usize>,
     /// The weapon picker opened before the unit's weapons were listed: the
     /// pane lists them on a worker (`maybe_request_unit_weapons`).
     pub(in crate::app) list_weapons: bool,
@@ -100,6 +119,10 @@ pub(in crate::app) struct ModelPreviewState {
     /// the collision/physics layers on screen — a frame-level filter, so
     /// toggling never rebuilds geometry.
     pub(in crate::app) show_render: bool,
+    /// Draw the model's stand-in (Halo 3's and ODST's LOD render model).
+    pub(in crate::app) show_lod_model: bool,
+    /// Draw the model's imposter (Reach, Halo 2 Anniversary).
+    pub(in crate::app) show_imposter: bool,
     /// Perspective projection (the default) instead of orthographic. A fixed
     /// 60° lens whose eye dollies toward the orbit point as the zoom grows,
     /// placed so the focus plane matches the orthographic framing exactly —
@@ -111,6 +134,12 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) animation: PreviewAnimationPlayback,
     /// Draw the world-unit ground grid at z = 0 under the geometry.
     pub(in crate::app) show_grid: bool,
+    /// What the viewport is cleared to. The tag pane keeps it in step with
+    /// `GuiPrefs::model_preview_background`.
+    pub(in crate::app) background: ModelPreviewBackground,
+    /// The footer's About button was pressed; the tag pane opens the Model
+    /// Preview help page and clears it.
+    pub(in crate::app) help_requested: bool,
     pub(in crate::app) scale: f32,
     pub(in crate::app) yaw: f32,
     pub(in crate::app) pitch: f32,
@@ -121,11 +150,31 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) focus: [f32; 3],
 }
 
+/// The last loaded model and how its player stood, drawn while the same
+/// model loads again with new settings.
+pub(in crate::app) struct ReloadingPreview {
+    pub(in crate::app) data: ModelPreviewData,
+    pub(in crate::app) animation: super::PreviewAnimationPlayback,
+}
+
+/// A reload's page before it, held until the new model's page is complete.
+pub(in crate::app) struct SettlingPreview {
+    pub(in crate::app) page: ReloadingPreview,
+    /// When the panel first drew it, by the UI clock.
+    pub(in crate::app) since: Option<f64>,
+}
+
+/// The longest the old page stands in for the new one, in seconds: what
+/// follows a load can fail, and the page must not stay still for good.
+const MAX_SETTLE_SECONDS: f64 = 3.0;
+
 impl Default for ModelPreviewState {
     fn default() -> Self {
         Self {
             loaded_key: None,
             preview_load_id: None,
+            reloading: None,
+            settling: None,
             render_model_path: None,
             data: None,
             active_tab: ModelTagPanelTab::Fields,
@@ -136,6 +185,8 @@ impl Default for ModelPreviewState {
             show_errors: false,
             show_non_critical_errors: false,
             show_armature: false,
+            show_bounding_sphere: false,
+            bounding_sphere: None,
             marker_filter: String::new(),
             campaign_evolved: Default::default(),
             weapon: None,
@@ -143,6 +194,8 @@ impl Default for ModelPreviewState {
             secondary_weapon: None,
             loaded_secondary_weapon: None,
             loaded_game_shaders: false,
+            detail_level: None,
+            loaded_detail_level: None,
             list_weapons: false,
             weapons_pending: false,
             reload_carry: None,
@@ -167,9 +220,13 @@ impl Default for ModelPreviewState {
             function_inputs: Default::default(),
             textures_pending: false,
             show_render: true,
+            show_lod_model: false,
+            show_imposter: false,
             perspective: true,
             animation: PreviewAnimationPlayback::default(),
             show_grid: true,
+            background: ModelPreviewBackground::Theme,
+            help_requested: false,
             scale: 1.0,
             yaw: -0.45,
             pitch: 0.25,
@@ -186,7 +243,34 @@ impl ModelPreviewState {
         self.remember_selection();
         self.loaded_key = None;
         self.data = None;
+        self.reloading = None;
+        self.settling = None;
         self.preview_load_id = None;
+    }
+
+    /// Whether the new model's page, `data`, has what the old one showed:
+    /// its materials (which the Object Functions card reads), its
+    /// collision and physics, its weapons and its clip. At `now`, a page
+    /// held past [`MAX_SETTLE_SECONDS`] counts as settled.
+    pub(in crate::app) fn page_settled(
+        &self,
+        settling: &SettlingPreview,
+        data: &ModelPreviewData,
+        now: f64,
+    ) -> bool {
+        if settling.since.is_some_and(|since| now - since > MAX_SETTLE_SECONDS) {
+            return true;
+        }
+        let had_overlays = settling.page.data.preview.batches.iter().any(|batch| {
+            matches!(batch.layer, super::ModelPreviewLayer::Collision | super::ModelPreviewLayer::Physics)
+        });
+        let materials = !self.render_mode.uses_textures()
+            || data.preview.materials.is_empty()
+            || data.textures_for(self.game_shaders).is_some();
+        let overlays = !had_overlays || self.overlays_loaded;
+        let weapons = !self.list_weapons && !self.weapons_pending;
+        let clip = !self.animation.resume_on_decode;
+        materials && overlays && weapons && clip
     }
 
     /// Note the clip and variant selected, by name, for the reload to choose
@@ -217,13 +301,20 @@ impl ModelPreviewState {
     /// One predicate for the panel's spinner gate and the loader's early
     /// return, so the two can never disagree about what needs a rebuild.
     pub(in crate::app) fn needs_preview_load(&self, entry_key: &str) -> bool {
-        self.loaded_key.as_deref() != Some(entry_key)
-            || self.data.is_none()
-            || !self.campaign_evolved.loaded_as_set()
-            || self.loaded_weapon != self.weapon
-            || self.loaded_secondary_weapon != self.secondary_weapon
-            || self.loaded_game_shaders != self.game_shaders
-            || self.loaded_scenario_selection != self.scenario_bsp_selection
+        self.data.is_none() || !self.load_settings_match(entry_key)
+    }
+
+    /// Whether the last load asked for was of `entry_key` with every
+    /// setting as it is now. The loader asks this before starting one, so
+    /// a setting that marks the page out of date always starts its load.
+    pub(in crate::app) fn load_settings_match(&self, entry_key: &str) -> bool {
+        self.loaded_key.as_deref() == Some(entry_key)
+            && self.campaign_evolved.loaded_as_set()
+            && self.loaded_weapon == self.weapon
+            && self.loaded_secondary_weapon == self.secondary_weapon
+            && self.loaded_game_shaders == self.game_shaders
+            && self.loaded_detail_level == self.detail_level
+            && self.loaded_scenario_selection == self.scenario_bsp_selection
     }
 }
 
@@ -309,9 +400,176 @@ impl ModelRenderMode {
     }
 }
 
+/// The Shading menu's choice: how the model's surfaces are drawn. Each is a
+/// render mode, and Game Shaders is Textured through the game's own passes;
+/// the wireframe drawn over a shaded choice is a toggle of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum ModelShading {
+    Wireframe,
+    Solid,
+    Textured,
+    GameShaders,
+}
+
+impl ModelShading {
+    pub(in crate::app) const ALL: [Self; 4] =
+        [Self::Wireframe, Self::Solid, Self::Textured, Self::GameShaders];
+
+    pub(in crate::app) fn label(self) -> &'static str {
+        match self {
+            Self::Wireframe => "Wireframe",
+            Self::Solid => "Solid",
+            Self::Textured => "Textured",
+            Self::GameShaders => "Game Shaders",
+        }
+    }
+
+    pub(in crate::app) fn uses_textures(self) -> bool {
+        matches!(self, Self::Textured | Self::GameShaders)
+    }
+}
+
+/// What the model viewport is cleared to behind the model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum ModelPreviewBackground {
+    /// The page's own background, dark or light with the theme.
+    Theme,
+    White,
+    Black,
+    GreenScreen,
+}
+
+impl ModelPreviewBackground {
+    pub(in crate::app) const ALL: [Self; 4] =
+        [Self::Theme, Self::White, Self::Black, Self::GreenScreen];
+
+    pub(in crate::app) fn label(self) -> &'static str {
+        match self {
+            Self::Theme => "Theme",
+            Self::White => "White",
+            Self::Black => "Black",
+            Self::GreenScreen => "Green Screen",
+        }
+    }
+
+    /// The clear colour, `theme` being the page's own.
+    pub(in crate::app) fn color(self, theme: [f32; 3]) -> [f32; 3] {
+        match self {
+            Self::Theme => theme,
+            Self::White => [1.0; 3],
+            Self::Black => [0.0; 3],
+            // Chroma-key green, #00B140.
+            Self::GreenScreen => [0.0, 177.0 / 255.0, 64.0 / 255.0],
+        }
+    }
+
+    pub(in crate::app) fn as_str(self) -> &'static str {
+        match self {
+            Self::Theme => "theme",
+            Self::White => "white",
+            Self::Black => "black",
+            Self::GreenScreen => "green_screen",
+        }
+    }
+
+    pub(in crate::app) fn from_str(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|background| background.as_str() == value)
+    }
+}
+
+impl ModelPreviewState {
+    /// The Shading menu's choice the render mode and Game Shaders make.
+    pub(in crate::app) fn shading(&self) -> ModelShading {
+        match self.render_mode {
+            ModelRenderMode::Wireframe => ModelShading::Wireframe,
+            ModelRenderMode::Solid | ModelRenderMode::SolidWireframe => ModelShading::Solid,
+            ModelRenderMode::Textured | ModelRenderMode::TexturedWireframe
+                if self.game_shaders =>
+            {
+                ModelShading::GameShaders
+            }
+            ModelRenderMode::Textured | ModelRenderMode::TexturedWireframe => {
+                ModelShading::Textured
+            }
+        }
+    }
+
+    /// Pick `shading`, keeping the wireframe drawn over it as it was.
+    /// Returns whether Game Shaders turned on or off, which reads the
+    /// preview again.
+    pub(in crate::app) fn set_shading(&mut self, shading: ModelShading) -> bool {
+        let overlay = self.wireframe_overlay();
+        self.render_mode = match shading {
+            ModelShading::Wireframe => ModelRenderMode::Wireframe,
+            ModelShading::Solid if overlay => ModelRenderMode::SolidWireframe,
+            ModelShading::Solid => ModelRenderMode::Solid,
+            _ if overlay => ModelRenderMode::TexturedWireframe,
+            _ => ModelRenderMode::Textured,
+        };
+        let game_shaders = shading == ModelShading::GameShaders;
+        let changed = self.game_shaders != game_shaders;
+        self.game_shaders = game_shaders;
+        changed
+    }
+
+    /// Whether a wireframe is drawn over the shaded surfaces.
+    pub(in crate::app) fn wireframe_overlay(&self) -> bool {
+        matches!(
+            self.render_mode,
+            ModelRenderMode::SolidWireframe | ModelRenderMode::TexturedWireframe
+        )
+    }
+
+    /// Draw a wireframe over the shaded surfaces, or stop. Wireframe shading
+    /// is nothing but the wireframe, so it is left as it is.
+    pub(in crate::app) fn set_wireframe_overlay(&mut self, on: bool) {
+        use ModelRenderMode::*;
+        self.render_mode = match (self.render_mode, on) {
+            (Solid | SolidWireframe, true) => SolidWireframe,
+            (Solid | SolidWireframe, false) => Solid,
+            (Textured | TexturedWireframe, true) => TexturedWireframe,
+            (Textured | TexturedWireframe, false) => Textured,
+            (Wireframe, _) => Wireframe,
+        };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shading_choices_keep_the_wireframe_overlay() {
+        let mut state = ModelPreviewState::default();
+        assert_eq!(state.shading(), ModelShading::Textured);
+        state.set_wireframe_overlay(true);
+        assert_eq!(state.render_mode, ModelRenderMode::TexturedWireframe);
+        assert!(state.set_shading(ModelShading::GameShaders), "Game Shaders turned on");
+        assert_eq!(state.shading(), ModelShading::GameShaders);
+        assert!(state.wireframe_overlay());
+        assert!(state.set_shading(ModelShading::Solid), "Game Shaders turned off");
+        assert_eq!(state.render_mode, ModelRenderMode::SolidWireframe);
+        assert!(!state.game_shaders);
+        state.set_shading(ModelShading::Wireframe);
+        state.set_wireframe_overlay(false);
+        assert_eq!(state.render_mode, ModelRenderMode::Wireframe);
+        assert!(!state.set_shading(ModelShading::Textured));
+        assert_eq!(state.render_mode, ModelRenderMode::Textured);
+    }
+
+    #[test]
+    fn preview_backgrounds_round_trip_their_names() {
+        for background in ModelPreviewBackground::ALL {
+            assert_eq!(
+                ModelPreviewBackground::from_str(background.as_str()),
+                Some(background)
+            );
+        }
+        let theme = [0.1, 0.2, 0.3];
+        assert_eq!(ModelPreviewBackground::Theme.color(theme), theme);
+    }
 
     #[test]
     fn model_render_modes_select_expected_passes() {

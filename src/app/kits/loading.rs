@@ -156,6 +156,12 @@ impl Baboon {
             .map(|layout| layout.root);
         view.terminal.open = terminal_open;
         kit.keywords.load_for_game(game.map(GameId::as_str));
+        // Keywords from before the shared list, or added by another Baboon,
+        // join its end.
+        let found = kit.keywords.all_keywords();
+        self.model
+            .keyword_catalog
+            .ensure_all(found.iter().map(|(keyword, _)| keyword.as_str()));
     }
 
     /// Applies `WorkerMessage::AllEntriesScanned`, rejecting stale source generations.
@@ -1270,11 +1276,7 @@ pub(in crate::app) fn extraction_scope_key(path: &Path) -> String {
 }
 
 pub(in crate::app) fn scope_contains(parent: &str, child: &str) -> bool {
-    parent.is_empty()
-        || child == parent
-        || child
-            .strip_prefix(parent)
-            .is_some_and(|rest| rest.starts_with(tag_path::SEPARATOR))
+    parent.is_empty() || tag_path::is_within(child, parent)
 }
 
 pub(in crate::app) fn mark_tree_loaded(tree: &mut TagTree) {
@@ -2109,7 +2111,7 @@ mod tests {
                     if let Some(offset) = offset { area = area.vertical_scroll_offset(offset); }
                     let shown = area.show(ui, |ui| {
                         crate::app::browser::draw_tree(ui, &source.tree, &source.entries, None,
-                            "", true, false, false, false, None, crate::app::browser::BrowserSort::Natural,
+                            "", crate::app::browser::FolderOpening::AllOpen, false, false, false, None, crate::app::browser::BrowserSort::Natural,
                             false, None, false, None);
                     });
                     scroll = shown.state.clamped_offset().y;

@@ -179,6 +179,7 @@ fn build_sbsp_preview_gen3(tag: &TagFile, render_only: bool) -> Result<RenderMod
             index_count,
             flat_color: None,
             layer: ModelPreviewLayer::Render,
+            outline: Default::default(),
             sort_position: None,
         });
     }

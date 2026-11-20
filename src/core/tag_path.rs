@@ -25,6 +25,13 @@ pub(crate) fn parent(path: &str) -> Option<&str> {
     path.rsplit_once(SEPARATOR).map(|(parent, _)| parent)
 }
 
+/// Whether `path` is the folder `folder` or beneath it: `objects\props`
+/// holds `objects\props\crate` but not `objects\props_old`. Letter case
+/// counts, so callers compare lowercased keys.
+pub(crate) fn is_within(path: &str, folder: &str) -> bool {
+    path.strip_prefix(folder).is_some_and(|rest| rest.is_empty() || rest.starts_with(SEPARATOR))
+}
+
 /// A tag path's last segment: `objects\props\crate` is `crate`.
 pub(crate) fn name(path: &str) -> &str {
     path.rsplit_once(SEPARATOR).map_or(path, |(_, name)| name)

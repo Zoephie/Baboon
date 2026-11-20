@@ -238,7 +238,7 @@ pub(in crate::app) fn draw_bitmap_preview_data(
     let data = match decoded {
         Ok(data) => data,
         Err(error) => {
-            ui.colored_label(Color32::from_rgb(130, 32, 24), &error);
+            ui.colored_label(bitmap_error_text(), &error);
             preview.decoded = Some(Err(error));
             return;
         }
@@ -323,6 +323,7 @@ pub(in crate::app) fn draw_bitmap_preview_data(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         draw_bitmap_view_menu(ui, preview, canvas.is_some());
                         draw_bitmap_camera_menu(ui, preview, has_selection);
+                        draw_bitmap_refresh_button(ui, preview);
                         draw_bitmap_header_separator(ui);
                         let previous_spacing = ui.spacing().item_spacing.x;
                         ui.spacing_mut().item_spacing.x = 4.0;
@@ -407,6 +408,25 @@ pub(in crate::app) fn draw_bitmap_preview_data(
     }
 }
 
+const REFRESH_BITMAP_LABEL: &str = "Refresh Bitmap";
+
+/// Refresh Bitmap, as Model Preview's Refresh Model: it reads the tag from
+/// disk again, after a reimport outside Baboon. Only a bitmap tag's own
+/// preview offers it.
+fn draw_bitmap_refresh_button(ui: &mut Ui, preview: &mut BitmapPreviewState) {
+    let Some(enabled) = preview.refresh else {
+        return;
+    };
+    let response = icon_text_button(ui, ButtonIcon::Refresh, REFRESH_BITMAP_LABEL, enabled)
+        .on_hover_text("Load the bitmap again from its tag on disk, as after a reimport outside Baboon.")
+        .on_disabled_hover_text(
+            "Save or undo your edits first: refreshing reads the tag from disk and would drop them.",
+        );
+    if response.clicked() {
+        preview.refresh_clicked = true;
+    }
+}
+
 fn bitmap_header_wrap_width(
     ui: &Ui,
     data: &BitmapPreviewData,
@@ -460,8 +480,18 @@ fn bitmap_header_wrap_width(
             + ui.spacing().button_padding.x * 2.0
     };
     let zoom_label = format!("Zoom: {:.0}%", preview.zoom * 100.0);
-    let action_width =
-        menu_width("View") + menu_width(&zoom_label) + 4.0 * BUTTON_HEIGHT + 3.0 * 4.0 + 1.0 + 24.0;
+    let refresh_width = if preview.refresh.is_some() {
+        menu_width(REFRESH_BITMAP_LABEL) + ui.spacing().item_spacing.x
+    } else {
+        0.0
+    };
+    let action_width = menu_width("View")
+        + menu_width(&zoom_label)
+        + refresh_width
+        + 4.0 * BUTTON_HEIGHT
+        + 3.0 * 4.0
+        + 1.0
+        + 24.0;
 
     // Include the section's 8 px inset on both sides and retain an 8 px gap
     // between the selector and action groups at the point where they wrap.
@@ -713,32 +743,7 @@ fn apply_bitmap_channel_action(
 }
 
 fn bitmap_channel_active_colors(icon: ButtonIcon) -> (Color32, Color32) {
-    // Use explicit premultiplied values here. `from_rgba_unmultiplied` converts
-    // saturated colors through linear space, which looks much brighter than a
-    // restrained UI fill. These are explicit 40%-opacity channel colors.
-    match icon {
-        ButtonIcon::ChannelRed => (
-            Color32::from_rgba_premultiplied(102, 0, 0, 102),
-            Color32::from_rgb(255, 0, 0),
-        ),
-        ButtonIcon::ChannelGreen => (
-            Color32::from_rgba_premultiplied(0, 102, 0, 102),
-            Color32::from_rgb(0, 255, 0),
-        ),
-        ButtonIcon::ChannelBlue => (
-            Color32::from_rgba_premultiplied(0, 0, 102, 102),
-            Color32::from_rgb(0, 0, 255),
-        ),
-        ButtonIcon::ChannelAlpha if is_dark_mode() => (
-            Color32::from_rgba_premultiplied(102, 102, 102, 102),
-            Color32::WHITE,
-        ),
-        ButtonIcon::ChannelAlpha => (
-            Color32::from_rgba_premultiplied(0, 0, 0, 102),
-            Color32::BLACK,
-        ),
-        _ => (Color32::TRANSPARENT, Color32::TRANSPARENT),
-    }
+    bitmap_channel_colors(icon)
 }
 
 fn draw_bitmap_camera_menu(ui: &mut Ui, preview: &mut BitmapPreviewState, has_selection: bool) {
@@ -931,8 +936,10 @@ fn draw_bitmap_canvas_and_footer(
     );
     if preview.show_border {
         let color = if preview.bg == BitmapPreviewBg::White {
+            // fixed: an image border, against the backdrop the user picked
             Color32::from_black_alpha(153)
         } else {
+            // fixed: an image border, against the backdrop the user picked
             Color32::from_white_alpha(153)
         };
         painter.with_clip_rect(canvas_rect).rect_stroke(
@@ -986,7 +993,7 @@ fn draw_bitmap_canvas_and_footer(
                 let box_min =
                     egui::pos2(canvas_rect.left() + 6.0, canvas_rect.bottom() - box_h - 6.0);
                 let box_rect = egui::Rect::from_min_size(box_min, egui::vec2(box_w, box_h));
-                painter.rect_filled(box_rect, 3.0, Color32::from_black_alpha(190));
+                painter.rect_filled(box_rect, 3.0, Color32::from_black_alpha(190)); // fixed: a label box over the image
                 let swatch_rect = egui::Rect::from_min_size(
                     box_min + egui::vec2(pad, (box_h - swatch) * 0.5),
                     egui::vec2(swatch, swatch),
@@ -1029,6 +1036,11 @@ fn draw_bitmap_stats_footer(ui: &mut Ui, data: &BitmapPreviewData, selection: Op
     );
     ui.painter()
         .rect_filled(footer_rect, 0.0, foundation_section_bar());
+    ui.painter().hline(
+        footer_rect.x_range(),
+        footer_rect.top(),
+        Stroke::new(1.0_f32, foundation_group_edge()),
+    );
     ui.painter().text(
         footer_rect.left_center() + Vec2::new(8.0, 0.0),
         Align2::LEFT_CENTER,

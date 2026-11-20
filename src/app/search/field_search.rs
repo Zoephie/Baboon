@@ -381,25 +381,6 @@ impl Baboon {
             },
         );
     }
-
-    pub(in crate::app) fn show_tags_with_keyword(&mut self, keyword: &str) {
-        let keys = self.model.kits[self.model.active].keywords.tags_with(keyword);
-        let entries: Vec<TagEntry> = keys
-            .iter()
-            .filter_map(|key| self.model.entry_for_key(key).cloned())
-            .collect();
-        let note = entries
-            .is_empty()
-            .then(|| "No tags with this keyword are in the current source.".to_owned());
-        self.dialogs.open(QueryResultsWindow::new(TagQueryResults {
-            kit: self.model.active_kit_id(),
-            title: format!("Tags tagged '{keyword}' ({})", entries.len()),
-            entries,
-            annotations: Vec::new(),
-            note,
-            ref_target: None,
-        }));
-    }
 }
 
 impl Model {

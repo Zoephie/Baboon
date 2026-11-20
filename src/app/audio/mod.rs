@@ -111,6 +111,7 @@ pub(super) enum InlineCodec {
     },
 }
 
+#[derive(Clone)]
 pub(super) enum SoundAction {
     /// Play an FMOD bank subsound (Halo 3+, audio paged out to
     /// `<game>/fmod/pc/*.fsb`). `id` is the engine's `fmod bank subsound id
@@ -178,8 +179,9 @@ pub(super) enum SoundAction {
     SetRegion(Option<(f64, f64)>),
 }
 
-/// The tag tab a sound was started from. Playback follows its tab: it pauses
-/// when another tab takes focus and is disposed of when the tab closes.
+/// The tag tab a sound was started from. Playback carries on while another
+/// tab has focus, under the mini player, and is disposed of when its tab
+/// closes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct SoundOwner {
     pub(super) kit: KitId,
@@ -1443,15 +1445,38 @@ impl AudioState {
         self.voice.as_ref().is_some_and(Voice::is_playing)
     }
 
-    /// Keep playback with its tab: pause it once `focus` is another tab (or
-    /// none), and dispose of it — with any decode or Wwise load still on its
-    /// way for it — once `is_open` says its tab is gone. A sound with no tab is
-    /// left alone.
-    pub(super) fn follow_tabs(
-        &mut self,
-        focus: Option<&SoundOwner>,
-        is_open: impl Fn(&SoundOwner) -> bool,
-    ) {
+    /// Under test, load a sound for `owner` paused `fraction` of the way
+    /// through, with no output: its tab's preview when it has one, else a
+    /// tone. For screenshots of the players.
+    #[cfg(test)]
+    pub(super) fn load_paused_for_shot(&mut self, owner: SoundOwner, fraction: f64) {
+        let waveform = match self.previews.get(&owner).map(|preview| &preview.state) {
+            Some(PreviewState::Ready(waveform)) => waveform.clone(),
+            _ => Arc::new(Waveform::new(Arc::new(DecodedPcm {
+                samples: (0..44_100)
+                    .map(|i| ((i as f32 * 0.05).sin() * 8000.0 * ((i as f32 * 0.0003).sin().abs())) as i16)
+                    .collect(),
+                channels: 1,
+                sample_rate: 22_050,
+            }))),
+        };
+        let voice = Voice::new(waveform, "shot".to_owned(), Some(owner), None, self.looping, self.speed.0);
+        voice.seek((voice.frames() as f64 * fraction) as u64);
+        self.voice = Some(voice);
+    }
+
+    /// The sound loaded for playing and the tab it belongs to, for the mini
+    /// player. A sound with no tab has none.
+    pub(super) fn now_playing(&self) -> Option<(SoundOwner, PlaybackView)> {
+        let voice = self.voice.as_ref()?;
+        Some((voice.owner.clone()?, voice.view()))
+    }
+
+    /// Keep playback with its tab: dispose of it — with any decode or Wwise
+    /// load still on its way for it — once `is_open` says its tab is gone.
+    /// Another tab taking focus leaves it playing. A sound with no tab is left
+    /// alone.
+    pub(super) fn follow_tabs(&mut self, is_open: impl Fn(&SoundOwner) -> bool) {
         let closed =
             |owner: &Option<SoundOwner>| owner.as_ref().is_some_and(|owner| !is_open(owner));
         if closed(&self.decode_owner) {
@@ -1477,14 +1502,6 @@ impl AudioState {
             .is_some_and(|voice| closed(&voice.owner))
         {
             self.voice = None;
-            return;
-        }
-        if let Some(voice) = self.voice.as_ref()
-            && let Some(owner) = voice.owner.as_ref()
-            && Some(owner) != focus
-            && voice.is_playing()
-        {
-            voice.pause();
         }
     }
 

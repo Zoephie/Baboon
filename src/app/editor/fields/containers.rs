@@ -409,7 +409,7 @@ pub(in crate::app) fn draw_field(
     let glow = edit
         .field_nav
         .is_some_and(|_| edit.field_nav_glow(&field_path, ui.input(|i| i.time)));
-    let glow_fill = egui::Color32::from_rgba_unmultiplied(255, 214, 0, 38);
+    let glow_fill = jump_glow();
     if let Some(function) = field.as_function() {
         if glow {
             egui::Frame::NONE.fill(glow_fill).show(ui, |ui| {
@@ -992,7 +992,7 @@ pub(in crate::app) fn draw_resettable_box(
     let tooltip = format!("Reset {title}");
     draw_foundation_box(ui, title.to_owned(), id_salt, |ui, part| {
         if part == BoxPart::Trailing {
-            reset = icon_button(ui, ButtonIcon::Undo, &tooltip, changed, foundation_block_text())
+            reset = icon_button(ui, ButtonIcon::Reset, &tooltip, changed, foundation_block_text())
                 .clicked();
         } else {
             contents(ui, part);
@@ -1045,7 +1045,8 @@ fn draw_foundation_collapsing_header_inner(
     let wrapped = header_controls.is_some() && controls_width > 0.0
         && title_width + 16.0 + controls_width + 8.0 + trailing_width > inner_width;
     if wrapped {
-        header_height += wrapped_height.max(ICON_BUTTON_SIZE.y) + 8.0;
+        // Each wrapped row of controls a whole header row under the last.
+        header_height += wrapped_height.max(ICON_BUTTON_SIZE.y) + HEADER_ROW_GAP;
     }
     let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, header_height), Sense::hover());
     let header_background = ui.painter().add(egui::Shape::Noop);
@@ -1063,8 +1064,12 @@ fn draw_foundation_collapsing_header_inner(
         let trailing = trailing_ui.min_rect().width();
         let trailing_left = first_row.right() - if trailing > 0.0 { trailing + 8.0 } else { 0.0 };
         let controls_rect = if wrapped {
-            egui::Rect::from_min_max(first_row.left_bottom() + Vec2::new(0.0, 8.0),
-                egui::pos2(first_row.right(), row_rect.bottom() - header_inset.y))
+            // One button high: a wrapping layout's first row takes its
+            // rect's height and later rows copy it, so each row centres on
+            // a button's height and grows the rect as it wraps.
+            let top = first_row.bottom() + HEADER_ROW_GAP;
+            egui::Rect::from_min_max(egui::pos2(first_row.left(), top),
+                egui::pos2(first_row.right(), top + BUTTON_HEIGHT))
         } else {
             let left = (trailing_left - controls_width).max(first_row.left() + title_width + 16.0);
             egui::Rect::from_min_max(egui::pos2(left.min(trailing_left), first_row.top()),
@@ -1072,8 +1077,10 @@ fn draw_foundation_collapsing_header_inner(
         };
         let mut controls_ui = ui.new_child(egui::UiBuilder::new().id_salt(id.with("controls"))
             .max_rect(controls_rect)
+            // Centred, so a button's label sits mid-button: egui lines a
+            // button's label up as its row does.
             .layout(egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(wrapped)));
-        controls_ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+        controls_ui.spacing_mut().item_spacing = Vec2::new(4.0, HEADER_ROW_GAP);
         controls(&mut controls_ui, BoxPart::Controls);
         let drawn = controls_ui.min_rect();
         // A wrapped layout's width is not its one-line width: keep that.
@@ -1171,6 +1178,9 @@ fn draw_foundation_collapsing_header_inner(
             if documentation { Color32::TRANSPARENT } else { bar_fill },
         ),
     );
+    if !documentation {
+        paint_header_row_lines(ui, row_rect, joined_to_body);
+    }
     let container_rect = body_response.map_or(row_rect, |body| {
         egui::Rect::from_min_max(
             row_rect.min,
@@ -2200,7 +2210,7 @@ pub(in crate::app) fn draw_foundation_block_control(
     let mut controls_rect = row_rect.shrink(8.0);
     if !narrow { controls_rect.max.x -= jump_space; }
     let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(controls_rect));
-    header_ui.spacing_mut().item_spacing = Vec2::new(4.0, if narrow { 4.0 } else { 0.0 });
+    header_ui.spacing_mut().item_spacing = Vec2::new(4.0, if narrow { HEADER_ROW_GAP } else { 0.0 });
     header_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(narrow), |ui| {
         let mut title_row = |ui: &mut Ui| {
         // The containing block body already supplies the nesting indent.
@@ -2462,6 +2472,7 @@ pub(in crate::app) fn draw_foundation_block_control(
             header_fill,
         ),
     );
+    paint_header_row_lines(ui, row_rect, joined_to_body);
     let container_rect = body_response.map_or(row_rect, |body| {
         egui::Rect::from_min_max(
             row_rect.min,
@@ -2477,6 +2488,24 @@ pub(in crate::app) fn draw_foundation_block_control(
 
     finish_foundation_container_spacing(ui, container_rect);
     actions
+}
+
+/// The gap between a stacked header's rows of buttons, so each row is a
+/// header row high: 24 of button, 8 of padding either side.
+const HEADER_ROW_GAP: f32 = 16.0;
+
+/// A line under each of a header's 40-high rows: between stacked rows, and
+/// under the last when the body is open beneath it.
+fn paint_header_row_lines(ui: &Ui, header: egui::Rect, joined_to_body: bool) {
+    let stroke = Stroke::new(1.0_f32, foundation_block_edge());
+    let mut y = header.top() + 40.0;
+    while y < header.bottom() - 1.0 {
+        ui.painter().hline(header.x_range(), y, stroke);
+        y += 40.0;
+    }
+    if joined_to_body {
+        ui.painter().hline(header.x_range(), header.bottom(), stroke);
+    }
 }
 
 fn draw_block_compact_actions(
@@ -5877,5 +5906,41 @@ mod tests {
             eprintln!("  {tagname}  ->  {p}");
         }
         assert!(broken.is_empty(), "{} unresolvable paths", broken.len());
+    }
+
+    /// A header whose controls wrap onto rows of their own keeps its height
+    /// from frame to frame. Centred, the rows sat at the middle of the last
+    /// frame's height and the header doubled each frame, pushing a model's
+    /// Permutations card far off the sidebar.
+    #[test]
+    fn a_wrapped_header_keeps_its_height() {
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(320.0, 2000.0),
+            )),
+            ..Default::default()
+        };
+        let mut heights = Vec::new();
+        for _ in 0..8 {
+            let mut height = 0.0;
+            crate::app::run_ui_test(&ctx, input(), |ui| {
+                let top = ui.cursor().top();
+                draw_resettable_box(ui, "Permutations", "wrapped", false, |ui, part| {
+                    if part == BoxPart::Controls {
+                        for _ in 0..3 {
+                            ui.add_sized([120.0, 24.0], egui::Button::new("control"));
+                        }
+                    }
+                });
+                height = ui.cursor().top() - top;
+            });
+            heights.push(height);
+        }
+        let settled = heights[heights.len() - 1];
+        assert_eq!(heights[heights.len() - 2], settled, "{heights:?}");
+        assert!(settled < 200.0, "{heights:?}");
     }
 }

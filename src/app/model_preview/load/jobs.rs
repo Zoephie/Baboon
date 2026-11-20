@@ -209,6 +209,9 @@ pub(in crate::app::model_preview) struct PreviewLoadSettings {
     pub(in crate::app::model_preview) equippable: Option<Vec<super::super::weapons::Equippable>>,
     /// What the load reads for: [`super::TagReader::game_shaders`].
     pub(in crate::app::model_preview) game_shaders: bool,
+    /// Halo CE's and Halo 2's level of detail, lowest first; `None` for the
+    /// highest.
+    pub(in crate::app::model_preview) detail_level: Option<usize>,
 }
 
 /// A load of everything, Game Shaders' share too, as a test reads it.
@@ -222,6 +225,7 @@ impl Default for PreviewLoadSettings {
             secondary_weapon: None,
             equippable: None,
             game_shaders: true,
+            detail_level: None,
         }
     }
 }
@@ -244,6 +248,7 @@ impl PreviewLoadSettings {
             },
             ce: super::super::ce::weapons::CeLoadSettings::of(state.data.as_ref()),
             game_shaders: state.game_shaders,
+            detail_level: state.detail_level,
         }
     }
 }
@@ -270,13 +275,9 @@ impl Baboon {
         if state.active_tab != ModelTagPanelTab::ModelPreview {
             return false;
         }
-        let desired_matches = state.loaded_key.as_deref() == Some(key)
-            && state.campaign_evolved.loaded_as_set()
-            && state.loaded_scenario_selection == state.scenario_bsp_selection
-            && state.loaded_weapon == state.weapon
-            && state.loaded_secondary_weapon == state.secondary_weapon
-            && state.loaded_game_shaders == state.game_shaders;
-        if desired_matches && (state.data.is_some() || state.preview_load_id.is_some()) {
+        if state.load_settings_match(key)
+            && (state.data.is_some() || state.preview_load_id.is_some())
+        {
             return false;
         }
 
@@ -301,6 +302,8 @@ impl Baboon {
             .model_previews
             .get_mut(key)
             .expect("preview state checked above");
+        // The same model with new settings keeps its page on screen.
+        let same_model = state.loaded_key.as_deref() == Some(key);
         state.loaded_key = Some(key.to_owned());
         settings
             .campaign_evolved
@@ -309,9 +312,24 @@ impl Baboon {
         state.loaded_weapon = settings.weapon.clone();
         state.loaded_secondary_weapon = settings.secondary_weapon.clone();
         state.loaded_game_shaders = settings.game_shaders;
+        state.loaded_detail_level = settings.detail_level;
         state.preview_load_id = Some(request_id);
         state.remember_selection();
-        state.data = None;
+        let previous = match state.data.take() {
+            Some(Ok(data)) if same_model => Some(super::super::state::ReloadingPreview {
+                data,
+                animation: state.animation.display_copy(),
+            }),
+            _ => None,
+        };
+        // A load asked for again (one dropped as stale) keeps what it showed,
+        // and one asked for while the last settles keeps the page it holds.
+        let settled_page = state.settling.take().map(|settling| settling.page);
+        state.reloading = if same_model {
+            settled_page.or(previous).or(state.reloading.take())
+        } else {
+            None
+        };
         state.render_model_path = None;
         // A fresh base load orphans any overlay, material, or animation work
         // keyed to the old geometry. Their request hooks re-arm after this
@@ -331,6 +349,9 @@ impl Baboon {
             speed: kept.speed,
             time: kept.time,
             filter: kept.filter,
+            // A clip that was picked is picked again by name; its decode
+            // then resumes it as it was.
+            resume_on_decode: kept.selected.is_some() || kept.resume_on_decode,
             ..PreviewAnimationPlayback::default()
         };
 
@@ -387,8 +408,22 @@ impl Baboon {
         if stale {
             return true;
         }
+        // The page it stood in for is held until the new one is complete.
+        let page = state.reloading.take();
+        state.settling = page
+            .filter(|_| result.is_ok())
+            .map(|page| super::super::state::SettlingPreview { page, since: None });
         if let Ok(data) = &result {
             state.render_model_path = Some(data.render_model_path.clone());
+            // The LOD Model swap only holds while there is one to swap in.
+            if !data
+                .preview
+                .lod_model
+                .as_ref()
+                .is_some_and(|lod| lod.missing.is_none())
+            {
+                state.show_lod_model = false;
+            }
             // The variant chosen before the reload, by name, else the canonical
             // one (named `default`, else the first), so both cards arrive in
             // one consistent state.

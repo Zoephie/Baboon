@@ -39,7 +39,7 @@ use crate::app::editor::{
 use crate::app::export::ContainerDumpReport;
 use crate::app::browser::{
     BITMAP_LIBRARY_KEY, BITMAP_LIBRARY_TITLE, Bitmaps, BrowserAction, BrowserCommand,
-    BrowserFeature, BrowserMode, BrowserSort, FilterCache, FolderBrowserState, KeywordChooser,
+    BrowserFeature, BrowserMode, BrowserSort, FilterCache, FolderBrowserState, KeywordManager,
     MODEL_LIBRARY_KEY, MODEL_LIBRARY_TITLE, Models, PaletteTable, RefOccurrence, TagQueryResults,
     ThumbnailImage, draw_folder_browser_pane, draw_kit_browser, draw_thumbnail_library,
     is_folder_pane_key, style_list_menu, tag_tab_label,

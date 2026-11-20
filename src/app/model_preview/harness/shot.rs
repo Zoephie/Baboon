@@ -1,5 +1,6 @@
 //! Renders a real model through the real renderer with no window, so a pass
-//! can be looked at without opening the app. macOS only, through CGL.
+//! can be looked at without opening the app: through CGL on macOS, a hidden
+//! window's WGL context on Windows.
 //!
 //! `H2_SHOT="<model path>|<out file>|<shaders 0/1>|<lights 0/1>|<yaw>|<pitch>"`,
 //! several separated by `;`, with `BLAM_TEST_H2EK` naming the kit's tags.
@@ -69,6 +70,8 @@ pub(in crate::app::model_preview) struct ShotOptions {
     pub(in crate::app::model_preview) mode: Option<String>,
     pub(in crate::app::model_preview) light_theme: bool,
     pub(in crate::app::model_preview) grid: bool,
+    /// The imposter drawn beside the model (`H2_SHOT_IMPOSTER`).
+    pub(in crate::app::model_preview) imposter: bool,
     pub(in crate::app::model_preview) camo: bool,
     pub(in crate::app::model_preview) bloom: bool,
     pub(in crate::app::model_preview) shadow: bool,
@@ -110,6 +113,7 @@ impl ShotOptions {
             mode: None,
             light_theme: false,
             grid: false,
+            imposter: false,
             camo: false,
             bloom: false,
             shadow: false,
@@ -167,6 +171,7 @@ impl ShotOptions {
             mode: var("H2_SHOT_MODE"),
             light_theme: set("H2_SHOT_LIGHT"),
             grid: set("H2_SHOT_GRID"),
+            imposter: set("H2_SHOT_IMPOSTER"),
             camo: set("H2_SHOT_CAMO"),
             bloom: set("H2_SHOT_BLOOM"),
             shadow: set("H2_SHOT_SHADOW"),
@@ -209,6 +214,7 @@ fn object_kind(kind: &str) -> (&'static str, &'static [u8; 4]) {
         "vehicle" => ("vehicle", b"vehi"),
         "effect_scenery" => ("effect_scenery", b"efsc"),
         "projectile" => ("projectile", b"proj"),
+        "imposter" => ("imposter_model", b"impo"),
         _ => ("biped", b"bipd"),
     }
 }
@@ -396,6 +402,7 @@ pub(super) fn render(
         state.render_mode = mode;
     }
     state.show_grid = options.grid;
+    state.show_imposter = options.imposter;
     state.active_camo = options.camo;
     state.bloom = options.bloom;
     state.self_shadow = options.shadow;
@@ -563,6 +570,8 @@ pub(super) fn render(
 }
 
 /// What [`shoot`] gives back of a shot.
+// The pixel gates that read it run on macOS only.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(in crate::app::model_preview) struct Shown {
     /// RGBA, bottom row first.
     pub(in crate::app::model_preview) pixels: Vec<u8>,
@@ -807,6 +816,10 @@ fn a_context_without_gen3_shaders_says_so() {
 /// them the same objects draw through more. Each object has transparent
 /// passes, so the check cannot pass by having none.
 #[test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "reads the GL calls, which only the macOS context records"
+)]
 fn without_game_shaders_no_game_pass_draws() {
     let cases = [
         (GameId::HaloCe, "vehicles\\warthog\\warthog"),
@@ -849,5 +862,50 @@ fn without_game_shaders_no_game_pass_draws() {
         };
         assert_eq!(programs(false).len(), 1, "{game:?} {model}: off");
         assert!(programs(true).len() > 1, "{game:?} {model}: on");
+    }
+}
+
+/// Shoots Reach's banshee imposter on its own and beside its model, as PNGs
+/// in `BABOON_IMPOSTER_SHOTS`, with `BLAM_TEST_HREK` naming the kit's tags.
+#[test]
+fn imposter_shots() {
+    let (Some(dir), Some(source)) = (
+        std::env::var_os("BABOON_IMPOSTER_SHOTS"),
+        super::kit::kit_source(GameId::HaloReach),
+    ) else {
+        eprintln!("imposter_shots: skipped; set BABOON_IMPOSTER_SHOTS and BLAM_TEST_HREK to shoot");
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    let gl = Arc::new(headless_gl());
+    unsafe {
+        eprintln!("GL {}", gl.get_parameter_string(glow::VERSION));
+    }
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let model = r"objects\vehicles\covenant\banshee\banshee";
+    for (name, kind, imposter) in [
+        ("imposter", Some("imposter"), false),
+        ("model", None, false),
+        ("model_with_imposter", None, true),
+    ] {
+        let options = ShotOptions { imposter, ..ShotOptions::new(GameId::HaloReach) };
+        let shot = Shot {
+            model: model.to_owned(),
+            shaders: false,
+            lights: true,
+            yaw: 0.6,
+            pitch: 0.25,
+            kind: kind.map(str::to_owned),
+        };
+        let pixels = render(&gl, &mut renderer, &source, &shot, &options).pixels;
+        // Something drew: not every pixel is the background's.
+        assert!(
+            pixels.chunks(4).any(|pixel| pixel != &pixels[..4]),
+            "banshee_{name}: nothing drawn"
+        );
+        let row = SHOT_SIZE[0] as usize * 4;
+        let upright: Vec<u8> = pixels.chunks_exact(row).rev().flatten().copied().collect();
+        let image = image::RgbaImage::from_raw(SHOT_SIZE[0], SHOT_SIZE[1], upright).unwrap();
+        image.save(dir.join(format!("banshee_{name}.png"))).unwrap();
     }
 }

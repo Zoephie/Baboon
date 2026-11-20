@@ -1,6 +1,7 @@
 //! The animation player: the clip picker, the transport, the scrubber and its clock.
 
 use super::super::super::ui_kit::button_icons::{ButtonIcon, selectable_icon_button};
+use super::super::super::ui_kit::railed_slider;
 use super::super::super::ui_kit::style::{BUTTON_HEIGHT, subtle_dark, text_dark};
 use super::super::{
     ANIMATION_FRAME_RATE, ModelPreviewState, PreviewAnimationEntry, PreviewAnimationPlayback,
@@ -11,7 +12,7 @@ use super::section::{
     ModelPreviewSectionPart, animation_extra_header_height, draw_model_preview_section,
 };
 use eframe::egui;
-use eframe::egui::{Color32, FontId, RichText, Ui, Vec2};
+use eframe::egui::{FontId, RichText, Ui, Vec2};
 
 pub(in crate::app::model_preview) fn animation_frame_position(
     playback: &PreviewAnimationPlayback,
@@ -145,6 +146,8 @@ pub(in crate::app::model_preview) fn draw_animation_combo(
                         playback.time = 0.0;
                         playback.playing = false;
                         playback.stopped = false;
+                        // Picked, not carried: it plays from the top.
+                        playback.resume_on_decode = false;
                         playback.error = None;
                         egui::Popup::close_id(ui.ctx(), popup_id);
                     }
@@ -228,6 +231,8 @@ pub(in crate::app::model_preview) fn draw_animation_header(
     } = *frames;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 16.0;
+        // Wrapped rows a whole header row apart, each centred in its own.
+        ui.spacing_mut().item_spacing.y = super::section::HEADER_ROW_HEIGHT - BUTTON_HEIGHT;
         let loading = state.animation.selected.is_some()
             && state.animation.pose.is_none()
             && state.animation.error.is_none();
@@ -265,37 +270,28 @@ pub(in crate::app::model_preview) fn draw_animation_header(
                 ui.spinner();
             }
         });
-        animation_header_group(ui, 140.0, |ui| {
+        animation_header_group(ui, 112.0, |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            if selectable_icon_button(
-                ui,
-                ButtonIcon::Play,
-                "Play",
-                state.animation.playing,
-                controls_enabled,
-            )
-            .clicked()
-            {
-                state.animation.playing = true;
-                state.animation.stopped = false;
-                // Play at the end of a non-looping clip restarts it.
-                if !state.animation.looped
-                    && state.animation.time * ANIMATION_FRAME_RATE >= last_frame
-                {
-                    state.animation.time = 0.0;
+            // One button that plays, and pauses while playing.
+            let (icon, hover) = if state.animation.playing {
+                (ButtonIcon::Pause, "Pause")
+            } else {
+                (ButtonIcon::Play, "Play")
+            };
+            if selectable_icon_button(ui, icon, hover, false, controls_enabled).clicked() {
+                if state.animation.playing {
+                    state.animation.playing = false;
+                    state.animation.stopped = false;
+                } else {
+                    state.animation.playing = true;
+                    state.animation.stopped = false;
+                    // Play at the end of a non-looping clip restarts it.
+                    if !state.animation.looped
+                        && state.animation.time * ANIMATION_FRAME_RATE >= last_frame
+                    {
+                        state.animation.time = 0.0;
+                    }
                 }
-            }
-            if selectable_icon_button(
-                ui,
-                ButtonIcon::Pause,
-                "Pause",
-                !state.animation.playing && !state.animation.stopped,
-                controls_enabled,
-            )
-            .clicked()
-            {
-                state.animation.playing = false;
-                state.animation.stopped = false;
             }
             if selectable_icon_button(
                 ui,
@@ -384,35 +380,24 @@ pub(in crate::app::model_preview) fn draw_animation_scrubber(
     ui.scope(|ui| {
         let mut scrub = animation_frame_position(&state.animation, pose_frames);
         ui.spacing_mut().slider_width = (ui.available_width() - 2.0).max(1.0);
-        // Reserved before the slider so the ticks lie under its handle.
-        let ticks = ui.painter().add(egui::Shape::Noop);
         let mut slider = egui::Slider::new(&mut scrub, 0.0..=last_frame.max(1.0)).show_value(false);
         if !state.animation.interpolate {
             slider = slider.step_by(1.0);
         }
-        let response = ui.add_enabled(controls_enabled, slider);
-        let tick_xs = frame_tick_xs(
-            response.rect,
-            ui.style().visuals.handle_shape,
-            last_frame.max(1.0),
-            pose_frames,
-        );
-        let rail_y = response.rect.center().y;
-        let stroke = egui::Stroke::new(1.0, subtle_dark());
-        ui.painter().set(
-            ticks,
-            egui::Shape::Vec(
-                tick_xs
-                    .into_iter()
-                    .map(|x| {
-                        egui::Shape::line_segment(
-                            [egui::pos2(x, rail_y - 5.0), egui::pos2(x, rail_y + 5.0)],
-                            stroke,
-                        )
-                    })
-                    .collect(),
-            ),
-        );
+        let handle_shape = ui.style().visuals.handle_shape;
+        let response = railed_slider(ui, slider, controls_enabled, |rect| {
+            let rail_y = rect.center().y;
+            let stroke = egui::Stroke::new(1.0, subtle_dark());
+            frame_tick_xs(rect, handle_shape, last_frame.max(1.0), pose_frames)
+                .into_iter()
+                .map(|x| {
+                    egui::Shape::line_segment(
+                        [egui::pos2(x, rail_y - 5.0), egui::pos2(x, rail_y + 5.0)],
+                        stroke,
+                    )
+                })
+                .collect()
+        });
         if response.changed() {
             state.animation.time = scrub / ANIMATION_FRAME_RATE;
             state.animation.playing = false;
@@ -426,7 +411,7 @@ pub(in crate::app::model_preview) fn draw_animation_scrubber(
         }
     });
     if let Some(error) = state.animation.error.clone() {
-        ui.label(RichText::new(error).color(Color32::from_rgb(150, 56, 44)));
+        ui.label(RichText::new(error).color(crate::app::ui_kit::panel_error_text()));
     }
 }
 

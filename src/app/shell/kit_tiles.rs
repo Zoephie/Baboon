@@ -469,7 +469,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         }
     }
     fn tab_bar_color(&self, _visuals: &egui::Visuals) -> Color32 {
-        row_type()
+        chrome_bar()
     }
 
     fn tab_bg_color(

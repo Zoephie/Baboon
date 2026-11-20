@@ -16,11 +16,89 @@ New, Sort and View are in the header.
 The View menu also offers **Tree**, an expandable folder hierarchy, and
 **Groups**, which groups descendant tags by type. These modes use single
 selection. Only a folder's chevron expands or collapses it; its label selects
-it, and double-clicking opens it.
+it, and double-clicking opens it. **Collapse All** in the View menu closes
+every folder; a folder's right-click menu has it for just that folder and
+everything inside it, as does Alt-clicking an open folder's arrow. There is
+no Expand All: opening every folder of a big kit at once stops the app
+answering.
+
+## Searching
+
+A search in the Tree or Groups view (and in the left browser) shows the
+folders or groups that hold matches **closed**, each with how many matches it
+holds, counting every folder inside it. Open one to look inside: while a
+folder holds a single item, the next one opens too, so a lone path down to
+the matches takes one click. A folder or group holding only one match opens
+by itself, as does a lone folder at the top. With **Folders** ticked, a folder
+matched by its name counts as a match too, along with everything inside it.
+
+Folders you open or close stay that way while you refine the search. Clearing
+the search shows the browser's folders as they were before it.
+
+A search in **Flat** view lists every match beneath the folder, not just its
+own: this folder's results first, then each folder's in path order, each row
+led by its folder path in muted text. Multiple selection and every bulk
+action work on the results. Moving, copying or deleting a folder together with
+items inside it handles those items once, with their folder, and the review
+says so. The footer counts the results.
+
+Right-click a result in Flat view or the Asset Browser for **Open Tag Folder**,
+which opens the folder it is in, in a new folder tab, with it selected.
 
 **Asset Browser** shows bitmap and model previews beneath the current folder.
 Use its type filters and search to narrow the listing. It supports multiple tag
 selection, with fewer file-management actions because assets may span folders.
+
+## Keywords
+
+A folder carries keywords as a tag does: add them on the **Keywords** bar in
+its header, and they show in its row's Keywords column. Typing in the bar
+lists the keywords that match, so similar tags and folders share one
+spelling: click one to add it, or use Up and Down and press Enter; Tab fills
+the highlighted one in. Keywords used in other games are offered too. A
+folder's keywords are not given to the tags inside it.
+
+**Tools → Manage Keywords** lists every keyword, in every game, in your
+order, with how many tags and folders in this kit carry each:
+
+- Drag a row by its handle to reorder. Keyword pills everywhere (headers,
+  the Keywords column, suggestions, the search box) follow this order.
+- Click a keyword's pill to give it a colour, or none. Each colour has a
+  light and a dark version.
+- **Search** (magnifier) opens the kit's root in a folder window with the
+  keyword in its search box.
+- **Rename** (pencil) renames it on every tag and folder in every game.
+  Renaming it to another keyword merges the two, after asking.
+- **Delete** removes it from every tag and folder in every game, after
+  asking. It can't be undone.
+- **Add New Keyword** adds one before anything carries it.
+
+The row's count is this kit's only. The Merge and Delete warnings show both
+this kit's count and the total across all your editing kits, since a
+keyword unused here may still be used in another kit. If another game's
+keyword file can't be read, a rename or delete changes nothing and says
+which file it was.
+
+Keywords keep the spelling they were first typed with ("To Be Deleted") and
+match without letter case.
+
+### Keyword pills in the search box
+
+With **Keywords** ticked, typing in a search box suggests matching keywords.
+Picking one (click, Tab, or Up/Down then Enter) makes it a pill in the box. A
+pill matches its keyword exactly, so "wip" doesn't find "wip-old". Text typed
+beside a pill searches as usual, and both must match: a **WIP** pill with
+`model` finds tags named "model" that carry WIP. `^`, `$` and `|` still work,
+and with `|` the pill applies to each alternative. An empty side of `|`
+matches nothing, as it does without a pill. Each pill has its own ×,
+and Backspace in an empty box removes the last one.
+
+Which tags and folders carry which keyword lives in Baboon's own data, not in
+the tags, one file per game shared by that game's kits. The list of keywords,
+their spelling, colours and order is one file for every game. Renaming or
+moving a folder in Baboon carries its keywords, and those of the folders
+inside it, along, including the folders that moved whole when some of it
+stayed behind; deleting it drops them.
 
 ## Selection and keyboard navigation
 

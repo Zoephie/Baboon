@@ -52,7 +52,7 @@ pub(in crate::app) fn draw_folder_import_report(ui: &mut Ui, report: &FolderConv
                 let (label, color) = match wanted {
                     FolderConversionFileStatus::NativeLayout => (
                         "Started from a kit tag — the definitions cannot build this group",
-                        Color32::from_rgb(242, 196, 48),
+                        import_warning_text(),
                     ),
                     FolderConversionFileStatus::GeneratedLayout => {
                         ("Built from the target's own definitions", text_dark())
@@ -61,7 +61,7 @@ pub(in crate::app) fn draw_folder_import_report(ui: &mut Ui, report: &FolderConv
                         ("Already in the kit — left as it was", subtle_dark())
                     }
                     FolderConversionFileStatus::Failed => {
-                        ("Failed / skipped", material_delete_text())
+                        ("Failed / skipped", error_text())
                     }
                 };
                 let matching = report

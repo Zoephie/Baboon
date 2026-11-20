@@ -731,14 +731,14 @@ impl Dialog for ChimpDiscardPrompt {
                     });
                 if let Some(error) = error.as_deref() {
                     ui.add_space(6.0);
-                    ui.colored_label(Color32::from_rgb(180, 48, 40), error);
+                    ui.colored_label(save_error_text(), error);
                 }
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(
                         "This removes the unsaved recovery copy. Exported mods and source PAK changes already saved are not affected, and this cannot be undone.",
                     )
-                    .color(Color32::from_rgb(210, 120, 90)),
+                    .color(replace_warning_text()),
                 );
                 ui.add_space(10.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -889,7 +889,7 @@ impl Dialog for ChimpSaveDialog {
                             ui.label(format!("Output: {stem}.utoc / .ucas / .pak"));
                         } else {
                             ui.colored_label(
-                                Color32::from_rgb(210, 120, 80),
+                                chimp_error_text(),
                                 "Enter a file-safe mod name.",
                             );
                         }
@@ -897,7 +897,7 @@ impl Dialog for ChimpSaveDialog {
                             chimp_existing_triplet(&dialog.folder.join(format!("{stem}.utoc")));
                         if !existing.is_empty() {
                             ui.colored_label(
-                                Color32::from_rgb(210, 120, 80),
+                                chimp_error_text(),
                                 format!("This will replace: {}", existing.join(", ")),
                             );
                             ui.baboon_checkbox(
@@ -909,7 +909,7 @@ impl Dialog for ChimpSaveDialog {
                     }
                     ChimpSaveMode::OverwriteSources => {
                         ui.colored_label(
-                            Color32::from_rgb(190, 72, 56),
+                            installed_overwrite_text(),
                             "This replaces package indexes in the installed game containers.",
                         );
                         for path in &source_containers {

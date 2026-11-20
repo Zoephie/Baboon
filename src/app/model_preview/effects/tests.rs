@@ -61,6 +61,77 @@ fn a_nonviolent_part_is_not_made_in_either_naming() {
     }
 }
 
+/// An instant response's transition effect plays at the marker its response
+/// names, which the effect's `replace` locations take: `effect marker name`,
+/// or in Reach the generic or specific effect marker.
+#[test]
+fn an_instant_responses_effect_takes_the_marker_named_beside_it() {
+    for (game, effect, marker) in [
+        ("halo2_mcc", "transition effect", "effect marker name"),
+        ("halo3_mcc", "transition effect (generic)", "effect marker name"),
+        ("halo3_mcc", "transition effect (specific)", "effect marker name"),
+        ("halo3odst_mcc", "delay effect", "delay effect marker name"),
+        ("haloreach_mcc", "transition effect (generic)", "generic effect marker"),
+        ("haloreach_mcc", "transition effect (specific)", "specific effect marker"),
+    ] {
+        let mut tag = TagFile::new(
+            crate::core::bundled::locate_definitions_root()
+                .join(game)
+                .join("model.json"),
+        )
+        .unwrap_or_else(|error| panic!("{game} model: {error:?}"));
+        // Reach keeps its instant responses in its own `damage info`.
+        let info = if game == "haloreach_mcc" {
+            "damage info"
+        } else {
+            "new damage info"
+        };
+        let response = format!("{info}[0]/damage sections[0]/instant responses[0]");
+        for block in [
+            info.to_owned(),
+            format!("{info}[0]/damage sections"),
+            format!("{info}[0]/damage sections[0]/instant responses"),
+        ] {
+            let mut root = tag.root_mut();
+            let mut field = root
+                .field_path_mut(&block)
+                .unwrap_or_else(|| panic!("{game}: {block}"));
+            if let Some(mut block) = field.as_block_mut() {
+                block.add_element();
+            }
+        }
+        let set = |tag: &mut TagFile, field: &str, data: TagFieldData| {
+            let path = format!("{response}/{field}");
+            let mut root = tag.root_mut();
+            root.field_path_mut(&path)
+                .unwrap_or_else(|| panic!("{game}: {path}"))
+                .set(data)
+                .unwrap_or_else(|error| panic!("{game}: {path}: {error:?}"));
+        };
+        set(
+            &mut tag,
+            effect,
+            TagFieldData::TagReference(blam_tags::TagReferenceData {
+                group_tag_and_name: Some((u32::from_be_bytes(*b"effe"), r"fx\boom".to_owned())),
+            }),
+        );
+        set(
+            &mut tag,
+            marker,
+            TagFieldData::StringId(blam_tags::StringIdData {
+                string: "damage_marker".to_owned(),
+            }),
+        );
+        let mut found = Vec::new();
+        collect_event_effects(tag.root(), &mut found);
+        let found = found
+            .iter()
+            .find(|found| found.field == effect)
+            .unwrap_or_else(|| panic!("{game}: {effect} in {found:?}"));
+        assert_eq!(found.marker, "damage_marker", "{game}: {effect}");
+    }
+}
+
 #[test]
 fn an_effect_restarts_each_time_its_function_comes_on() {
     let mut onsets = EffectOnsets::default();

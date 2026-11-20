@@ -12,7 +12,7 @@ use crate::app::shell::frame::pane_header_inline_left_width;
 use crate::app::shell::frame::PANE_HEADER_COMMON_ACTIONS_WIDTH;
 use crate::app::shell::frame::PANE_HEADER_SECTION_GAP;
 
-const TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT: f32 = 1160.0;
+pub(in crate::app) const TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT: f32 = 1160.0;
 const TAG_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT: f32 = 1180.0;
 const TAG_HEADER_DYNAMIC_ACTIONS_WIDTH: f32 = 285.0;
 const BITMAP_HEADER_ACTIONS_WIDTH: f32 = 225.0;
@@ -190,6 +190,7 @@ pub(in crate::app) fn draw_tag_pane(
     } = inputs;
     let bitmap_preview_view = cx.model.prefs.bitmap_preview_view;
     let model_preview_perspective = cx.model.prefs.model_preview_perspective;
+    let model_preview_background = cx.model.prefs.model_preview_background;
 
     let Some(doc) = cx.model.kits[kit_index].parsed_tags.get(&key) else {
         if cx.model.kits[kit_index].loading_tags.contains(&key) {
@@ -331,6 +332,7 @@ pub(in crate::app) fn draw_tag_pane(
         key: key.clone(),
     };
     let sound_playback = audio.playback(Some(&sound_owner));
+    crate::app::editor::sound_player_drawing(ui.ctx());
     // A status line from another tab's sound is that tab's business.
     let sound_status_shown = audio.status_is_for(&sound_owner);
     let sound_looping = audio.looping();
@@ -366,6 +368,7 @@ pub(in crate::app) fn draw_tag_pane(
     let mut edit_context = FieldEditContext {
         view_scope: scope,
         tag_key: &key,
+        document_revision: (doc.id, doc.dirty.revision()),
         group_tag: entry.group_tag,
         root: Some(doc.tag.root()),
         game: source.and_then(|source| source.game),
@@ -397,6 +400,7 @@ pub(in crate::app) fn draw_tag_pane(
         string_list_checkboxes: cx.model.prefs.string_list_checkboxes,
         string_list_wrap_text: cx.model.prefs.string_list_wrap_text,
         string_list_help_requested: false,
+        sound_help_requested: false,
         string_row_document: Some(string_row_clipboard::RowDocument { kit: kit_id, key: key.clone(), id: doc.id }),
         string_row_request: None,
         buffers: &mut view.edit_buffers,
@@ -406,7 +410,7 @@ pub(in crate::app) fn draw_tag_pane(
         open_request: &mut open_request,
         sound_play_request: crate::app::audio::SoundRequests::new(
             &mut sound_queue,
-            Some(sound_owner),
+            Some(sound_owner.clone()),
         ),
         sound_status: audio.status.as_deref().filter(|_| sound_status_shown),
         sound_volume,
@@ -456,6 +460,7 @@ pub(in crate::app) fn draw_tag_pane(
     if is_bitmap_tag(entry) {
         let preview = view.caches.bitmap_previews.entry(key.clone()).or_default();
         preview.apply_view_settings(bitmap_preview_view);
+        preview.refresh = Some(!doc.dirty.is_set() && !kit.loading_tags.contains(&key));
         draw_bitmap_tag(
             ui,
             ctx,
@@ -468,6 +473,9 @@ pub(in crate::app) fn draw_tag_pane(
             &mut edit_context,
             (doc.id, doc.dirty.revision()),
         );
+        if std::mem::take(&mut preview.refresh_clicked) {
+            cx.send(crate::app::editor::EditorCommand::RefreshBitmap { kit: kit_id, key: key.clone() });
+        }
         if preview.view_settings() != bitmap_preview_view {
             let settings = preview.view_settings();
             cx.edit_prefs(move |prefs| prefs.bitmap_preview_view = settings);
@@ -487,6 +495,7 @@ pub(in crate::app) fn draw_tag_pane(
         // One projection for every pane, as the bitmap view settings are:
         // applied going in, and a toggle in this pane written back.
         model_preview.perspective = model_preview_perspective;
+        model_preview.background = model_preview_background;
         let document_revision = (
             doc.id,
             doc.dirty.revision(),
@@ -529,6 +538,20 @@ pub(in crate::app) fn draw_tag_pane(
             let perspective = model_preview.perspective;
             cx.edit_prefs(move |prefs| prefs.model_preview_perspective = perspective);
         }
+        if edit_context.sound_help_requested {
+            cx.send(crate::app::help::HelpCommand::ShowDocSection(
+                crate::app::help::SOUND_PLAYER_HELP_SECTION,
+            ));
+        }
+        if std::mem::take(&mut model_preview.help_requested) {
+            cx.send(crate::app::help::HelpCommand::ShowDocSection(
+                crate::app::help::MODEL_PREVIEW_HELP_SECTION,
+            ));
+        }
+        if model_preview.background != model_preview_background {
+            let background = model_preview.background;
+            cx.edit_prefs(move |prefs| prefs.model_preview_background = background);
+        }
     }
 
     let row_command = edit_context.string_row_request.take().map(|request| string_row_clipboard::RowCommand {
@@ -554,6 +577,7 @@ pub(in crate::app) fn draw_tag_pane(
     if !sound_queue.is_empty() {
         cx.send(AudioCommand::Queue(sound_queue));
     }
+    crate::app::editor::sound_player_drawn(ui.ctx(), &sound_owner);
     if let Some(request) = sound_extract_request {
         cx.send(ExportCommand::QueueSoundExtract(request));
     }
@@ -683,6 +707,7 @@ fn draw_responsive_tag_header(
         b"scnr" => TAG_HEADER_DYNAMIC_ACTIONS_WIDTH,
         b"bitm" => BITMAP_HEADER_ACTIONS_WIDTH,
         b"unic" | b"ustr" => 250.0,
+        b"hsc*" => 280.0,
         _ => 0.0,
     };
     let has_dynamic_actions = dynamic_actions_width > 0.0;
@@ -861,6 +886,7 @@ fn draw_tag_header_specific_actions(cx: &Ctx, ui: &mut Ui, kit_index: usize, ent
             });
         }
         b"scnr" => draw_scenario_launcher_buttons(cx, ui, kit_index, entry),
+        b"hsc*" => draw_script_tag_buttons(cx, ui, kit_index, entry),
         b"bitm" => {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = PANE_HEADER_ACTION_GAP;
@@ -888,6 +914,59 @@ fn draw_tag_header_specific_actions(cx: &Ctx, ui: &mut Ui, kit_index: usize, ent
     }
 }
 
+/// A script tag's header buttons: open it in VS Code, and recompile its
+/// scenario. Laid out right to left, as the header's other actions are.
+fn draw_script_tag_buttons(cx: &Ctx, ui: &mut Ui, kit_index: usize, entry: &TagEntry) {
+    let kit = cx.model.kits[kit_index].id;
+    let game = cx.model.kits[kit_index].source.as_ref().and_then(|source| source.game);
+    let enabled = matches!(entry.location, TagEntryLocation::LooseFile(_))
+        && crate::core::script_tags::supports_script_tags(game);
+    let why = "Opening and recompiling scripts works on the loose script tags of a Halo 2, Halo 3, \
+               ODST or Reach editing kit";
+    // VS Code also needs VS Code, and the script's data file to open.
+    let vscode_blocked = enabled
+        .then(|| {
+            crate::app::kits::script_tools::vscode_unavailable(
+                ui.ctx(),
+                cx.model.kit_layout_for(kit_index).map(|layout| layout.data).as_deref(),
+                &entry.display_path,
+            )
+        })
+        .flatten();
+    let mut action = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = PANE_HEADER_ACTION_GAP;
+        if icon_text_button(ui, ButtonIcon::Import, "Recompile", enabled)
+            .on_hover_text(crate::app::browser::RECOMPILE_HELP)
+            .on_disabled_hover_text(why)
+            .clicked()
+        {
+            action = Some(BrowserAction::RecompileScript(entry.key.clone()));
+        }
+        // The logo keeps its own colours, so it isn't a tinted button icon.
+        let logo = egui::Image::from_bytes(
+            "bytes://baboon_app_icons/vs-code.svg",
+            include_root_bytes!("assets/App Icons/VS Code.svg"),
+        )
+        .fit_to_exact_size(Vec2::splat(BUTTON_ICON_SIZE));
+        if ui
+            .add_enabled(
+                enabled && vscode_blocked.is_none(),
+                egui::Button::image_and_text(logo, "VS Code").min_size(Vec2::new(0.0, BUTTON_HEIGHT)),
+            )
+            .on_hover_text(crate::app::browser::OPEN_IN_VSCODE_HELP)
+            .on_disabled_hover_text(vscode_blocked.as_deref().unwrap_or(why))
+            .clicked()
+        {
+            action = Some(BrowserAction::OpenScriptInVsCode(entry.key.clone()));
+        }
+        ui.label(RichText::new("Open In:").color(subtle_dark()));
+    });
+    if let Some(action) = action {
+        cx.send(BrowserCommand::Action { kit, action });
+    }
+}
+
 fn draw_tag_header_common_actions(cx: &Ctx, ui: &mut Ui, kit_index: usize, entry: &TagEntry) {
     let key = entry.key.clone();
     let kit = cx.model.kits[kit_index].id;
@@ -905,7 +984,7 @@ fn draw_tag_header_common_actions(cx: &Ctx, ui: &mut Ui, kit_index: usize, entry
             "Other tag actions",
             CONTEXT_MENU_WIDTH,
             |ui| {
-                if let Some(menu_action) = draw_tag_context_menu_contents(ui, entry, None, true)
+                if let Some(menu_action) = draw_tag_context_menu_contents(ui, entry, None, true, true)
                 {
                     action = Some(menu_action);
                 }

@@ -12,7 +12,8 @@ use super::super::gl::texture::{
 };
 use super::super::particles::{CheapGl, ParticleGl};
 use super::super::{
-    ALL_SLOTS, DetailFunction, ModelGpuFrame, ModelGpuSlot, SLOT_COUNT, effects, material_color,
+    ALL_SLOTS, BatchOutline, DetailFunction, ModelGpuFrame, ModelGpuSlot, ModelPreviewLayer,
+    SLOT_COUNT, effects, material_color,
 };
 use super::grid::{background_is_dark, grid_line_color};
 use super::program::{SAMPLER_UNIFORMS, model_shader_sources, pass_context_supported};
@@ -396,6 +397,7 @@ impl RenderCore {
             self.draw_batches(
                 gl,
                 frame,
+                &frame.visible_batches,
                 false,
                 replaced,
                 Self::bound_materials(frame, &self.slots[slot].materials),
@@ -423,11 +425,63 @@ impl RenderCore {
                 self.draw_batches(
                     gl,
                     frame,
+                    &frame.visible_batches,
                     true,
                     &|_, _| false,
                     Self::bound_materials(frame, &self.slots[slot].materials),
                 );
             }
+        }
+    }
+
+    /// Collision and physics over the model, in their own colours: faces
+    /// at half strength, so the model shows through, and solid 1px edges.
+    /// Only the nearest surface draws, so a hull's far side does not double
+    /// up, and the render mode's wireframe leaves them alone.
+    pub(super) unsafe fn draw_overlays(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+    ) {
+        if frame.overlay_batches.is_empty() {
+            return;
+        }
+        unsafe {
+            gl.use_program(Some(self.program));
+            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            gl.enable(glow::DEPTH_TEST);
+            gl.disable(glow::CULL_FACE);
+            gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
+            // Faces sit a little behind their edges, so every edge wins
+            // the depth test against its own face.
+            gl.enable(glow::POLYGON_OFFSET_FILL);
+            gl.polygon_offset(1.0, 1.0);
+            let draw = |core: &Self, wire: bool| {
+                core.draw_batches(gl, frame, &frame.overlay_batches, wire, &|_, _| false, &[]);
+            };
+            // Depth first, so the faces below blend only where they are
+            // nearest.
+            gl.color_mask(false, false, false, false);
+            gl.depth_func(glow::LESS);
+            gl.depth_mask(true);
+            draw(self, false);
+            gl.color_mask(true, true, true, true);
+            gl.depth_func(glow::LEQUAL);
+            gl.depth_mask(false);
+            gl.enable(glow::BLEND);
+            gl.blend_color(0.0, 0.0, 0.0, OVERLAY_FACE_OPACITY);
+            gl.blend_func(glow::CONSTANT_ALPHA, glow::ONE_MINUS_CONSTANT_ALPHA);
+            gl.uniform_1_f32(Some(&self.unlit), 0.0);
+            draw(self, false);
+            gl.disable(glow::BLEND);
+            gl.disable(glow::POLYGON_OFFSET_FILL);
+            gl.polygon_mode(glow::FRONT_AND_BACK, glow::LINE);
+            gl.line_width(1.0);
+            gl.uniform_1_f32(Some(&self.unlit), 1.0);
+            draw(self, true);
+            gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
+            gl.depth_mask(true);
         }
     }
 
@@ -622,11 +676,12 @@ impl RenderCore {
         &self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
+        batches: &[usize],
         wire: bool,
         replaced: &dyn Fn(&Self, usize) -> bool,
         materials: &[MaterialGlTextures],
     ) {
-        for &batch_index in &frame.visible_batches {
+        for &batch_index in batches {
             let Some(batch) = frame.preview.batches.get(batch_index) else {
                 continue;
             };
@@ -637,7 +692,12 @@ impl RenderCore {
             ) else {
                 continue;
             };
-            let color = if wire && background_is_dark(frame.background) {
+            let overlay = batch.flat_color.filter(|_| {
+                matches!(batch.layer, ModelPreviewLayer::Collision | ModelPreviewLayer::Physics)
+            });
+            let color = if let Some([r, g, b]) = overlay {
+                Color32::from_rgb(r, g, b)
+            } else if wire && background_is_dark(frame.background) {
                 Color32::from_rgb(190, 205, 215)
             } else if wire {
                 Color32::from_rgb(38, 55, 65)
@@ -652,6 +712,20 @@ impl RenderCore {
             if !wire && replaced(self, index) {
                 continue;
             }
+            // Lines are an outline alone, and hidden faces have one.
+            let skip = match batch.outline {
+                BatchOutline::Triangles => false,
+                BatchOutline::Hidden => wire,
+                BatchOutline::Lines => !wire,
+            };
+            if skip {
+                continue;
+            }
+            let mode = if batch.outline == BatchOutline::Lines {
+                glow::LINES
+            } else {
+                glow::TRIANGLES
+            };
             // The wireframe pass draws flat on purpose, so it never binds a
             // texture — and neither does a batch whose material did not resolve.
             let material = (!wire)
@@ -665,16 +739,14 @@ impl RenderCore {
                     color.g() as f32 / 255.0,
                     color.b() as f32 / 255.0,
                 );
-                gl.draw_elements(
-                    glow::TRIANGLES,
-                    index_count,
-                    glow::UNSIGNED_INT,
-                    byte_offset,
-                );
+                gl.draw_elements(mode, index_count, glow::UNSIGNED_INT, byte_offset);
             }
         }
     }
 }
+
+/// How strongly collision and physics faces cover what is behind them.
+const OVERLAY_FACE_OPACITY: f32 = 0.5;
 
 /// The context's version, renderer and vendor as the driver names them, and
 /// its profile: what decides which of the games' shaders it can run.

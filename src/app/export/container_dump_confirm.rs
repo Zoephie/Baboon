@@ -75,7 +75,7 @@ impl Dialog for ContainerDumpConfirm {
                              and you can cancel it from the status bar."
                         }
                     })
-                    .color(egui::Color32::from_rgb(210, 120, 90)),
+                    .color(replace_warning_text()),
                 );
                 ui.add_space(5.0);
                 ui.label(

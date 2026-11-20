@@ -19,7 +19,7 @@ impl Baboon {
             // Setup draws alone, over an empty window.
             ctx.set_zoom_factor(self.model.prefs.ui_scale);
             set_dark_mode(self.model.prefs.effective_dark_mode(ctx.system_theme()));
-            ctx.set_theme(if is_dark_mode() { egui::Theme::Dark } else { egui::Theme::Light });
+            ctx.set_theme(egui_theme());
             ctx.set_visuals(foundation_visuals());
             egui::CentralPanel::default().show(ui, |_ui| {});
             self.dialogs.draw(&cx!(self, ctx), &app_reads!(self));
@@ -45,13 +45,14 @@ impl Baboon {
         set_window_work_area(ctx, ui.available_rect_before_wrap());
 
         egui::CentralPanel::default()
-            .frame(Frame::NONE.fill(row_type()).inner_margin(egui::Margin {
+            .frame(Frame::NONE.fill(chrome_bar()).inner_margin(egui::Margin {
                 top: 6, ..egui::Margin::ZERO
             }))
             .show(ui, |ui| {
                 self.draw_workspace_tiles(ui, ctx);
             });
         crate::app::browser::drag_move::draw_drag_label(ctx);
+        crate::app::editor::draw_sound_mini_player(&cx!(self, ctx), &self.audio);
         self.draw_auxiliary_windows(ctx);
         crate::app::ui_kit::autoscroll::draw_blocker(ui);
         // The draws' commands land first: some of them queue the very requests
@@ -101,18 +102,13 @@ impl Baboon {
         // Drain queued sound-player actions: resolve the permutation against the
         // FMOD banks, decode (cached), and play/stop. Runs every frame so voices
         // are reaped even when idle; the tags root is only cloned when acting.
-        // Playback follows its tab: paused once another tab (or another kit)
-        // has focus, disposed of once its tab is closed, whichever way that
-        // happened. Checked against the open tabs rather than hooked into each
-        // close path, so a close confirmed after the save prompt counts and a
+        // Playback carries on in another tab, under the mini player, and is
+        // disposed of once its tab is closed, whichever way that happened.
+        // Checked against the open tabs rather than hooked into each close
+        // path, so a close confirmed after the save prompt counts and a
         // cancelled one does not.
-        let focus = self.model.kits.get(self.model.active).filter(|_| !self.shell.home_open).and_then(|kit| {
-            kit.selected_key
-                .clone()
-                .map(|key| crate::app::audio::SoundOwner { kit: kit.id, key })
-        });
         let kits = &self.model.kits;
-        self.audio.follow_tabs(focus.as_ref(), |owner| {
+        self.audio.follow_tabs(|owner| {
             kits.iter()
                 .find(|kit| kit.id == owner.kit)
                 .is_some_and(|kit| kit.open_tabs.contains(&owner.key))
@@ -241,6 +237,10 @@ impl Baboon {
                 keyword_notice = Some(notice);
             }
         }
+        self.model.keyword_catalog.save_if_dirty();
+        if let Some(notice) = self.model.keyword_catalog.take_notice() {
+            keyword_notice = Some(notice);
+        }
         if let Some(notice) = keyword_notice {
             self.model.status = notice;
         }
@@ -267,7 +267,7 @@ impl Baboon {
         self.handle_pixels_per_point_change(ctx);
         self.maybe_refresh_entry_index(ctx.clone());
         set_dark_mode(self.model.prefs.effective_dark_mode(ctx.system_theme()));
-        ctx.set_theme(if is_dark_mode() { egui::Theme::Dark } else { egui::Theme::Light });
+        ctx.set_theme(egui_theme());
         // Pushed the same way and for the same reason as the theme: the two
         // halves of the angle conversion are free functions on opposite sides
         // of the frame, and neither can reach `Baboon`.
@@ -641,7 +641,7 @@ pub(in crate::app) fn draw_status_bar(
             });
         });
     ui.painter().hline(bar.response.rect.x_range(), bar.response.rect.top() + 0.5,
-        Stroke::new(1.0, grid_line()));
+        Stroke::new(1.0, chrome_edge()));
 }
 
 /// The "please wait" window shown while the active kit is still indexing.
@@ -893,7 +893,7 @@ pub(in crate::app) fn draw_terminal_panel(
                 egui::CentralPanel::default()
                     .frame(
                         Frame::NONE
-                            .fill(Color32::from_rgb(24, 24, 23))
+                            .fill(terminal_bg())
                             .inner_margin(egui::Margin {
                                 left: 6,
                                 right: 6,
@@ -929,7 +929,7 @@ pub(in crate::app) fn draw_folder_refactor_lock(ctx: &egui::Context, folder_refa
             let (rect, _) =
                 ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
             ui.painter()
-                .rect_filled(rect, 0.0, Color32::from_black_alpha(140));
+                .rect_filled(rect, 0.0, modal_scrim());
             let panel = egui::Rect::from_center_size(rect.center(), egui::vec2(window_width(ctx, 460.0), if control.is_some_and(|control| !control.is_applying()) { 210.0 } else { 160.0 }));
             ui.scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| {
                 Frame::window(&ctx.global_style()).show(ui, |ui| {

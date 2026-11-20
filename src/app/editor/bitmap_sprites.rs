@@ -323,14 +323,18 @@ pub(in crate::app) struct SpriteCanvas<'a> {
 }
 
 /// Selected-sprite amber, the same on every background.
+// fixed: marks over the sprite sheet image
 const SELECTED: Color32 = Color32::from_rgb(255, 190, 40);
 /// The content rect and the image's registration point.
+// fixed: as above
 const SECONDARY: Color32 = Color32::from_rgb(70, 200, 255);
 
 fn halo(bg: BitmapPreviewBg) -> Color32 {
     if bg == BitmapPreviewBg::White {
+        // fixed: a halo against the backdrop the user picked
         Color32::from_white_alpha(200)
     } else {
+        // fixed: as above
         Color32::from_black_alpha(200)
     }
 }

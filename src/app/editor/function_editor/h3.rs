@@ -348,11 +348,14 @@ fn draw_function_type_row(
                 // a graph, so its view settings do not apply to this type.
                 ui.add_enabled_ui(editor.master_type() != EngineMasterType::Basic, |ui| {
                     icon_menu_button(ui, ButtonIcon::Find, "Zoom and grid", |ui| {
-                        ui.add(
+                        plain_railed_slider(
+                            ui,
                             egui::Slider::new(&mut graph_view.zoom_percent, 50.0..=100.0)
                                 .text("Zoom")
                                 .suffix("%")
                                 .step_by(1.0),
+                            true,
+                            editor_bg(),
                         );
                         ui.separator();
                         ui.label(RichText::new("Grid").color(text_dark().gamma_multiply(0.5)));
@@ -443,9 +446,9 @@ fn draw_function_editor_contents(
                     let mut input_height = 0.0;
                     for slot in 0..2 {
                         let fill = if slot == 0 {
-                            Color32::from_rgba_unmultiplied(42, 190, 72, 26)
+                            graph_curve_fill(0)
                         } else {
-                            Color32::from_rgba_unmultiplied(220, 55, 55, 26)
+                            graph_curve_fill(1)
                         };
                         let panel = egui::Frame::new()
                             .fill(fill)
@@ -957,29 +960,7 @@ fn labeled_function_bound(ui: &mut Ui, label: &str, value: &mut f32, editable: b
 }
 
 fn function_bound_stepper(ui: &mut Ui, id: egui::Id, editable: bool) -> f32 {
-    ui.add_enabled_ui(editable, |ui| {
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(20.0, 24.0), Sense::hover());
-        let mut step = 0.0;
-        for (up, delta, tooltip) in [(true, 1.0, "Increase by 1"), (false, -1.0, "Decrease by 1")] {
-            let button = egui::Rect::from_min_size(
-                rect.min + Vec2::new(0.0, if up { 0.0 } else { 13.0 }), Vec2::new(20.0, 11.0),
-            );
-            let response = ui.interact(button, id.with(up), Sense::click()).on_hover_text(tooltip);
-            let visuals = ui.style().interact(&response);
-            let corners = egui::CornerRadius { nw: 0, sw: 0, ne: if up { 2 } else { 0 }, se: if up { 0 } else { 2 } };
-            ui.painter().rect(button, corners, visuals.bg_fill, visuals.bg_stroke, egui::StrokeKind::Inside);
-            let center = button.center();
-            let direction = if up { -1.0 } else { 1.0 };
-            ui.painter().add(egui::Shape::convex_polygon(vec![
-                center + Vec2::new(-3.5, -2.0 * direction),
-                center + Vec2::new(3.5, -2.0 * direction),
-                center + Vec2::new(0.0, 2.0 * direction),
-            ], visuals.fg_stroke.color, Stroke::NONE));
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tooltip));
-            if response.clicked() { step = delta; }
-        }
-        step
-    }).inner
+    crate::app::editor::fields::value_stepper(ui, id, editable, "Increase by 1", "Decrease by 1")
 }
 
 #[cfg(test)]

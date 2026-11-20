@@ -59,7 +59,7 @@ impl Dialog for ChimpMeshTexturePrompt {
                          materials, detail maps, lookup tables — so a single weapon can run to \
                          40–50 files, and decoding them all takes a while.",
                     )
-                    .color(egui::Color32::from_rgb(210, 120, 90)),
+                    .color(replace_warning_text()),
                 );
                 if let Some(subject) = &subject {
                     ui.add_space(4.0);

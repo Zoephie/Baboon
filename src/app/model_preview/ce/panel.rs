@@ -1,12 +1,16 @@
 //! The panel's controls for a Halo CE object's functions and effects.
 
 use super::super::load::{ObjectControls, SectionControls};
-use super::super::panel::{carry_through_reload, weapon_dropdown};
+use super::super::panel::{
+    CardRows, carry_through_reload, draw_held_regions, name_cell, name_column_width, play_row,
+    value_slider, weapon_dropdown,
+};
+use crate::app::ui_kit::button_icons::ButtonIcon;
 use super::super::{ModelPreviewData, ModelPreviewState, frame};
 use crate::app::model_preview::ce::functions::{
     CeEventCounts, CeFunctionInputs, CeObjectFunctions, CeObjectKey, OUTPUTS, object_time,
 };
-use eframe::egui::{self, Ui};
+use eframe::egui::{RichText, Ui};
 
 /// What the panel has set and played of an opened Halo CE object.
 pub(in crate::app) struct CePanelState {
@@ -84,39 +88,38 @@ pub(in crate::app::model_preview) fn draw_ce_event_effects(
     if events.is_empty() && firing.is_empty() {
         return;
     }
-    {
-        const SCALES: &str = "What effect_new_from_object is given. A firing effect gets its trigger's \
-                              rate and error; reloading, readying, damage and the rest get 0 and 0.";
-        const FIRE: &str = "Fire the trigger once, as weapon_trigger_fire does: it plays the next \
-                            of its firing effects and lights the weapon's inputs, at scale A's \
-                            rate of fire. The weapon is held as an actor holds one: it never \
-                            overheats.";
-        for (scale, name) in scales.iter_mut().zip(["scale A", "scale B"]) {
-            ui.add(egui::Slider::new(scale, 0.0..=1.0).text(name))
-                .on_hover_text(SCALES);
-        }
-        for weapon in firing {
-            for (trigger, label) in
-                (0..weapon.triggers.len()).zip(["primary trigger", "secondary trigger"])
-            {
-                if ui
-                    .small_button(format!("Fire {}", named(weapon.object, label)))
-                    .on_hover_text(FIRE)
-                    .clicked()
-                {
-                    let fired = shots.entry((geometry, weapon.object)).or_default();
-                    if let Some(effect) = fired.fire(weapon, trigger, scales[0], time) {
-                        *counts.entry((geometry, effect)).or_default() += 1;
-                    }
-                    ui.ctx().request_repaint();
+    const SCALES: &str = "What effect_new_from_object is given. A firing effect gets its trigger's \
+                          rate and error; reloading, readying, damage and the rest get 0 and 0.";
+    const FIRE: &str = "Fire the trigger once, as weapon_trigger_fire does: it plays the next \
+                        of its firing effects and lights the weapon's inputs, at scale A's \
+                        rate of fire. The weapon is held as an actor holds one: it never \
+                        overheats.";
+    let mut rows = CardRows::default();
+    let name_width = name_column_width(ui, ["Scale A", "Scale B"], ui.available_width());
+    for (scale, name) in scales.iter_mut().zip(["Scale A", "Scale B"]) {
+        rows.row(ui, |ui| {
+            name_cell(ui, name, name_width);
+            value_slider(ui, scale, true).on_hover_text(SCALES);
+        });
+    }
+    for weapon in firing {
+        for (trigger, label) in
+            (0..weapon.triggers.len()).zip(["primary trigger", "secondary trigger"])
+        {
+            let name = format!("Fire {}", named(weapon.object, label));
+            if play_row(ui, &mut rows, ButtonIcon::Play, &name, FIRE) {
+                let fired = shots.entry((geometry, weapon.object)).or_default();
+                if let Some(effect) = fired.fire(weapon, trigger, scales[0], time) {
+                    *counts.entry((geometry, effect)).or_default() += 1;
                 }
-            }
-        }
-        for (index, name) in events {
-            if ui.small_button(format!("Play {name}")).clicked() {
-                *counts.entry((geometry, index)).or_default() += 1;
                 ui.ctx().request_repaint();
             }
+        }
+    }
+    for (index, name) in events {
+        if play_row(ui, &mut rows, ButtonIcon::Play, &name, "Play this effect") {
+            *counts.entry((geometry, index)).or_default() += 1;
+            ui.ctx().request_repaint();
         }
     }
 }
@@ -139,31 +142,63 @@ pub(in crate::app::model_preview) fn draw_ce_function_controls(
     let read = read.unwrap_or([true; 4]);
     let mut values = functions.inputs_for(set, key);
     ui.push_id(key.1, |ui| {
+        let mut rows = CardRows::default();
         // The opened object's go under the section's own title.
         if let Some(name) = name {
-            ui.add_space(6.0);
-            ui.strong(format!("{name} Functions"));
+            rows.row(ui, |ui| {
+                ui.label(RichText::new(format!("{name} Functions")).strong());
+            });
         }
+        // Each output by its letter, and by what it is used for when the
+        // tag says.
+        let outputs_named: Vec<String> = functions
+            .functions
+            .iter()
+            .take(OUTPUTS.len())
+            .enumerate()
+            .map(|(index, function)| match function.usage.trim() {
+                "" => OUTPUTS[index].to_owned(),
+                usage => format!("{}: {usage}", OUTPUTS[index]),
+            })
+            .collect();
+        let names = functions
+            .input_names
+            .iter()
+            .flatten()
+            .map(String::as_str)
+            .chain(outputs_named.iter().map(String::as_str));
+        let row_width = ui.available_width().max(1.0);
+        let name_width = name_column_width(ui, names, f32::MAX).min((row_width - 130.0).max(40.0));
         let before = values;
         for ((value, name), active) in values.iter_mut().zip(&functions.input_names).zip(reaching) {
             let Some(name) = name else {
                 continue;
             };
-            ui.add_enabled(active, egui::Slider::new(value, 0.0..=1.0).text(name))
+            rows.row(ui, |ui| {
+                ui.add_enabled_ui(active, |ui| {
+                    name_cell(ui, name, name_width);
+                    value_slider(ui, value, true);
+                })
+                .response
                 .on_disabled_hover_text(UNREAD);
+            });
         }
         if values != before {
             set.insert(key, values);
         }
         let time = object_time(ui.input(|input| input.time) as f32, key.1);
         let outputs = functions.outputs(&functions.with_fired(values, fired), time);
-        for (index, function) in functions.functions.iter().take(OUTPUTS.len()).enumerate() {
-            let text = format!(
-                "{}: {:.2}  {}",
-                OUTPUTS[index], outputs[index], function.usage
-            );
-            ui.add_enabled(read[index], egui::Label::new(text))
+        for (index, name) in outputs_named.iter().enumerate() {
+            // What the function makes: shown, not set.
+            let mut shown = outputs[index];
+            rows.row(ui, |ui| {
+                ui.add_enabled_ui(read[index], |ui| {
+                    name_cell(ui, name, name_width);
+                    value_slider(ui, &mut shown, false);
+                })
+                .response
                 .on_disabled_hover_text(UNREAD);
+            });
         }
     });
 }
@@ -332,12 +367,19 @@ pub(in crate::app::model_preview) fn draw_ce_weapon_picker(
             })
             .collect()
     });
-    let held = options
-        .iter()
-        .flatten()
-        .find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
+    let mut rows = CardRows::default();
+    let label_width = name_column_width(ui, ["Weapon"], ui.available_width());
     let salt = ("ce_weapon_picker", data.render_model_path.as_str());
-    let pick = weapon_dropdown(ui, "Weapon", salt, options.as_deref(), held);
+    let held = state.weapon.clone();
+    let pick = weapon_dropdown(
+        ui,
+        &mut rows,
+        "Weapon",
+        label_width,
+        salt,
+        options.as_deref(),
+        held.as_deref(),
+    );
     if pick.opened && options.is_none() {
         state.list_weapons = true;
     }
@@ -345,4 +387,6 @@ pub(in crate::app::model_preview) fn draw_ce_weapon_picker(
         carry_through_reload(data, state);
         state.weapon = choice;
     }
+    let held = state.loaded_weapon.clone();
+    draw_held_regions(ui, data, state, &mut rows, held.as_deref());
 }

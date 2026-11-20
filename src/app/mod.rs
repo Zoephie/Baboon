@@ -269,7 +269,7 @@ impl Baboon {
         let first_run_wizard = (!suppress_startup_popups && !load_first_run_complete())
             .then(|| FirstRunWizardState::new(storage.mode, &prefs));
         set_dark_mode(prefs.effective_dark_mode(cc.egui_ctx.system_theme()));
-        cc.egui_ctx.set_theme(if is_dark_mode() { egui::Theme::Dark } else { egui::Theme::Light });
+        cc.egui_ctx.set_theme(crate::app::ui_kit::style::egui_theme());
         cc.egui_ctx.set_visuals(foundation_visuals());
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
         names.publish_as_process_group_names();
@@ -526,6 +526,15 @@ impl Baboon {
                 next_kit_id: 1,
                 prefs: live_prefs,
                 status: "Ready".to_owned(),
+                keyword_catalog: {
+                    use crate::core::keyword_catalog::KeywordCatalog;
+                    let mut catalog = KeywordCatalog::default();
+                    // Tests keep it in memory: they run side by side.
+                    if !cfg!(test) {
+                        catalog.load_at(Some(KeywordCatalog::default_path()));
+                    }
+                    catalog
+                },
             },
         }
     }

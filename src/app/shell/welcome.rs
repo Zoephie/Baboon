@@ -23,6 +23,7 @@ fn draw_welcome_columns(ui: &mut Ui, contents: impl FnOnce(&mut [Ui])) {
     });
     painter.set(
         background,
+        // fixed: shade over the banner art
         egui::Shape::rect_filled(left, 0.0, Color32::from_black_alpha(51)),
     );
 }
@@ -126,6 +127,7 @@ pub(in crate::app) fn draw_welcome_screen(
                             egui::Align2::LEFT_TOP,
                             format!("v{}", env!("CARGO_PKG_VERSION")),
                             FontId::proportional(12.0 * banner_scale.max(0.8)),
+                            // fixed: the version over the banner art
                             Color32::from_rgb(255, 190, 151),
                         );
 

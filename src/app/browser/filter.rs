@@ -48,6 +48,49 @@ pub(in crate::app) fn search_scope_controls(ui: &mut Ui, scope: &mut BrowserSear
     }
 }
 
+/// Marks a search term as a keyword pill: it matches a tag or folder carrying
+/// exactly that keyword, whatever the scope. Spaces inside the keyword are
+/// [`KEYWORD_SPACE`] and bars [`KEYWORD_BAR`], so the term stays one word in
+/// one `|` branch.
+const KEYWORD_TERM: char = '\u{1}';
+const KEYWORD_SPACE: char = '\u{2}';
+const KEYWORD_BAR: char = '\u{3}';
+
+/// The search a box runs: its text, with each keyword pill required too.
+/// The pills join every `|` branch, so `a | b` with a pill finds either with
+/// that keyword.
+pub(in crate::app) fn keyword_query(text: &str, pills: &[String]) -> String {
+    let text = text.trim();
+    if pills.is_empty() {
+        return text.to_owned();
+    }
+    let terms: Vec<String> = pills
+        .iter()
+        .map(|pill| {
+            let keyword = pill.trim().to_ascii_lowercase();
+            let keyword = keyword.replace(' ', &KEYWORD_SPACE.to_string());
+            format!("{KEYWORD_TERM}{}", keyword.replace('|', &KEYWORD_BAR.to_string()))
+        })
+        .collect();
+    let terms = terms.join(" ");
+    if text.is_empty() {
+        return terms;
+    }
+    // An empty side of `|` matches nothing, as it does without pills, rather
+    // than becoming the pills alone and finding everything they tag.
+    text.split('|')
+        .filter(|branch| !branch.trim().is_empty())
+        .map(|branch| format!("{} {terms}", branch.trim()))
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+/// The keyword a pill's term asks for, or `None` for an ordinary term.
+fn keyword_term(term: &str) -> Option<String> {
+    term.strip_prefix(KEYWORD_TERM)
+        .map(|keyword| keyword.replace(KEYWORD_SPACE, " ").replace(KEYWORD_BAR, "|"))
+}
+
 /// Parsed once per search, then matched without per-entry lowercase strings.
 pub(in crate::app) struct ScopedSearchQuery {
     branches: Vec<Vec<String>>,
@@ -65,6 +108,11 @@ impl ScopedSearchQuery {
                 })
                 .collect(),
         }
+    }
+    /// Whether the search holds a keyword pill, which finds folders by
+    /// their own keywords whatever the scope.
+    pub(in crate::app) fn has_keyword_pill(&self) -> bool {
+        self.branches.iter().flatten().any(|term| keyword_term(term).is_some())
     }
     fn matches(&self, matches_term: impl Fn(&str) -> bool) -> bool {
         let mut had_term = false;
@@ -90,6 +138,9 @@ impl ScopedSearchQuery {
         let group_bytes = entry.group_tag.to_be_bytes();
         let fourcc = std::str::from_utf8(&group_bytes).unwrap_or("");
         self.matches(|term| {
+            if let Some(keyword) = keyword_term(term) {
+                return keywords.contains(&keyword);
+            }
             (scope.tags
                 && (search_term_matches(term, filename)
                     || (!term.starts_with('^')
@@ -107,9 +158,17 @@ impl ScopedSearchQuery {
                         .any(|keyword| search_term_matches(term, keyword)))
         })
     }
+    /// Whether a folder's own keywords match.
+    pub(in crate::app) fn keywords(&self, keywords: &[String]) -> bool {
+        self.matches(|term| match keyword_term(term) {
+            Some(wanted) => keywords.contains(&wanted),
+            None => keywords.iter().any(|keyword| search_term_matches(term, keyword)),
+        })
+    }
     pub(in crate::app) fn folder(&self, path: &str) -> bool {
         self.matches(|term| {
-            tag_path::segments(path).any(|part| search_term_matches(term, part))
+            keyword_term(term).is_none()
+                && tag_path::segments(path).any(|part| search_term_matches(term, part))
         })
     }
 }
@@ -472,6 +531,98 @@ mod tests {
         );
         assert_eq!(cache.entries.len(), 1);
         assert_eq!(cache.tree.entries, vec![0]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A folder carrying a keyword is found by a keyword search, though no
+    /// tag in it carries the keyword and its name does not match.
+    #[test]
+    fn keyword_search_finds_folders_by_their_own_keywords() {
+        let root =
+            std::env::temp_dir().join(format!("baboon-folder-keywords-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("objects/jiralhanae")).unwrap();
+        std::fs::create_dir_all(root.join("objects/elite")).unwrap();
+        let mut keywords = std::collections::BTreeMap::new();
+        keywords.insert(
+            crate::core::tag_key::folder_entry_key(&root, "objects\\jiralhanae"),
+            vec!["brute".to_owned()],
+        );
+        let mut cache = FilterCache::default();
+        cache.refresh_scoped(
+            1,
+            "brute",
+            &[entry("objects\\armor.bitmap", b"bitm")],
+            false,
+            Path::new(""),
+            Some(&root),
+            BrowserSearchScope {
+                tags: false,
+                folders: false,
+                keywords: true,
+            },
+            &keywords,
+        );
+        assert!(cache.entries.is_empty());
+        let objects = &cache.tree.children[0];
+        assert_eq!(objects.label, "objects");
+        let labels: Vec<_> = objects.children.iter().map(|node| node.label.as_str()).collect();
+        assert_eq!(labels, ["jiralhanae"]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A keyword pill matches its keyword exactly, whatever the scope:
+    /// "wip" doesn't find "wip-old", and typed text still has to match too.
+    /// A folder carrying it is found by its own keywords.
+    #[test]
+    fn keyword_pills_match_exactly_and_combine_with_typed_text() {
+        let wip = entry("objects\\wip.model", b"mode");
+        let old = entry("objects\\old.model", b"mode");
+        let scope = BrowserSearchScope::default();
+        let wip_keywords = ["wip".to_owned(), "to be deleted".to_owned()];
+        let old_keywords = ["wip-old".to_owned()];
+        let pill = keyword_query("", &["WIP".to_owned()]);
+        assert!(scoped_entry_matches(&wip, &pill, scope, &wip_keywords));
+        assert!(!scoped_entry_matches(&old, &pill, scope, &old_keywords));
+        let spaced = keyword_query("", &["To Be Deleted".to_owned()]);
+        assert!(scoped_entry_matches(&wip, &spaced, scope, &wip_keywords));
+        let barred = keyword_query("", &["wip|old".to_owned()]);
+        assert!(!scoped_entry_matches(&old, &barred, scope, &old_keywords), "a bar is no `|`");
+        assert!(scoped_entry_matches(&old, &barred, scope, &["wip|old".to_owned()]));
+        let with_text = keyword_query("old", &["wip".to_owned()]);
+        assert!(!scoped_entry_matches(&wip, &with_text, scope, &wip_keywords));
+        let either = keyword_query("wip | old", &["wip".to_owned()]);
+        assert!(scoped_entry_matches(&wip, &either, scope, &wip_keywords));
+        // An empty side of `|` finds nothing, not everything with the pill.
+        let open_bar = keyword_query("old |", &["wip".to_owned()]);
+        assert!(!scoped_entry_matches(&wip, &open_bar, scope, &wip_keywords));
+        assert!(!scoped_folder_matches("wip", &pill), "a pill never matches a folder's name");
+        assert_eq!(keyword_query(" plain ", &[]), "plain");
+
+        let root =
+            std::env::temp_dir().join(format!("baboon-keyword-pills-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("objects/drafts")).unwrap();
+        let mut keywords = std::collections::BTreeMap::new();
+        keywords.insert(
+            crate::core::tag_key::folder_entry_key(&root, "objects\\drafts"),
+            vec!["wip".to_owned()],
+        );
+        keywords.insert(wip.key.clone(), vec!["wip".to_owned()]);
+        let mut cache = FilterCache::default();
+        cache.refresh_scoped(
+            1,
+            &pill,
+            &[wip.clone(), old.clone()],
+            false,
+            Path::new(""),
+            Some(&root),
+            BrowserSearchScope { tags: true, folders: false, keywords: true },
+            &keywords,
+        );
+        assert_eq!(cache.entries.len(), 1);
+        assert_eq!(cache.entries[0].key, wip.key);
+        let objects = &cache.tree.children[0];
+        let labels: Vec<_> = objects.children.iter().map(|node| node.label.as_str()).collect();
+        assert_eq!(labels, ["drafts"]);
         std::fs::remove_dir_all(&root).unwrap();
     }
 

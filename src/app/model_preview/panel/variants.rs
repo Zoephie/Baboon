@@ -5,7 +5,8 @@ use super::super::super::super::core::document::ops::{BlockOpKind, ModelVariantO
 use super::super::super::ui_kit::button_icons::{
     ButtonIcon, close_menu, icon_button, icon_text_button, icon_text_dropdown_button,
 };
-use super::super::super::ui_kit::style::{BUTTON_HEIGHT, bold_font, subtle_dark, text_dark};
+use super::super::super::ui_kit::style::{ICON_BUTTON_SIZE, subtle_dark, text_dark};
+use super::rows::{CardRows, name_cell, name_column_width};
 use super::super::{
     BlockConfirm, FieldEditContext, ModelPreviewData, ModelPreviewState, ModelRegionSelection,
     ModelVariantPreview, combo_scroll_next_index, default_permutation, detect_active_variant,
@@ -15,37 +16,63 @@ use super::super::{
 };
 use crate::app::ui_kit::checkbox::CheckboxUi as _;
 use eframe::egui;
-use eframe::egui::{RichText, Ui, Vec2};
+use eframe::egui::{RichText, Ui};
 
-/// A row per region: whether it draws, its name, and a dropdown of its
-/// permutations.
+/// The names of the weapons the preview was read holding: their regions
+/// are named `"{weapon}: {region}"`, and show in the Weapons card.
+pub(in crate::app::model_preview) fn held_weapon_names(state: &ModelPreviewState) -> Vec<&str> {
+    [state.loaded_weapon.as_deref(), state.loaded_secondary_weapon.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(crate::core::tag_path::name)
+        .collect()
+}
+
+/// What `region` is called on the weapon `weapon` brought, if it is one of
+/// that weapon's.
+pub(in crate::app::model_preview) fn weapon_region<'a>(region: &'a str, weapon: &str) -> Option<&'a str> {
+    region.strip_prefix(weapon)?.strip_prefix(": ")
+}
+
+/// A row per region of the model's own, held weapons' left to the Weapons
+/// card: whether it draws, its name, and its permutations.
 pub(in crate::app::model_preview) fn draw_variant_controls(
     ui: &mut Ui,
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
+    rows: &mut CardRows,
 ) {
-    let row_width = ui.available_width().max(1.0);
-    // The names share a column, but never take more than two fifths of the
-    // row from the dropdowns.
-    let region_name_width = data
+    let weapons: Vec<String> = held_weapon_names(state).into_iter().map(str::to_owned).collect();
+    let regions: Vec<(usize, &str)> = data
         .preview
         .regions
         .iter()
-        .filter(|region| !is_model_physics_overlay_region(data, state, region))
-        .map(|region| {
-            ui.painter()
-                .layout_no_wrap(region.name.clone(), bold_font(13.0), text_dark())
-                .size()
-                .x
-        })
-        .fold(60.0_f32, f32::max)
-        .min(180.0)
-        .min(row_width * 0.4);
-    ui.set_max_width(row_width);
-    for region in &data.preview.regions {
-        if is_model_physics_overlay_region(data, state, region) {
-            continue;
-        }
+        .enumerate()
+        .filter(|(_, region)| !is_model_physics_overlay_region(data, region))
+        .filter(|(_, region)| !weapons.iter().any(|weapon| weapon_region(&region.name, weapon).is_some()))
+        .map(|(index, region)| (index, region.name.as_str()))
+        .collect();
+    draw_region_rows(ui, data, state, rows, &regions);
+}
+
+/// A row for each of `regions` (an index into the preview's, and the name
+/// to show it by): its checkbox, its name in a shared column, and its
+/// permutations between arrows that step through them.
+pub(in crate::app::model_preview) fn draw_region_rows(
+    ui: &mut Ui,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+    rows: &mut CardRows,
+    regions: &[(usize, &str)],
+) {
+    let row_width = ui.available_width().max(1.0);
+    // Past the checkbox: the names share a column, which gives way first in
+    // a narrow card, leaving the checkbox, the arrows and some of the picker.
+    let fixed = 2.0 * ICON_BUTTON_SIZE.x + 20.0 + 4.0 * 6.0 + 60.0;
+    let name_width = name_column_width(ui, regions.iter().map(|(_, name)| *name), row_width)
+        .min((row_width - fixed).max(30.0));
+    for &(index, label) in regions {
+        let region = &data.preview.regions[index];
         let selection = state
             .region_selections
             .entry(region.name.clone())
@@ -53,20 +80,28 @@ pub(in crate::app::model_preview) fn draw_variant_controls(
                 enabled: !region.permutations.is_empty(),
                 permutation: default_permutation(region),
             });
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
+        let current = region
+            .permutations
+            .iter()
+            .position(|permutation| *permutation == selection.permutation);
+        let count = region.permutations.len();
+        rows.row(ui, |ui| {
             ui.baboon_checkbox(&mut selection.enabled, "");
-            ui.add_sized(
-                Vec2::new(region_name_width, BUTTON_HEIGHT),
-                egui::Label::new(
-                    RichText::new(&region.name)
-                        .color(text_dark())
-                        .font(bold_font(13.0)),
-                )
-                .truncate(),
+            name_cell(ui, label, name_width);
+            let mut stepped = None;
+            if icon_button(
+                ui,
+                ButtonIcon::Left,
+                "Previous permutation",
+                current.is_some_and(|at| at > 0),
+                text_dark(),
             )
-            .on_hover_text(&region.name);
-            let width = ui.available_width().max(60.0);
+            .clicked()
+            {
+                stepped = current.map(|at| at - 1);
+            }
+            let arrow = ICON_BUTTON_SIZE.x + ui.spacing().item_spacing.x;
+            let width = (ui.available_width() - arrow).max(40.0);
             let salt = (data.source_key.as_str(), region.name.as_str());
             let (choice, wheel_delta) = draw_permutation_picker(
                 ui,
@@ -75,16 +110,21 @@ pub(in crate::app::model_preview) fn draw_variant_controls(
                 &region.permutations,
                 width,
             );
-            let wheeled = wheel_delta.and_then(|delta| {
-                let current = region
-                    .permutations
-                    .iter()
-                    .position(|permutation| *permutation == selection.permutation)
-                    .unwrap_or(0);
-                combo_scroll_next_index(current, region.permutations.len(), delta)
-                    .map(|next| region.permutations[next].clone())
-            });
-            if let Some(permutation) = choice.or(wheeled) {
+            if icon_button(
+                ui,
+                ButtonIcon::Right,
+                "Next permutation",
+                current.map_or(count > 0, |at| at + 1 < count),
+                text_dark(),
+            )
+            .clicked()
+            {
+                stepped = Some(current.map_or(0, |at| at + 1));
+            }
+            let wheeled = wheel_delta
+                .and_then(|delta| combo_scroll_next_index(current.unwrap_or(0), count, delta));
+            let stepped = stepped.or(wheeled).map(|next| region.permutations[next].clone());
+            if let Some(permutation) = choice.or(stepped) {
                 selection.permutation = permutation;
                 selection.enabled = true;
             }
@@ -164,6 +204,7 @@ fn draw_variant_picker(
     selected_label: &str,
     variants: &[ModelVariantPreview],
     selected: Option<usize>,
+    width: f32,
 ) -> (Option<Option<usize>>, Option<i32>) {
     let popup_id = ui.make_persistent_id(("model_preview_variant", source_key));
     let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
@@ -172,7 +213,7 @@ fn draw_variant_picker(
         popup_id,
         selected_label,
         Some(variants.len()),
-        150.0,
+        width,
         text_dark(),
         true,
     );
@@ -230,21 +271,42 @@ fn draw_variant_picker(
     (choice, dropdown_wheel_delta(ui, &response, popup_open))
 }
 
+/// The Permutations card's first row: the variant between arrows that step
+/// through them, stretched to what `actions` (Save and Delete, drawn right
+/// to left from the row's right end) leave.
 pub(in crate::app::model_preview) fn draw_variant_selector(
     ui: &mut Ui,
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
+    rows: &mut CardRows,
+    actions: &mut dyn FnMut(&mut Ui, &mut ModelPreviewState),
 ) {
     // Reverse-sync: reflect manual region/permutation tweaks in the combo —
     // show the matching variant, or "(custom)" when the live selection matches
     // none. When it lands exactly on a variant, adopt it so Update/Drop target
     // the shown variant.
-    let mut active_variant = detect_active_variant(data, state);
+    let active_variant = detect_active_variant(data, state);
     if let Some(choice) = active_variant {
         state.selected_variant = choice;
     }
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
+    rows.row(ui, |ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            actions(ui, state);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                draw_variant_stepper(ui, data, state, active_variant);
+            });
+        });
+    });
+}
+
+/// The variant picker between its arrows, filling the width it is given.
+fn draw_variant_stepper(
+    ui: &mut Ui,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+    mut active_variant: Option<Option<usize>>,
+) {
+    {
         if icon_button(
             ui,
             ButtonIcon::Left,
@@ -267,12 +329,15 @@ pub(in crate::app::model_preview) fn draw_variant_selector(
                 .unwrap_or_else(|| "<None>".to_owned()),
             None => "(custom)".to_owned(),
         };
+        let arrow = ICON_BUTTON_SIZE.x + ui.spacing().item_spacing.x;
+        let width = (ui.available_width() - arrow).max(100.0);
         let (choice, wheel_delta) = draw_variant_picker(
             ui,
             &data.source_key,
             &selected,
             &data.variants,
             state.selected_variant,
+            width,
         );
         if let Some(choice) = choice {
             reset_model_preview_selection(state, data, choice);
@@ -305,7 +370,7 @@ pub(in crate::app::model_preview) fn draw_variant_selector(
         {
             reset_model_preview_selection(state, data, next);
         }
-    });
+    }
 }
 
 pub(in crate::app::model_preview) fn draw_variant_header_actions(
@@ -315,7 +380,32 @@ pub(in crate::app::model_preview) fn draw_variant_header_actions(
     edit: &mut FieldEditContext<'_>,
 ) -> bool {
     let mut mutation_requested = false;
-    icon_text_dropdown_button(ui, ButtonIcon::Save, "Save", |ui| {
+    // Drawn right to left from the row's end: Delete last, Save before it.
+    let can_delete = edit.editable && state.selected_variant.is_some();
+    // Icon-only, so the variant picker keeps its room in a narrow sidebar.
+    if icon_button(ui, ButtonIcon::Garbage, "Delete selected variant", can_delete, text_dark())
+        .clicked()
+    {
+        let variant_index = state
+            .selected_variant
+            .expect("button enabled only when a variant is selected");
+        *edit.block_confirm = Some(BlockConfirm {
+            opened_at: None,
+            kit: None,
+            tag_key: edit.tag_key.to_owned(),
+            path: "variants".to_owned(),
+            kind: BlockOpKind::Delete(variant_index),
+            message: format!(
+                "Delete element {variant_index} of {} from this block?",
+                data.variants.len()
+            ),
+            confirm_label: "Delete".to_owned(),
+        });
+    }
+    // Where the row is too narrow for Save's label beside a readable
+    // variant picker, Save is its icon and arrow alone.
+    let compact = ui.available_width() < COMPACT_SAVE_BELOW;
+    let save = icon_text_dropdown_button(ui, ButtonIcon::Save, if compact { "" } else { "Save" }, |ui| {
         ui.set_min_width(240.0);
         ui.label("New Variant Name");
         ui.add_enabled(
@@ -357,29 +447,15 @@ pub(in crate::app::model_preview) fn draw_variant_header_actions(
             close_menu(ui);
         }
     });
-    let can_delete = edit.editable && state.selected_variant.is_some();
-    if icon_text_button(ui, ButtonIcon::Garbage, "Delete", can_delete)
-        .on_hover_text("Delete selected variant")
-        .clicked()
-    {
-        let variant_index = state
-            .selected_variant
-            .expect("button enabled only when a variant is selected");
-        *edit.block_confirm = Some(BlockConfirm {
-            opened_at: None,
-            kit: None,
-            tag_key: edit.tag_key.to_owned(),
-            path: "variants".to_owned(),
-            kind: BlockOpKind::Delete(variant_index),
-            message: format!(
-                "Delete element {variant_index} of {} from this block?",
-                data.variants.len()
-            ),
-            confirm_label: "Delete".to_owned(),
-        });
+    if compact {
+        save.response.on_hover_text("Save variant");
     }
     mutation_requested
 }
+
+/// The room left of Delete below which Save drops its label: Save's own
+/// width, the variant arrows, and some 170 points of picker.
+const COMPACT_SAVE_BELOW: f32 = 320.0;
 
 #[cfg(test)]
 mod tests {
@@ -426,6 +502,7 @@ mod tests {
                             "0. minor",
                             &variants,
                             Some(0),
+                            150.0,
                         ));
                     });
                 },

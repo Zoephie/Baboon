@@ -43,110 +43,6 @@ pub(in crate::app) fn object_default_variant(tag: &TagFile) -> Option<String> {
     })
 }
 
-/// Show the connected `.model` reference at the top of object-family tags
-/// (biped, vehicle, weapon, scenery, …) with a working Open button.
-pub(in crate::app) fn draw_object_model_summary(
-    ui: &mut Ui,
-    tag: &TagFile,
-    entry: &TagEntry,
-    names: &TagNameIndex,
-    source_game: Option<GameId>,
-    edit: &mut FieldEditContext<'_>,
-) {
-    if !is_object_family_group(entry.group_tag, source_game) {
-        return;
-    }
-    let Some(model) = find_model_reference(tag.root(), names, 0, "") else {
-        return;
-    };
-    let formatted = format_reference_path(names, model.group_tag, &model.rel_path);
-    let meta = FieldDisplayMeta {
-        label: "model".to_owned(),
-        unit: None,
-        range: None,
-        help: Some("Object model tag reference".to_owned()),
-        tag_reference_allowed: Vec::new(),
-        read_only: false,
-        advanced: false,
-        slider: None,
-    };
-    ui.add_space(4.0);
-    let import_verb = geometry_import_verb(names, model.group_tag);
-    draw_foundation_tag_reference_row(
-        ui,
-        &meta,
-        &formatted,
-        Some((model.group_tag, model.rel_path)),
-        import_verb,
-        0,
-        &model.field_path,
-        edit,
-        shared_tag_reference_value_width(ui, 0),
-    );
-}
-
-pub(in crate::app) struct ModelReferenceInfo {
-    pub(in crate::app) group_tag: u32,
-    pub(in crate::app) rel_path: String,
-    pub(in crate::app) field_path: String,
-}
-
-/// Like `find_model_reference` but returns the raw `(group_tag, rel_path)` so
-/// the caller can resolve/open the target.
-pub(in crate::app) fn find_model_reference(
-    tag_struct: TagStruct<'_>,
-    names: &TagNameIndex,
-
-    depth: usize,
-    path_prefix: &str,
-) -> Option<ModelReferenceInfo> {
-    if depth > 8 {
-        return None;
-    }
-    for field in tag_struct.fields() {
-        let field_path = append_field_path(path_prefix, field.name());
-        match field.value() {
-            Some(TagFieldData::TagReference(reference)) => {
-                let Some((group_tag, path)) = reference.group_tag_and_name.as_ref() else {
-                    continue;
-                };
-                if !is_model_group(*group_tag, names) || path.is_empty() {
-                    continue;
-                }
-                return Some(ModelReferenceInfo {
-                    group_tag: *group_tag,
-                    rel_path: path.clone(),
-                    field_path,
-                });
-            }
-            Some(_) => continue,
-            None => {}
-        }
-        if let Some(nested) = field.as_struct() {
-            if let Some(found) = find_model_reference(nested, names, depth + 1, &field_path) {
-                return Some(found);
-            }
-        } else if let Some(block) = field.as_block() {
-            for (index, element) in block.iter().take(4).enumerate() {
-                let element_path = format!("{field_path}[{index}]");
-                if let Some(found) = find_model_reference(element, names, depth + 1, &element_path)
-                {
-                    return Some(found);
-                }
-            }
-        } else if let Some(array) = field.as_array() {
-            for (index, element) in array.iter().take(8).enumerate() {
-                let element_path = format!("{field_path}[{index}]");
-                if let Some(found) = find_model_reference(element, names, depth + 1, &element_path)
-                {
-                    return Some(found);
-                }
-            }
-        }
-    }
-    None
-}
-
 pub(in crate::app) fn is_model_group(group_tag: u32, names: &TagNameIndex) -> bool {
     // By FOURCC and the kit's game's name for it: Halo CE names its legacy
     // render geometry `mode` "model" too, and that is not a model wrapper.
@@ -167,11 +63,9 @@ pub(in crate::app) fn is_model_group(group_tag: u32, names: &TagNameIndex) -> bo
 /// viewport — everything [`is_model_group`] covers, plus geometry-bearing
 /// tags that are not "models" in the object sense.
 ///
-/// Kept separate from [`is_model_group`] on purpose: that predicate also
-/// decides whether a *tag_reference* is an object's model link
-/// (`find_model_reference`), and a `particle`'s `Model` → `pmdf` field
-/// would be misread as one, putting a bogus model summary on every
-/// particle tag.
+/// Kept separate from [`is_model_group`] on purpose: that predicate names
+/// an object's model wrapper, and a `particle`'s `Model` → `pmdf` field is
+/// not one.
 pub(in crate::app) fn is_previewable_geometry_group(group_tag: u32, names: &TagNameIndex) -> bool {
     use crate::app::browser::{COLLISION_GROUPS, RENDER_GEOMETRY_GROUPS, group_in};
     // The group as the kit's game names it: Halo CE's `mode` is its legacy
@@ -198,6 +92,7 @@ pub(in crate::app) fn is_previewable_geometry_group(group_tag: u32, names: &TagN
                 (b"phmo", "physics_model"),
                 (b"sbsp", "scenario_structure_bsp"),
                 (b"scnr", "scenario"),
+                (b"impo", "imposter_model"),
             ],
         )
 }
@@ -254,18 +149,13 @@ pub(in crate::app) fn draw_tag_metadata(
         if let Some(reason) = unsaveable_reason(entry, tag) {
             ui.label(
                 RichText::new("Cannot be saved")
-                    .color(READ_ONLY_BADGE_COLOR)
+                    .color(read_only_badge())
                     .strong(),
             )
             .on_hover_text(reason);
         }
     });
 }
-
-/// Amber, for the header note on a tag whose edits have nowhere to be written.
-/// Warning-coloured rather than error-coloured: nothing is wrong, and the tag
-/// is fully editable — the edits just do not outlive the session.
-pub(in crate::app) const READ_ONLY_BADGE_COLOR: Color32 = Color32::from_rgb(210, 145, 60);
 
 #[cfg(test)]
 mod object_family_tests {

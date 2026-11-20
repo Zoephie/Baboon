@@ -44,6 +44,8 @@ pub(crate) mod h3;
 pub(crate) mod h4;
 #[cfg(test)]
 mod harness;
+#[cfg(all(test, any(target_os = "macos", windows)))]
+pub(in crate::app) use harness::headless_gl;
 pub(in crate::app) mod load;
 pub(in crate::app) mod materials;
 mod panel;
@@ -80,15 +82,19 @@ pub(in crate::app) use panel::{
     ModelPreviewSectionPart, draw_model_preview_panel, draw_model_preview_section_with_header_wrap,
     draw_standalone_mesh_preview, preview_panel_title, standalone_mesh_preview,
 };
+#[cfg(test)]
+pub(in crate::app) use panel::SETUP_PANEL_PADDING;
 
 #[cfg(test)]
 use animation::PreviewAnimationPose;
-use animation::{ANIMATION_FRAME_RATE, animation_skinning_rows, armature_node_positions};
+use animation::{
+    ANIMATION_FRAME_RATE, animation_skinning_rows, armature_node_matrices, armature_node_positions,
+};
 #[cfg(test)]
 use ce::frame::object_states;
 use data::{MODEL_ERROR_FALLBACK_COLOR, NEXT_MODEL_GEOMETRY_ID, model_preview_data};
 pub(in crate::app) use data::{
-    ModelErrorPoint, ModelErrorPrimitive, ModelErrorShape, ModelPreviewData, ModelPreviewLayer,
+    BatchOutline, ModelErrorPoint, ModelErrorPrimitive, ModelErrorShape, ModelPreviewData, ModelPreviewLayer,
     ModelVariantPreview, RenderModelPreview, RenderModelPreviewBatch, RenderModelPreviewMarker,
     RenderModelPreviewMaterial, RenderModelPreviewNode, RenderModelPreviewRegion,
     RenderModelPreviewVertex,
@@ -121,8 +127,9 @@ use selection::{
     selected_variant_regions,
 };
 use viewport::draw_model_viewport;
+pub(in crate::app) use viewport::BoundingSphere;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::{
     DEFAULT_MODEL_SETUP_WIDTH, MAX_MODEL_SETUP_WIDTH, MIN_MODEL_SETUP_WIDTH, ModelPreviewState,
-    ModelRegionSelection, ModelRenderMode, ModelTagPanelTab,
+    ModelPreviewBackground, ModelRegionSelection, ModelRenderMode, ModelShading, ModelTagPanelTab,
 };

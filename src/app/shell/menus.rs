@@ -125,7 +125,7 @@ impl Baboon {
 /// menus, then the tool launcher buttons.
 pub(in crate::app) fn draw_menu_bar(cx: &Ctx, ui: &mut egui::Ui, menu: &MenuState, view: &mut KitView) {
     let bar = egui::Panel::top("menu")
-        .frame(Frame::NONE.fill(row_type()).inner_margin(egui::Margin {
+        .frame(Frame::NONE.fill(chrome_bar()).inner_margin(egui::Margin {
             left: 6,
             right: 6,
             top: 2,
@@ -153,7 +153,7 @@ pub(in crate::app) fn draw_menu_bar(cx: &Ctx, ui: &mut egui::Ui, menu: &MenuStat
             });
         });
     ui.painter().hline(bar.response.rect.x_range(), bar.response.rect.bottom() - 0.5,
-        Stroke::new(1.0, grid_line()));
+        Stroke::new(1.0, chrome_edge()));
 }
 
 #[cfg(test)]
@@ -606,9 +606,9 @@ fn draw_tools_menu(cx: &Ctx, ui: &mut Ui) {
         close_menu(ui);
         cx.send(AppAction::OpenFieldValueSearch);
     }
-    if ui.button("Browse Keywords...").clicked() {
+    if ui.button("Manage Keywords...").clicked() {
         close_menu(ui);
-        cx.send(AppAction::OpenKeywordChooser);
+        cx.send(AppAction::OpenKeywordManager);
     }
     if ui.button("Find Unreferenced Tags...").clicked() {
         close_menu(ui);

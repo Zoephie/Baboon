@@ -238,6 +238,7 @@ impl ModelGlRenderer {
             if frame.render_mode.draws_wireframe() {
                 self.core.draw_wireframe(gl, frame, slot);
             }
+            self.core.draw_overlays(gl, frame, slot);
             game.finish(&mut FrameCx {
                 gl,
                 frame,

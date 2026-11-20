@@ -680,7 +680,7 @@ pub(in crate::app) fn draw_git_review(cx: &Ctx, ui: &mut Ui, kit: KitId, state: 
                         bottom: 8,
                     })
                     .show(ui, |ui| {
-                        ui.colored_label(Color32::from_rgb(225, 105, 105), error);
+                        ui.colored_label(review_error_text(), error);
                     });
             }
 

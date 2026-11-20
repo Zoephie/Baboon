@@ -591,7 +591,7 @@ mod tests {
         else {
             return;
         };
-        let has = |painted: &[String], text: &str| painted.iter().any(|shown| shown == text);
+        let has = |painted: &[String], text: &str| painted.iter().any(|shown| shown.trim() == text);
         let h2 = H2Sound::read(&tag).expect("H2 language entries");
         let rows = sound_permutation_rows(&tag, Some(&h2));
         let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
@@ -602,15 +602,15 @@ mod tests {
             "class: unit_dialog",
             "1",
             "0:00.000 / 0:00.650",
-            "\u{1F310} English",
+            "English",
             "opus \u{00B7} mono \u{00B7} 48 kHz",
         ] {
             assert!(has(&english, text), "missing {text:?} in {english:?}");
         }
-        assert!(has(&english, "\u{2B07} Extract all (English)"));
-        assert!(has(&english, "\u{2B07} All languages"));
+        assert!(has(&english, "Extract All (English)"));
+        assert!(has(&english, "Extract All Languages"));
         // The third extract button is the selected permutation's own.
-        assert!(has(&english, "\u{2B07} 1"), "{english:?}");
+        assert!(has(&english, "Extract 1"), "{english:?}");
         assert!(
             !english.iter().any(|shown| shown.contains("|default|")),
             "a lone default pitch range isn't shown: {english:?}"
@@ -641,7 +641,7 @@ mod tests {
             "{portuguese:?}"
         );
         assert!(has(&portuguese, "(rate inferred)"));
-        assert!(has(&portuguese, "\u{2B07} Extract all (Portuguese)"));
+        assert!(has(&portuguese, "Extract All (Portuguese)"));
 
         // Another game's language this tag never had: say so, play English.
         let mexican = painted_sound_player(&tag, Some("mexican"), None);
@@ -652,7 +652,7 @@ mod tests {
             ),
             "{mexican:?}"
         );
-        assert!(has(&mexican, "\u{1F310} English"));
+        assert!(has(&mexican, "English"));
     }
 
     fn lpi_of(row: &SoundPermRow) -> usize {

@@ -201,7 +201,7 @@ fn draw_cache_import_body(
                      rewrites those.",
                 )
                 .small()
-                .color(Color32::from_rgb(242, 196, 48)),
+                .color(import_warning_text()),
             );
         }
 
@@ -290,7 +290,7 @@ fn draw_cache_import_body(
 
     if let Some(error) = dialog.error.as_ref() {
         ui.add_space(8.0);
-        ui.label(RichText::new(error).color(material_delete_text()));
+        ui.label(RichText::new(error).color(error_text()));
     }
 
     if let Some(progress) = dialog.progress.as_ref() {
@@ -336,7 +336,7 @@ fn draw_cache_import_body(
         if report.cancelled {
             ui.label(
                 RichText::new("Stopped early. Everything below was written.")
-                    .color(Color32::from_rgb(242, 196, 48)),
+                    .color(import_warning_text()),
             );
         }
         if !report.outside_references.is_empty() {
@@ -431,7 +431,7 @@ fn draw_cache_import_body(
                     report.levels_without_lighting.len()
                 ))
                 .strong()
-                .color(Color32::from_rgb(242, 196, 48)),
+                .color(import_warning_text()),
             );
             ui.label(
                 RichText::new(
@@ -479,7 +479,7 @@ fn draw_cache_import_body(
                      across:",
                     report.held_back.len()
                 ))
-                .color(Color32::from_rgb(242, 196, 48)),
+                .color(import_warning_text()),
             );
             crate::app::ScrollArea::vertical()
                 .id_salt("cache_import_held_back")

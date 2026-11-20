@@ -21,3 +21,5 @@ mod graph;
 #[cfg(test)]
 mod tests;
 mod worker;
+#[cfg(test)]
+pub(in crate::app::model_preview) use worker::resume_or_start;

@@ -217,7 +217,7 @@ impl Dialog for NewTagDialog {
                             .color(if authorable {
                                 subtle_dark()
                             } else {
-                                Color32::from_rgb(170, 130, 60)
+                                header_notice_text()
                             })
                             .small(),
                     );
@@ -259,7 +259,7 @@ impl Dialog for NewTagDialog {
 
                 if let Some(error) = &self.error {
                     ui.add_space(6.0);
-                    ui.label(RichText::new(error).color(material_delete_text()));
+                    ui.label(RichText::new(error).color(error_text()));
                 }
 
                 ui.add_space(10.0);

@@ -28,10 +28,10 @@ impl BitmapPreviewBg {
         match self {
             // Match the dark-mode page background rather than the lighter
             // Foundation section/header surfaces.
-            Self::DarkGray => egui::Color32::from_rgb(40, 40, 40),
+            Self::DarkGray => egui::Color32::from_rgb(40, 40, 40), // fixed: a backdrop the user picks
             Self::Black => egui::Color32::BLACK,
             Self::White => egui::Color32::WHITE,
-            Self::Magenta => egui::Color32::from_rgb(255, 0, 255),
+            Self::Magenta => egui::Color32::from_rgb(255, 0, 255), // fixed: a backdrop the user picks
         }
     }
 
@@ -181,6 +181,12 @@ pub(in crate::app) struct BitmapPreviewState {
     pub(in crate::app) frame_selection: bool,
     /// A sprite was picked on the canvas: the sidebar scrolls to its row.
     pub(in crate::app) scroll_to_selection: bool,
+    /// Whether the header shows Refresh Bitmap, and whether it can be
+    /// clicked: a bitmap tag's pane sets it each frame, greyed out while the
+    /// tag has unsaved edits or is being read; other previews leave it off.
+    pub(in crate::app) refresh: Option<bool>,
+    /// Refresh Bitmap was clicked: the pane reads the tag from disk again.
+    pub(in crate::app) refresh_clicked: bool,
 }
 
 /// Which block a selection is in.
@@ -240,6 +246,8 @@ impl Default for BitmapPreviewState {
             sequences: None,
             frame_selection: false,
             scroll_to_selection: false,
+            refresh: None,
+            refresh_clicked: false,
         }
     }
 }

@@ -29,4 +29,8 @@ pub(in crate::app) struct Model {
     /// takes the focused kit's when it writes them out.
     pub(in crate::app) prefs: GuiPrefs,
     pub(in crate::app) status: String,
+    /// Every keyword in the user's order, with its spelling and colour: one
+    /// list for every game. Which tags carry which is each kit's
+    /// [`Kit::keywords`].
+    pub(in crate::app) keyword_catalog: crate::core::keyword_catalog::KeywordCatalog,
 }

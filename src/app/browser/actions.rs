@@ -451,6 +451,40 @@ impl Baboon {
         }
     }
 
+    /// Open the folder a tag is in, in a new folder tab, with the tag
+    /// selected: a search result's way back to where it lives.
+    pub(in crate::app) fn open_tag_folder(&mut self, key: &str, ctx: egui::Context) {
+        let Some(display) = self.model.kits[self.model.active]
+            .source
+            .as_ref()
+            .and_then(|source| source.full_entry_set().iter().find(|entry| entry.key == key))
+            .map(|entry| entry.display_path.replace('/', "\\"))
+        else {
+            return;
+        };
+        let parent = tag_path::parent(&display).unwrap_or("").to_owned();
+        let label = if parent.is_empty() { "tags".to_owned() } else { tag_path::name(&parent).to_owned() };
+        let kit = self.model.kits[self.model.active].id;
+        let before: HashSet<String> = self.views[kit].browser.folder_browsers.keys().cloned().collect();
+        self.handle_browser_action(
+            BrowserAction::OpenFolderBrowser {
+                rel_path: PathBuf::from(parent.replace('\\', std::path::MAIN_SEPARATOR_STR)),
+                label,
+                open_in_new_tab: true,
+            },
+            ctx,
+        );
+        if let Some(pane) = self.views[kit]
+            .browser
+            .folder_browsers
+            .iter_mut()
+            .find(|(pane_key, _)| !before.contains(*pane_key))
+            .map(|(_, pane)| pane)
+        {
+            pane.selection.click(key, false, false, false);
+        }
+    }
+
     pub(in crate::app) fn toggle_folder_favorite(&mut self, rel_path: &Path) {
         let Some(root) = self.model.loaded_tags_root() else {
             self.model.status = "Only loose editing-kit folders can be favorited".to_owned();
@@ -656,10 +690,14 @@ impl Baboon {
                         asset_bitmaps: true,
                         asset_models: true,
                         asset_cell_size: DEFAULT_CELL,
+                        keyword_terms: Vec::new(),
+                        search_folders: SearchFolders::default(),
+                        open_all: None,
                     });
                 self.kit_and_view(self.model.active).open_tag_pane(&key);
             }
             BrowserAction::ToggleFolderFavorite(rel_path) => self.toggle_folder_favorite(&rel_path),
+            BrowserAction::OpenTagFolder(key) => self.open_tag_folder(&key, ctx),
             BrowserAction::Select(key) => self.select_entry(key, ctx),
             BrowserAction::ToggleFavorite(key) => self.toggle_favorite(&key),
             BrowserAction::CopyTagName(key) => self.copy_tag_name(&key, &ctx),
@@ -746,6 +784,8 @@ impl Baboon {
             BrowserAction::DumpReferences(key) => self.begin_dump_tag_references(&key, ctx),
             BrowserAction::LaunchScenarioInSapien(key) => self.launch_scenario_in_sapien(&key),
             BrowserAction::LaunchScenarioInTagTest(key) => self.launch_scenario_in_tag_test(&key),
+            BrowserAction::OpenScriptInVsCode(key) => self.open_script_in_vscode(&key),
+            BrowserAction::RecompileScript(key) => self.recompile_script(&key, &ctx),
             BrowserAction::MoveTag(key) => self.begin_move_tag(&key),
             BrowserAction::ImportTagInFolder { folder_rel } => self.begin_import_tag(folder_rel),
             BrowserAction::NewTagInFolder { folder_rel } => {
@@ -890,7 +930,7 @@ impl Baboon {
         let kit=self.model.active_kit_id();
         if let Some(path)=self.views[kit].browser.folder_browsers.get(key).map(|pane|pane.rel_path.clone()) {
             let browser=&mut self.views[kit].browser;
-            browser.filter.clear();browser.mode=BrowserMode::Folders;
+            browser.filter.clear();browser.keyword_terms.clear();browser.mode=BrowserMode::Folders;
             browser.selected_tag=Some(folder_pane_key(&path));
             self.views[kit].navigation_hidden=false;
             let relative=tag_path::relative_tag_path(&path);
@@ -903,6 +943,7 @@ impl Baboon {
         };
         self.views[self.model.kits[self.model.active].id].navigation_hidden = false;
         self.views[self.model.kits[self.model.active].id].browser.filter.clear();
+        self.views[self.model.kits[self.model.active].id].browser.keyword_terms.clear();
         self.views[self.model.kits[self.model.active].id].browser.mode = BrowserMode::Folders;
         // An open tag comes to the front as well as being selected; one that is
         // not open is only revealed. Selecting a tag with no tab would leave
@@ -1232,7 +1273,7 @@ mod tests {
                         begin_browser_navigation(ui, egui::Id::unique(("folder_keyboard_test", pane_key.as_deref())));
                         ScrollArea::vertical().show(ui, |ui| {
                             top = ui.cursor().top();
-                            draw_tree(ui, &tree, &entries, None, "", false, false, true, false, None,
+                            draw_tree(ui, &tree, &entries, None, "", FolderOpening::Remembered(None), false, true, false, None,
                                 BrowserSort::Name, false, None, false, Some(GameId::Halo3));
                         });
                         finish_browser_navigation(ui);
@@ -1479,13 +1520,14 @@ mod tests {
     }
 
     /// How many variants `BrowserAction` has. Bump it with `variant_index`.
-    const VARIANTS: usize = 50;
+    const VARIANTS: usize = 52;
 
     fn variant_index(action: &BrowserAction) -> usize {
         use BrowserAction as A;
         match action {
-            A::Bulk { .. } => 50, // Dedicated batch tests cover this compound action.
-            A::DropItems { .. } => 51, // So do drop tests: it is a Move or Copy.
+            A::Bulk { .. } => 52, // Dedicated batch tests cover this compound action.
+            A::DropItems { .. } => 53, // So do drop tests: it is a Move or Copy.
+            A::OpenTagFolder(_) => 54, // As does the search result test that opens one.
             A::OpenFolderBrowser { .. } => 0,
             A::ToggleFolderFavorite(_) => 1,
             A::Select(_) => 2,
@@ -1536,7 +1578,9 @@ mod tests {
             A::RenameContainerFolder { .. } => 47,
             A::DeleteContainerFolder { .. } => 48,
             A::StringTransfer { .. } => 49,
-            A::DeleteLooseFolder { .. } => 50,
+            A::DeleteLooseFolder { .. } => 54,
+            A::OpenScriptInVsCode(_) => 50,
+            A::RecompileScript(_) => 51,
         }
     }
 
@@ -2167,6 +2211,18 @@ mod tests {
                     ensure(app.model.kits[0].pending_container_folders.is_empty(), "nothing pending")?;
                     ensure(kit.path(FOLDER).is_dir(), "the folder on disk is untouched")
                 },
+            },
+            // 50, 51: a model is no script tag; the script tag cases are
+            // `kits::script_tools`'s.
+            Case {
+                action: |kit| A::OpenScriptInVsCode(kit.key(MODEL)),
+                setup: no_setup,
+                check: |app, _, _| status_is(app, "Only script tags can be opened or recompiled"),
+            },
+            Case {
+                action: |kit| A::RecompileScript(kit.key(MODEL)),
+                setup: no_setup,
+                check: |app, _, _| status_is(app, "Only script tags can be opened or recompiled"),
             },
         ]
     }

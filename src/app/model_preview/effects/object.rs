@@ -2,7 +2,8 @@
 
 use super::super::{RenderModelPreviewMarker, TagReader, object_reference};
 use super::events::{
-    WORLD_AXES, WORLD_ORIENTATION, collect_event_effects, event_function_name, with_nested_effects,
+    EventEffectRef, WORLD_AXES, WORLD_ORIENTATION, collect_event_effects, event_function_name,
+    with_nested_effects,
 };
 use super::placement::marker_name;
 use super::times::{EffectTimes, MOST_MARKERS, REPLACE};
@@ -223,19 +224,41 @@ pub(in crate::app::model_preview) fn object_effects(
     if let Some(model) = &model {
         collect_event_effects(model.root(), &mut named);
     }
+    // One effect at two markers plays at both, under a name for each.
     let mut seen = std::collections::HashSet::new();
-    for (field, path) in named {
-        if seen.insert(path.clone()) {
-            effects.push(ObjectEffect {
-                scale_by: event_function_name(&field, &path),
-                once: !field.contains("looping"),
-                path,
-                marker: String::new(),
-                secondary_by: String::new(),
-                change_color: None,
-                vectors: false,
-            });
+    let mut names = std::collections::HashSet::new();
+    for EventEffectRef {
+        field,
+        path,
+        marker,
+    } in named
+    {
+        if !seen.insert((path.to_ascii_lowercase(), marker.to_ascii_lowercase())) {
+            continue;
         }
+        let mut name = event_function_name(&field, &path);
+        if !names.insert(name.clone()) {
+            // Told apart by its marker; with none, or that taken too, by a
+            // number, rather than a bare "boom @ ".
+            let at_marker = format!("{name} @ {marker}");
+            name = if !marker.is_empty() && names.insert(at_marker.clone()) {
+                at_marker
+            } else {
+                (2..)
+                    .map(|number| format!("{name} {number}"))
+                    .find(|numbered| names.insert(numbered.clone()))
+                    .expect("an unbounded range always yields")
+            };
+        }
+        effects.push(ObjectEffect {
+            scale_by: name,
+            once: !field.contains("looping"),
+            path,
+            marker,
+            secondary_by: String::new(),
+            change_color: None,
+            vectors: false,
+        });
     }
     with_nested_effects(reader, effects)
 }

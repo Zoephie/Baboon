@@ -6,6 +6,47 @@ that picking one up does not mean rediscovering it first.
 
 ---
 
+## Model Preview: an imposter's own lighting and pose (Reach, Halo 2 Anniversary)
+
+**What is missing:** each imposter vertex carries a BRDF (`raw imposter
+data`: diffuse, ambient, specular, shininess), but the preview
+(`load/imposter.rs`) draws only the diffuse, scaled to display range, as
+flat colour per triangle. The imposter isn't posed either.
+
+**What implementing it involves:** a shading pass reading the other BRDF
+terms, and binding the imposter to the model's nodes through its `node
+maps` so it takes the model's animation.
+
+---
+
+## Model Preview: the gravity hammer's LOD model draws blank in Textured
+
+**What is missing:** `objects\weapons\melee\gravity_hammer\gravity_hammer.model`
+(Halo 3) with **LOD Model** ticked draws nothing in Textured mode but two
+dots; Solid and Wireframe draw it, and `lod_gravity_hammer.render_model`
+opened alone draws textured. The LOD is an alpha-tested card (28 vertices, 16
+triangles). OpenGL raises 0x501 (invalid value) while drawing it merged.
+Vertices, UVs and textures were compared merged against alone and match, so
+the fault is in how the merged batch's material is bound, not the data. The
+cruiser's LOD swaps correctly. Predates the LOD Model checkbox.
+
+**What implementing it involves:** find the GL call raising 0x501 in the
+merged draw (likely a texture unit or sampler index from the appended
+material) and compare with the standalone path.
+
+---
+
+## Model Preview: a weapon's first-person skeleton (Campaign Evolved)
+
+**Status:** not implemented. A Campaign Evolved weapon's `first person
+skeleton model` (`skel`) is ignored; the third-person `.model`'s `skeleton
+model` already gives the preview its nodes, markers and regions
+(`campaign_evolved/meshes.rs`). A skeleton model has no geometry, so showing
+it means drawing its armature beside the weapon's, once there is a use for
+it.
+
+---
+
 ## Drag and drop: spring-loaded folders and edge scrolling
 
 **Status:** not implemented. Flat view drags drop onto folder rows (Flat and

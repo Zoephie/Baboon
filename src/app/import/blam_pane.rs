@@ -8,7 +8,7 @@ use super::*;
 /// Import stays legible as a filled button in both themes: dark green fill,
 /// white text.
 fn blam_import_fill() -> Color32 {
-    Color32::from_rgb(40, 122, 62)
+    import_button_fill()
 }
 
 impl Model {
@@ -101,7 +101,7 @@ pub(in crate::app) fn draw_blam_pane(cx: &Ctx, ui: &mut Ui, kit_index: usize, bl
                         let color = match line.kind {
                             BlamLogKind::Info => subtle_dark(),
                             BlamLogKind::Good => good_news(),
-                            BlamLogKind::Error => material_delete_text(),
+                            BlamLogKind::Error => error_text(),
                         };
                         ui.label(RichText::new(&line.text).color(color).monospace().small());
                     }

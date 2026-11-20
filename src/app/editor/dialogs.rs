@@ -215,6 +215,9 @@ pub(in crate::app) enum EditorCommand {
     /// The pane showing `key` in `kit` took focus: it is the tag the file
     /// actions act on.
     FocusTab { kit: KitId, key: String },
+    /// Bring a tag's tab to the front, in its kit, from anywhere: the mini
+    /// player's way back to the sound it plays.
+    RevealTab { kit: KitId, key: String },
     /// Bring `kit`'s open tabs in line with the panes its tile tree holds,
     /// which a drag, a split or a close can have changed.
     SyncOpenTabs { kit: KitId },
@@ -222,6 +225,8 @@ pub(in crate::app) enum EditorCommand {
     ReimportBitmap { kit: KitId, key: String },
     /// Proceed with the folder-wide Halo 2 bitmap reimport held by its dialog.
     ConfirmBitmapReimport,
+    /// Read the bitmap at `key` in `kit` from disk again: Refresh Bitmap.
+    RefreshBitmap { kit: KitId, key: String },
     /// Set the reference field at `field_path` of the tag at `tag_key` in
     /// `kit` to the picked `input`.
     PickTagReference {
@@ -252,6 +257,14 @@ impl Baboon {
                     self.kit_and_view(index).focus_pane(key);
                 }
             }
+            EditorCommand::RevealTab { kit, key } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.focus_kit(index);
+                    let mut kit_view = self.kit_and_view(index);
+                    kit_view.open_tag_pane(&key);
+                    kit_view.focus_pane(key);
+                }
+            }
             EditorCommand::ReimportBitmap { kit, key } => {
                 if let Some(index) = self.model.kit_index(kit) {
                     self.focus_kit(index);
@@ -259,6 +272,20 @@ impl Baboon {
                 }
             }
             EditorCommand::ConfirmBitmapReimport => self.confirm_reimport_bitmap(ctx),
+            EditorCommand::RefreshBitmap { kit, key } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    // Unsaved edits would be dropped, so the button is greyed
+                    // out for them; a reload landing on one is ignored too.
+                    if self.model.kits[index].parsed_tags.get(&key).is_some_and(|doc| doc.dirty.is_set()) {
+                        self.model.status = "Save or undo the bitmap's edits before refreshing it".to_owned();
+                    } else {
+                        self.load_tag_in(index, key, ctx.clone(), true);
+                        // Said now: the read landing leaves the status alone,
+                        // and one that fails says so instead.
+                        self.model.status = "Bitmap refreshed from disk".to_owned();
+                    }
+                }
+            }
             EditorCommand::ApplyTsvPaste => self.apply_tsv_paste(),
             EditorCommand::ApplyBlockConfirm => self.apply_block_confirm(),
             EditorCommand::SaveBlockTable => self.save_block_table(ctx),

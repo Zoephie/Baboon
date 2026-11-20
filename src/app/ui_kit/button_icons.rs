@@ -61,6 +61,7 @@ pub(in crate::app) enum ButtonIcon {
     SelectAll,
     Undo,
     Redo,
+    Reset,
     Compare,
     Swap,
     Container,
@@ -90,6 +91,12 @@ pub(in crate::app) enum ButtonIcon {
     InsertRowBelow,
     Json,
     Loop,
+    /// Sound off: the Volume button while muted.
+    Mute,
+    Shuffle,
+    SkipBack,
+    SkipForward,
+    Volume,
     Markers,
     MarkersLookup,
     MaterialsLookup,
@@ -124,6 +131,7 @@ pub(in crate::app) enum ButtonIcon {
     TableView,
     Bitmap,
     View,
+    Shading,
     WindowMode,
     NavigationPane,
     FolderClosed,
@@ -161,6 +169,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Paste => include_root_str!("assets/Button Icons/Paste.svg"),
         ButtonIcon::SelectAll => include_root_str!("assets/Button Icons/Select All.svg"),
         ButtonIcon::Undo => include_root_str!("assets/Button Icons/Undo.svg"),
+        ButtonIcon::Reset => include_root_str!("assets/Button Icons/Reset.svg"),
         ButtonIcon::Recent => include_root_str!("assets/Button Icons/Recent.svg"),
         ButtonIcon::Home => include_root_str!("assets/Button Icons/Home.svg"),
         ButtonIcon::Redo => include_root_str!("assets/Button Icons/Redo.svg"),
@@ -195,6 +204,11 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::InsertRowBelow => include_root_str!("assets/Button Icons/Insert Row (below).svg"),
         ButtonIcon::Json => include_root_str!("assets/Button Icons/JSON.svg"),
         ButtonIcon::Loop => include_root_str!("assets/Button Icons/Loop.svg"),
+        ButtonIcon::Mute => include_root_str!("assets/Button Icons/mute.svg"),
+        ButtonIcon::Shuffle => include_root_str!("assets/Button Icons/Shuffle.svg"),
+        ButtonIcon::SkipBack => include_root_str!("assets/Button Icons/Skip Back.svg"),
+        ButtonIcon::SkipForward => include_root_str!("assets/Button Icons/Skip Forward.svg"),
+        ButtonIcon::Volume => include_root_str!("assets/Button Icons/volume.svg"),
         ButtonIcon::Markers => include_root_str!("assets/tag icons/markers.svg"),
         ButtonIcon::MarkersLookup => include_root_str!("assets/Button Icons/Markers.svg"),
         ButtonIcon::MaterialsLookup => include_root_str!("assets/tag icons/material_effects.svg"),
@@ -229,6 +243,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::NewTag => include_root_str!("assets/Button Icons/New Tag.svg"),
         ButtonIcon::TableView => include_root_str!("assets/Button Icons/Table View.svg"),
         ButtonIcon::View => include_root_str!("assets/Button Icons/View.svg"),
+        ButtonIcon::Shading => include_root_str!("assets/Button Icons/shading.svg"),
         ButtonIcon::Bitmap => {
             if is_dark_mode() {
                 include_root_str!("assets/tag icons/bitmap.svg")
@@ -244,6 +259,13 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
 }
 
 pub(in crate::app) fn paint_button_icon_at(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32) {
+    // The SVG is recoloured without alpha, so a see-through colour paints
+    // opaque and its alpha goes on as a tint.
+    if color.a() < 255 {
+        let [r, g, b, a] = color.to_srgba_unmultiplied();
+        paint_icon_tinted(ui, icon, rect, Color32::from_rgb(r, g, b), Color32::from_white_alpha(a));
+        return;
+    }
     paint_icon_tinted(ui, icon, rect, color, Color32::WHITE);
 }
 
@@ -527,7 +549,7 @@ pub(in crate::app) fn icon_for_foundation_button(label: &str) -> Option<ButtonIc
 
 fn icon_color(icon: ButtonIcon, fallback: Color32) -> Color32 {
     match icon {
-        ButtonIcon::Clear | ButtonIcon::Garbage | ButtonIcon::Remove => material_delete_text(),
+        ButtonIcon::Clear | ButtonIcon::Garbage | ButtonIcon::Remove => destructive_icon(),
         _ => fallback,
     }
 }
@@ -771,6 +793,30 @@ pub(in crate::app) fn icon_menu_button<R>(
     menu.response.on_hover_text(tooltip)
 }
 
+/// A menu trigger showing only an icon and the dropdown chevron, for a menu
+/// whose icon says enough.
+pub(in crate::app) fn icon_dropdown_button<R>(
+    ui: &mut Ui,
+    icon: ButtonIcon,
+    tooltip: &str,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    let button = egui::Button::new("").min_size(Vec2::new(44.0, BUTTON_HEIGHT));
+    let (response, inner) = dropdown_menu_button(ui, button, add_contents);
+    for (icon, center_x) in [
+        (icon, response.rect.left() + 13.0),
+        (ButtonIcon::Down, response.rect.right() - 12.0),
+    ] {
+        let rect = egui::Rect::from_center_size(
+            egui::pos2(center_x, response.rect.center().y),
+            Vec2::splat(BUTTON_ICON_SIZE),
+        );
+        paint_button_icon_at(ui, icon, rect, text_dark());
+    }
+    let response = response.on_hover_text(tooltip);
+    egui::InnerResponse::new(inner.map(|inner| inner.inner), response)
+}
+
 /// Picker trigger with an optional leading image and the standard dropdown chevron.
 pub(in crate::app) fn text_dropdown_button<R>(
     ui: &mut Ui,
@@ -815,6 +861,19 @@ pub(in crate::app) fn fixed_width_icon_text_dropdown_button<R>(
             value_dropdown_contents(ui, ui.spacing().combo_height, add_contents)
         })
     }).inner
+}
+
+/// An icon-and-text menu button `width` wide whatever its label, so a label
+/// that changes never moves the buttons beside it. The menu is a plain one,
+/// at least as wide as the button.
+pub(in crate::app) fn fixed_width_icon_text_menu_button<R>(
+    ui: &mut Ui,
+    icon: ButtonIcon,
+    label: &str,
+    width: f32,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    icon_text_dropdown_button_sized(ui, icon, label, Some(width), add_contents)
 }
 
 fn icon_text_dropdown_button_sized<R>(
@@ -1205,6 +1264,7 @@ mod tests {
             ButtonIcon::SelectAll,
             ButtonIcon::Undo,
             ButtonIcon::Redo,
+            ButtonIcon::Reset,
             ButtonIcon::Compare,
             ButtonIcon::Swap,
             ButtonIcon::Container,
@@ -1234,6 +1294,11 @@ mod tests {
             ButtonIcon::JumpDown,
             ButtonIcon::Left,
             ButtonIcon::Loop,
+            ButtonIcon::Mute,
+            ButtonIcon::Shuffle,
+            ButtonIcon::SkipBack,
+            ButtonIcon::SkipForward,
+            ButtonIcon::Volume,
             ButtonIcon::Markers,
             ButtonIcon::MarkersLookup,
             ButtonIcon::MaterialsLookup,
@@ -1262,6 +1327,7 @@ mod tests {
             ButtonIcon::TableView,
             ButtonIcon::Pin,
             ButtonIcon::View,
+            ButtonIcon::Shading,
             ButtonIcon::WindowMode,
             ButtonIcon::NavigationPane,
         ];
@@ -1470,7 +1536,7 @@ mod tests {
                 |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {
                         let rect = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), Vec2::splat(BUTTON_ICON_SIZE));
-                        paint_button_icon_at(ui, ButtonIcon::Clear, rect, material_delete_text());
+                        paint_button_icon_at(ui, ButtonIcon::Clear, rect, destructive_icon());
                         if (1..3).contains(&pass) {
                             ui.add_space(40.0);
                             icon_text_button(ui, ButtonIcon::Clear, "Cancel", true);

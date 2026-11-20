@@ -106,9 +106,9 @@ impl CompatVerdict {
 
     pub(in crate::app) fn color(self) -> Color32 {
         match self {
-            Self::HardBlocked => material_delete_text(),
-            Self::Unknown | Self::SourceOnly | Self::OptionLoss => Color32::from_rgb(242, 196, 48),
-            Self::Identical => disclosure_triangle_green(),
+            Self::HardBlocked => error_text(),
+            Self::Unknown | Self::SourceOnly | Self::OptionLoss => import_warning_text(),
+            Self::Identical => match_tick(),
             _ => subtle_dark(),
         }
     }

@@ -157,6 +157,7 @@ pub(super) fn ass_to_preview(ass: &AssFile, render_only: bool) -> RenderModelPre
                 index_count,
                 flat_color: color,
                 layer: ModelPreviewLayer::Render,
+                outline: Default::default(),
                 sort_position: None,
             });
         }

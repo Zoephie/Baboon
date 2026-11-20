@@ -16,7 +16,7 @@ use crate::app::shell::frame::browser_favorites_divider;
 use crate::app::shell::frame::draw_game_banner_header;
 use crate::app::shell::frame::sidebar_source_path_label;
 use crate::app::shell::frame::navigate_folder_browser;
-use crate::app::shell::frame::browser_search_field;
+use crate::app::shell::frame::browser_search_field_with_keywords;
 use crate::app::shell::frame::is_file_cached;
 
 const FOLDER_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT: f32 = 900.0;
@@ -191,7 +191,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
     // The whole pane, for saying why a drag can't land here.
     let pane_rect = ui.max_rect();
     let generation = cx.model.kits[kit_index].generation;
-    let before_view = (pane.mode, pane.assets_view, pane.filter.clone(), pane.search_scope, pane.asset_bitmaps, pane.asset_models);
+    let before_view = (pane.mode, pane.assets_view, pane.search_query(), pane.search_scope, pane.asset_bitmaps, pane.asset_models);
     let before_sort = (pane.sort, cx.model.prefs.folders_before_tags);
     ui.data_mut(|data|data.insert_temp(browser_selection_owner_id().with("drawing"),(kit_id,pane_key.to_owned())));
     set_browser_selected_tag(ui, pane.selected_tag.clone());
@@ -242,6 +242,8 @@ pub(in crate::app) fn draw_folder_browser_pane(
     let mut load_requests = Vec::new();
     let scanning = cx.model.kits[kit_index].scanning_entries;
     let table_keywords = cx.model.kits[kit_index].keywords.snapshot();
+    let table_catalog = Arc::new(cx.model.keyword_catalog.clone());
+    let keyword_reads = (&cx.model.kits[kit_index].keywords, &cx.model.keyword_catalog);
     let source = cx.model.kits[kit_index].source.as_ref();
     let (bitmap_library, model_library) = (&mut view.bitmap_browser, &mut view.model_browser);
 
@@ -259,6 +261,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
             );
             set_browser_entries_scanning(ui, scanning);
             set_browser_loose_source(ui, is_loose);
+            set_browser_data_root(ui, cx.model.kit_layout_for(kit_index).map(|layout| layout.data));
             set_browser_game(ui, game);
             set_browser_scenario_launch(ui, scenario_launch);
             set_browser_is_folder_pane(ui, true);
@@ -280,8 +283,18 @@ pub(in crate::app) fn draw_folder_browser_pane(
             } else {
                 source.full_entry_set()
             };
+            // A loose folder carries keywords as a tag does.
+            let keyword_key = cx.model.loaded_tags_root_for(kit_index).map(|root| {
+                crate::core::tag_key::folder_entry_key(
+                    &root,
+                    &tag_path::relative_tag_path(&pane.rel_path),
+                )
+            });
             draw_folder_pane_header(
+                cx,
                 ui,
+                kit_index,
+                keyword_key.as_deref(),
                 &mut pane,
                 header_entries,
                 is_loose,
@@ -310,7 +323,14 @@ pub(in crate::app) fn draw_folder_browser_pane(
             let header = egui::Frame::NONE.inner_margin(6)
                 .show(ui, |ui| {
             if folder_browser_search_stacks(ui.available_width()) {
-                let search_response = browser_search_field(ui, &mut pane.filter, &search_hint);
+                let search_response = browser_search_field_with_keywords(
+                    ui,
+                    &mut pane.filter,
+                    &mut pane.keyword_terms,
+                    &search_hint,
+                    Some(keyword_reads),
+                    pane.search_scope.keywords,
+                );
                 ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
                     draw_folder_browser_controls(
@@ -334,7 +354,14 @@ pub(in crate::app) fn draw_folder_browser_pane(
                         &mut action,
                     );
                     ui.add_space(6.0);
-                    browser_search_field(ui, &mut pane.filter, &search_hint)
+                    browser_search_field_with_keywords(
+                        ui,
+                        &mut pane.filter,
+                        &mut pane.keyword_terms,
+                        &search_hint,
+                        Some(keyword_reads),
+                        pane.search_scope.keywords,
+                    )
                 })
                 .inner
             }
@@ -351,11 +378,11 @@ pub(in crate::app) fn draw_folder_browser_pane(
                 ui.label(
                     RichText::new(warning)
                         .small()
-                        .color(Color32::from_rgb(184, 134, 11)),
+                        .color(filter_warning_text()),
                 );
             }
             if before_sort != (pane.sort, folders_before_tags) { invalidate_browser_navigation(ui.ctx()); }
-            if before_view != (pane.mode, pane.assets_view, pane.filter.clone(), pane.search_scope, pane.asset_bitmaps, pane.asset_models) { invalidate_browser_navigation(ui.ctx()); pane.selection.clear(); pane.selected_tag = None; set_browser_selected_tag(ui,None); }
+            if before_view != (pane.mode, pane.assets_view, pane.search_query(), pane.search_scope, pane.asset_bitmaps, pane.asset_models) { invalidate_browser_navigation(ui.ctx()); pane.selection.clear(); pane.selected_tag = None; set_browser_selected_tag(ui,None); }
             let body_height = (ui.available_height() - BUTTON_HEIGHT - 12.0 - ui.spacing().item_spacing.y).max(0.0);
             ui.allocate_ui_with_layout(Vec2::new(ui.available_width(),body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
             egui::Frame::NONE.inner_margin(6).show(ui, |ui| {
@@ -375,7 +402,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
                 }
                 pane.filter_cache.refresh_scoped_async(
                     generation,
-                    &pane.filter,
+                    &pane.search_query(),
                     source.full_entry_set(),
                     false,
                     &pane.rel_path,
@@ -420,11 +447,12 @@ pub(in crate::app) fn draw_folder_browser_pane(
                         ui,
                         search_root.map(Path::to_path_buf),
                         Arc::clone(&table_keywords),
+                        Arc::clone(&table_catalog),
                         pane.date_cache.clone(),
                         &mut pane.table_layout,
                     );
                     if pane.mode == BrowserMode::Flat {
-                        flat::draw(ui, &mut pane, pane_key, kit_id, source, generation, folders_before_tags, double_click_to_open, &favorite_keys, &table_keywords, &mut need_scan, &mut action);
+                        flat::draw(ui, &mut pane, pane_key, kit_id, source, generation, folders_before_tags, double_click_to_open, &favorite_keys, &table_keywords, search_root, &mut need_scan, &mut action);
                     } else { draw_folder_pane_tree(
                         ui,
                         &mut pane,
@@ -587,7 +615,12 @@ fn draw_browser_footer(
         total
     };
     let noun = if total == 1 { "item" } else { "items" };
-    let total_label = if shown == total {
+    // A Flat search reaches into every folder beneath, so it can list more
+    // than the folder holds: it counts its results instead.
+    let total_label = if multi && !pane.assets_view && !pane.search_query().is_empty() {
+        let shown = pane.selection.rows.len();
+        format!("{shown} {}", if shown == 1 { "result" } else { "results" })
+    } else if shown == total {
         format!("{total} {noun}")
     } else {
         format!("{shown} of {total} {noun}")
@@ -683,8 +716,12 @@ fn draw_folder_pane_tree(
     action: &mut Option<BrowserAction>,
 ) {
     let game = source.game;
-    let filter = pane.filter.trim().to_owned();
+    let filter = pane.search_query();
     let groups_mode = pane.mode == BrowserMode::Groups;
+    let open_all = pane.open_all.take();
+    if filter.is_empty() {
+        pane.search_folders.clear();
+    }
     let needs_complete_index = reads.is_loose && (groups_mode || !filter.is_empty());
     if needs_complete_index && !source.complete_scan {
         *need_scan = !reads.scanning;
@@ -718,6 +755,7 @@ fn draw_folder_pane_tree(
                     reads.folders_before_tags,
                     Some(reads.favorite_keys),
                     game,
+                    open_all,
                 );
                 if action.is_none() {
                     *action = tree_action;
@@ -755,10 +793,16 @@ fn draw_folder_pane_tree(
             reads.keywords,
             ui.ctx(),
         );
+        pane.search_folders.sync(&pane.filter_cache, groups_mode, open_all);
         (
             &pane.filter_cache.tree,
             pane.filter_cache.entries.as_slice(),
         )
+    };
+    let opening = if filter.is_empty() {
+        FolderOpening::Remembered(open_all)
+    } else {
+        FolderOpening::Search(&pane.search_folders)
     };
     let searching = !filter.is_empty() && pane.filter_cache.waiting_for_results();
     if searching {
@@ -777,15 +821,15 @@ fn draw_folder_pane_tree(
                 }
                 return;
             }
-            // Already filtered by `filter_cache`: drawn with folders open
-            // rather than matched a second time.
+            // Already filtered by `filter_cache`: drawn with the search's own
+            // opening rather than matched a second time.
             let tree_action = draw_tree(
                 ui,
                 tree,
                 visible_entries,
                 reads.selected,
                 "",
-                !filter.is_empty(),
+                opening,
                 reads.show_prefixes,
                 reads.double_click_to_open,
                 groups_mode,
@@ -938,6 +982,7 @@ fn draw_kit_browser_inner(
         }
     });
     set_browser_sound_available_languages(ui, browser_game, browser_tags_root);
+    set_browser_data_root(ui, cx.model.kit_layout_for(kit_index).map(|layout| layout.data));
     set_browser_entries_scanning(ui, cx.model.kits[kit_index].scanning_entries);
     set_browser_loose_source(
         ui,
@@ -980,12 +1025,19 @@ fn draw_kit_browser_inner(
         let mut show_prefixes = cx.model.prefs.show_browser_prefixes;
         let mut folders_before_tags = cx.model.prefs.folders_before_tags;
         let prev_filter_empty = view.browser.filter.is_empty();
-        browser_search_field(ui, &mut view.browser.filter, &view.browser.search_scope.hint());
+        browser_search_field_with_keywords(
+            ui,
+            &mut view.browser.filter,
+            &mut view.browser.keyword_terms,
+            &view.browser.search_scope.hint(),
+            Some((&cx.model.kits[kit_index].keywords, &cx.model.keyword_catalog)),
+            view.browser.search_scope.keywords,
+        );
         if let Some(warning) = browser::browser_filter_warning(&view.browser.filter) {
             ui.label(
                 RichText::new(warning)
                     .small()
-                    .color(Color32::from_rgb(184, 134, 11)),
+                    .color(filter_warning_text()),
             );
         }
         ui.add_space(6.0);
@@ -1004,6 +1056,7 @@ fn draw_kit_browser_inner(
                 &mut view.browser.search_scope,
                 None,
                 true,
+                &mut view.browser.open_all,
             );
             if groups_clicked
                 && matches!(source.source, TagSource::LooseFolder { .. })
@@ -1028,7 +1081,7 @@ fn draw_kit_browser_inner(
         }
         ui.add_space(4.0);
         let selected = current_browser_item(kit, view);
-        let filter = view.browser.filter.trim().to_owned();
+        let filter = keyword_query(&view.browser.filter, &view.browser.keyword_terms);
         let mode = view.browser.mode;
         edit_browser_prefs(cx, show_prefixes, folders_before_tags);
         let double_click_to_open = cx.model.prefs.double_click_to_open_tags;
@@ -1170,6 +1223,10 @@ fn draw_kit_browser_inner(
                     view.browser.search_scope, &search_keywords, game);
                 browser_favorites_divider(ui, true);
 
+                let open_all = view.browser.open_all.take();
+                if filter.is_empty() {
+                    view.browser.search_folders.clear();
+                }
                 let tree_action = if !filter.is_empty() {
                     // Active search renders a memoized, pruned tree. A loose
                     // source waits for its complete background index first.
@@ -1196,6 +1253,7 @@ fn draw_kit_browser_inner(
                             &search_keywords,
                             ui.ctx(),
                         );
+                        view.browser.search_folders.sync(&view.browser.filter_cache, groups_mode, open_all);
                         let cache = &view.browser.filter_cache;
                         if cache.waiting_for_results() {
                             reloading = true;
@@ -1208,15 +1266,15 @@ fn draw_kit_browser_inner(
                             ui.label(RichText::new("No matching results").color(subtle_dark()));
                             None
                         } else {
-                            // Empty filter → tree renders every (already
-                            // pruned) entry with folders collapsed.
+                            // Empty filter: the tree is already pruned, and
+                            // opens as the search's folders say.
                             draw_tree(
                                 ui,
                                 &cache.tree,
                                 &cache.entries,
                                 selected.as_deref(),
                                 "",
-                                true,
+                                FolderOpening::Search(&view.browser.search_folders),
                                 show_prefixes,
                                 double_click_to_open,
                                 groups_mode,
@@ -1247,6 +1305,7 @@ fn draw_kit_browser_inner(
                                     folders_before_tags,
                                     favorite_context,
                                     game,
+                                    open_all,
                                 )
                             } else {
                                 draw_tree(
@@ -1255,7 +1314,7 @@ fn draw_kit_browser_inner(
                                     &source.entries,
                                     selected.as_deref(),
                                     &filter,
-                                    false,
+                                    FolderOpening::Remembered(open_all),
                                     show_prefixes,
                                     double_click_to_open,
                                     false,
@@ -1288,7 +1347,7 @@ fn draw_kit_browser_inner(
                                     entries,
                                     selected.as_deref(),
                                     &filter,
-                                    false,
+                                    FolderOpening::Remembered(open_all),
                                     show_prefixes,
                                     double_click_to_open,
                                     true,
@@ -1424,6 +1483,7 @@ fn browser_toolbar_controls(
     search_scope: &mut BrowserSearchScope,
     table_layout: Option<&mut FolderTableLayout>,
     show_modes: bool,
+    open_all: &mut Option<bool>,
 ) -> bool {
     style_browser_toolbar(ui);
 
@@ -1433,7 +1493,7 @@ fn browser_toolbar_controls(
     if show_modes {
         icon_text_dropdown_button(ui, ButtonIcon::View, "View", |ui| {
             style_list_menu(ui);
-            if dedicated && selectable_icon_text_button(ui, ButtonIcon::FolderClosed, "Flat", *mode == BrowserMode::Flat).on_hover_text("Current folder only. Mixed multi-selection and bulk actions.").clicked() { *mode = BrowserMode::Flat; close_menu(ui); }
+            if dedicated && selectable_icon_text_button(ui, ButtonIcon::FolderClosed, "Flat", *mode == BrowserMode::Flat).on_hover_text("This folder's items, with mixed multi-selection and bulk actions. A search lists matches from every folder beneath.").clicked() { *mode = BrowserMode::Flat; close_menu(ui); }
             if selectable_icon_text_button(ui, ButtonIcon::FolderOpen, if dedicated { "Tree" } else { "Folders" }, *mode == BrowserMode::Folders).on_hover_text("Expandable folder tree. Single selection; use chevrons to expand.").clicked() {
                 *mode = BrowserMode::Folders;
                 close_menu(ui);
@@ -1442,6 +1502,13 @@ fn browser_toolbar_controls(
                 *mode = BrowserMode::Groups;
                 groups_clicked = true;
                 close_menu(ui);
+            }
+            if *mode != BrowserMode::Flat {
+                ui.separator();
+                if icon_text_button(ui, ButtonIcon::Closed, "Collapse All", true).on_hover_text("Close every folder. Alt-click a folder's arrow to close everything inside it.").clicked() {
+                    *open_all = Some(false);
+                    close_menu(ui);
+                }
             }
             ui.separator();
             ui.baboon_checkbox(show_prefixes, "Show prefixes");
@@ -1485,7 +1552,7 @@ fn draw_folder_browser_controls(
         browser_sort_control(ui, &mut pane.sort, folders_before_tags, Some(&mut pane.table_layout));
         icon_text_dropdown_button(ui, ButtonIcon::View, "View", |ui| {
             ui.label("Thumbnail size");
-            ui.add(egui::Slider::new(&mut pane.asset_cell_size, MIN_CELL..=MAX_CELL));
+            plain_railed_slider(ui, egui::Slider::new(&mut pane.asset_cell_size, MIN_CELL..=MAX_CELL), true, editor_bg());
         });
         icon_menu_button(ui, ButtonIcon::Filter, "Filter asset types", |ui| {
             style_list_menu(ui);
@@ -1505,11 +1572,16 @@ fn draw_folder_browser_controls(
         &mut pane.search_scope,
         Some(&mut pane.table_layout),
         true,
+        &mut pane.open_all,
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_folder_pane_header(
+    cx: &Ctx,
     ui: &mut Ui,
+    kit_index: usize,
+    keyword_key: Option<&str>,
     pane: &mut FolderBrowserState,
     entries: &[TagEntry],
     is_loose: bool,
@@ -1532,28 +1604,46 @@ fn draw_folder_pane_header(
     let inline_left_width = pane_header_inline_left_width(available, action_width);
     let actions_inline = inline_left_width.is_some();
     let left_width = inline_left_width.unwrap_or(available);
+    // Keywords follow the title when there is room, as a tag's do, or take
+    // a row under it.
+    let keywords_inline = available >= crate::app::editor::pane::TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT;
+    let left_height = if keyword_key.is_some() && !keywords_inline {
+        PANE_HEADER_ICON_SIZE + 10.0 + BUTTON_HEIGHT
+    } else {
+        PANE_HEADER_ICON_SIZE
+    };
 
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = PANE_HEADER_SECTION_GAP;
         ui.allocate_ui_with_layout(
-            Vec2::new(left_width, PANE_HEADER_ICON_SIZE),
+            Vec2::new(left_width, left_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
+                ui.spacing_mut().item_spacing.y = 10.0;
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = PANE_HEADER_ICON_TEXT_GAP;
-                    let (icon_rect, _) =
-                        ui.allocate_exact_size(Vec2::splat(PANE_HEADER_ICON_SIZE), Sense::hover());
-                    paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon_rect, text_dark());
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        if let Some((path, label)) = pane_header_breadcrumbs(ui, &breadcrumbs) {
-                            navigate_folder_browser(pane, path, label);
-                            ui.ctx().request_repaint();
-                        }
-                        ui.label(RichText::new(title).size(15.0).strong().color(text_dark()));
+                    ui.spacing_mut().item_spacing.x = PANE_HEADER_SECTION_GAP;
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = PANE_HEADER_ICON_TEXT_GAP;
+                        let (icon_rect, _) = ui
+                            .allocate_exact_size(Vec2::splat(PANE_HEADER_ICON_SIZE), Sense::hover());
+                        paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon_rect, text_dark());
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            if let Some((path, label)) = pane_header_breadcrumbs(ui, &breadcrumbs) {
+                                navigate_folder_browser(pane, path, label);
+                                ui.ctx().request_repaint();
+                            }
+                            ui.label(RichText::new(title).size(15.0).strong().color(text_dark()));
+                        });
                     });
+                    if keywords_inline && let Some(key) = keyword_key {
+                        crate::app::shell::draw_keyword_bar(cx, ui, kit_index, key);
+                    }
                 });
+                if !keywords_inline && let Some(key) = keyword_key {
+                    crate::app::shell::draw_keyword_bar(cx, ui, kit_index, key);
+                }
             },
         );
 
@@ -1898,7 +1988,6 @@ fn follow_reveal(kit_id: KitId, kit: &Kit, item: &str) -> Option<RevealRequest> 
 mod tests {
     use super::*;
     use crate::app::compare::GIT_REVIEW_TITLE;
-    use crate::app::shell::frame::sidebar_wrappable_path_label;
 
     #[test]
     fn favorite_folders_and_shortcuts_follow_double_click_preference() {
@@ -2107,6 +2196,7 @@ mod tests {
                             &mut scope,
                             None,
                             show_modes,
+                            &mut None,
                         );
                     });
                 });
@@ -2135,14 +2225,6 @@ mod tests {
             }
             .hint(),
             "search tags & keywords"
-        );
-    }
-
-    #[test]
-    fn sidebar_paths_can_wrap_after_each_separator() {
-        assert_eq!(
-            sidebar_wrappable_path_label(r"C:\tags\objects"),
-            "C:\\\u{200b}tags\\\u{200b}objects"
         );
     }
 }

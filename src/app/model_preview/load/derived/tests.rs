@@ -1075,3 +1075,64 @@ fn listed_weapons_land_in_the_load_that_asked_for_them() {
     app.handle_unit_weapons_listed(stamp, key.clone(), geometry_id, Some(ListedWeapons::Unit(Vec::new())));
     assert_eq!(listed(&app), (false, Some(0)), "its own lands");
 }
+
+/// A box outlines its twelve edges, not the diagonals that split its sides.
+#[test]
+fn a_box_outlines_its_edges_alone() {
+    let shape = blam_tags::JmsBox {
+        name: String::new(),
+        parent: -1,
+        material: 0,
+        rotation: RealQuaternion::IDENTITY,
+        translation: RealPoint3d {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        width: 200.0,
+        length: 100.0,
+        height: 50.0,
+    };
+    let mut triples = Vec::new();
+    push_box(&mut triples, &shape);
+    let lines = crease_lines(&triples);
+    assert_eq!(lines.len(), 24, "12 edges × 2 points");
+    // Each edge runs along one axis: its ends differ in one coordinate.
+    for pair in lines.chunks_exact(2) {
+        let differing = (0..3)
+            .filter(|&axis| (pair[0].0[axis] - pair[1].0[axis]).abs() > 1e-4)
+            .count();
+        assert_eq!(differing, 1, "{pair:?}");
+    }
+}
+
+/// A pill's outline lies on the pill: every point a radius from its axis
+/// segment, and its ends reach a radius past the body.
+#[test]
+fn a_capsule_outline_lies_on_the_pill() {
+    let capsule = blam_tags::JmsCapsule {
+        name: String::new(),
+        parent: -1,
+        material: 0,
+        rotation: RealQuaternion::IDENTITY,
+        translation: RealPoint3d {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        height: 100.0,
+        radius: 25.0,
+    };
+    let mut lines = Vec::new();
+    push_capsule_outline(&mut lines, &capsule);
+    assert!(!lines.is_empty() && lines.len() % 2 == 0);
+    let (mut min_z, mut max_z) = (f32::INFINITY, f32::NEG_INFINITY);
+    for (point, _) in &lines {
+        let along = point[2].clamp(0.0, 1.0);
+        let distance = (point[0].powi(2) + point[1].powi(2) + (point[2] - along).powi(2)).sqrt();
+        assert!((distance - 0.25).abs() < 1e-4, "{point:?} is {distance} from the axis");
+        min_z = min_z.min(point[2]);
+        max_z = max_z.max(point[2]);
+    }
+    assert!((min_z - -0.25).abs() < 1e-4 && (max_z - 1.25).abs() < 1e-4);
+}

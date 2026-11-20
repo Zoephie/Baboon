@@ -83,15 +83,7 @@ fn editing_kit_card_with_read_only(
     read_only: bool,
 ) -> (bool, bool, bool) {
     let invalid = error.is_some();
-    let fill = if invalid {
-        if is_dark_mode() {
-            Color32::from_rgb(98, 40, 36)
-        } else {
-            Color32::from_rgb(255, 222, 216)
-        }
-    } else {
-        settings_card_fill(is_dark_mode())
-    };
+    let fill = if invalid { settings_card_invalid_fill() } else { settings_card_fill() };
     let mut load = false;
     let mut edit = false;
     let mut remove = false;
@@ -167,7 +159,7 @@ fn editing_kit_card_with_read_only(
                             egui::Label::new(
                                 RichText::new(path.display().to_string()).size(11.0).color(
                                     if invalid {
-                                        material_delete_text()
+                                        error_text()
                                     } else {
                                         subtle_dark()
                                     },
@@ -370,11 +362,11 @@ fn draw_editing_kit_form(
     });
     recovery_error = recovery_folder_validation(ui.ctx(), draft, profiles, loaded_tags_roots);
     if draft.tab == EditingKitFormTab::General && let Some(error) = &recovery_error {
-        ui.label(RichText::new(format!("Advanced settings: {error}")).color(material_delete_text()));
+        ui.label(RichText::new(format!("Advanced settings: {error}")).color(error_text()));
         if ui.button("Review Advanced Settings").clicked() { draft.tab = EditingKitFormTab::Advanced; }
     }
     if let Some(error) = &draft.error {
-        ui.label(RichText::new(error).color(material_delete_text()));
+        ui.label(RichText::new(error).color(error_text()));
     }
     });
     ui.add_space(8.0);
@@ -535,7 +527,7 @@ fn draw_editing_kit_general(ui: &mut Ui, draft: &mut CustomEditingKitDraft) {
         ui.label(
             RichText::new(warning)
                 .small()
-                .color(Color32::from_rgb(220, 170, 70)),
+                .color(settings_warning_text()),
         );
     }
 
@@ -771,7 +763,7 @@ fn draw_recovery_folder_input(
                 "This changes future deletions only. Existing deleted files will not be moved.",
             )
             .small()
-            .color(Color32::from_rgb(220, 170, 70)),
+            .color(settings_warning_text()),
         );
     }
     let shared = recheck_cached(
@@ -798,10 +790,10 @@ fn draw_recovery_folder_input(
     );
     if shared {
         ui.label(RichText::new("Another editing kit uses this folder. Their recovery batches will be mixed together.")
-            .small().color(Color32::from_rgb(220, 170, 70)));
+            .small().color(settings_warning_text()));
     }
     if let Some(error) = probe(draft) {
-        ui.label(RichText::new(error).color(material_delete_text()));
+        ui.label(RichText::new(error).color(error_text()));
     }
 }
 
@@ -978,26 +970,15 @@ fn settings_window_body(
 }
 
 /// Cards always consume the available width, including after a window resize.
-fn settings_card_fill(dark_mode: bool) -> Color32 {
-    if dark_mode {
-        Color32::from_rgba_premultiplied(13, 13, 13, 13)
-    } else {
-        Color32::from_black_alpha(13)
-    }
-}
-
 fn settings_card<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> R {
     Frame::NONE
-        .fill(settings_card_fill(is_dark_mode()))
+        .fill(settings_card_fill())
         .stroke(Stroke::new(1.0, foundation_group_edge()))
         .corner_radius(egui::CornerRadius::same(4))
         .inner_margin(egui::Margin::symmetric(12, 9))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            if !ui.visuals().dark_mode {
-                let background = editor_bg().blend(settings_card_fill(false));
-                opaque_widget_fills(ui.visuals_mut(), background);
-            }
+            settings_card_widget_fills(ui);
             content(ui)
         })
         .inner
@@ -2017,7 +1998,7 @@ fn draw_settings_editing_kits_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 0.0;
             Frame::NONE
-                .fill(settings_card_fill(is_dark_mode()))
+                .fill(settings_card_fill())
                 .corner_radius(egui::CornerRadius {
                     nw: 4,
                     ne: 4,
@@ -2362,10 +2343,13 @@ fn draw_settings_ui_scale(ui: &mut Ui, pending: &mut f32, live: &mut f32) -> boo
                 *pending = DEFAULT_UI_SCALE;
             }
             draw_ui_scale_input(ui, pending);
-            ui.add(
+            plain_railed_slider(
+                ui,
                 egui::Slider::new(pending, MIN_UI_SCALE..=MAX_UI_SCALE)
                     .show_value(false)
                     .clamping(egui::SliderClamping::Always),
+                true,
+                editor_bg(),
             );
             if applied {
                 *live = (*pending).clamp(MIN_UI_SCALE, MAX_UI_SCALE);

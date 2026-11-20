@@ -183,7 +183,7 @@ fn draw_chimp_mount_status(ui: &mut Ui, cx: &Ctx, kit_index: usize) {
             }
             ChimpMount::Loading => {}
             ChimpMount::Failed(error) => {
-                ui.colored_label(Color32::from_rgb(210, 80, 80), error);
+                ui.colored_label(chimp_browser_error_text(), error);
                 if ui.button("Retry").clicked() {
                     cx.send(ChimpCommand::Mount { kit });
                 }
@@ -475,7 +475,7 @@ fn draw_chimp_archives(ui: &mut Ui, view: &mut ChimpView, world: &World, kit: Ki
                         .file_name()
                         .and_then(|name| name.to_str())
                         .unwrap_or("archive");
-                    ui.colored_label(Color32::from_rgb(210, 150, 70), name)
+                    ui.colored_label(chimp_archive_text(), name)
                         .on_hover_text(format!(
                             "{}\n{}",
                             diagnostic.path.display(),

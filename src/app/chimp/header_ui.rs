@@ -281,7 +281,7 @@ fn draw_chimp_header_sections(
                                             .collect::<Vec<_>>()
                                             .join(", ")
                                     ))
-                                    .color(Color32::from_rgb(170, 130, 60))
+                                    .color(header_notice_text())
                                     .small(),
                                 );
                             }
@@ -612,7 +612,7 @@ fn draw_chimp_header_sections(
                                     "{} package(s) could not be read and are not ruled out.",
                                     scan.unreadable
                                 ))
-                                .color(Color32::from_rgb(170, 130, 60))
+                                .color(header_notice_text())
                                 .small(),
                             );
                         }
@@ -701,7 +701,7 @@ fn draw_chimp_identity_panel(
                     "These decide the header's shape, not just what it says. Lowering the UE5 \
                      file version stops the bulk-data map being written at all.",
                 )
-                .color(Color32::from_rgb(170, 130, 60))
+                .color(header_notice_text())
                 .small(),
             );
             ui.baboon_checkbox(&mut edit.is_unversioned, "Unversioned");
@@ -829,7 +829,7 @@ fn draw_chimp_export_edit_panel(
                      asset as {}.{leaf} — renaming it here leaves nothing at that path.",
                     header.package_name()
                 ))
-                .color(Color32::from_rgb(170, 130, 60))
+                .color(header_notice_text())
                 .small(),
             );
         }

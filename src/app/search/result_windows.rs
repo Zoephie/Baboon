@@ -334,7 +334,7 @@ impl Dialog for FieldValueSearchWindow {
                     if indexed {
                         ui.label(
                             RichText::new("• indexed — searches are instant")
-                                .color(Color32::from_rgb(120, 170, 90))
+                                .color(accept_text())
                                 .small(),
                         );
                     } else if cx.model.kits[cx.model.active].field_index.is_building() {

@@ -116,6 +116,11 @@ impl KitViews {
     pub(in crate::app) fn remove(&mut self, kit: KitId) -> Option<KitView> {
         self.views.remove(&kit)
     }
+
+    /// Every kit's view, in no particular order.
+    pub(in crate::app) fn all_mut(&mut self) -> impl Iterator<Item = &mut KitView> {
+        self.views.values_mut()
+    }
 }
 
 impl std::ops::Index<KitId> for KitViews {

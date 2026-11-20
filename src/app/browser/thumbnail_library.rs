@@ -331,13 +331,15 @@ fn draw_thumbnail_library_toolbar<S: ThumbnailSource>(
         ui.separator();
         ui.label(RichText::new("Size").color(subtle_dark()));
         let mut cell = library.cell_size();
-        if ui
-            .add(
-                egui::Slider::new(&mut cell, MIN_CELL..=MAX_CELL)
-                    .show_value(false)
-                    .clamping(egui::SliderClamping::Always),
-            )
-            .changed()
+        if plain_railed_slider(
+            ui,
+            egui::Slider::new(&mut cell, MIN_CELL..=MAX_CELL)
+                .show_value(false)
+                .clamping(egui::SliderClamping::Always),
+            true,
+            editor_bg(),
+        )
+        .changed()
         {
             library.cell_size = cell;
         }
@@ -790,6 +792,14 @@ fn draw_thumbnail_entry<S: ThumbnailSource>(
         style_tag_context_menu(ui);
         if type_badge.is_some() && multi(ui).is_some() {
             if let Some(request) = draw_multi_menu(ui) { action = Some(CellAction::BrowserAction(request)); }
+            // The grid lists every asset beneath the folder: a way to the
+            // one this asset is in.
+            if multi(ui).is_some_and(|state| state.selection.keys.len() <= 1) {
+                context_menu_separator(ui);
+                if open_tag_folder_menu_item(ui) {
+                    action = Some(CellAction::BrowserAction(BrowserAction::OpenTagFolder(key.clone())));
+                }
+            }
         } else if context_menu_button(ui, S::MENU_ITEM).clicked() {
             action = Some(CellAction::MenuAction(key.clone()));
             close_menu(ui);
@@ -1187,6 +1197,9 @@ mod tests {
             asset_bitmaps: true,
             asset_models: true,
             asset_cell_size: DEFAULT_CELL,
+            keyword_terms: Vec::new(),
+            search_folders: SearchFolders::default(),
+            open_all: None,
         }
     }
 

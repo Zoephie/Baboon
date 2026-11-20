@@ -700,7 +700,7 @@ impl Dialog for ModExportDialog {
                     if unresolved_count > 0 {
                         ui.label(
                             RichText::new(format!("· {unresolved_count} excluded"))
-                                .color(egui::Color32::from_rgb(210, 120, 90)),
+                                .color(replace_warning_text()),
                         );
                     }
                     if !review_only {
@@ -787,11 +787,11 @@ impl Dialog for ModExportDialog {
                                     ModExportChange::New => ("+", added_text()),
                                     ModExportChange::Modified => ("~", modified_text()),
                                     ModExportChange::Unresolved => {
-                                        ("!", egui::Color32::from_rgb(210, 120, 90))
+                                        ("!", replace_warning_text())
                                     }
                                     // Nothing to write, so nothing to mark.
                                     ModExportChange::Unchanged => {
-                                        ("=", egui::Color32::from_gray(130))
+                                        ("=", unchanged_text())
                                     }
                                 };
                                 // A marker as well as a colour: this is a
@@ -927,7 +927,7 @@ impl Dialog for ModExportDialog {
                     ui.add_space(6.0);
                     ui.label(
                         RichText::new(format!("Overwrites: {}", existing.join(", ")))
-                            .color(egui::Color32::from_rgb(210, 120, 90)),
+                            .color(replace_warning_text()),
                     );
                     // Named and then confirmed. A mod is three files plus its
                     // sidecar, and replacing someone's existing mod should take
@@ -952,7 +952,7 @@ impl Dialog for ModExportDialog {
                             replaces_mounted.join(", ")
                         ))
                         .small()
-                        .color(egui::Color32::from_rgb(210, 120, 90)),
+                        .color(replace_warning_text()),
                     );
                 }
                 ui.add_space(10.0);

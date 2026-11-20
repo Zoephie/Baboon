@@ -16,6 +16,8 @@ use crate::app::export::is_scenario_group;
 mod filter;
 mod folder_table;
 mod tree;
+mod search_folders;
+pub(in crate::app) use search_folders::{search_node_key, SearchFolders};
 mod navigation;
 pub(in crate::app) mod selection;
 mod flat;
@@ -283,6 +285,20 @@ pub(in crate::app) fn browser_loose_source(ui: &Ui) -> bool {
     ui.data(|data| data.get_temp(browser_loose_source_id()).unwrap_or(false))
 }
 
+/// The data folder of the kit being drawn, from its chosen layout, published
+/// beside its tags folder for the row menu's Open in VS Code.
+fn browser_data_root_id() -> egui::Id {
+    egui::Id::unique("browser_data_root")
+}
+
+pub(in crate::app) fn set_browser_data_root(ui: &Ui, data_root: Option<PathBuf>) {
+    ui.data_mut(|data| data.insert_temp(browser_data_root_id(), data_root));
+}
+
+pub(in crate::app) fn browser_data_root(ui: &Ui) -> Option<PathBuf> {
+    ui.data(|data| data.get_temp(browser_data_root_id())).flatten()
+}
+
 /// What the kit currently being drawn can launch a scenario in, published the
 /// same way and for the same reason as the modified set: the row menu offers
 /// Sapien and tag_test, and the tree's drawing functions have no other route to
@@ -307,36 +323,9 @@ pub(in crate::app) fn browser_scenario_launch(
     .unwrap_or_default()
 }
 
-/// Colour for a tag that this workspace created, with no counterpart in the
-/// game. Paired with a `+` marker wherever it is used, so the meaning does not
-/// rest on colour alone.
-pub(in crate::app) fn added_text() -> Color32 {
-    Color32::from_rgb(126, 186, 108)
-}
-
-/// Background wash behind the shipped side of a diff, and behind the edited
-/// side. Kept dark: the editor draws its own widgets on top, and a strong fill
-/// would fight them rather than frame them.
-pub(in crate::app) fn removed_wash() -> Color32 {
-    Color32::from_rgb(52, 30, 30)
-}
-
-pub(in crate::app) fn added_wash() -> Color32 {
-    Color32::from_rgb(28, 46, 32)
-}
-
-
-/// Colour for a value or element that is going away. Paired with a `-` marker,
-/// so red and green never carry the meaning by themselves.
-pub(in crate::app) fn removed_text() -> Color32 {
-    Color32::from_rgb(214, 106, 106)
-}
-
-/// Colour for a tag or folder holding edits that are not written into the game.
-/// The same goldenrod the workspace tab is tinted with.
-pub(in crate::app) fn modified_text() -> Color32 {
-    Color32::from_rgb(214, 168, 46)
-}
+pub(in crate::app) use crate::app::ui_kit::style::{
+    added_text, added_wash, modified_text, removed_text, removed_wash,
+};
 
 pub(in crate::app) mod panel;
 pub(in crate::app) use panel::{draw_folder_browser_pane, draw_kit_browser};
@@ -349,8 +338,8 @@ pub(in crate::app) mod thumbnail_library;
 pub(in crate::app) use thumbnail_library::*;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
-pub(in crate::app) mod keyword_chooser;
-pub(in crate::app) use keyword_chooser::KeywordChooser;
+pub(in crate::app) mod keyword_manager;
+pub(in crate::app) use keyword_manager::KeywordManager;
 
 /// The browser: a tag waiting to be revealed.
 pub(in crate::app) struct BrowserFeature {
@@ -374,7 +363,13 @@ pub(in crate::app) struct KitBrowser {
     pub(in crate::app) mode: BrowserMode,
     pub(in crate::app) sort: BrowserSort,
     pub(in crate::app) filter: String,
+    /// Keyword pills in the search box: each must be on a match exactly.
+    pub(in crate::app) keyword_terms: Vec<String>,
     pub(in crate::app) filter_cache: FilterCache,
+    /// Which of the search's result folders are open.
+    pub(in crate::app) search_folders: SearchFolders,
+    /// View → Expand All (true) or Collapse All (false), for the next draw.
+    pub(in crate::app) open_all: Option<bool>,
     /// What the search box matches: tag names, folder names, keywords.
     pub(in crate::app) search_scope: BrowserSearchScope,
     /// Docked folder browsers, keyed by their synthetic tag-tree pane key.
@@ -459,8 +454,23 @@ pub(in crate::app) enum BrowserCommand {
         key: String,
         keyword: String,
     },
-    /// List the active kit's tags carrying a keyword.
-    ShowTagsWithKeyword(String),
+    /// Show the active kit's tags and folders carrying a keyword.
+    SearchKeyword(String),
+    /// Manage Keywords: move the keyword at `from` to `to` in the order.
+    MoveKeyword { from: usize, to: usize },
+    /// Manage Keywords: a keyword's colour; `None` is the neutral pill.
+    SetKeywordColour {
+        keyword: String,
+        colour: Option<crate::core::keyword_catalog::KeywordColour>,
+    },
+    /// Manage Keywords' Add New Keyword.
+    NewKeyword(String),
+    /// Manage Keywords' Rename; asks first when it merges two keywords.
+    RenameKeyword { old: String, new: String },
+    /// Manage Keywords' Delete; asks first when anything carries it.
+    DeleteKeyword(String),
+    /// A confirmed merge (`new`) or delete (`None`), in every game.
+    ChangeKeywordEverywhere { old: String, new: Option<String> },
     /// Load the folders at `paths` in one of `kit`'s lazy loose-folder trees,
     /// which a browser drew open before they had loaded.
     LoadFolders {
@@ -492,9 +502,28 @@ impl Baboon {
             BrowserCommand::AddKeyword { kit, key, keyword } => {
                 if let Some(index) = self.model.kit_index(kit) {
                     self.model.kits[index].keywords.add(&key, &keyword);
+                    // Spelled as typed in the shared list, if it's new.
+                    self.model.keyword_catalog.ensure(&keyword);
                 }
             }
-            BrowserCommand::ShowTagsWithKeyword(keyword) => self.show_tags_with_keyword(&keyword),
+            BrowserCommand::SearchKeyword(keyword) => self.search_keyword(&keyword, ctx),
+            BrowserCommand::MoveKeyword { from, to } => self.model.keyword_catalog.move_to(from, to),
+            BrowserCommand::SetKeywordColour { keyword, colour } => {
+                self.model.keyword_catalog.set_colour(&keyword, colour);
+            }
+            BrowserCommand::NewKeyword(name) => {
+                if !self.model.keyword_catalog.ensure(&name) {
+                    self.model.status = format!(
+                        "\u{201c}{}\u{201d} is already a keyword",
+                        self.model.keyword_catalog.display(&name)
+                    );
+                }
+            }
+            BrowserCommand::RenameKeyword { old, new } => self.rename_keyword(&old, &new),
+            BrowserCommand::DeleteKeyword(keyword) => self.delete_keyword(&keyword),
+            BrowserCommand::ChangeKeywordEverywhere { old, new } => {
+                self.change_keyword_everywhere(&old, new.as_deref());
+            }
             BrowserCommand::LoadFolders { kit, tree, paths } => self.load_browser_folders(kit, tree, &paths),
             BrowserCommand::ScanAllEntries { kit } => {
                 if let Some(index) = self.model.kit_index(kit) {

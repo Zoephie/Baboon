@@ -68,6 +68,31 @@ fn pane_header_input_stroke(ui: &Ui, hovered: bool, focused: bool) -> Stroke {
 /// The shared browser search field. Its icon lives inside the 24-point pill so
 /// the compact sidebar and a wide folder pane use exactly the same geometry.
 pub(in crate::app) fn browser_search_field(ui: &mut Ui, value: &mut String, hint: &str) -> egui::Response {
+    browser_search_field_with_keywords(ui, value, &mut Vec::new(), hint, None, false)
+}
+
+/// What a search box reads to suggest keywords: the kit's keywords and the
+/// shared list's spelling, colours and order.
+pub(in crate::app) type KeywordReads<'a> = (
+    &'a crate::core::keywords::KeywordStore,
+    &'a crate::core::keyword_catalog::KeywordCatalog,
+);
+
+/// [`browser_search_field`] with keyword pills: `pills` show inside the box
+/// ahead of the text, each with its own ×, and Backspace in an empty box
+/// takes off the last. `keywords` gives the pills their spelling and colour;
+/// with `suggest` too (the Keywords scope is on), the word being typed
+/// suggests matching keywords, and picking one makes it a pill.
+pub(in crate::app) fn browser_search_field_with_keywords(
+    ui: &mut Ui,
+    value: &mut String,
+    pills: &mut Vec<String>,
+    hint: &str,
+    keywords: Option<KeywordReads<'_>>,
+    suggest: bool,
+) -> egui::Response {
+    const PILL_HEIGHT: f32 = 18.0;
+    const PILL_REMOVE: f32 = 16.0;
     let width = ui.available_width().max(BROWSER_SEARCH_HEIGHT);
     let (rect, background_response) =
         ui.allocate_exact_size(Vec2::new(width, BROWSER_SEARCH_HEIGHT), Sense::hover());
@@ -81,7 +106,8 @@ pub(in crate::app) fn browser_search_field(ui: &mut Ui, value: &mut String, hint
         ),
         Vec2::splat(BROWSER_SEARCH_ICON_SIZE),
     );
-    paint_button_icon_at(ui, ButtonIcon::SearchBar, icon_rect, text_dark());
+    // Muted as the hint text is.
+    paint_button_icon_at(ui, ButtonIcon::SearchBar, icon_rect, text_dark().gamma_multiply(0.5));
     let icon_response = ui.interact(
         icon_rect,
         background_response.id.with("search_icon"),
@@ -96,13 +122,76 @@ pub(in crate::app) fn browser_search_field(ui: &mut Ui, value: &mut String, hint
         Vec2::splat(BROWSER_SEARCH_ICON_SIZE),
     );
 
+    let edit_id = background_response.id.with("search_text");
+    // Backspace in an empty box takes off the last pill, before the text
+    // edit sees the key.
+    let edit_focused = ui.memory(|memory| memory.has_focus(edit_id));
+    let mut pills_changed = false;
+    if edit_focused
+        && value.is_empty()
+        && !pills.is_empty()
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace))
+    {
+        pills.pop();
+        pills_changed = true;
+    }
+    let mut x = icon_rect.right() + BROWSER_SEARCH_ICON_TEXT_GAP;
+    let pill_font = FontId::proportional(12.0);
+    let mut removed = None;
+    for (index, pill) in pills.iter().enumerate() {
+        let (label, colour) = match keywords {
+            Some((_, catalog)) => (catalog.display(pill).to_owned(), catalog.colour(pill)),
+            None => (pill.clone(), None),
+        };
+        let pill_width = crate::app::ui_kit::keyword_pill_width(
+            ui.painter(),
+            &label,
+            &pill_font,
+            PILL_REMOVE + 2.0,
+        );
+        // Keep room for some text after the pills.
+        if x + pill_width > clear_rect.left() - 60.0 {
+            break;
+        }
+        let pill_rect = egui::Rect::from_min_size(
+            egui::pos2(x, rect.center().y - PILL_HEIGHT / 2.0),
+            Vec2::new(pill_width, PILL_HEIGHT),
+        );
+        crate::app::ui_kit::paint_keyword_pill(ui.painter(), pill_rect, &label, &pill_font, colour);
+        let remove_rect = egui::Rect::from_center_size(
+            egui::pos2(pill_rect.right() - PILL_REMOVE / 2.0 - 1.0, pill_rect.center().y),
+            Vec2::splat(14.0),
+        );
+        let remove = ui
+            .interact(remove_rect, background_response.id.with(("remove_pill", index)), Sense::click())
+            .on_hover_text("Remove keyword from search");
+        crate::app::ui_kit::paint_close_control(ui, &remove);
+        if remove.clicked() {
+            removed = Some(index);
+        }
+        x = pill_rect.right() + 4.0;
+    }
+    if let Some(index) = removed {
+        pills.remove(index);
+        pills_changed = true;
+    }
     let edit_rect = egui::Rect::from_min_max(
-        egui::pos2(icon_rect.right() + BROWSER_SEARCH_ICON_TEXT_GAP, rect.top()),
+        egui::pos2(x, rect.top()),
         egui::pos2(clear_rect.left() - BROWSER_SEARCH_ICON_TEXT_GAP, rect.bottom()),
     );
+    let hint = if pills.is_empty() { hint } else { "" };
+    // While suggestions show, Tab picks one rather than moving on.
+    let suggesting = suggest
+        && keywords.is_some()
+        && ui.data(|data| {
+            data.get_temp::<egui::Rect>(edit_id.with("keyword_suggestions").with("suggestions"))
+                .is_some()
+        });
     let edit_response = ui.put(
         edit_rect,
         crate::app::ui_kit::singleline_text_edit(value)
+            .id(edit_id)
+            .lock_focus(suggesting)
             .hint_text(placeholder_text(hint))
             .text_color(text_dark())
             .frame(egui::Frame::NONE)
@@ -116,15 +205,74 @@ pub(in crate::app) fn browser_search_field(ui: &mut Ui, value: &mut String, hint
     let mut response = background_response
         .union(icon_response)
         .union(edit_response.clone());
-    if !value.is_empty() {
+    if pills_changed {
+        edit_response.request_focus();
+        response.mark_changed();
+    }
+    // The word being typed suggests keywords; picking one makes it a pill.
+    if let Some((store, catalog)) = keywords.filter(|_| suggest) {
+        // The longest run of typed words, at the end, that some keyword
+        // matches: "to be d" can be one keyword, and "elite wi" text then
+        // a keyword.
+        let starts = std::iter::once(0).chain(
+            value
+                .char_indices()
+                .filter(|(_, c)| c.is_whitespace())
+                .map(|(at, c)| at + c.len_utf8()),
+        );
+        let mut start = value.len();
+        for candidate in starts {
+            let fragment = value[candidate..].trim();
+            if !fragment.is_empty()
+                && !keyword_suggestions(store, catalog, fragment, pills).is_empty()
+            {
+                start = candidate;
+                break;
+            }
+        }
+        let mut word = value[start..].trim().to_owned();
+        if !word.is_empty() && !word.starts_with('^') && !word.contains('|') {
+            let typed = word.clone();
+            let picked = draw_keyword_suggestions(
+                ui,
+                edit_id.with("keyword_suggestions"),
+                &edit_response,
+                rect,
+                store,
+                catalog,
+                pills,
+                &mut word,
+            );
+            let entered = edit_response.lost_focus()
+                && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            // Tab fills the word in: in a search box, that picks it.
+            let keyword = match picked {
+                KeywordPick::Clicked(keyword) => Some(keyword),
+                KeywordPick::Highlighted(keyword) if entered => Some(keyword),
+                _ if word != typed => Some(word.clone()),
+                _ => None,
+            };
+            if let Some(keyword) = keyword {
+                value.truncate(start);
+                let kept = value.trim_end().len();
+                value.truncate(kept);
+                if !pills.contains(&keyword) {
+                    pills.push(keyword);
+                }
+                edit_response.request_focus();
+                response.mark_changed();
+            }
+        }
+    }
+    if !value.is_empty() || !pills.is_empty() {
         let clear = search_clear_control_at(
             ui,
             clear_rect,
             edit_response.id.with("clear_search"),
-            BROWSER_SEARCH_ICON_SIZE * 0.5,
         );
         if clear.clicked() {
             value.clear();
+            pills.clear();
             edit_response.request_focus();
             response.mark_changed();
         }
@@ -169,7 +317,7 @@ pub(in crate::app) fn paint_connected_tab(ui: &Ui, rect: egui::Rect, fill: Color
             }
         }
         points.push(r.right_bottom());
-        let border = if focused { focused_tab_border(ui.visuals().dark_mode) } else { grid_line() };
+        let border = if focused { focused_tab_border_in(ui) } else { grid_line() };
         ui.painter().add(egui::Shape::line(points, Stroke::new(1.0, border)));
     }
 }
@@ -178,7 +326,7 @@ pub(in crate::app) fn paint_connected_tab(ui: &Ui, rect: egui::Rect, fill: Color
 pub(in crate::app) fn paint_page_outline(
     ui: &Ui, rect: egui::Rect, corners: egui::CornerRadius, tab: Option<&egui::Rect>, focused: bool,
 ) {
-    let stroke = Stroke::new(1.0, if focused { focused_tab_border(ui.visuals().dark_mode) } else { grid_line() });
+    let stroke = Stroke::new(1.0, if focused { focused_tab_border_in(ui) } else { grid_line() });
     let Some(tab) = tab else {
         ui.painter().rect_stroke(rect, corners, stroke, egui::StrokeKind::Inside);
         return;
@@ -235,7 +383,7 @@ pub(in crate::app) fn paint_kit_split_grips(ui: &Ui, tree: &egui_tiles::Tree<Kit
                 painter.vline(center.x, toolbar_bottom..=parent.top(), Stroke::new(2.0, divider_color));
             }
             let color = if hovered {
-                if is_dark_mode() { Color32::WHITE } else { Color32::BLACK }
+                text_strong()
             } else { subtle_dark() };
             ui.painter().rect_filled(egui::Rect::from_center_size(center, size), 2.0, color);
         }
@@ -308,11 +456,7 @@ pub(in crate::app) fn pane_header_breadcrumbs(
             ui.painter().rect_filled(
                 rect,
                 egui::CornerRadius::same(4),
-                if is_dark_mode() {
-                    Color32::from_white_alpha(26)
-                } else {
-                    Color32::from_black_alpha(26)
-                },
+                menu_row_hover(),
             );
         }
         let text_position = egui::Align2::CENTER_CENTER
@@ -351,6 +495,7 @@ pub(in crate::app) fn navigate_folder_browser(pane: &mut FolderBrowserState, pat
     pane.rel_path = path;
     pane.label = label;
     pane.filter.clear();
+    pane.keyword_terms.clear();
     pane.cached_generation = u64::MAX;
     pane.cached_source_len = usize::MAX;
     pane.tree = TagTree::default();
@@ -545,11 +690,11 @@ pub(in crate::app) fn editing_kit_menu_row_with_read_only(
 pub(in crate::app) fn terminal_line_color(severity: TerminalLineSeverity) -> Color32 {
     match severity {
         TerminalLineSeverity::Normal | TerminalLineSeverity::Summary => {
-            Color32::from_rgb(232, 232, 228)
+            terminal_text()
         }
-        TerminalLineSeverity::Warning => Color32::from_rgb(238, 196, 91),
-        TerminalLineSeverity::Error => Color32::from_rgb(244, 105, 105),
-        TerminalLineSeverity::Success => Color32::from_rgb(123, 184, 137),
+        TerminalLineSeverity::Warning => terminal_warning_text(),
+        TerminalLineSeverity::Error => terminal_error_text(),
+        TerminalLineSeverity::Success => terminal_success_text(),
     }
 }
 
@@ -564,16 +709,8 @@ pub(in crate::app) fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction:
     let size = egui::vec2(width, 18.0);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let radius = 6.0;
-    let bg = if is_dark_mode() {
-        Color32::from_rgb(31, 31, 30)
-    } else {
-        Color32::from_rgb(215, 215, 210)
-    };
-    let fill = if is_dark_mode() {
-        Color32::from_rgb(69, 111, 132)
-    } else {
-        Color32::from_rgb(91, 146, 172)
-    };
+    let bg = progress_track();
+    let fill = progress_fill();
     ui.painter().rect_filled(rect, radius, bg);
     if let Some(fraction) = fraction {
         let fill_width = rect.width() * fraction.clamp(0.0, 1.0);
@@ -654,9 +791,17 @@ pub(in crate::app) fn draw_kit_banner_tile(
         text_width,
         TextStyle::Body,
     );
-    let wrappable_path = sidebar_wrappable_path_label(path_label);
+    // Whole folders move between rows as the pane resizes, each row after
+    // the first starting at a separator; only a folder wider than the row
+    // breaks inside itself.
+    let path_font = TextStyle::Small.resolve(ui.style());
+    let path_rows = ui.fonts_mut(|fonts| {
+        path_rows_at_separators(path_label, text_width, |text| {
+            fonts.layout_no_wrap(text.to_owned(), path_font.clone(), Color32::WHITE).size().x
+        })
+    });
     let mut path_job = egui::text::LayoutJob::default();
-    RichText::new(wrappable_path).color(subtle_dark()).small().append_to(
+    RichText::new(path_rows).color(subtle_dark()).small().append_to(
         &mut path_job, ui.style(), egui::FontSelection::Style(TextStyle::Small), egui::Align::Min,
     );
     path_job.wrap.max_width = text_width;
@@ -691,15 +836,36 @@ pub(in crate::app) fn draw_kit_banner_tile(
     );
 }
 
-pub(in crate::app) fn sidebar_wrappable_path_label(path: &str) -> String {
-    let mut wrappable = String::with_capacity(path.len());
-    for character in path.chars() {
-        wrappable.push(character);
-        if matches!(character, '\\' | '/') {
-            wrappable.push('\u{200b}');
+/// `path` in rows no wider than `width`, as `measure` sizes text: each row
+/// after the first starts at a `\` or `/`, so folder names stay whole.
+pub(in crate::app) fn path_rows_at_separators(
+    path: &str,
+    width: f32,
+    mut measure: impl FnMut(&str) -> f32,
+) -> String {
+    let mut segments = Vec::new();
+    let mut start = 0;
+    for (at, character) in path.char_indices() {
+        if matches!(character, '\\' | '/') && at > start {
+            segments.push(&path[start..at]);
+            start = at;
         }
     }
-    wrappable
+    segments.push(&path[start..]);
+    let mut rows = String::with_capacity(path.len() + 4);
+    let mut row = String::new();
+    for segment in segments {
+        let joined = format!("{row}{segment}");
+        if row.is_empty() || measure(&joined) <= width {
+            row = joined;
+        } else {
+            rows.push_str(&row);
+            rows.push('\n');
+            row = segment.to_owned();
+        }
+    }
+    rows.push_str(&row);
+    rows
 }
 
 pub(in crate::app) fn sidebar_source_path_label(source: &TagSource) -> String {
@@ -762,42 +928,30 @@ fn scenario_launcher_button(
     )
 }
 
-fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
-    const TEXT_PADDING: f32 = 8.0;
+fn keyword_pill(
+    ui: &mut Ui,
+    tag_key: &str,
+    keyword: &str,
+    catalog: &crate::core::keyword_catalog::KeywordCatalog,
+) -> bool {
     const REMOVE_WIDTH: f32 = 20.0;
     let font_id = egui::TextStyle::Button.resolve(ui.style());
-    let galley = ui
-        .painter()
-        .layout_no_wrap(keyword.to_owned(), font_id, text_dark());
-    let width = TEXT_PADDING + galley.size().x + REMOVE_WIDTH + 4.0;
+    let label = catalog.display(keyword);
+    let colour = catalog.colour(keyword);
+    let width = crate::app::ui_kit::keyword_pill_width(
+        ui.painter(),
+        label,
+        &font_id,
+        REMOVE_WIDTH + 4.0,
+    );
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, BUTTON_HEIGHT), Sense::hover());
-    let background = editor_bg();
-    let target = if is_dark_mode() {
-        Color32::WHITE
-    } else {
-        Color32::BLACK
-    };
-    let blend =
-        |base: u8, overlay: u8| (base as f32 + (overlay as f32 - base as f32) * 0.05).round() as u8;
-    let fill = Color32::from_rgb(
-        blend(background.r(), target.r()),
-        blend(background.g(), target.g()),
-        blend(background.b(), target.b()),
-    );
-    ui.painter()
-        .rect_filled(rect, egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8), fill);
-    let text_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + TEXT_PADDING, rect.top()),
-        egui::pos2(rect.right() - REMOVE_WIDTH, rect.bottom()),
-    );
-    let text_pos = egui::Align2::LEFT_CENTER
-        .align_size_within_rect(galley.size(), text_rect)
-        .min;
-    ui.painter().galley(text_pos, galley, text_dark());
+    crate::app::ui_kit::paint_keyword_pill(ui.painter(), rect, label, &font_id, colour);
 
-    let remove_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.right() - REMOVE_WIDTH, rect.top()),
-        rect.right_bottom(),
+    // The tabs' close button, shown while the pointer is on the keyword;
+    // only the button itself removes it.
+    let remove_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - REMOVE_WIDTH / 2.0 - 2.0, rect.center().y),
+        Vec2::splat(16.0),
     );
     let remove = ui
         .interact(
@@ -806,12 +960,9 @@ fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
             Sense::click(),
         )
         .on_hover_text("Remove keyword");
-    let stroke = ui.style().interact(&remove).fg_stroke;
-    let cross = egui::Rect::from_center_size(remove_rect.center(), Vec2::splat(7.0));
-    ui.painter()
-        .line_segment([cross.left_top(), cross.right_bottom()], stroke);
-    ui.painter()
-        .line_segment([cross.right_top(), cross.left_bottom()], stroke);
+    if ui.rect_contains_pointer(rect) || remove.has_focus() {
+        crate::app::ui_kit::paint_close_control(ui, &remove);
+    }
     remove.clicked()
 }
 
@@ -899,10 +1050,11 @@ pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, 
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         ui.label(RichText::new("Keywords:").color(subtle_dark()));
-        let existing = cx.model.kits[kit_index].keywords.keywords(tag_key).to_vec();
+        let catalog = &cx.model.keyword_catalog;
+        let existing = catalog.ordered(cx.model.kits[kit_index].keywords.keywords(tag_key));
         let mut remove: Option<String> = None;
         for keyword in &existing {
-            if keyword_pill(ui, tag_key, keyword) {
+            if keyword_pill(ui, tag_key, keyword, catalog) {
                 remove = Some(keyword.clone());
             }
         }
@@ -919,6 +1071,8 @@ pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, 
         let mut draft = ui
             .data_mut(|data| data.get_temp::<String>(draft_id))
             .unwrap_or_default();
+        let suggesting =
+            ui.data(|data| data.get_temp::<egui::Rect>(draft_id.with("suggestions")).is_some());
         let keyword_field = Frame::NONE
             .fill(browser_search_bg())
             .corner_radius(egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8))
@@ -930,6 +1084,9 @@ pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, 
                 ui.horizontal(|ui| {
                     let resp = ui.add(
                         crate::app::ui_kit::singleline_text_edit(&mut draft)
+                            // While suggestions show, Tab fills one in rather
+                            // than moving on.
+                            .lock_focus(suggesting)
                             .hint_text(placeholder_text("add keyword"))
                             .desired_width(120.0)
                             .frame(egui::Frame::NONE),
@@ -966,16 +1123,197 @@ pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, 
             egui::StrokeKind::Middle,
         );
         let submitted = lost_focus_once(&resp) && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        if (add_clicked || submitted) && !draft.trim().is_empty() {
+        let picked = draw_keyword_suggestions(
+            ui,
+            draft_id,
+            &resp,
+            keyword_field.response.rect,
+            &cx.model.kits[kit_index].keywords,
+            &cx.model.keyword_catalog,
+            &existing,
+            &mut draft,
+        );
+        // Enter takes the highlighted suggestion, if there is one.
+        let keyword = match picked {
+            KeywordPick::Clicked(keyword) => Some(keyword),
+            KeywordPick::Highlighted(keyword) if submitted => Some(keyword),
+            _ if add_clicked || submitted => Some(draft.clone()),
+            _ => None,
+        };
+        if let Some(keyword) = keyword.filter(|keyword| !keyword.trim().is_empty()) {
             cx.send(BrowserCommand::AddKeyword {
                 kit,
                 key: tag_key.to_owned(),
-                keyword: draft.clone(),
+                keyword,
             });
             draft.clear();
         }
         ui.data_mut(|data| data.insert_temp(draft_id, draft));
     });
+}
+
+/// Keywords matching `typed`, leaving out `existing`: those starting with it
+/// first, then those containing it, each in the user's order. Keywords used
+/// only in other games are offered too, at a count of 0.
+pub(in crate::app) fn keyword_suggestions(
+    keywords: &crate::core::keywords::KeywordStore,
+    catalog: &crate::core::keyword_catalog::KeywordCatalog,
+    typed: &str,
+    existing: &[String],
+) -> Vec<(String, usize)> {
+    let elsewhere: Vec<String> = catalog.entries().iter().map(|entry| entry.key()).collect();
+    let mut found = keywords.suggestions_with(typed, existing, usize::MAX, &elsewhere);
+    let typed = typed.trim().to_ascii_lowercase();
+    found.sort_by_key(|(keyword, _)| (!keyword.starts_with(&typed), catalog.rank(keyword)));
+    found.truncate(8);
+    found
+}
+
+/// What the keyword suggestions gave this frame.
+enum KeywordPick {
+    None,
+    /// Picked with the pointer: added at once.
+    Clicked(String),
+    /// Highlighted with the arrow keys: Enter adds it instead of the draft.
+    Highlighted(String),
+}
+
+/// Keywords already in use that match what is being typed, listed under the
+/// keyword field while it has the keyboard, so a tag gets "brute" rather
+/// than a new "brutes". Up and Down highlight one, Tab fills it in, and a
+/// click adds it.
+fn draw_keyword_suggestions(
+    ui: &mut Ui,
+    draft_id: egui::Id,
+    field: &egui::Response,
+    field_rect: egui::Rect,
+    keywords: &crate::core::keywords::KeywordStore,
+    catalog: &crate::core::keyword_catalog::KeywordCatalog,
+    existing: &[String],
+    draft: &mut String,
+) -> KeywordPick {
+    let highlight_id = draft_id.with("suggestion_highlight");
+    let list_id = draft_id.with("suggestions");
+    // The list's rect last frame: a press on it takes the field's focus
+    // before the click lands, so the list stays up for that press.
+    let last_rect = ui.data(|data| data.get_temp::<egui::Rect>(list_id));
+    let pressing_list = last_rect.is_some_and(|rect| {
+        ui.input(|input| {
+            input.pointer.interact_pos().is_some_and(|pos| rect.contains(pos))
+                && (input.pointer.any_down() || input.pointer.any_released())
+        })
+    });
+    let entered = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    if !field.has_focus() && !pressing_list && !entered {
+        ui.data_mut(|data| {
+            data.remove::<egui::Rect>(list_id);
+            data.remove::<usize>(highlight_id);
+        });
+        return KeywordPick::None;
+    }
+    let suggestions = keyword_suggestions(keywords, catalog, draft, existing);
+    let mut highlight = ui
+        .data(|data| data.get_temp::<usize>(highlight_id))
+        .filter(|index| *index < suggestions.len());
+    if entered {
+        ui.data_mut(|data| {
+            data.remove::<egui::Rect>(list_id);
+            data.remove::<usize>(highlight_id);
+        });
+        return highlight.map_or(KeywordPick::None, |index| {
+            KeywordPick::Highlighted(suggestions[index].0.clone())
+        });
+    }
+    if suggestions.is_empty() {
+        ui.data_mut(|data| data.remove::<egui::Rect>(list_id));
+        return KeywordPick::None;
+    }
+    if field.has_focus() {
+        // Tab completes only once something is typed: Tab into an empty
+        // field just arrives there.
+        let typed = !draft.trim().is_empty();
+        let (down, up, tab) = ui.input_mut(|input| {
+            (
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                typed && input.consume_key(egui::Modifiers::NONE, egui::Key::Tab),
+            )
+        });
+        let last = suggestions.len() - 1;
+        if down {
+            highlight = Some(highlight.map_or(0, |index| (index + 1).min(last)));
+        }
+        if up {
+            highlight = highlight.and_then(|index| index.checked_sub(1));
+        }
+        if tab {
+            // Fill in the highlighted one, or the best match.
+            *draft = suggestions[highlight.unwrap_or(0)].0.clone();
+            highlight = None;
+            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), field.id) {
+                let end = egui::text::CCursor::new(draft.chars().count());
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
+                state.store(ui.ctx(), field.id);
+            }
+        }
+    }
+    let mut clicked = None;
+    let area = egui::Area::new(list_id)
+        .order(egui::Order::Foreground)
+        .fixed_pos(field_rect.left_bottom() + Vec2::new(-0.5, 4.0))
+        .show(ui.ctx(), |ui| {
+            let frame = Frame::popup(ui.style());
+            // Exactly as wide as the field it hangs from, border included.
+            let inner_width = (field_rect.width() - frame.total_margin().sum().x + 1.5).max(40.0);
+            frame.show(ui, |ui| {
+                ui.set_width(inner_width);
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let font = egui::TextStyle::Button.resolve(ui.style());
+                for (index, (keyword, count)) in suggestions.iter().enumerate() {
+                    let row = ui
+                        .add(
+                            egui::Button::selectable(highlight == Some(index), "")
+                                .right_text(RichText::new(count.to_string()).color(subtle_dark()))
+                                .min_size(Vec2::new(ui.available_width(), 24.0)),
+                        )
+                        .on_hover_text(format!(
+                            "Used on {count} tag{} or folder{} in this kit",
+                            if *count == 1 { "" } else { "s" },
+                            if *count == 1 { "" } else { "s" }
+                        ));
+                    let label = catalog.display(keyword);
+                    let colour = catalog.colour(keyword);
+                    let width = crate::app::ui_kit::keyword_pill_width(ui.painter(), label, &font, 0.0);
+                    let pill = egui::Rect::from_min_size(
+                        egui::pos2(row.rect.left() + 4.0, row.rect.center().y - 9.0),
+                        Vec2::new(width, 18.0),
+                    );
+                    crate::app::ui_kit::paint_keyword_pill(ui.painter(), pill, label, &font, colour);
+                    if row.clicked() {
+                        clicked = Some(keyword.clone());
+                    }
+                }
+            });
+        });
+    ui.data_mut(|data| {
+        data.insert_temp(list_id, area.response.rect);
+        match highlight {
+            Some(index) => {
+                data.insert_temp(highlight_id, index);
+            }
+            None => data.remove::<usize>(highlight_id),
+        }
+    });
+    match clicked {
+        Some(keyword) => {
+            // Back to the field, for the next keyword.
+            field.request_focus();
+            KeywordPick::Clicked(keyword)
+        }
+        None => highlight.map_or(KeywordPick::None, |index| {
+            KeywordPick::Highlighted(suggestions[index].0.clone())
+        }),
+    }
 }
 
 /// The scenario header's launch buttons. `kit_index` is the workspace whose
@@ -1165,7 +1503,7 @@ mod tests {
                 .unwrap();
             let location = text
                 .iter()
-                .find(|text| text.galley.job.text == sidebar_wrappable_path_label(path))
+                .find(|text| text.galley.job.text.replace('\n', "") == path)
                 .unwrap();
             assert_eq!(heading.galley.rows.len(), 1);
             assert!(location.galley.rows.len() <= 3);
@@ -1174,6 +1512,20 @@ mod tests {
                 assert!(location.galley.elided && heading.galley.elided);
             }
         }
+    }
+
+    /// A banner path breaks before a separator, never inside a folder name,
+    /// unless the folder alone is wider than the row.
+    #[test]
+    fn banner_paths_break_before_separators() {
+        let by_chars = |text: &str| text.chars().count() as f32;
+        let path = r"C:\Program Files (x86)\Steam\steamapps\common\H2R";
+        assert_eq!(
+            path_rows_at_separators(path, 24.0, by_chars),
+            "C:\\Program Files (x86)\n\\Steam\\steamapps\\common\n\\H2R"
+        );
+        assert_eq!(path_rows_at_separators(path, 200.0, by_chars), path);
+        assert_eq!(path_rows_at_separators("/a/b", 1.0, by_chars), "/a\n/b");
     }
 
     #[test]
@@ -1730,8 +2082,12 @@ mod tests {
             },
             |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    let response = ui
-                        .add(egui::Slider::new(pending, MIN_UI_SCALE..=MAX_UI_SCALE).show_value(false));
+                    let response = plain_railed_slider(
+                        ui,
+                        egui::Slider::new(pending, MIN_UI_SCALE..=MAX_UI_SCALE).show_value(false),
+                        true,
+                        editor_bg(),
+                    );
                     rect = response.rect;
                     if crate::app::shell::first_run::commit_ui_scale_now(&response, *pending, *live) {
                         *live = *pending;
@@ -2054,6 +2410,18 @@ mod tests {
         pub(super) painted_rects: Vec<(String, egui::Rect)>,
         /// What the last frame asked the platform to do.
         pub(super) commands: Vec<egui::OutputCommand>,
+        /// Every texture upload since the harness began, in order, and the
+        /// last frame's shapes: what [`Harness::shoot`] paints. `None`
+        /// keeps neither.
+        pub(super) recording: Option<Recording>,
+    }
+
+    /// What a frame needs to be painted after the fact.
+    #[derive(Default)]
+    pub(super) struct Recording {
+        textures: Vec<(egui::TextureId, egui::epaint::ImageDelta)>,
+        shapes: Vec<egui::epaint::ClippedShape>,
+        pixels_per_point: f32,
     }
 
     impl Harness {
@@ -2087,7 +2455,15 @@ mod tests {
                 painted: Vec::new(),
                 painted_rects: Vec::new(),
                 commands: Vec::new(),
+                recording: None,
             }
+        }
+
+        /// A harness that keeps what [`Harness::shoot`] needs.
+        pub(super) fn recording() -> Self {
+            let mut harness = Self::new();
+            harness.recording = Some(Recording::default());
+            harness
         }
 
         /// Run one whole application frame with `events`, timed.
@@ -2108,7 +2484,15 @@ mod tests {
             Counters::reset();
             let app = &mut self.app;
             let started = Instant::now();
-            let output = crate::app::run_ui_test(&self.ctx, input, |ui| app.run_frame(ui));
+            let mut output = self.ctx.run_ui(input, |ui| app.run_frame(ui));
+            if let Some(recording) = &mut self.recording {
+                for (id, deltas) in output.textures_delta.set.drain() {
+                    recording.textures.extend(deltas.into_iter().map(|delta| (id, delta)));
+                }
+                recording.shapes = output.shapes.clone();
+                recording.pixels_per_point = output.pixels_per_point;
+            }
+            output.textures_delta.clear();
             let run = started.elapsed();
             let counters = Counters::read();
             let started = Instant::now();
@@ -3542,7 +3926,7 @@ mod tests {
                 |h| {
                     fixture::open_document(&mut h.app, "sound\\smoke.sound", sound_tag());
                 },
-                &["smoke.sound", "2 permutations"],
+                &["smoke.sound", "Sound Player", "(2)"],
             ),
             case(
                 "pane_bitmap",
@@ -4246,10 +4630,11 @@ mod tests {
                             action: crate::app::tag_ops::folder_merge_review::ItemsAction::Delete,
                             selected: vec![("objects/props".into(), RenameIcon::Folder), ("smoke.scenario".into(), RenameIcon::Tag(None))],
                             game: None,
+                            covered: Some("\u{201c}crate.scenery\u{201d} moves with its folder \u{201c}props\u{201d}, which is also selected.".into()),
                         }),
                     });
                 },
-                &["Delete Selected Items?", "2 Items to Delete", "Checking for Missing References…", "Checking references", "Delete"],
+                &["Delete Selected Items?", "2 Items to Delete", "Checking for Missing References…", "Checking references", "Delete", "which is also selected"],
             ),
             case(
                 "bulk_move_review",
@@ -4698,12 +5083,28 @@ mod tests {
                 &["Export Mod", "Smoke_P.utoc"],
             ),
             case(
-                "keyword_chooser",
-                &["dialog:KeywordChooser"],
-                &["browser/keyword_chooser.rs"],
+                "keyword_manager",
+                &["dialog:KeywordManager"],
+                &["browser/keyword_manager.rs"],
                 memory_kit,
-                |h| h.app.dialogs.open(KeywordChooser),
-                &["Keywords"],
+                |h| h.app.dialogs.open(KeywordManager::new()),
+                &["Manage Keywords", "Add New Keyword"],
+            ),
+            case(
+                "keyword_change_confirm",
+                &["dialog:KeywordChangeConfirm"],
+                &["browser/keyword_manager.rs"],
+                memory_kit,
+                |h| {
+                    h.app.dialogs.open(crate::app::browser::keyword_manager::KeywordChangeConfirm {
+                        old: "wip".to_owned(),
+                        old_name: "WIP".to_owned(),
+                        into: None,
+                        here: 1,
+                        everywhere: 3,
+                    })
+                },
+                &["Delete Keyword?", "All your editing kits", "3 tags and folders", "This can't be undone."],
             ),
             case(
                 "layout_diff",
@@ -5386,27 +5787,30 @@ mod tests {
         let refresh = rect_of(&h, "Refresh Model");
         assert_eq!(refresh.len(), 1, "{:?}", h.painted);
         let refresh = refresh[0];
-        let camera = rect_of(&h, "Camera")[0];
+        // The Shading menu, labelled with its choice.
+        let shading = rect_of(&h, "Textured")[0];
         let setup = rect_of(&h, "Permutations")[0];
         // The card's title, under the page's tab of the same name.
         let title = rect_of(&h, "Model Preview")
             .into_iter()
             .max_by(|a, b| a.top().total_cmp(&b.top()))
             .unwrap();
-        assert!(refresh.right() < camera.left(), "refresh {refresh:?}, camera {camera:?}");
+        assert!(refresh.right() < shading.left(), "refresh {refresh:?}, shading {shading:?}");
         assert!(refresh.right() < setup.left(), "in the sidebar: {refresh:?}");
-        // The sidebar's first card starts level with the viewport's card.
+        // The sidebar's panel starts level with the viewport's card, and
+        // its first card inside it, past its border and padding.
+        let inset = crate::app::model_preview::SETUP_PANEL_PADDING + 1.0;
         assert!(
-            (setup.center().y - title.center().y).abs() < 1.0,
+            (setup.center().y - title.center().y - inset).abs() < 1.0,
             "first card {setup:?}, viewport title {title:?}"
         );
-        // Its cards stop short of the sidebar's right edge by the scroll
-        // bar's width: the rightmost control on the card's title row is its
+        // Its cards stop short of the sidebar's right edge by the same
+        // border and padding as at the left; the scroll bar floats over that
+        // padding. The rightmost control on the card's title row is its
         // Reset. The sidebar starts 36 points left of the card's title (8 of
-        // padding, a 24-point toggle and a 4-point gap).
-        let sidebar_right = setup.left() - 36.0 + h.app.model.prefs.model_setup_width;
-        let scroll = h.ctx.global_style().spacing.scroll;
-        let gutter = scroll.bar_width + scroll.bar_inner_margin;
+        // padding, a 24-point toggle and a 4-point gap), and the panel's
+        // border and padding before that.
+        let sidebar_right = setup.left() - 36.0 - inset + h.app.model.prefs.model_setup_width;
         let reset = h.ctx.viewport(|viewport| {
             viewport
                 .prev_pass
@@ -5424,19 +5828,82 @@ mod tests {
                 .expect("the card's Reset")
         });
         assert!(
-            reset.right() <= sidebar_right - gutter - 7.0,
-            "Reset {reset:?} under the scroll bar of a sidebar ending at {sidebar_right}"
+            reset.right() <= sidebar_right - inset - 7.0,
+            "Reset {reset:?} in the padding of a sidebar ending at {sidebar_right}"
         );
         assert!((refresh.center().y - title.center().y).abs() < 4.0, "not on the header row");
         let id = h.app.model.kits[h.app.model.active].id;
+        // The geometry the page shows, once loaded: every load gets a new
+        // id. A small model can load again within the click's frames, so
+        // the check is that it's not the same load, not that it's loading.
         let loaded = |h: &Harness| {
             let previews = &h.app.views[id].caches.model_previews;
             let (key, state) = previews.iter().next().unwrap();
-            !state.needs_preview_load(key)
+            let data = state.data.as_ref().and_then(|data| data.as_ref().ok());
+            data.filter(|_| !state.needs_preview_load(key)).map(|data| data.geometry_id)
         };
-        assert!(loaded(&h));
+        let before = loaded(&h);
+        assert!(before.is_some());
         h.click("Refresh Model", 0);
-        assert!(!loaded(&h), "Refresh Model left the preview as loaded");
+        assert_ne!(loaded(&h), before, "Refresh Model left the same load in place");
+    }
+
+    /// Switching Game Shaders loads the model again, and only the viewport
+    /// waits on it: the header keeps its buttons rather than the bare title,
+    /// and the sidebar keeps its cards, every pass until the load lands.
+    #[test]
+    fn a_game_shaders_switch_keeps_the_page_while_the_model_reloads() {
+        let mut h = Harness::new();
+        let _kit = model_preview_pane(&mut h);
+        fn state(h: &mut Harness) -> &mut crate::app::model_preview::state::ModelPreviewState {
+            let id = h.app.model.kits[h.app.model.active].id;
+            h.app.views[id]
+                .caches
+                .model_previews
+                .values_mut()
+                .next()
+                .unwrap()
+        }
+        let painted = |h: &Harness, needle: &str| h.painted.iter().any(|text| text.trim() == needle);
+        assert!(painted(&h, "Refresh Model") && painted(&h, "Permutations"));
+        state(&mut h).game_shaders = true;
+        // The pass that asks for the load, then passes with it out: its
+        // answer is held off by taking it for a superseded one.
+        for pass in 0..4 {
+            h.frame(Vec::new());
+            assert!(painted(&h, "Refresh Model"), "the header lost its buttons: {:?}", h.painted);
+            assert!(painted(&h, "Permutations"), "the sidebar lost its cards: {:?}", h.painted);
+            if pass == 0 {
+                assert!(state(&mut h).reloading.is_some(), "the old model was not held aside");
+                state(&mut h).preview_load_id = Some(u64::MAX);
+            }
+        }
+        // Asked for again, it lands, and the old model goes.
+        state(&mut h).preview_load_id = None;
+        for _ in 0..400 {
+            h.frame(Vec::new());
+            let key = state(&mut h).loaded_key.clone().unwrap();
+            if !state(&mut h).needs_preview_load(&key) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(state(&mut h).reloading.is_none(), "the old model was kept past its load");
+    }
+
+    /// A loaded model's viewport draws it: the page holds the model's data
+    /// out of its state while it draws, and asked of the state then, the
+    /// viewport took itself for reloading and showed loading rings forever.
+    #[test]
+    fn a_loaded_models_viewport_draws_instead_of_waiting() {
+        let mut h = Harness::recording();
+        let _kit = model_preview_pane(&mut h);
+        h.frame(Vec::new());
+        let shapes = &h.recording.as_ref().unwrap().shapes;
+        assert!(
+            shapes.iter().any(|clipped| matches!(clipped.shape, egui::Shape::Callback(_))),
+            "the viewport painted no model"
+        );
     }
 
     /// The sidebar's left edge drags its width, which is saved and kept
@@ -6634,12 +7101,20 @@ mod tests {
             .unwrap()
             .search_scope
             .folders = true;
+        // The search answers from a worker.
+        for _ in 0..400 {
+            idle(&mut h);
+            if !h.app.views[kit].browser.folder_browsers[&key].filter_cache.is_searching() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
         idle(&mut h);
         assert!(
             h.painted
                 .iter()
-                .any(|text| text.starts_with("1 of 2 items · ")),
-            "filtered footer keeps the total: {:?}",
+                .any(|text| text.starts_with("2 results · ")),
+            "a search counts its results: {:?}",
             h.painted
         );
         let pane = h.app.views[kit]
@@ -6945,6 +7420,74 @@ mod tests {
         };
         assert_eq!(draft(draft_ids[0]), "rocket");
         assert_eq!(draft(draft_ids[1]), "", "the other pane's box is untouched");
+    }
+
+    /// Typing in the keyword field lists the keywords already in use that
+    /// match, so a tag gets "brute" rather than a new spelling; Down and
+    /// Enter add the highlighted one rather than what was typed.
+    #[test]
+    fn the_keyword_field_suggests_keywords_already_in_use() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let mut app = Baboon::for_test();
+        for (key, keyword) in [
+            ("file:a", "brute"),
+            ("file:b", "brute"),
+            ("file:c", "brutes"),
+            ("file:d", "wip"),
+        ] {
+            app.model.kits[0].keywords.add(key, keyword);
+        }
+        let key = |key: egui::Key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let frame = |app: &mut Baboon, events: Vec<egui::Event>| -> Vec<String> {
+            let output = crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 400.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let egui = ui.ctx().clone();
+                        draw_keyword_bar(&cx!(app, &egui), ui, 0, "file:crate.model");
+                    });
+                },
+            );
+            output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        let painted = frame(&mut app, Vec::new());
+        assert!(!painted.iter().any(|text| text == "brutes"), "listed before typing: {painted:?}");
+        // Tab gives the field the keyboard, then "bru" is typed.
+        frame(&mut app, vec![key(egui::Key::Tab)]);
+        frame(&mut app, vec![egui::Event::Text("bru".to_owned())]);
+        let painted = frame(&mut app, Vec::new());
+        for listed in ["brute", "2", "brutes"] {
+            assert!(painted.iter().any(|text| text == listed), "{listed}: {painted:?}");
+        }
+        assert!(!painted.iter().any(|text| text == "wip"), "{painted:?}");
+
+        frame(&mut app, vec![key(egui::Key::ArrowDown)]);
+        frame(&mut app, vec![key(egui::Key::Enter)]);
+        app.apply_commands(&ctx);
+        assert_eq!(app.model.kits[0].keywords.keywords("file:crate.model"), ["brute"]);
     }
 
     /// An open tag that nobody touches does not keep the window drawing. The
@@ -7562,5 +8105,1018 @@ mod tests {
         click_point(&mut edit.h, egui::pos2(1400.0, 900.0));
         settle(&mut edit.h, 2);
         assert_eq!(offset(&edit), undone, "the undo stays undone");
+    }
+
+    impl Harness {
+        /// Paint the last frame, the 3D viewport included, through egui's own
+        /// GL painter into an offscreen framebuffer, and save it as a PNG.
+        /// Needs [`Harness::recording`]. Nothing is shown, so this works with
+        /// no screen: what a screenshot of the window would be, without one.
+        #[cfg(any(target_os = "macos", windows))]
+        pub(super) fn shoot(&self, path: &std::path::Path) {
+            use eframe::glow::{self, HasContext as _};
+            let recording = self.recording.as_ref().expect("a recording harness");
+            let pixels_per_point = recording.pixels_per_point;
+            let width = (self.screen.x * pixels_per_point).round() as u32;
+            let height = (self.screen.y * pixels_per_point).round() as u32;
+            let gl = std::sync::Arc::new(crate::app::model_preview::headless_gl());
+            let mut painter =
+                eframe::egui_glow::Painter::new(std::sync::Arc::clone(&gl), "", None, false)
+                    .expect("egui's GL painter");
+            for (id, delta) in &recording.textures {
+                painter.set_texture(*id, delta);
+            }
+            let primitives = self.ctx.tessellate(recording.shapes.clone(), pixels_per_point);
+            let mut pixels = vec![0_u8; width as usize * height as usize * 4];
+            unsafe {
+                let color = gl.create_renderbuffer().unwrap();
+                gl.bind_renderbuffer(glow::RENDERBUFFER, Some(color));
+                gl.renderbuffer_storage(glow::RENDERBUFFER, glow::RGBA8, width as i32, height as i32);
+                let depth = gl.create_renderbuffer().unwrap();
+                gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
+                gl.renderbuffer_storage(
+                    glow::RENDERBUFFER,
+                    glow::DEPTH24_STENCIL8,
+                    width as i32,
+                    height as i32,
+                );
+                let framebuffer = gl.create_framebuffer().unwrap();
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+                gl.framebuffer_renderbuffer(
+                    glow::FRAMEBUFFER,
+                    glow::COLOR_ATTACHMENT0,
+                    glow::RENDERBUFFER,
+                    Some(color),
+                );
+                gl.framebuffer_renderbuffer(
+                    glow::FRAMEBUFFER,
+                    glow::DEPTH_STENCIL_ATTACHMENT,
+                    glow::RENDERBUFFER,
+                    Some(depth),
+                );
+                assert_eq!(
+                    gl.check_framebuffer_status(glow::FRAMEBUFFER),
+                    glow::FRAMEBUFFER_COMPLETE
+                );
+                gl.viewport(0, 0, width as i32, height as i32);
+                let background = self.ctx.global_style().visuals.panel_fill;
+                let [r, g, b, _] = egui::Rgba::from(background).to_array();
+                gl.disable(glow::SCISSOR_TEST);
+                gl.clear_color(r, g, b, 1.0);
+                gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+                painter.paint_primitives([width, height], pixels_per_point, &primitives);
+                // The viewport's own passes may leave another framebuffer
+                // bound; read the one painted into.
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+                gl.read_pixels(
+                    0,
+                    0,
+                    width as i32,
+                    height as i32,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelPackData::Slice(Some(&mut pixels)),
+                );
+            }
+            painter.destroy();
+            let row = width as usize * 4;
+            let upright: Vec<u8> = pixels
+                .chunks_exact(row)
+                .rev()
+                .flatten()
+                .copied()
+                .enumerate()
+                // Opaque: the window has no see-through parts.
+                .map(|(index, byte)| if index % 4 == 3 { 255 } else { byte })
+                .collect();
+            let image = image::RgbaImage::from_raw(width, height, upright).unwrap();
+            if let Some(folder) = path.parent() {
+                let _ = std::fs::create_dir_all(folder);
+            }
+            image.save(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        }
+    }
+
+    /// Opens a kit's `subtree` as the active kit, from the kit at `root`.
+    fn install_kit_subtree(
+        h: &mut Harness,
+        root: &std::path::Path,
+        game: GameId,
+        subtree: &str,
+    ) -> Vec<TagEntry> {
+        let names = TagNameIndex::load_game(&locate_definitions_root(), game).expect("group names");
+        // The kit's own separators, as a folder load names its tags.
+        let subtree = subtree.replace('/', std::path::MAIN_SEPARATOR_STR);
+        let entries = crate::core::source::scan_folder_subtree_entries(
+            root,
+            std::path::Path::new(&subtree),
+            &names,
+        )
+        .expect("scan the kit");
+        h.app.install_loaded_source(LoadedSourceData {
+            label: format!("{game:?}"),
+            source: TagSource::LooseFolder {
+                root: root.to_owned(),
+                game: Some(game),
+                definitions_root: locate_definitions_root(),
+            },
+            names,
+            game: Some(game),
+            entries: entries.clone(),
+            tree: crate::core::source::build_folder_directory_tree(root).unwrap(),
+            group_tree: crate::core::source::build_group_tree(&entries),
+            all_entries: entries.clone(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: true,
+            chosen_kit_layout: None,
+        });
+        entries
+    }
+
+    /// Opens the tag of `entries` whose path ends `rel` (with its
+    /// extension), and runs frames until its model preview has loaded and
+    /// settled.
+    fn open_model_page(h: &mut Harness, entries: &[TagEntry], rel: &str) -> String {
+        let wanted = rel.replace('/', "\\").to_ascii_lowercase();
+        let key = entries
+            .iter()
+            .find(|entry| {
+                entry.display_path.replace('/', "\\").to_ascii_lowercase().ends_with(&wanted)
+            })
+            .unwrap_or_else(|| panic!("{rel} is not in the kit: {:?}", entries.first().map(|entry| &entry.display_path)))
+            .key
+            .clone();
+        h.app.select_entry(key.clone(), h.ctx.clone());
+        let started = Instant::now();
+        loop {
+            h.frame(Vec::new());
+            // The page opens on its fields; the preview is its other tab.
+            if h.painted.iter().any(|text| text == "Model Preview")
+                && !h.painted.iter().any(|text| text.trim() == "Refresh Model")
+            {
+                h.click("Model Preview", 0);
+            }
+            let id = h.app.model.kits[h.app.model.active].id;
+            let loaded = h.app.views[id]
+                .caches
+                .model_previews
+                .get(&key)
+                .is_some_and(|state| {
+                    state.loaded_key.as_ref() == Some(&key) && !state.needs_preview_load(&key)
+                });
+            if loaded && h.painted.iter().any(|text| text.trim() == "Refresh Model") {
+                break;
+            }
+            assert!(started.elapsed().as_secs() < 120, "{rel} never loaded: {:?}", h.painted);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // Textures and the layout settle over a few more.
+        for _ in 0..60 {
+            h.frame(Vec::new());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        key
+    }
+
+    /// Screenshots of the whole app with Reach's banshee imposter open, on
+    /// its own and beside its model, as PNGs in `BABOON_APP_SHOTS`, with
+    /// `BLAM_TEST_HREK` naming the kit's tags.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
+    fn app_shots_of_the_banshee_imposter() {
+        let (Some(dir), Ok(root)) = (
+            std::env::var_os("BABOON_APP_SHOTS"),
+            std::env::var("BLAM_TEST_HREK"),
+        ) else {
+            return;
+        };
+        // The kit's own separators, as a folder load would name its tags.
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let dir = std::path::PathBuf::from(dir);
+        let mut h = Harness::recording();
+        h.frame(Vec::new());
+        let entries = install_kit_subtree(
+            &mut h,
+            &root,
+            GameId::HaloReach,
+            "objects/vehicles/covenant/banshee",
+        );
+        let base = "objects/vehicles/covenant/banshee/banshee";
+        open_model_page(&mut h, &entries, &format!("{base}.imposter_model"));
+        h.shoot(&dir.join("app_banshee_imposter.png"));
+        let key = open_model_page(&mut h, &entries, &format!("{base}.model"));
+        h.shoot(&dir.join("app_banshee_model.png"));
+        let id = h.app.model.kits[h.app.model.active].id;
+        if let Some(state) = h.app.views[id].caches.model_previews.get_mut(&key) {
+            state.show_imposter = true;
+        }
+        for _ in 0..10 {
+            h.frame(Vec::new());
+        }
+        h.shoot(&dir.join("app_banshee_model_with_imposter.png"));
+    }
+
+    /// Refresh Bitmap reads the tag from disk again: a bitmap reimported
+    /// outside Baboon shows its new image without closing the tab. It is
+    /// greyed out while the tag has unsaved edits, which a reload would
+    /// drop. With `BLAM_TEST_H2EK` naming the kit's tags.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn refresh_bitmap_shows_the_bitmap_changed_on_disk() {
+        let Ok(kit) = std::env::var("BLAM_TEST_H2EK") else {
+            return;
+        };
+        let kit = std::path::PathBuf::from(kit.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let root = std::env::temp_dir().join(format!(
+            "baboon-refresh-bitmap-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let folder = root.join("ui").join("refresh");
+        std::fs::create_dir_all(&folder).unwrap();
+        let tag = folder.join("picture.bitmap");
+        let blip = kit.join("ui").join("hud").join("bitmaps").join("hud_sensor_blip.bitmap");
+        let null = kit.join("ui").join("global_bitmaps").join("null.bitmap");
+        std::fs::copy(&blip, &tag).unwrap();
+
+        let mut h = Harness::recording();
+        h.frame(Vec::new());
+        let entries = install_kit_subtree(&mut h, &root, GameId::Halo2, "ui/refresh");
+        let key = entries[0].key.clone();
+        h.app.select_entry(key.clone(), h.ctx.clone());
+        let id = h.app.model.kits[h.app.model.active].id;
+        let decoded = |h: &Harness| {
+            h.app.views[id].caches.bitmap_previews.get(&key).and_then(|preview| {
+                preview.decoded.as_ref().and_then(|data| data.as_ref().ok()).map(|data| {
+                    (data.width, data.height, data.rgba.clone())
+                })
+            })
+        };
+        let settle = |h: &mut Harness, what: &str, done: &dyn Fn(&Harness) -> bool| {
+            let started = Instant::now();
+            while !done(h) {
+                h.frame(Vec::new());
+                if h.painted.iter().any(|text| text == "Bitmap Preview")
+                    && !h.painted.iter().any(|text| text.trim() == "Refresh Bitmap")
+                {
+                    h.click("Bitmap Preview", 0);
+                }
+                assert!(started.elapsed().as_secs() < 60, "{what}: {:?}", h.painted);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            h.idle(5);
+        };
+        settle(&mut h, "the first decode", &|h| {
+            decoded(h).is_some() && h.painted.iter().any(|text| text.trim() == "Refresh Bitmap")
+        });
+        let before = decoded(&h).unwrap();
+        // BABOON_APP_SHOTS saves the header with Refresh Bitmap.
+        if let Some(dir) = std::env::var_os("BABOON_APP_SHOTS") {
+            h.shoot(&std::path::PathBuf::from(dir).join("refresh_bitmap.png"));
+        }
+
+        // Reimported outside Baboon: the tab still shows the old image.
+        std::fs::copy(&null, &tag).unwrap();
+        h.idle(5);
+        assert_eq!(decoded(&h).unwrap(), before, "nothing reads the disk on its own");
+
+        h.click("Refresh Bitmap", 0);
+        settle(&mut h, "the refreshed decode", &|h| {
+            decoded(h).is_some_and(|now| now != before)
+        });
+        assert_eq!(h.app.model.status, "Bitmap refreshed from disk");
+
+        // Unsaved edits grey it out rather than drop them.
+        h.app.model.kits[h.app.model.active]
+            .parsed_tags
+            .get_mut(&key)
+            .unwrap()
+            .dirty
+            .touch();
+        h.idle(3);
+        assert_eq!(
+            h.app.views[id].caches.bitmap_previews[&key].refresh,
+            Some(false),
+            "greyed out with unsaved edits",
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Halo 2's brute biped, Game Shaders on and a clip playing, switched to
+    /// its lowest level of detail: only the viewport changes. The sidebar's
+    /// cards and the player stay as they were, frame by frame, while the
+    /// model loads and while its materials, collision and physics, weapons
+    /// and clip follow. With `BLAM_TEST_H2EK` naming the kit's tags.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn a_level_of_detail_switch_keeps_the_page_steady() {
+        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let mut h = Harness::recording();
+        h.frame(Vec::new());
+        let entries =
+            install_kit_subtree(&mut h, &root, GameId::Halo2, "objects/characters/brute");
+        let key = open_model_page(&mut h, &entries, "objects/characters/brute/brute.biped");
+        let id = h.app.model.kits[h.app.model.active].id;
+        let state = h.app.views[id].caches.model_previews.get_mut(&key).unwrap();
+        state.set_shading(crate::app::model_preview::ModelShading::GameShaders);
+        let started = Instant::now();
+        let watch = [
+            "Permutations", "Weapons", "Effects", "Object Functions", "Primary", "body",
+            "Animation Player", "combat:rifle:idle", "physics",
+        ];
+        let shown = |h: &Harness| -> Vec<&str> {
+            watch
+                .iter()
+                .copied()
+                .filter(|label| h.painted.iter().any(|text| text.contains(label)))
+                .collect()
+        };
+        // Settled: Game Shaders' cards drawn and the clip playing.
+        let mut picked = false;
+        loop {
+            h.frame(Vec::new());
+            let state = h.app.views[id].caches.model_previews.get_mut(&key).unwrap();
+            if !picked
+                && !state.needs_preview_load(&key)
+                && let Some(Ok(data)) = &state.data
+                && let Some(animations) = &data.animations
+            {
+                state.animation.selected =
+                    animations.iter().position(|entry| entry.name.contains("rifle:idle"));
+                picked = true;
+            }
+            let now = shown(&h);
+            if now.contains(&"Object Functions") && now.contains(&"combat:rifle:idle") {
+                break;
+            }
+            assert!(started.elapsed().as_secs() < 120, "never settled: {now:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        h.idle(30);
+        let before = shown(&h);
+        assert!(!before.contains(&"physics"), "the physics overlay is no region: {before:?}");
+        h.app.views[id].caches.model_previews.get_mut(&key).unwrap().detail_level = Some(0);
+        let started = Instant::now();
+        let mut frame = 0;
+        loop {
+            h.frame(Vec::new());
+            assert_eq!(shown(&h), before, "frame {frame} of the switch");
+            let state = &h.app.views[id].caches.model_previews[&key];
+            if !state.needs_preview_load(&key) && state.settling.is_none() {
+                break;
+            }
+            assert!(started.elapsed().as_secs() < 120, "the switch never settled");
+            frame += 1;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // The page drawn live again is the page it held.
+        h.idle(30);
+        assert_eq!(shown(&h), before, "after the switch");
+        let state = &h.app.views[id].caches.model_previews[&key];
+        assert_eq!(state.loaded_detail_level, Some(0));
+        assert!(frame > 0, "the switch loaded nothing");
+    }
+
+    /// A screenshot of Halo 2's brute on its Model Preview tab in light
+    /// mode, as `model_light.png` in `BABOON_APP_SHOTS`, with
+    /// `BLAM_TEST_H2EK` naming the kit's tags. With `BABOON_SHOT_CLICK` as
+    /// `x,y`, it then clicks there (the Other menu, say) and saves
+    /// `model_light_clicked.png`.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
+    fn app_shots_of_the_model_preview() {
+        let (Some(dir), Ok(root)) = (
+            std::env::var_os("BABOON_APP_SHOTS"),
+            std::env::var("BLAM_TEST_H2EK"),
+        ) else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let dir = std::path::PathBuf::from(dir);
+        let tag = std::env::var("BABOON_SHOT_TAG")
+            .unwrap_or_else(|_| "objects/characters/brute/brute.model".to_owned());
+        let subtree = tag.rsplit_once('/').map_or("", |(folder, _)| folder).to_owned();
+        // BABOON_SHOT_GAME names the kit's game ("halo3_mcc"; Halo 2 by
+        // default), and BABOON_SHOT_DARK shoots the dark theme instead.
+        let game = std::env::var("BABOON_SHOT_GAME")
+            .map_or(GameId::Halo2, |id| id.parse().expect("a game id"));
+        let dark = std::env::var_os("BABOON_SHOT_DARK").is_some();
+        let theme = if dark { "dark" } else { "light" };
+        let mut h = Harness::recording();
+        h.app.model.prefs.follow_system_theme = false;
+        h.app.model.prefs.dark_mode = dark;
+        h.frame(Vec::new());
+        let entries = install_kit_subtree(&mut h, &root, game, &subtree);
+        let key = open_model_page(&mut h, &entries, &tag);
+        // BABOON_SHOT_SHADERS turns Game Shaders on, for the Effects and
+        // Object Functions cards; BABOON_SHOT_WEAPON holds a weapon tag;
+        // BABOON_SHOT_OVERLAYS shows collision and physics ("physics" for
+        // physics alone); BABOON_SHOT_LOD picks a level of detail, lowest
+        // first (Halo CE and Halo 2).
+        let shaders = std::env::var_os("BABOON_SHOT_SHADERS").is_some();
+        let weapon = std::env::var("BABOON_SHOT_WEAPON").ok();
+        let overlays = std::env::var("BABOON_SHOT_OVERLAYS").ok();
+        let physics_only = overlays.as_deref() == Some("physics");
+        let overlays = overlays.is_some();
+        let lod = std::env::var("BABOON_SHOT_LOD").ok().map(|level| level.parse::<usize>().unwrap());
+        if shaders || weapon.is_some() || overlays || lod.is_some() {
+            let id = h.app.model.kits[h.app.model.active].id;
+            let state = h.app.views[id].caches.model_previews.get_mut(&key).unwrap();
+            if shaders {
+                state.set_shading(crate::app::model_preview::ModelShading::GameShaders);
+            }
+            if weapon.is_some() {
+                state.weapon = weapon;
+            }
+            if overlays {
+                state.show_collision = !physics_only;
+                state.show_physics = true;
+            }
+            if lod.is_some() {
+                state.detail_level = lod;
+            }
+            let started = Instant::now();
+            loop {
+                h.frame(Vec::new());
+                let state = &h.app.views[id].caches.model_previews[&key];
+                if !state.needs_preview_load(&key)
+                    && state.data.as_ref().is_some_and(|data| data.is_ok())
+                    && (!overlays || state.overlays_loaded)
+                {
+                    break;
+                }
+                assert!(started.elapsed().as_secs() < 120, "{tag} never reloaded");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            for _ in 0..60 {
+                h.frame(Vec::new());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        // BABOON_SHOT_SCROLL ("x,y,points") turns the wheel over a point
+        // first, as to scroll the setup cards.
+        if let Ok(scroll) = std::env::var("BABOON_SHOT_SCROLL") {
+            let parts: Vec<f32> = scroll.split(',').map(|part| part.trim().parse().unwrap()).collect();
+            let at = egui::pos2(parts[0], parts[1]);
+            h.frame(vec![pointer_at(at)]);
+            h.frame(vec![egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -parts[2]),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            for _ in 0..30 {
+                h.frame(Vec::new());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        h.shoot(&dir.join(format!("model_{theme}.png")));
+        // BABOON_SHOT_CLIP names an animation to play, by part of its name,
+        // for a shot of the Animation Player's scrubber.
+        if let Ok(clip) = std::env::var("BABOON_SHOT_CLIP") {
+            let id = h.app.model.kits[h.app.model.active].id;
+            let started = Instant::now();
+            let mut picked = false;
+            while started.elapsed().as_secs() < 60 {
+                h.frame(Vec::new());
+                let state = h.app.views[id].caches.model_previews.get_mut(&key).unwrap();
+                if !picked
+                    && let Some(Ok(data)) = &state.data
+                    && let Some(animations) = &data.animations
+                {
+                    state.animation.selected =
+                        animations.iter().position(|entry| entry.name.contains(&clip));
+                    assert!(state.animation.selected.is_some(), "no clip matches {clip}");
+                    picked = true;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+                if picked && h.painted.iter().any(|text| text.contains(" / ") && !text.contains("0 / 0")) {
+                    break;
+                }
+            }
+            for _ in 0..40 {
+                h.frame(Vec::new());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            h.shoot(&dir.join(format!("model_{theme}_clip.png")));
+        }
+        let Ok(click) = std::env::var("BABOON_SHOT_CLICK") else {
+            return;
+        };
+        let (x, y) = click.split_once(',').expect("x,y");
+        let target = egui::pos2(x.trim().parse().unwrap(), y.trim().parse().unwrap());
+        let button = |pressed| egui::Event::PointerButton {
+            pos: target,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        h.frame(vec![pointer_at(target)]);
+        h.frame(vec![button(true)]);
+        h.frame(vec![button(false)]);
+        for _ in 0..20 {
+            h.frame(Vec::new());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        h.shoot(&dir.join(format!("model_{theme}_clicked.png")));
+    }
+
+    /// Screenshots of the whole app on Halo 2's brute `.model` Tag Fields
+    /// page, light and dark, as PNGs in `BABOON_APP_SHOTS`, with
+    /// `BLAM_TEST_H2EK` naming the kit's tags: for judging the themes.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
+    fn app_shots_of_the_sound_players() {
+        let (Some(dir), Ok(root), Ok(tag), Ok(other)) = (
+            std::env::var_os("BABOON_APP_SHOTS"),
+            std::env::var("BLAM_TEST_H2EK"),
+            std::env::var("BABOON_SHOT_TAG"),
+            std::env::var("BABOON_SHOT_OTHER"),
+        ) else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let dir = std::path::PathBuf::from(dir);
+        let subtree = tag.rsplit_once('/').map_or("", |(folder, _)| folder).to_owned();
+        let game = std::env::var("BABOON_SHOT_GAME")
+            .map_or(GameId::Halo2, |id| id.parse().expect("a game id"));
+        // The whole window, then about half its width for the player's
+        // two-row header.
+        for (dark, width) in [(false, SCREEN.x), (true, SCREEN.x), (false, 960.0), (true, 960.0)] {
+            let mut h = Harness::recording();
+            h.screen = egui::vec2(width, SCREEN.y);
+            h.app.model.prefs.follow_system_theme = false;
+            h.app.model.prefs.dark_mode = dark;
+            h.frame(Vec::new());
+            let entries = install_kit_subtree(&mut h, &root, game, &subtree);
+            let key_of = |path: &str| {
+                let wanted = path.replace('/', "\\");
+                entries
+                    .iter()
+                    .find(|entry| entry.display_path.to_ascii_lowercase().ends_with(&wanted))
+                    .expect("the tag")
+                    .key
+                    .clone()
+            };
+            let (key, other) = (key_of(&tag), key_of(&other));
+            let settle = |h: &mut Harness| {
+                for _ in 0..120 {
+                    h.frame(Vec::new());
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            };
+            h.app.select_entry(key.clone(), h.ctx.clone());
+            settle(&mut h);
+            let theme = if dark { "dark" } else { "light" };
+            let theme = format!("{theme}_{width}");
+            h.shoot(&dir.join(format!("player_{theme}.png")));
+            // BABOON_SHOT_CLICK ("x,y") opens something there, as the Zoom
+            // menu, for a shot of it.
+            if let Ok(at) = std::env::var("BABOON_SHOT_CLICK")
+                && width == SCREEN.x
+            {
+                let parts: Vec<f32> = at.split(',').map(|part| part.trim().parse().unwrap()).collect();
+                let at = egui::pos2(parts[0], parts[1]);
+                h.frame(vec![pointer_at(at)]);
+                let button = |pressed| egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                h.frame(vec![button(true)]);
+                h.frame(vec![button(false)]);
+                settle(&mut h);
+                h.shoot(&dir.join(format!("clicked_{theme}.png")));
+                h.frame(vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            let kit = h.app.model.kits[h.app.model.active].id;
+            h.app.audio.load_paused_for_shot(crate::app::audio::SoundOwner { kit, key }, 0.4);
+            settle(&mut h);
+            h.app.select_entry(other, h.ctx.clone());
+            settle(&mut h);
+            h.shoot(&dir.join(format!("mini_{theme}.png")));
+        }
+    }
+
+    /// `BABOON_APP_SHOTS` shots of a folder's keywords: `BABOON_SHOT_FOLDER`
+    /// (under `BLAM_TEST_H2EK`'s tags) open in a folder tab, its subfolders
+    /// and tags carrying keywords, then the keyword field's suggestions with
+    /// "bru" typed. Light and dark.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
+    fn app_shots_of_folder_keywords() {
+        let (Some(dir), Ok(root), Ok(folder)) = (
+            std::env::var_os("BABOON_APP_SHOTS"),
+            std::env::var("BLAM_TEST_H2EK"),
+            std::env::var("BABOON_SHOT_FOLDER"),
+        ) else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let dir = std::path::PathBuf::from(dir);
+        let game = std::env::var("BABOON_SHOT_GAME")
+            .map_or(GameId::Halo2, |id| id.parse().expect("a game id"));
+        let settle = |h: &mut Harness| {
+            for _ in 0..60 {
+                h.frame(Vec::new());
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        for dark in [false, true] {
+            let mut h = Harness::recording();
+            h.app.model.prefs.follow_system_theme = false;
+            h.app.model.prefs.dark_mode = dark;
+            h.frame(Vec::new());
+            let entries = install_kit_subtree(&mut h, &root, game, &folder);
+            let active = h.app.model.active;
+            let tags_root = h.app.model.loaded_tags_root_for(active).unwrap();
+            let relative = folder.replace('/', "\\");
+            let folder_key = |sub: &str| {
+                let path = if sub.is_empty() { relative.clone() } else { format!("{relative}\\{sub}") };
+                crate::core::tag_key::folder_entry_key(&tags_root, &path)
+            };
+            let keywords = &mut h.app.model.kits[active].keywords;
+            keywords.add(&folder_key(""), "covenant");
+            keywords.add(&folder_key(""), "brute");
+            keywords.add(&folder_key("bitmaps"), "textures");
+            keywords.add(&folder_key("fx"), "effects");
+            keywords.add(&folder_key("fx"), "brute");
+            for (index, entry) in entries.iter().take(6).enumerate() {
+                keywords.add(&entry.key, if index % 3 == 0 { "brutes" } else { "brute" });
+                if index == 1 {
+                    keywords.add(&entry.key, "brute ai");
+                }
+            }
+            h.app.handle_browser_action(
+                BrowserAction::OpenFolderBrowser {
+                    rel_path: folder.clone().into(),
+                    label: folder.rsplit('/').next().unwrap().into(),
+                    open_in_new_tab: true,
+                },
+                h.ctx.clone(),
+            );
+            settle(&mut h);
+            let theme = if dark { "dark" } else { "light" };
+            h.shoot(&dir.join(format!("folder_keywords_{theme}.png")));
+            // The pointer on a keyword shows its remove button, then on the
+            // button its hover.
+            let pill = h
+                .painted_rects
+                .iter()
+                .find(|(text, _)| text == "covenant")
+                .map(|(_, rect)| *rect)
+                .expect("the covenant keyword");
+            h.frame(vec![pointer_at(pill.center())]);
+            settle(&mut h);
+            h.shoot(&dir.join(format!("keyword_hover_{theme}.png")));
+            h.frame(vec![pointer_at(egui::pos2(pill.right() + 8.0 + 10.0 - 2.0, pill.center().y))]);
+            settle(&mut h);
+            h.shoot(&dir.join(format!("keyword_remove_hover_{theme}.png")));
+            h.click("add keyword", 0);
+            h.frame(vec![egui::Event::Text("bru".to_owned())]);
+            settle(&mut h);
+            h.shoot(&dir.join(format!("keyword_suggestions_{theme}.png")));
+        }
+    }
+
+
+    /// `BABOON_APP_SHOTS` shots of the theme with `BABOON_SHOT_TAG` open.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
+    fn app_shots_of_the_themes() {
+        let (Some(dir), Ok(root)) = (
+            std::env::var_os("BABOON_APP_SHOTS"),
+            std::env::var("BLAM_TEST_H2EK"),
+        ) else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let dir = std::path::PathBuf::from(dir);
+        // The H2 Rebalance brute by default; BABOON_SHOT_TAG names another
+        // model in the kit, as objects/characters/elite/elite.model.
+        let tag = std::env::var("BABOON_SHOT_TAG")
+            .unwrap_or_else(|_| "objects/characters/brute/brute.model".to_owned());
+        let subtree = tag.rsplit_once('/').map_or("", |(folder, _)| folder).to_owned();
+        let wanted = tag.replace('/', "\\");
+        // BABOON_SHOT_GAME names the kit's game ("halo3_mcc"; Halo 2 by default).
+        let game = std::env::var("BABOON_SHOT_GAME")
+            .map_or(GameId::Halo2, |id| id.parse().expect("a game id"));
+        for dark in [false, true] {
+            let mut h = Harness::recording();
+            h.app.model.prefs.follow_system_theme = false;
+            h.app.model.prefs.dark_mode = dark;
+            h.frame(Vec::new());
+            let entries = install_kit_subtree(&mut h, &root, game, &subtree);
+            let key = entries
+                .iter()
+                .find(|entry| entry.display_path.to_ascii_lowercase().ends_with(&wanted))
+                .expect("the tag")
+                .key
+                .clone();
+            h.app.select_entry(key.clone(), h.ctx.clone());
+            for _ in 0..120 {
+                h.frame(Vec::new());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            // BABOON_SHOT_SCROLL ("x,y,points") turns the wheel over a point,
+            // to bring fields further down the page into view.
+            if let Ok(scroll) = std::env::var("BABOON_SHOT_SCROLL") {
+                let parts: Vec<f32> = scroll.split(',').map(|part| part.trim().parse().unwrap()).collect();
+                let at = egui::pos2(parts[0], parts[1]);
+                h.frame(vec![pointer_at(at)]);
+                h.frame(vec![egui::Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -parts[2]),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+                for _ in 0..30 {
+                    h.frame(Vec::new());
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            let name = if dark { "theme_dark.png" } else { "theme_light.png" };
+            h.shoot(&dir.join(name));
+        }
+    }
+
+    /// A tag in a scratch kit, with the keywords that tests below give it.
+    fn keyword_kit(name: &str) -> (LooseKit, Harness, KitId, String, String) {
+        let kit = LooseKit::new(name, "halo3_mcc");
+        kit.write_mcc("objects\\alpha", "scenery", |_| {});
+        kit.write_mcc("objects\\beta", "scenery", |_| {});
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        let started = Instant::now();
+        while h.app.model.kits[h.app.model.active]
+            .source
+            .as_ref()
+            .is_none_or(|source| source.entries.len() < 2)
+        {
+            h.frame(Vec::new());
+            assert!(started.elapsed().as_secs() < 20, "the scratch kit's tags");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let active = h.app.model.active;
+        let kit_id = h.app.model.kits[active].id;
+        let key = |name: &str| {
+            h.app.model.kits[active]
+                .source
+                .as_ref()
+                .unwrap()
+                .entries
+                .iter()
+                .find(|entry| entry.display_path.contains(name))
+                .unwrap()
+                .key
+                .clone()
+        };
+        let (alpha, beta) = (key("alpha"), key("beta"));
+        (kit, h, kit_id, alpha, beta)
+    }
+
+    fn add_keyword(h: &mut Harness, kit: KitId, key: &str, keyword: &str) {
+        let ctx = h.ctx.clone();
+        h.app.apply_browser_command(
+            BrowserCommand::AddKeyword { kit, key: key.to_owned(), keyword: keyword.to_owned() },
+            &ctx,
+        );
+    }
+
+    /// Manage Keywords lists keywords as typed, in the user's order; Search
+    /// opens the kit's root in a folder window holding the keyword's pill and
+    /// finds only the tag carrying it; a merge and a delete ask first.
+    #[test]
+    fn manage_keywords_searches_merges_and_asks_before_deleting() {
+        let (_kit, mut h, kit, alpha, beta) = keyword_kit("manage-keywords");
+        add_keyword(&mut h, kit, &alpha, "Mk Ready");
+        add_keyword(&mut h, kit, &beta, "Mk Draft");
+        let ctx = h.ctx.clone();
+        let command = |h: &mut Harness, command: BrowserCommand| {
+            h.app.apply_browser_command(command, &ctx);
+            h.idle(3);
+        };
+        command(&mut h, BrowserCommand::SetKeywordColour {
+            keyword: "mk ready".into(),
+            colour: Some(crate::core::keyword_catalog::KeywordColour::Green),
+        });
+        h.app.dialogs.open(KeywordManager::new());
+        h.idle(3);
+        assert!(h.painted_contains("Manage Keywords"), "{:?}", h.painted);
+        assert!(h.painted_contains("Mk Ready") && h.painted_contains("Mk Draft"));
+        assert!(h.painted_contains("Add New Keyword"));
+        let catalog = &h.app.model.keyword_catalog;
+        let ready = catalog.position("mk ready").unwrap();
+        let draft = catalog.position("mk draft").unwrap();
+        assert!(ready < draft);
+        command(&mut h, BrowserCommand::MoveKeyword { from: draft, to: ready });
+        let keywords = ["mk ready".to_owned(), "mk draft".to_owned()];
+        assert_eq!(h.app.model.keyword_catalog.ordered(&keywords), ["mk draft", "mk ready"]);
+
+        // Search: a root folder window whose box holds the pill.
+        command(&mut h, BrowserCommand::SearchKeyword("mk ready".into()));
+        let root = h.app.views[kit]
+            .browser
+            .folder_browsers
+            .values()
+            .find(|pane| pane.rel_path.as_os_str().is_empty())
+            .expect("a root folder window");
+        assert_eq!(root.keyword_terms, ["mk ready"]);
+        assert!(root.filter.is_empty() && root.search_scope.keywords);
+        let started = Instant::now();
+        loop {
+            h.frame(Vec::new());
+            let pane = h.app.views[kit]
+                .browser
+                .folder_browsers
+                .values()
+                .find(|pane| pane.rel_path.as_os_str().is_empty())
+                .unwrap();
+            // Flat lists every match beneath the root.
+            let found: Vec<String> = pane.selection.rows.iter().map(|row| row.0.clone()).collect();
+            if !found.is_empty() {
+                assert_eq!(found, std::slice::from_ref(&alpha));
+                break;
+            }
+            assert!(started.elapsed().as_secs() < 20, "{:?}", h.painted);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // Renaming onto another keyword merges them, after asking.
+        command(&mut h, BrowserCommand::RenameKeyword { old: "mk draft".into(), new: "MK READY".into() });
+        assert!(h.painted_contains("Merge Keywords?"), "{:?}", h.painted);
+        assert_eq!(h.app.model.kits[h.app.model.active].keywords.keywords(&beta), ["mk draft"]);
+        h.click("Merge", 0);
+        h.idle(3);
+        let store = &h.app.model.kits[h.app.model.active].keywords;
+        assert_eq!(store.keywords(&beta), ["mk ready"]);
+        assert!(h.app.model.keyword_catalog.get("mk draft").is_none());
+        assert_eq!(h.app.model.keyword_catalog.display("mk ready"), "Mk Ready");
+
+        // A plain rename respells it, straight away.
+        command(&mut h, BrowserCommand::RenameKeyword { old: "mk ready".into(), new: "Mk Done".into() });
+        assert_eq!(h.app.model.kits[h.app.model.active].keywords.keywords(&alpha), ["mk done"]);
+        let root = h.app.views[kit]
+            .browser
+            .folder_browsers
+            .values()
+            .find(|pane| pane.rel_path.as_os_str().is_empty())
+            .unwrap();
+        assert_eq!(root.keyword_terms, ["mk done"], "the search pill follows the rename");
+        assert_eq!(h.app.model.keyword_catalog.colour("mk done"), Some(crate::core::keyword_catalog::KeywordColour::Green));
+
+        // Delete asks, and Cancel keeps it.
+        command(&mut h, BrowserCommand::DeleteKeyword("mk done".into()));
+        assert!(h.painted_contains("Delete Keyword?"), "{:?}", h.painted);
+        assert!(h.painted_contains("Remove \u{201c}Mk Done\u{201d} from every tag and folder"), "{:?}", h.painted);
+        assert!(h.painted_contains("This editing kit") && h.painted_contains("2 tags and folders"), "{:?}", h.painted);
+        h.click("Cancel", 0);
+        h.idle(3);
+        assert_eq!(h.app.model.kits[h.app.model.active].keywords.count_of("mk done"), 2);
+        command(&mut h, BrowserCommand::DeleteKeyword("mk done".into()));
+        h.click("Delete Keyword", 0);
+        h.idle(3);
+        assert_eq!(h.app.model.kits[h.app.model.active].keywords.count_of("mk done"), 0);
+        assert!(h.app.model.keyword_catalog.get("mk done").is_none());
+    }
+
+    /// With Keywords ticked, a word typed in the search box suggests the
+    /// keywords it matches; Tab makes the pick a pill, and Backspace in the
+    /// empty box takes it off again.
+    #[test]
+    fn typing_a_keyword_in_the_search_box_makes_a_pill() {
+        let (_kit, mut h, kit, alpha, _beta) = keyword_kit("search-pills");
+        add_keyword(&mut h, kit, &alpha, "Sp Ready");
+        h.app.views[kit].browser.search_scope.keywords = true;
+        h.idle(2);
+        let hint = h.app.views[kit].browser.search_scope.hint();
+        h.click(&hint, 0);
+        h.frame(vec![egui::Event::Text("sp re".to_owned())]);
+        h.idle(2);
+        assert!(h.painted_contains("Sp Ready"), "the suggestion: {:?}", h.painted);
+        press_key(&mut h, egui::Key::Tab, egui::Modifiers::NONE);
+        h.idle(2);
+        let browser = &h.app.views[kit].browser;
+        assert_eq!(browser.keyword_terms, ["sp ready"]);
+        assert_eq!(browser.filter, "");
+        assert!(h.painted_contains("Sp Ready"), "the pill: {:?}", h.painted);
+        press_key(&mut h, egui::Key::Backspace, egui::Modifiers::NONE);
+        h.idle(2);
+        assert!(h.app.views[kit].browser.keyword_terms.is_empty());
+    }
+
+    /// Search results start with their folders closed and counted; opening
+    /// one follows a lone path down until it branches, and clearing the
+    /// search leaves the browser's own folders as they were.
+    #[test]
+    /// Clicking a group's arrow opens it, as a folder's does: the row's own
+    /// click once covered the arrow and nothing opened the group.
+    fn clicking_a_group_opens_it() {
+        let kit = LooseKit::new("groups-open", "halo3_mcc");
+        for rel in ["objects/a/one", "objects/b/two", "objects/c/three"] {
+            kit.write_mcc(rel, "scenery", |_| {});
+        }
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        h.idle(2);
+        let id = h.app.model.kits[h.app.model.active].id;
+        let chevron = |h: &mut Harness, label: &str| {
+            let rect = h.painted_rects.iter().find(|(t, _)| t == label).map(|(_, r)| *r).expect("label");
+            let target = egui::pos2(rect.left() - 12.0, rect.center().y);
+            let press = |pressed| egui::Event::PointerButton { pos: target, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            for events in [vec![pointer_at(target)], vec![press(true)], vec![press(false)]] {
+                h.frame(events);
+            }
+            h.idle(30);
+        };
+        h.idle(20);
+        chevron(&mut h, "objects");
+        assert!(h.painted.iter().any(|text| text == "b"), "{:?}", h.painted);
+        h.app.views[id].browser.mode = BrowserMode::Groups;
+        for _ in 0..40 { h.frame(Vec::new()); std::thread::sleep(Duration::from_millis(5)); }
+        chevron(&mut h, "scenery");
+        assert!(h.painted_contains("two.scenery"), "{:?}", h.painted);
+    }
+
+    #[test]
+    fn search_results_open_folder_by_folder() {
+        let kit = LooseKit::new("search-folders", "halo3_mcc");
+        for rel in [
+            "objects\\characters\\brute\\zz_one",
+            "objects\\characters\\brute\\zz_two",
+            "objects\\characters\\elite\\zz_three",
+            "scenarios\\solo\\zz_four",
+            "objects\\plain",
+        ] {
+            kit.write_mcc(rel, "scenery", |_| {});
+        }
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        h.idle(2);
+        let id = h.app.model.kits[h.app.model.active].id;
+        h.app.views[id].browser.filter = "zz".into();
+        let started = Instant::now();
+        h.frame(Vec::new());
+        while h.app.views[id].browser.filter_cache.tree.children.is_empty()
+            || h.app.views[id].browser.filter_cache.is_searching()
+        {
+            assert!(started.elapsed().as_secs() < 20, "{:?}", h.painted);
+            h.frame(Vec::new());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        h.idle(2);
+        let shown = |h: &Harness, text: &str| h.painted.iter().any(|painted| painted == text);
+        assert!(shown(&h, "objects") && shown(&h, "3") && shown(&h, "1"), "{:?}", h.painted);
+        assert!(!shown(&h, "characters") && !shown(&h, "solo"), "{:?}", h.painted);
+
+        // scenarios holds one folder, so it opens through to the tag.
+        h.click("scenarios", 0);
+        h.idle(3);
+        assert!(shown(&h, "solo") && h.painted_contains("zz_four"), "{:?}", h.painted);
+        // objects holds only characters, which holds two folders: stop there.
+        h.click("objects", 0);
+        h.idle(3);
+        assert!(shown(&h, "brute") && shown(&h, "elite"), "{:?}", h.painted);
+        assert!(!h.painted_contains("zz_one"), "{:?}", h.painted);
+
+        // Refining keeps what was opened.
+        h.app.views[id].browser.filter = "zz_".into();
+        let started = Instant::now();
+        while !shown(&h, "brute") || h.app.views[id].browser.filter_cache.waiting_for_results() {
+            assert!(started.elapsed().as_secs() < 20, "{:?}", h.painted);
+            h.frame(Vec::new());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // Collapse All closes everything; clearing shows the plain tree.
+        h.app.views[id].browser.open_all = Some(false);
+        h.idle(3);
+        assert!(!shown(&h, "characters"), "{:?}", h.painted);
+        h.app.views[id].browser.filter.clear();
+        h.idle(3);
+        assert!(shown(&h, "objects") && !shown(&h, "characters"), "{:?}", h.painted);
+        assert!(!shown(&h, "3"), "no counts outside a search: {:?}", h.painted);
     }
 }

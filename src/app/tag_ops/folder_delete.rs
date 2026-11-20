@@ -196,11 +196,17 @@ impl Baboon {
                 both.drop_document(&key);
             }
             for key in &done.keys { self.forget_campaign_overlay(index, key); }
+            let root = self.model.loaded_tags_root_for(index);
             let kit = &mut self.model.kits[index];
             if kit.selected_key.as_ref().is_some_and(|key| done.keys.contains(key)) { kit.selected_key = None; }
             for key in &done.keys {
                 kit.set_tag_references(key, None);
                 kit.keywords.forget_tag(key);
+            }
+            // The folder's own keywords, and its folders', go with it.
+            if let Some(root) = root {
+                kit.keywords.forget_folder(&crate::core::tag_key::folder_entry_key(
+                    &root, &tag_path::relative_tag_path(&done.relative)));
             }
             kit.keywords.save_if_dirty();
             kit.pending_container_folders.retain(|folder| !tag_path::to_relative(folder).starts_with(&done.relative));

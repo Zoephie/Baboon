@@ -5,7 +5,7 @@ use super::super::{
     TagSource, file_entry_key, group_tag_to_extension, model_preview_data, read_entry,
     resolve_tag_path,
 };
-use super::render_model::build_render_preview;
+use super::render_model::build_render_preview_at;
 use super::variants::{read_model_variants, read_variant_instances};
 use super::{TagReader, add_overlay_shaders, feature_into};
 
@@ -17,12 +17,15 @@ pub(super) fn load_model(
     entry: &TagEntry,
     names: &TagNameIndex,
     reader: Option<&TagReader>,
+    detail_level: Option<usize>,
 ) -> Result<ModelPreviewData, String> {
     let (render_entry, normalized, render_tag) = read_model_render(model_tag, names, reader)?;
-    let mut preview = build_render_preview(&render_tag)?;
+    let mut preview = build_render_preview_at(&render_tag, detail_level)?;
     if preview.batches.is_empty() {
         return Err("Referenced render_model has no previewable draw batches.".to_owned());
     }
+    preview.lod_model = super::stand_in::append_lod_model(model_tag, reader, &mut preview);
+    preview.imposter = super::imposter::append_imposter(model_tag, reader, &mut preview);
     add_overlay_shaders(model_tag, &mut preview);
     // The collision/physics overlays are not built here: walking the
     // collision BSP and tessellating the physics shapes is slow, and a

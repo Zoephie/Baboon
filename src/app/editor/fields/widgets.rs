@@ -3,6 +3,46 @@
 
 use super::*;
 
+/// The up and down arrows beside a value cell, as the function editor's Min
+/// and Max have them: 1 for up, -1 for down, else 0. Drawn after a cell with
+/// square right corners, it reads as part of it.
+pub(in crate::app) fn value_stepper(
+    ui: &mut Ui,
+    id: egui::Id,
+    enabled: bool,
+    up_tooltip: &str,
+    down_tooltip: &str,
+) -> f32 {
+    ui.add_enabled_ui(enabled, |ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(20.0, 24.0), Sense::hover());
+        let mut step = 0.0;
+        for (up, delta, tooltip) in [(true, 1.0, up_tooltip), (false, -1.0, down_tooltip)] {
+            let button = egui::Rect::from_min_size(
+                rect.min + Vec2::new(0.0, if up { 0.0 } else { 13.0 }), Vec2::new(20.0, 11.0),
+            );
+            // Not `id.with(up)`: egui names the cell's tooltip `id.with(0)`, which
+            // `false` hashes the same as, and a widget may not be in two layers.
+            let response = ui
+                .interact(button, id.with(if up { "step_up" } else { "step_down" }), Sense::click())
+                .on_hover_text(tooltip);
+            let visuals = ui.style().interact(&response);
+            let corners = egui::CornerRadius { nw: 0, sw: 0, ne: if up { 2 } else { 0 }, se: if up { 0 } else { 2 } };
+            // Filled as a button is, so the arrows show on any background.
+            ui.painter().rect(button, corners, visuals.weak_bg_fill, visuals.bg_stroke, egui::StrokeKind::Inside);
+            let center = button.center();
+            let direction = if up { -1.0 } else { 1.0 };
+            ui.painter().add(egui::Shape::convex_polygon(vec![
+                center + Vec2::new(-3.5, -2.0 * direction),
+                center + Vec2::new(3.5, -2.0 * direction),
+                center + Vec2::new(0.0, 2.0 * direction),
+            ], visuals.fg_stroke.color, egui::Stroke::NONE));
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tooltip));
+            if response.clicked() { step = delta; }
+        }
+        step
+    }).inner
+}
+
 /// Whether `response`'s widget gave up keyboard focus, reported on one pass
 /// only.
 ///
@@ -167,11 +207,11 @@ fn findable_layout_job(
             0.0,
             egui::TextFormat {
                 font_id: font_id.clone(),
-                color: Color32::BLACK,
+                color: search_match_text(),
                 background: if active.as_ref() == Some(&range) {
-                    Color32::from_rgb(255, 168, 38)
+                    search_active_match_bg()
                 } else {
-                    Color32::from_rgb(255, 220, 70)
+                    search_match_bg()
                 },
                 ..Default::default()
             },
@@ -222,7 +262,7 @@ fn foundation_label_cell_inner(ui: &mut Ui, text: &str, help: Option<&str>, stac
             Align2::LEFT_CENTER,
             "?",
             bold_font(12.5),
-            Color32::from_rgb(61, 161, 204),
+            help_cue(),
         );
     }
     paint_findable_text(
@@ -1114,42 +1154,52 @@ pub(in crate::app) fn search_clear_control(
         egui::pos2(field_rect.right() - 10.0, field_rect.center().y),
         Vec2::splat(20.0),
     );
-    search_clear_control_at(ui, clear_rect, id, 2.0)
+    search_clear_control_at(ui, clear_rect, id)
 }
 
 pub(in crate::app) fn search_clear_control_at(
     ui: &mut Ui,
     clear_rect: egui::Rect,
     id: egui::Id,
-    corner_radius: f32,
 ) -> egui::Response {
+    // The tabs' close button, hover and all.
     let clear = ui
         .interact(clear_rect, id, Sense::click())
         .on_hover_text("Clear search");
-    if clear.hovered() {
-        ui.painter().rect_filled(
-            clear_rect,
-            corner_radius,
-            ui.visuals().widgets.hovered.weak_bg_fill,
-        );
-    }
-    let color = if is_dark_mode() {
-        Color32::WHITE
-    } else {
-        Color32::BLACK
-    }
-    .gamma_multiply(0.5);
-    let icon_rect = clear_rect.shrink((clear_rect.width() - 10.0) * 0.5);
-    let stroke = Stroke::new(1.5_f32, color);
-    ui.painter()
-        .line_segment([icon_rect.left_top(), icon_rect.right_bottom()], stroke);
-    ui.painter()
-        .line_segment([icon_rect.right_top(), icon_rect.left_bottom()], stroke);
+    crate::app::ui_kit::paint_close_control(ui, &clear);
     clear
 }
 
 #[cfg(test)]
 mod tests {
+    /// The Sound Player's Speed draws a value cell and its stepper under one
+    /// id. With the cell's tooltip up, egui names that tooltip `id.with(0)`,
+    /// which the down arrow once shared, and the debug build stopped.
+    #[test]
+    fn a_value_cells_tooltip_does_not_clash_with_its_stepper() {
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        ctx.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let id = egui::Id::unique("stepped_value");
+        let mut cell = egui::Rect::NOTHING;
+        for pass in 0..4 {
+            let mut input = egui::RawInput::default();
+            if pass > 0 {
+                input.events.push(egui::Event::PointerMoved(cell.center()));
+            }
+            input.time = Some(pass as f64);
+            let _ = crate::app::run_ui_test(&ctx, input, |ui| {
+                ui.horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(56.0, 24.0), Sense::hover());
+                    let response = ui.interact(rect, id, Sense::click());
+                    cell = response.rect;
+                    response.on_hover_text("value");
+                    value_stepper(ui, id, true, "up", "down");
+                });
+            });
+        }
+    }
+
     #[test]
     fn searchable_picker_rows_fill_the_list_width() {
         let ctx = egui::Context::default();

@@ -228,6 +228,7 @@ pub(in crate::app) fn context_menu_button(ui: &mut Ui, label: &str) -> egui::Res
                 .tint(if enabled {
                     Color32::WHITE
                 } else {
+                    // fixed: dims the icon image itself
                     Color32::from_white_alpha(90)
                 })
                 .paint_at(ui, icon_rect);
@@ -334,7 +335,7 @@ pub(super) fn context_menu_primary_button(
 fn context_menu_icon(label: &str) -> Option<ButtonIcon> {
     let exact = match label {
         "Reveal in Browser" => Some(ButtonIcon::NavigationPane),
-        "Expand All" => Some(ButtonIcon::Opened),
+        "Open Tag Folder" => Some(ButtonIcon::FolderOpen),
         "Collapse All" => Some(ButtonIcon::Closed),
         "Close Tab" => Some(ButtonIcon::CloseTab),
         "Discard Unsaved Changes" => Some(ButtonIcon::Undo),
@@ -354,7 +355,7 @@ fn context_menu_icon(label: &str) -> Option<ButtonIcon> {
         "Find Tag References..." => Some(ButtonIcon::Find),
         "Dump Tag to JSON..." => Some(ButtonIcon::Json),
         "Dump Tag References..." => Some(ButtonIcon::Doc),
-        "Reimport" => Some(ButtonIcon::Import),
+        "Reimport" | "Recompile" => Some(ButtonIcon::Import),
         "Export Strings..." => Some(ButtonIcon::Export),
         _ => None,
     };
@@ -496,6 +497,10 @@ fn context_menu_app_icon(label: &str) -> Option<egui::Image<'static>> {
         "Open in Tag Test" => (
             "bytes://baboon_app_icons/tag-test.png",
             include_root_bytes!("assets/App Icons/Tag Test.png"),
+        ),
+        "Open in VS Code" => (
+            "bytes://baboon_app_icons/vs-code.svg",
+            include_root_bytes!("assets/App Icons/VS Code.svg"),
         ),
         _ => return None,
     };
@@ -770,17 +775,178 @@ pub(in crate::app) fn ancestor_labels(display_path: &str) -> Vec<String> {
     segments
 }
 
+/// How a tree's folders decide whether they are open.
+#[derive(Clone, Copy)]
+pub(in crate::app) enum FolderOpening<'a> {
+    /// As the user left them. `Some` opens (true) or closes every folder
+    /// first: View → Expand All or Collapse All.
+    Remembered(Option<bool>),
+    /// Every folder open: tests that measure a whole tree.
+    #[cfg_attr(not(test), allow(dead_code))]
+    AllOpen,
+    /// A search's results, open as their [`SearchFolders`] say. Kept apart
+    /// from the remembered state, which clearing the search shows again.
+    Search(&'a SearchFolders),
+}
+
+impl FolderOpening<'_> {
+    /// Moves whenever folders may have opened or closed without being drawn.
+    fn revision(self, ui: &Ui) -> u64 {
+        match self {
+            FolderOpening::Remembered(_) => current_open_request(ui).map_or(0, |request| request.serial),
+            FolderOpening::AllOpen => 1 << 63,
+            FolderOpening::Search(folders) => (1 << 62) | folders.revision(),
+        }
+    }
+}
+
+/// Expand All or Collapse All on a folder (`root`) or a whole tree (`""`),
+/// applied to each folder beneath it the first time it is drawn afterwards,
+/// so lazily loaded folders follow too.
+#[derive(Clone)]
+struct OpenRequest {
+    root: String,
+    open: bool,
+    serial: u64,
+}
+
+fn open_request_scope_id() -> egui::Id {
+    egui::Id::unique("browser_open_request_scope")
+}
+
+fn open_request_serial_id() -> egui::Id {
+    egui::Id::unique("browser_open_request_serial")
+}
+
+/// Start drawing a tree: its open requests are kept under its own id.
+fn begin_open_requests(ui: &Ui, open_all: Option<bool>) {
+    let scope = ui.scope_id().with("browser_open_requests");
+    ui.data_mut(|data| data.insert_temp(open_request_scope_id(), scope));
+    if let Some(open) = open_all {
+        push_open_request(ui, String::new(), open);
+    }
+}
+
+fn push_open_request(ui: &Ui, root: String, open: bool) {
+    ui.data_mut(|data| {
+        let Some(scope) = data.get_temp::<egui::Id>(open_request_scope_id()) else {
+            return;
+        };
+        let serial = data.get_temp_mut_or_default::<u64>(open_request_serial_id());
+        *serial += 1;
+        let serial = *serial;
+        data.insert_temp(scope, OpenRequest { root, open, serial });
+    });
+}
+
+fn current_open_request(ui: &Ui) -> Option<OpenRequest> {
+    ui.data(|data| {
+        let scope = data.get_temp::<egui::Id>(open_request_scope_id())?;
+        data.get_temp::<OpenRequest>(scope)
+    })
+}
+
+/// Whether search key `key` is `root` or beneath it; `""` holds everything.
+fn key_is_beneath(key: &str, root: &str) -> bool {
+    crate::app::kits::loading::scope_contains(root, key)
+}
+
+/// What a folder header needs to know to open: from a search, or from the
+/// remembered state with any pending open request.
+#[derive(Clone, Copy)]
+struct HeaderOpening<'a> {
+    default_open: bool,
+    force_open: bool,
+    /// The node's path, which keys open requests and search state.
+    path: &'a Path,
+    search: Option<&'a SearchFolders>,
+}
+
+impl<'a> HeaderOpening<'a> {
+    fn new(opening: FolderOpening<'a>, path: &'a Path, filter: &str, force_open: bool) -> Self {
+        HeaderOpening {
+            default_open: matches!(opening, FolderOpening::AllOpen) || !filter.is_empty(),
+            force_open,
+            path,
+            search: match opening {
+                FolderOpening::Search(folders) => Some(folders),
+                _ => None,
+            },
+        }
+    }
+
+    fn state_id(self, ui: &Ui, id_source: &str) -> egui::Id {
+        let id = ui.make_persistent_id(id_source);
+        if self.search.is_some() { id.with("search_results") } else { id }
+    }
+
+    /// Load the header's open state and apply what this opening says.
+    fn load(self, ui: &Ui, id: egui::Id) -> egui::collapsing_header::CollapsingState {
+        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(),
+            id,
+            self.default_open,
+        );
+        if let Some(folders) = self.search {
+            state.set_open(folders.is_open(self.path));
+        } else if let Some(request) = current_open_request(ui)
+            && key_is_beneath(&search_node_key(self.path), &request.root)
+        {
+            let applied = id.with("open_request");
+            if ui.data(|data| data.get_temp::<u64>(applied)) != Some(request.serial) {
+                state.set_open(request.open);
+                ui.data_mut(|data| data.insert_temp(applied, request.serial));
+            }
+        }
+        if self.force_open {
+            state.set_open(true);
+        }
+        state
+    }
+
+    /// After drawing: a click that opened or closed the header, with Alt
+    /// held, opens or closes everything inside it too.
+    fn after_toggle(self, ui: &Ui, was_open: bool, now_open: bool) {
+        if was_open == now_open {
+            return;
+        }
+        // Alt-closing closes everything inside too. There is no opening
+        // everything: in a big kit that loads and draws every folder at
+        // once, and the app stops answering.
+        let everything = !now_open && ui.input(|input| input.modifiers.alt);
+        if let Some(folders) = self.search {
+            folders.toggle(self.path, now_open, everything);
+        } else if everything {
+            push_open_request(ui, search_node_key(self.path), now_open);
+        }
+    }
+
+    fn count(self) -> Option<usize> {
+        self.search.and_then(|folders| folders.count(self.path))
+    }
+}
+
+/// Collapse All for one folder and everything inside it.
+fn subtree_open_menu_items(ui: &mut Ui, path: &Path, search: Option<&SearchFolders>) {
+    if context_menu_button(ui, "Collapse All").clicked() {
+        match search {
+            Some(folders) => folders.toggle(path, false, true),
+            None => push_open_request(ui, search_node_key(path), false),
+        }
+        close_menu(ui);
+    }
+}
+
 /// `filter` narrows what is drawn; pass `""` for a tree that is already
-/// filtered. `expand_folders` opens folders by default, as a non-empty
-/// `filter` also does: a pre-filtered tree wants its results open without
-/// being matched against the query a second time, every frame.
+/// filtered. A non-empty `filter` opens folders, as [`FolderOpening::AllOpen`]
+/// does: a pre-filtered tree is drawn with its search's own opening instead.
 pub(in crate::app) fn draw_tree(
     ui: &mut Ui,
     tree: &TagTree,
     entries: &[TagEntry],
     selected: Option<&str>,
     filter: &str,
-    expand_folders: bool,
+    opening: FolderOpening,
     show_prefixes: bool,
     double_click_to_open: bool,
     groups_mode: bool,
@@ -792,6 +958,10 @@ pub(in crate::app) fn draw_tree(
     game: Option<GameId>,
 ) -> Option<BrowserAction> {
     begin_folder_chevron_collection(ui);
+    begin_open_requests(ui, match opening {
+        FolderOpening::Remembered(open_all) => open_all,
+        _ => None,
+    });
     let mut clicked = None;
     if !folders_before_tags {
         let action = draw_entry_list(
@@ -822,7 +992,7 @@ pub(in crate::app) fn draw_tree(
             entries,
             selected,
             filter,
-            expand_folders,
+            opening,
             show_prefixes,
             double_click_to_open,
             groups_mode,
@@ -879,8 +1049,10 @@ pub(in crate::app) fn draw_tree_lazy(
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
     game: Option<GameId>,
+    open_all: Option<bool>,
 ) -> Option<BrowserAction> {
     begin_folder_chevron_collection(ui);
+    begin_open_requests(ui, open_all);
     let mut clicked = None;
     if !folders_before_tags {
         let action = draw_entry_list(
@@ -943,7 +1115,8 @@ struct FolderLayoutKey<'a> {
     node: &'a TagTreeNode,
     entries: &'a [TagEntry],
     filter: &'a str,
-    expand_folders: bool,
+    /// [`FolderOpening::revision`].
+    opening: u64,
     folders_before_tags: bool,
     groups_mode: bool,
 }
@@ -958,7 +1131,7 @@ impl FolderLayoutKey<'_> {
         self.entries.as_ptr().hash(&mut hasher);
         self.entries.len().hash(&mut hasher);
         self.filter.hash(&mut hasher);
-        self.expand_folders.hash(&mut hasher);
+        self.opening.hash(&mut hasher);
         self.folders_before_tags.hash(&mut hasher);
         self.groups_mode.hash(&mut hasher);
         let spacing = ui.spacing();
@@ -1063,7 +1236,7 @@ pub(in crate::app) fn draw_tree_node_lazy(
         node,
         entries,
         filter,
-        expand_folders: false,
+        opening: FolderOpening::Remembered(None).revision(ui),
         folders_before_tags,
         groups_mode: false,
     }
@@ -1119,8 +1292,7 @@ fn draw_tree_node_lazy_block(
         &folder_name,
         &folder_label,
         folder_label_color(ui, node),
-        !filter.is_empty(),
-        on_path,
+        HeaderOpening::new(FolderOpening::Remembered(None), &node.rel_path, filter, on_path),
         is_current_folder(selected, &node.rel_path),
         Some(&node.rel_path),
         |ui| {
@@ -1235,6 +1407,8 @@ fn draw_tree_node_lazy_block(
             });
             close_menu(ui);
         }
+        context_menu_separator(ui);
+        subtree_open_menu_items(ui, &node.rel_path, None);
     });
     if response.double_clicked() {
         clicked = Some(BrowserAction::OpenFolderBrowser {
@@ -1252,7 +1426,7 @@ pub(in crate::app) fn draw_tree_node(
     entries: &[TagEntry],
     selected: Option<&str>,
     filter: &str,
-    expand_folders: bool,
+    opening: FolderOpening,
     show_prefixes: bool,
     double_click_to_open: bool,
     groups_mode: bool,
@@ -1272,7 +1446,7 @@ pub(in crate::app) fn draw_tree_node(
         node,
         entries,
         filter,
-        expand_folders,
+        opening: opening.revision(ui),
         folders_before_tags,
         groups_mode,
     };
@@ -1284,7 +1458,7 @@ pub(in crate::app) fn draw_tree_node(
             entries,
             selected,
             filter,
-            expand_folders,
+            opening,
             show_prefixes,
             double_click_to_open,
             groups_mode,
@@ -1306,7 +1480,7 @@ fn draw_tree_node_block(
     entries: &[TagEntry],
     selected: Option<&str>,
     filter: &str,
-    expand_folders: bool,
+    opening: FolderOpening,
     show_prefixes: bool,
     double_click_to_open: bool,
     groups_mode: bool,
@@ -1348,7 +1522,7 @@ fn draw_tree_node_block(
                 entries,
                 selected,
                 filter,
-                expand_folders,
+                opening,
                 show_prefixes,
                 double_click_to_open,
                 groups_mode,
@@ -1382,14 +1556,14 @@ fn draw_tree_node_block(
             }
         }
     };
+    let header_opening = HeaderOpening::new(opening, &node.rel_path, filter, on_path);
     let header_response = if groups_mode {
         show_group_tree_header(
             ui,
             &node.label,
             folder_label_color(ui, node),
             show_prefixes,
-            expand_folders || !filter.is_empty(),
-            on_path,
+            header_opening,
             body,
         )
     } else {
@@ -1403,8 +1577,7 @@ fn draw_tree_node_block(
             &node.label,
             &folder_label,
             folder_label_color(ui, node),
-            expand_folders || !filter.is_empty(),
-            on_path,
+            header_opening,
             is_current_folder(selected, &node.rel_path),
             Some(&node.rel_path),
             body,
@@ -1423,6 +1596,8 @@ fn draw_tree_node_block(
     }
     context_menu(&header_response, |ui| {
         if let Some(action) = draw_folder_context_menu_contents(ui, node, entries, groups_mode, is_container, favorite_keys) { clicked = Some(action); }
+        context_menu_separator(ui);
+        subtree_open_menu_items(ui, &node.rel_path, header_opening.search);
     });
     if !groups_mode && header_response.double_clicked() {
         clicked = Some(BrowserAction::OpenFolderBrowser {
@@ -2202,19 +2377,12 @@ fn show_group_tree_header<R>(
     label: &str,
     label_color: Color32,
     show_prefixes: bool,
-    default_open: bool,
-    force_open: bool,
+    opening: HeaderOpening,
     add_body: impl FnOnce(&mut Ui) -> R,
 ) -> egui::Response {
-    let id = ui.make_persistent_id(label);
-    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
-        ui.ctx(),
-        id,
-        default_open,
-    );
-    if force_open {
-        state.set_open(true);
-    }
+    let id = opening.state_id(ui, label);
+    let mut state = opening.load(ui, id);
+    let was_open = state.is_open();
     note_folder_animation(ui, &state);
 
     let (name, fourcc) = group_tree_label_parts(label);
@@ -2234,8 +2402,8 @@ fn show_group_tree_header<R>(
                 content = content.union(ui.label(RichText::new(display_name).color(label_color)));
             }
             let badge = Frame::NONE
-                .fill(Color32::from_rgb(48, 58, 66))
-                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(76, 89, 98)))
+                .fill(group_badge_fill())
+                .stroke(Stroke::new(1.0_f32, group_badge_edge()))
                 .corner_radius(egui::CornerRadius::same(4))
                 // A 6 by 1 inset: egui counts the stroke as padding.
                 .inner_margin(egui::Margin::symmetric(5, 0))
@@ -2243,16 +2411,29 @@ fn show_group_tree_header<R>(
                     ui.label(
                         RichText::new(fourcc)
                             .monospace()
-                            .color(Color32::from_rgb(226, 235, 240)),
+                            .color(group_badge_text()),
                     )
                 })
                 .response;
-            (content.union(badge), toggle_clicked)
+            let mut content = content.union(badge);
+            if let Some(count) = opening.count() {
+                content = content.union(search_count_label(ui, count));
+            }
+            (content, toggle_clicked)
         });
-    // Folder labels select/open; only the disclosure button changes expansion.
-    let _ = toggle_clicked;
+    // The row's click covers its arrow, so the row opens and closes the
+    // group, as a folder's does.
+    if response.clicked() && !toggle_clicked {
+        state.toggle(ui);
+    }
+    opening.after_toggle(ui, was_open, state.is_open());
     state.show_body_indented(&response, ui, add_body);
     response
+}
+
+/// How many search matches a folder or group holds, muted after its name.
+fn search_count_label(ui: &mut Ui, count: usize) -> egui::Response {
+    ui.label(RichText::new(count.to_string()).color(subtle_dark()))
 }
 
 const BROWSER_TREE_ICON_SIZE: f32 = 16.0;
@@ -2336,23 +2517,16 @@ fn show_folder_tree_header<R>(
     id_source: &str,
     label: &str,
     label_color: Color32,
-    default_open: bool,
-    force_open: bool,
+    opening: HeaderOpening,
     current: bool,
     folder_path: Option<&Path>,
     add_body: impl FnOnce(&mut Ui) -> R,
 ) -> egui::Response {
     #[cfg(test)]
     TREE_ROWS_LAID_OUT.with(|count| count.set(count.get() + 1));
-    let id = ui.make_persistent_id(id_source);
-    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
-        ui.ctx(),
-        id,
-        default_open,
-    );
-    if force_open {
-        state.set_open(true);
-    }
+    let id = opening.state_id(ui, id_source);
+    let mut state = opening.load(ui, id);
+    let was_open = state.is_open();
     note_folder_animation(ui, &state);
 
     let (response, (toggle_clicked, guide_x)) =
@@ -2362,7 +2536,7 @@ fn show_folder_tree_header<R>(
             let (icon_rect, icon_response) =
                 ui.allocate_exact_size(Vec2::splat(BROWSER_TREE_ICON_SIZE), Sense::hover());
             let (icon, color) = if state.is_open() {
-                (ButtonIcon::FolderOpen, disclosure_triangle_green())
+                (ButtonIcon::FolderOpen, open_folder_icon())
             } else {
                 (ButtonIcon::FolderClosed, disclosure_triangle_blue())
             };
@@ -2373,7 +2547,10 @@ fn show_folder_tree_header<R>(
             } else {
                 name
             };
-            let content = icon_response.union(ui.add(name));
+            let mut content = icon_response.union(ui.add(name));
+            if let Some(count) = opening.count() {
+                content = content.union(search_count_label(ui, count));
+            }
             (
                 toggle.union(content),
                 (toggle_clicked, icon_rect.center().x),
@@ -2396,6 +2573,7 @@ fn show_folder_tree_header<R>(
     if response.clicked() && !toggle_clicked {
         state.toggle(ui);
     }
+    opening.after_toggle(ui, was_open, state.is_open());
     let navigation_open = state.is_open();
     show_relocated_browser_tree_body(ui, &mut state, &response, guide_x, |ui| {
         if folder_path.is_some() { push_browser_parent(ui, response.id, navigation_open); }
@@ -2779,6 +2957,80 @@ pub(in crate::app) fn draw_entry(
     reserve_disclosure: bool,
     game: Option<GameId>,
 ) -> Option<BrowserAction> {
+    draw_entry_in(
+        ui,
+        entry,
+        None,
+        selected,
+        show_prefixes,
+        double_click_to_open,
+        reveal_key,
+        favorite_keys,
+        reserve_disclosure,
+        game,
+    )
+}
+
+/// A row's name, after its folder path in muted text when it has one. A
+/// path too long for the row loses folders from its start, so the folder
+/// nearest the name stays readable.
+pub(in crate::app) fn path_and_name_job(
+    ui: &Ui,
+    path: Option<&str>,
+    name: &str,
+    font: FontId,
+    color: Color32,
+    width: f32,
+) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    if let Some(path) = path.filter(|path| !path.is_empty()) {
+        let measure = |text: &str| {
+            ui.painter()
+                .layout_no_wrap(text.to_owned(), font.clone(), color)
+                .size()
+                .x
+        };
+        let room = width - measure(name);
+        let segments: Vec<&str> = path
+            .trim_end_matches(tag_path::SEPARATOR)
+            .split(tag_path::SEPARATOR)
+            .collect();
+        let shown = (0..segments.len())
+            .map(|skip| {
+                let rest = segments[skip..].join("\\");
+                if skip == 0 { format!("{rest}\\") } else { format!("…\\{rest}\\") }
+            })
+            .find(|text| measure(text) <= room)
+            .unwrap_or_else(|| "…\\".to_owned());
+        job.append(
+            &shown,
+            0.0,
+            egui::TextFormat::simple(font.clone(), subtle_dark()),
+        );
+    }
+    job.append(name, 0.0, egui::TextFormat::simple(font, color));
+    job.wrap.max_width = width.max(0.0);
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    job.wrap.overflow_character = Some('…');
+    job
+}
+
+/// [`draw_entry`] for a search result listed away from its folder: `path`
+/// leads its name, and its menu can open that folder.
+#[allow(clippy::too_many_arguments)]
+pub(in crate::app) fn draw_entry_in(
+    ui: &mut Ui,
+    entry: &TagEntry,
+    path: Option<&str>,
+    selected: Option<&str>,
+    show_prefixes: bool,
+    double_click_to_open: bool,
+    reveal_key: Option<&str>,
+    favorite_keys: Option<&HashSet<String>>,
+    reserve_disclosure: bool,
+    game: Option<GameId>,
+) -> Option<BrowserAction> {
     let leaf_label = tag_path::name(&entry.display_path);
     // Every expanded row runs this each frame, on screen or not, so what a
     // row allocates waits until it is needed: the payload until a drag
@@ -2863,15 +3115,14 @@ pub(in crate::app) fn draw_entry(
             Some(modified) if modified.contains_key(&entry.key) => modified_text(),
             _ => text_dark(),
         };
-        let mut job = egui::text::LayoutJob::simple(
-            label,
+        let job = path_and_name_job(
+            ui,
+            path,
+            &label,
             FontId::proportional(12.5),
             color,
             (label_clip.right() - label_left - 4.0).max(0.0),
         );
-        job.wrap.max_rows = 1;
-        job.wrap.break_anywhere = true;
-        job.wrap.overflow_character = Some('…');
         let galley = ui.painter().layout_job(job);
         let label_pos = egui::pos2(label_left, row_rect.center().y - galley.size().y * 0.5);
         ui.painter().with_clip_rect(label_clip).galley(label_pos, galley, color);
@@ -2899,11 +3150,28 @@ pub(in crate::app) fn draw_entry(
     let open_requested = browser_open_requested(&response, double_click_to_open);
     let mut action = open_requested.then(|| BrowserAction::Select(entry.key.clone()));
     context_menu(&response, |ui| {
-        if let Some(menu_action) = draw_tag_context_menu_contents(ui, entry, favorite_keys, false) {
+        if let Some(menu_action) = draw_tag_context_menu_contents(ui, entry, favorite_keys, false, false) {
             action = Some(menu_action);
+        }
+        if path.is_some() {
+            context_menu_separator(ui);
+            if open_tag_folder_menu_item(ui) {
+                action = Some(BrowserAction::OpenTagFolder(entry.key.clone()));
+            }
         }
     });
     action
+}
+
+/// "Open Tag Folder", for a search result shown away from its folder.
+pub(in crate::app) fn open_tag_folder_menu_item(ui: &mut Ui) -> bool {
+    let clicked = context_menu_button(ui, "Open Tag Folder")
+        .on_hover_text("Open the folder this tag is in, in a new folder tab, with the tag selected.")
+        .clicked();
+    if clicked {
+        close_menu(ui);
+    }
+    clicked
 }
 
 pub(in crate::app) fn select_browser_tag(ui: &Ui, response: &egui::Response, key: &str) -> bool {
@@ -2947,11 +3215,24 @@ pub(in crate::app) fn paint_browser_selection_border(ui: &Ui, rect: egui::Rect) 
     );
 }
 
+/// What Open in VS Code does, for its tooltips.
+pub(in crate::app) const OPEN_IN_VSCODE_HELP: &str = "Open this script's .hsc file from the data folder in \
+    VS Code, where an extension such as Atlas can edit it.";
+
+/// What Recompile does, for its tooltips.
+pub(in crate::app) const RECOMPILE_HELP: &str = "Compile the scenario that lists this script from its data files: \
+    with Tool's rebuild-scenario-scripts in the terminal on Halo 2, or by opening it in Sapien, which \
+    compiles its scripts as it loads, on Halo 3, ODST and Reach.";
+
+/// The tag menu: on a browser row when `in_tag_header` is false, else
+/// behind the tag pane header's "…" button, which leaves out what the
+/// header already shows as buttons.
 pub(in crate::app) fn draw_tag_context_menu_contents(
     ui: &mut Ui,
     entry: &TagEntry,
     favorite_keys: Option<&HashSet<String>>,
     open_submenus_left: bool,
+    in_tag_header: bool,
 ) -> Option<BrowserAction> {
     let mut action = None;
     style_tag_context_menu(ui);
@@ -3083,7 +3364,39 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
         }
     }
 
-    if favorite_keys.is_some() || launch.supported && is_scenario_group(entry.group_tag) {
+    // A script tag's two tools, as its header offers them; the header's own
+    // menu leaves them to its buttons.
+    let script_tag = &entry.group_tag.to_be_bytes() == b"hsc*" && !in_tag_header;
+    if launch.supported && script_tag {
+        if favorite_keys.is_some() {
+            context_menu_separator(ui);
+        }
+        let blocked = crate::app::kits::script_tools::vscode_unavailable(
+            ui.ctx(),
+            browser_data_root(ui).as_deref(),
+            &entry.display_path,
+        );
+        let response = ui
+            .add_enabled_ui(blocked.is_none(), |ui| context_menu_button(ui, "Open in VS Code"))
+            .inner
+            .on_hover_text(OPEN_IN_VSCODE_HELP);
+        if response.clicked() {
+            action = Some(BrowserAction::OpenScriptInVsCode(entry.key.clone()));
+            close_menu(ui);
+        }
+        if let Some(blocked) = blocked {
+            response.on_disabled_hover_text(blocked);
+        }
+        if context_menu_button(ui, "Recompile")
+            .on_hover_text(RECOMPILE_HELP)
+            .clicked()
+        {
+            action = Some(BrowserAction::RecompileScript(entry.key.clone()));
+            close_menu(ui);
+        }
+    }
+
+    if favorite_keys.is_some() || launch.supported && (is_scenario_group(entry.group_tag) || script_tag) {
         context_menu_separator(ui);
     }
     if crate::app::editor::string_list::supports_group(entry.group_tag) {
@@ -3299,7 +3612,7 @@ pub(in crate::app) fn draw_favorites(
 
 fn show_favorites_section<R>(ui: &mut Ui, add_body: impl FnOnce(&mut Ui) -> R) -> egui::Response {
     show_browser_navigation_section(ui, "browser_favorites", "Favorites",
-        ButtonIcon::FavouriteFilled, Color32::from_rgb(242, 196, 48), add_body)
+        ButtonIcon::FavouriteFilled, favourite_star(), add_body)
 }
 
 /// Bind the sidebar's collapsing headers to explicit preferences instead of
@@ -3387,7 +3700,7 @@ pub(in crate::app) fn show_browser_navigation_section_with_add<R>(
                 if hovered || add_response.is_pointer_button_down_on() {
                     paint_button_icon_at(ui, ButtonIcon::Add,
                         egui::Rect::from_center_size(add_rect.center(), Vec2::splat(BUTTON_ICON_SIZE)),
-                        Color32::from_rgb(126, 211, 75));
+                        add_icon());
                 }
                 content = content.union(add_response.on_hover_text("Add Shortcut"));
             }
@@ -3757,6 +4070,11 @@ mod tests {
         Reveal, TREE_ROW_TOPS, TREE_ROWS_LAID_OUT, TREE_SKIPS_ROWS, draw_tree, draw_tree_lazy,
     };
 
+    fn test_opening(default_open: bool, force_open: bool) -> HeaderOpening<'static> {
+        HeaderOpening { default_open, force_open, path: Path::new(""), search: None }
+    }
+
+
     fn extract_labels(
         complete: bool,
         scanning: bool,
@@ -4022,8 +4340,7 @@ mod tests {
                         "characters",
                         "characters",
                         text_dark(),
-                        false,
-                        false,
+                        test_opening(false, false),
                         false,
                         None,
                         |_| {},
@@ -4201,8 +4518,7 @@ mod tests {
                                     "dest",
                                     "dest",
                                     text_dark(),
-                                    false,
-                                    false,
+                                    test_opening(false, false),
                                     false,
                                     Some(Path::new("objects/dest")),
                                     |_| {},
@@ -4266,9 +4582,9 @@ mod tests {
         let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 begin_folder_chevron_collection(ui);
-                show_folder_tree_header(ui, "outer", "outer", text_dark(), true, true, false, None, |ui| {
+                show_folder_tree_header(ui, "outer", "outer", text_dark(), test_opening(true, true), false, None, |ui| {
                     nested_guide_enabled = ui.visuals().indent_has_left_vline;
-                    show_folder_tree_header(ui, "inner", "inner", text_dark(), true, true, false, None, |_| {});
+                    show_folder_tree_header(ui, "inner", "inner", text_dark(), test_opening(true, true), false, None, |_| {});
                 });
             });
         });
@@ -4365,6 +4681,7 @@ mod tests {
                         }),
                         BrowserSort::default(),
                         true,
+                        None,
                         None,
                         None,
                     );
@@ -4562,7 +4879,7 @@ mod tests {
                             &entries,
                             None,
                             "",
-                            false,
+                            FolderOpening::Remembered(None),
                             false,
                             false,
                             false,
@@ -4609,8 +4926,7 @@ mod tests {
                         "objects",
                         label,
                         text_dark(),
-                        false,
-                        false,
+                        test_opening(false, false),
                         false,
                         None,
                         |_| {
@@ -4655,7 +4971,7 @@ mod tests {
                         &entries,
                         None,
                         "",
-                        false,
+                        FolderOpening::Remembered(None),
                         false,
                         false,
                         groups_mode,
@@ -4719,7 +5035,7 @@ mod tests {
                         &entries,
                         None,
                         "",
-                        expand_folders,
+                        if expand_folders { FolderOpening::AllOpen } else { FolderOpening::Remembered(None) },
                         false,
                         false,
                         false,
@@ -5508,6 +5824,7 @@ mod tests {
                                 true,
                                 None,
                                 None,
+                                None,
                             );
                             return;
                         }
@@ -5517,7 +5834,7 @@ mod tests {
                             entries,
                             selected,
                             filter,
-                            true,
+                            FolderOpening::AllOpen,
                             false,
                             false,
                             false,
@@ -6017,5 +6334,57 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&root);
         assert!(offsets.iter().all(|after| (after - offset).abs() <= 24.0), "deletion moved the scroll offset from {offset} to {offsets:?}");
+    }
+}
+
+#[cfg(test)]
+mod script_tag_menu_tests {
+    use super::*;
+
+    /// The labels the tag menu paints for `entry`.
+    fn menu_labels(entry: &TagEntry, in_tag_header: bool) -> Vec<String> {
+        let ctx = egui::Context::default();
+        crate::app::Baboon::configure_context(&ctx);
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                set_browser_scenario_launch(
+                    ui,
+                    crate::app::kits::scenario_launch::ScenarioLaunchAvailability {
+                        supported: true,
+                        ..Default::default()
+                    },
+                );
+                let _ = draw_tag_context_menu_contents(ui, entry, None, false, in_tag_header);
+            });
+        });
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A script tag's menu offers its two tools on a browser row, but not
+    /// behind the tag header's "…", where they're already buttons.
+    #[test]
+    fn a_script_tags_tools_are_on_its_row_menu_but_not_its_header_menu() {
+        let script = unnamed_entry_of(b"hsc*");
+        let row = menu_labels(&script, false);
+        assert!(row.iter().any(|label| label == "Open in VS Code"), "{row:?}");
+        assert!(row.iter().any(|label| label == "Recompile"), "{row:?}");
+        let header = menu_labels(&script, true);
+        assert!(!header.iter().any(|label| label == "Open in VS Code" || label == "Recompile"), "{header:?}");
+        // Other tags never have them.
+        let other = menu_labels(&unnamed_entry_of(b"bipd"), false);
+        assert!(!other.iter().any(|label| label == "Open in VS Code"), "{other:?}");
+    }
+
+    #[test]
+    fn the_script_tools_have_icons() {
+        assert!(context_menu_app_icon("Open in VS Code").is_some());
+        assert_eq!(context_menu_icon("Recompile"), Some(ButtonIcon::Import));
     }
 }

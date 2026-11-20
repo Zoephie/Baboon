@@ -1,7 +1,9 @@
 //! One current directory, rendered with the existing folder table columns.
 use super::*;
 use std::hash::{Hash, Hasher};
-type FlatRow = (String, String, Option<usize>, Option<usize>);
+/// A row's key and name, the entry or folder it shows, and in a search the
+/// folder path below this one that it is in.
+type FlatRow = (String, String, Option<usize>, Option<usize>, Option<String>);
 struct FlatListing {
     rows: Vec<FlatRow>,
     nodes: Vec<TagTreeNode>,
@@ -48,6 +50,7 @@ pub(super) fn draw(
     double_click: bool,
     favorites: &HashSet<String>,
     keywords: &Arc<std::collections::BTreeMap<String, Vec<String>>>,
+    search_root: Option<&Path>,
     need_scan: &mut bool,
     action: &mut Option<BrowserAction>,
 ) {
@@ -61,17 +64,43 @@ pub(super) fn draw(
     let entries = source.full_entry_set();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     let sort = folder_table_sort_signature(ui);
+    let query = pane.search_query();
+    // A search runs as the Tree view's does, so it finds the same things:
+    // folders by name or by their own keywords, empty ones too.
+    let searching = !query.is_empty();
+    if searching {
+        pane.filter_cache.refresh_scoped_async(
+            generation,
+            &query,
+            entries,
+            false,
+            &pane.rel_path,
+            search_root,
+            pane.search_scope,
+            keywords,
+            ui.ctx(),
+        );
+        if pane.filter_cache.waiting_for_results() {
+            pane.selection.rows = Arc::default();
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(RichText::new("Searching…").color(subtle_dark()));
+            });
+            return;
+        }
+    }
     (
         generation,
         entries.as_ptr() as usize,
         entries.len(),
         &prefix,
-        &pane.filter,
+        &query,
         pane.search_scope,
         pane.sort,
         folders_first,
         sort,
         Arc::as_ptr(keywords) as usize,
+        searching.then_some(pane.filter_cache.serial),
     )
         .hash(&mut hasher);
     let signature = hasher.finish();
@@ -91,17 +120,18 @@ pub(super) fn draw(
         for node in folder_nodes {
             folders.insert(node.label.to_ascii_lowercase(), node.rel_path.clone());
         }
+        // A search lists every match beneath this folder, not just its own,
+        // each after the folder path it is in.
+        let matched: HashSet<&str> =
+            pane.filter_cache.entries.iter().map(|entry| entry.key.as_str()).collect();
         let mut indices = Vec::new();
+        // The folder each listed tag is in, below this one ("" for this one).
+        let mut tag_folder = HashMap::<usize, String>::new();
         for (index, entry) in entries.iter().enumerate() {
             let display = entry.display_path.replace('/', "\\");
             let parent = tag_path::parent(&display).unwrap_or("");
             if parent.eq_ignore_ascii_case(&prefix) {
-                if scoped_entry_matches(
-                    entry,
-                    &pane.filter,
-                    pane.search_scope,
-                    keywords.get(&entry.key).map(Vec::as_slice).unwrap_or(&[]),
-                ) {
+                if !searching || matched.contains(entry.key.as_str()) {
                     indices.push(index);
                 }
             } else if let Some(relative) = display.get(prefix.len()..).filter(|_| {
@@ -116,7 +146,25 @@ pub(super) fn draw(
                         .entry(name.to_ascii_lowercase())
                         .or_insert_with(|| pane.rel_path.join(name));
                 }
+                if !searching {
+                    continue;
+                }
+                if matched.contains(entry.key.as_str()) {
+                    let inside = tag_path::parent(relative).unwrap_or("");
+                    indices.push(index);
+                    tag_folder.insert(index, inside.to_owned());
+                }
             }
+        }
+        // A search lists the folders it matched, at any depth beneath.
+        if searching {
+            folders = pane
+                .filter_cache
+                .found_folders
+                .iter()
+                .filter(|path| !paths_match_case_insensitive(path, &pane.rel_path))
+                .map(|path| (path_key(path), path.clone()))
+                .collect();
         }
         match pane.sort {
             BrowserSort::Natural => indices.sort_by_cached_key(|&i| {
@@ -135,16 +183,8 @@ pub(super) fn draw(
             indices = order;
         }
         let nodes: Vec<_> = folders
-            .into_iter()
-            .filter(|(_, path)| {
-                pane.filter.is_empty()
-                    || (pane.search_scope.folders
-                        && scoped_folder_matches(
-                            &path.file_name().unwrap_or_default().to_string_lossy(),
-                            &pane.filter,
-                        ))
-            })
-            .map(|(_, path)| TagTreeNode {
+            .into_values()
+            .map(|path| TagTreeNode {
                 label: path
                     .file_name()
                     .unwrap_or_default()
@@ -157,33 +197,52 @@ pub(super) fn draw(
             .collect();
         let folder_order =
             table_order_folders(ui, &nodes).unwrap_or_else(|| (0..nodes.len()).collect());
-        let mut rows: Vec<(String, String, Option<usize>, Option<usize>)> = folder_order
+        // The folder a listed folder is in, below this one, as shown.
+        let node_folder = |node: &TagTreeNode| {
+            let relative = tag_path::relative_tag_path(&node.rel_path);
+            let relative = relative.get(prefix.len()..).unwrap_or("").trim_start_matches('\\');
+            tag_path::parent(relative).unwrap_or("").to_owned()
+        };
+        let shown_path = |folder: &str| (!folder.is_empty()).then(|| format!("{folder}\\"));
+        // Each row with the folder it is in, and whether it is a folder.
+        let mut listed: Vec<(String, bool, FlatRow)> = folder_order
             .into_iter()
             .map(|i| {
-                (
+                let folder = node_folder(&nodes[i]);
+                let row = (
                     folder_pane_key(&nodes[i].rel_path),
                     nodes[i].label.clone(),
                     None,
                     Some(i),
-                )
+                    shown_path(&folder),
+                );
+                (folder, true, row)
             })
             .collect();
-        let tags: Vec<_> = indices
-            .into_iter()
-            .map(|i| {
-                (
-                    entries[i].key.clone(),
-                    tag_path::name(&entries[i].display_path).into(),
-                    Some(i),
-                    None,
-                )
-            })
-            .collect();
+        let tags = indices.into_iter().map(|i| {
+            let folder = tag_folder.remove(&i).unwrap_or_default();
+            let row = (
+                entries[i].key.clone(),
+                tag_path::name(&entries[i].display_path).into(),
+                Some(i),
+                None,
+                shown_path(&folder),
+            );
+            (folder, false, row)
+        });
         if folders_first {
-            rows.extend(tags);
+            listed.extend(tags);
         } else {
-            rows.splice(0..0, tags);
+            listed.splice(0..0, tags);
         }
+        // This folder's own results first, then each folder's in path
+        // order; the sort keeps the order above within each folder.
+        if searching {
+            listed.sort_by_cached_key(|(folder, _, _)| {
+                (!folder.is_empty(), crate::core::source::natural_key(folder))
+            });
+        }
+        let rows: Vec<FlatRow> = listed.into_iter().map(|(_, _, row)| row).collect();
         let selection_rows = Arc::new(
             rows.iter()
                 .map(|row| (row.0.clone(), row.1.clone()))
@@ -238,7 +297,7 @@ pub(super) fn draw(
         rows.len(),
         |ui, visible| {
             if browser_navigation_building(ui) {
-                for (key, label, entry, _) in rows {
+                for (key, label, entry, _, _) in rows {
                     let id = if entry.is_some() {
                         ui.make_persistent_id(("browser_tag", key))
                     } else {
@@ -249,11 +308,12 @@ pub(super) fn draw(
                 }
             }
             let at_end = visible.end == rows.len();
-            for (key, label, entry, folder) in &rows[visible] {
+            for (key, label, entry, folder, path) in &rows[visible] {
                 if let Some(i) = entry {
-                    if let Some(request) = draw_entry(
+                    if let Some(request) = draw_entry_in(
                         ui,
                         &entries[*i],
+                        path.as_deref(),
                         None,
                         false,
                         double_click,
@@ -314,13 +374,20 @@ pub(super) fn draw(
                         icon,
                         disclosure_triangle_blue(),
                     );
-                    ui.painter().with_clip_rect(folder_name_clip(ui)).text(
-                        egui::pos2(rect.left() + FLAT_ROW_CONTENT_INSET + 21.0, rect.center().y),
-                        egui::Align2::LEFT_CENTER,
+                    let clip = folder_name_clip(ui).intersect(rect);
+                    let left = rect.left() + FLAT_ROW_CONTENT_INSET + 21.0;
+                    let galley = ui.painter().layout_job(path_and_name_job(
+                        ui,
+                        path.as_deref(),
                         label,
                         egui::TextStyle::Body.resolve(ui.style()),
                         text_dark(),
-                    );
+                        (clip.right() - left - 4.0).max(0.0),
+                    ));
+                    let top = rect.center().y - galley.size().y * 0.5;
+                    ui.painter()
+                        .with_clip_rect(clip)
+                        .galley(egui::pos2(left, top), galley, text_dark());
                     paint_folder_columns(ui, rect, None, Some(&node.rel_path));
                     if response.double_clicked()
                         && !ui.input(|input| {
@@ -495,6 +562,10 @@ mod tests {
                             true,
                             &HashSet::new(),
                             &self.keywords,
+                            match &self.source.source {
+                                TagSource::LooseFolder { root, .. } => Some(root.as_path()),
+                                _ => None,
+                            },
                             &mut false,
                             &mut self.action,
                         );
@@ -905,5 +976,107 @@ mod tests {
             .0;
         assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(owner));
         assert_eq!(h.app.views[id].browser.folder_browsers.len(), 1);
+    }
+
+    /// A Flat search lists matches from every folder beneath, this folder's
+    /// own first and then each folder's in path order, with matched folders
+    /// among them; Open Tag Folder opens a result's folder with it selected.
+    #[test]
+    fn a_flat_search_lists_every_folder_beneath_in_path_order() {
+        let kit = LooseKit::new("flat-search-deep", "halo3_mcc");
+        for rel in [
+            "zz_here",
+            "scenarios\\zz_three",
+            "objects\\deep\\zz_two",
+            "objects\\deep\\other",
+            "objects\\zz_one",
+        ] {
+            kit.write_mcc(rel, "scenery", |_| {});
+        }
+        std::fs::create_dir_all(kit.root.join("objects").join("empty_deep")).unwrap();
+        let mut h = Harness::new(&kit);
+        let kit_id = h.app.model.active_kit_id();
+        let key = |h: &Harness, name: &str| {
+            h.source
+                .full_entry_set()
+                .iter()
+                .find(|entry| entry.display_path.contains(name))
+                .unwrap()
+                .key
+                .clone()
+        };
+        // The search runs on a worker, as the Tree view's does.
+        let settle = |h: &mut Harness| {
+            for _ in 0..400 {
+                h.frame(Vec::new());
+                if !h.app.views[kit_id].browser.folder_browsers[&h.pane].filter_cache.is_searching() {
+                    h.frame(Vec::new());
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            panic!("the search never answered");
+        };
+        let pane = h.app.views[kit_id].browser.folder_browsers.get_mut(&h.pane).unwrap();
+        pane.filter = "zz".into();
+        settle(&mut h);
+        let rows = |h: &Harness| -> Vec<String> {
+            h.app.views[kit_id].browser.folder_browsers[&h.pane]
+                .selection
+                .rows
+                .iter()
+                .map(|row| row.0.clone())
+                .collect()
+        };
+        assert_eq!(
+            rows(&h),
+            [key(&h, "zz_here"), key(&h, "zz_one"), key(&h, "zz_two"), key(&h, "zz_three")]
+        );
+
+        // Folders found by name are listed in their own folder's place.
+        let pane = h.app.views[kit_id].browser.folder_browsers.get_mut(&h.pane).unwrap();
+        pane.filter = "deep".into();
+        pane.search_scope.folders = true;
+        settle(&mut h);
+        let listed = rows(&h);
+        assert_eq!(listed[0], folder_pane_key(Path::new("objects").join("deep").as_path()));
+        assert!(listed.contains(&key(&h, "other")), "{listed:?}");
+
+        // A folder found by its own keyword is listed too, though nothing
+        // in it matches, and an empty folder is found by name.
+        let mut keywords = std::collections::BTreeMap::new();
+        keywords.insert(
+            crate::core::tag_key::key_identity(&crate::core::tag_key::folder_entry_key(
+                &kit.root,
+                "scenarios",
+            )),
+            vec!["needs work".to_owned()],
+        );
+        h.keywords = Arc::new(keywords);
+        let pane = h.app.views[kit_id].browser.folder_browsers.get_mut(&h.pane).unwrap();
+        pane.filter = "deep".into();
+        settle(&mut h);
+        let listed = rows(&h);
+        assert!(
+            listed.contains(&folder_pane_key(Path::new("objects").join("empty_deep").as_path())),
+            "{listed:?}"
+        );
+        let pane = h.app.views[kit_id].browser.folder_browsers.get_mut(&h.pane).unwrap();
+        pane.filter.clear();
+        pane.keyword_terms = vec!["needs work".to_owned()];
+        pane.search_scope.folders = false;
+        settle(&mut h);
+        assert_eq!(rows(&h), [folder_pane_key(Path::new("scenarios"))]);
+
+        let wanted = key(&h, "zz_two");
+        let ctx = h.ctx.clone();
+        h.app.handle_browser_action(BrowserAction::OpenTagFolder(wanted.clone()), ctx);
+        let opened = h.app.views[kit_id]
+            .browser
+            .folder_browsers
+            .values()
+            .find(|pane| tag_path::relative_tag_path(&pane.rel_path).eq_ignore_ascii_case("objects\\deep"))
+            .expect("a tab for the tag's folder");
+        assert!(opened.selection.keys.contains(&wanted));
     }
 }

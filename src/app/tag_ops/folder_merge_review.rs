@@ -51,6 +51,8 @@ pub(in crate::app) struct ItemsPreview {
     pub action: ItemsAction,
     pub selected: Vec<(String, crate::app::browser::bulk_rename::RenameIcon)>,
     pub game: Option<GameId>,
+    /// Selected items left out because a selected folder holds them.
+    pub covered: Option<String>,
 }
 
 /// What the check adds to the review: the referring tags (left with missing
@@ -221,6 +223,7 @@ fn draw_items_review(
     game: Option<GameId>,
     phase: Option<&str>,
     notice: Option<&str>,
+    covered: Option<&str>,
 ) -> Option<bool> {
     use crate::app::browser::bulk_rename::{
         ITEM_ROW_HEIGHT, draw_folder_band, draw_item_row, draw_items_box, draw_references_box,
@@ -243,6 +246,10 @@ fn draw_items_review(
     crate::app::browser::bulk_rename::padded_body(ui, |ui| {
         if let Some(notice) = notice {
             ui.label(RichText::new(notice).color(ui.visuals().warn_fg_color));
+            ui.add_space(8.0);
+        }
+        if let Some(covered) = covered {
+            ui.label(RichText::new(covered).color(subtle_dark()));
             ui.add_space(8.0);
         }
         if let Some((path, icon)) = single {
@@ -450,6 +457,7 @@ pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi, phase: Opti
                     preview.game,
                     phase,
                     None,
+                    preview.covered.as_deref(),
                 ) == Some(false);
             });
         if cancel || modal.should_close() {
@@ -459,6 +467,7 @@ pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi, phase: Opti
         return;
     };
     let mut response = None;
+    let covered = state.items_preview.as_ref().and_then(|preview| preview.covered.clone());
     let modal = egui::Modal::new(egui::Id::unique("folder_merge_review"))
         .frame(egui::Frame::window(&ctx.global_style()))
         .show(ctx, |ui| {
@@ -475,7 +484,7 @@ pub(in crate::app) fn draw(ctx: &egui::Context, state: &mut MergeUi, phase: Opti
             };
             if let Some((action, selected, game, check)) = items {
                 ui.set_width(items_review_width(ctx, &action, selected));
-                response = draw_items_review(ui, ctx, &action, selected, Some(check), game, None, review.notice.as_deref())
+                response = draw_items_review(ui, ctx, &action, selected, Some(check), game, None, review.notice.as_deref(), covered.as_deref())
                     .map(|go| go.then_some(MergeAnswer { choice: None, apply_remaining: false }));
                 return;
             }
@@ -568,7 +577,7 @@ impl Dialog for SaveBeforeFolderOperation {
             .id(egui::Id::unique("save_before_folder_operation")).open(&mut open).resizable(false)
             .show(cx.egui, |ui| {
                 ui.label("Save all unsaved tags in this workspace before checking references and moving or copying folders.");
-                if let Some(error) = &self.error { ui.colored_label(material_delete_text(), error); }
+                if let Some(error) = &self.error { ui.colored_label(error_text(), error); }
                 if ui.button("Save All and Continue").clicked() { cx.send(TagOpsCommand::SaveBeforeFolderOperation); }
                 if ui.button("Cancel").clicked() { cx.send(TagOpsCommand::CancelFolderOperationSave); }
             });

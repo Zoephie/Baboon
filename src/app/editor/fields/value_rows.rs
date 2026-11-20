@@ -1035,7 +1035,7 @@ fn draw_foundation_slider_row(
             Some(step) => slider.step_by(step as f64),
             None => slider,
         };
-        let mut slid = ui.add_enabled(editable, slider);
+        let mut slid = plain_railed_slider(ui, slider, editable, editor_bg());
         if show_limits {
             ui.label(limit(range.max));
         } else {
@@ -1103,9 +1103,6 @@ fn draw_foundation_cell_row_at(
         }
     });
 }
-
-/// Red used to flag tag references whose target file is missing on disk.
-pub(in crate::app) const REFERENCE_MISSING_COLOR: Color32 = Color32::from_rgb(216, 92, 92);
 
 fn is_block_flags(value: &TagFieldData) -> bool {
     matches!(

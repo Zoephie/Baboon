@@ -1589,6 +1589,7 @@ impl Baboon {
                         &tx,
                     )
                     .map(|done| bulk::BulkOutcome {
+                        note: None,
                         done,
                         pane,
                         completed: Vec::new(),
@@ -2381,6 +2382,7 @@ mod tests {
         app.handle_browser_bulk_finished(
             stamp,
             Ok(bulk::BulkOutcome {
+                note: None,
                 done,
                 pane: pane.clone(),
                 completed: Vec::new(),

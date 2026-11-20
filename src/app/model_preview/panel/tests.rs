@@ -1,13 +1,13 @@
 use super::super::super::ui_kit::button_icons::{
-    ButtonIcon, icon_text_button, icon_text_dropdown_button, selectable_icon_text_button,
+    ButtonIcon, icon_button, icon_text_button, icon_text_dropdown_button, selectable_icon_text_button,
 };
 use super::super::super::ui_kit::style::{
     BUTTON_HEIGHT, ICON_BUTTON_SIZE, foundation_fonts, foundation_style,
 };
-use super::super::super::{Baboon, TagSource, locate_definitions_root};
+use super::super::super::{Baboon, TagSource};
 use super::super::{
     ANIMATION_FRAME_RATE, MIN_MODEL_SETUP_WIDTH, ModelPreviewData, ModelPreviewLayer,
-    ModelPreviewState, ModelRegionSelection, ModelRenderMode, PHYSICS_REGION,
+    ModelPreviewState, ModelRegionSelection, ModelShading, PHYSICS_REGION,
     PreviewAnimationEntry, PreviewAnimationPlayback, PreviewAnimationPose, RenderModelPreview,
     RenderModelPreviewBatch, RenderModelPreviewRegion, build_render_preview, frame,
     is_model_physics_overlay_region, load_referenced_tag_from_source, merge_preview_append,
@@ -28,7 +28,6 @@ use crate::app::model_preview::harness::kit::kit_root;
 use crate::app::ui_kit::checkbox::CheckboxUi as _;
 use crate::app::ui_kit::radio::RadioUi as _;
 use crate::core::game::GameId;
-use blam_tags::TagFile;
 use eframe::egui;
 use eframe::egui::{Sense, Vec2};
 
@@ -166,8 +165,69 @@ fn bitmap_header_moves_actions_to_a_second_row_below_its_wrap_width() {
     assert!(narrow_right > narrow_left + BUTTON_HEIGHT);
 }
 
+/// The Permutations card's first row holds the variant picker between its
+/// arrows and, at the row's right end, Save then Delete, all on one line
+/// and inside the card from the narrowest sidebar up.
+#[test]
+fn variant_row_keeps_save_and_delete_beside_the_picker() {
+    let data = model_preview_data(
+        String::new(),
+        String::new(),
+        RenderModelPreview::default(),
+        Vec::new(),
+    );
+    for width in [MIN_MODEL_SETUP_WIDTH, 360.0, 520.0] {
+        let context = egui::Context::default();
+        context.set_fonts(foundation_fonts());
+        context.set_global_style(foundation_style());
+        let mut state = ModelPreviewState::default();
+        let (mut row, mut save, mut delete) =
+            (egui::Rect::NOTHING, egui::Rect::NOTHING, egui::Rect::NOTHING);
+        let _ = crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(width, 200.0),
+                )),
+                ..Default::default()
+            },
+            |context| {
+                egui::CentralPanel::default().show(context, |ui| {
+                    let top = ui.cursor().top();
+                    let mut rows = super::rows::CardRows::default();
+                    draw_variant_selector(ui, &data, &mut state, &mut rows, &mut |ui, _| {
+                        delete = icon_button(
+                            ui,
+                            ButtonIcon::Garbage,
+                            "Delete selected variant",
+                            true,
+                            egui::Color32::BLACK,
+                        )
+                        .rect;
+                        save = icon_text_dropdown_button(ui, ButtonIcon::Save, "Save", |_| {})
+                            .response
+                            .rect;
+                    });
+                    row = egui::Rect::from_min_max(
+                        egui::pos2(0.0, top),
+                        egui::pos2(width, ui.cursor().top()),
+                    );
+                });
+            },
+        );
+        assert!(save.right() <= delete.left(), "width {width}: Save {save:?}, Delete {delete:?}");
+        assert!(
+            (save.center().y - delete.center().y).abs() < 1.0,
+            "width {width}: Save {save:?}, Delete {delete:?}"
+        );
+        assert!(delete.right() <= width, "width {width}: Delete {delete:?} past the pane");
+        assert!(row.height() < 2.0 * BUTTON_HEIGHT, "width {width}: row {row:?} wrapped");
+    }
+}
+
 /// A sidebar card's header keeps its Reset at the right end of the title
-/// row; the variant picker and actions follow the title where they fit and
+/// row; header controls (a picker and actions) follow the title where they fit and
 /// take a row of their own under it where they do not, inside the card at
 /// every width.
 #[test]
@@ -210,7 +270,21 @@ fn setup_card_header_wraps_its_controls_under_the_title_when_narrow() {
                             draw_foundation_box(ui, "Permutations".into(), "card", |ui, part| {
                                 match part {
                                     BoxPart::Controls => {
-                                        draw_variant_selector(ui, &data, &mut state);
+                                        // A picker between arrows, as a
+                                        // header's controls might be.
+                                        let _ = (&data, &mut state);
+                                        ui.add_sized(
+                                            Vec2::new(24.0, BUTTON_HEIGHT),
+                                            egui::Button::new("<"),
+                                        );
+                                        ui.add_sized(
+                                            Vec2::new(150.0, BUTTON_HEIGHT),
+                                            egui::Button::new("0. default"),
+                                        );
+                                        ui.add_sized(
+                                            Vec2::new(24.0, BUTTON_HEIGHT),
+                                            egui::Button::new(">"),
+                                        );
                                         icon_text_dropdown_button(
                                             ui,
                                             ButtonIcon::Save,
@@ -324,7 +398,6 @@ fn physics_overlay_is_not_a_model_setup_variant_region() {
 
     assert!(is_model_physics_overlay_region(
         &data,
-        &state,
         &data.preview.regions[1]
     ));
     assert!(state.region_selections[PHYSICS_REGION].enabled);
@@ -334,11 +407,19 @@ fn physics_overlay_is_not_a_model_setup_variant_region() {
         "body"
     );
 
+    // Its overlays loading again, the model drawn still has them.
     state.overlays_loaded = false;
-    assert!(!is_model_physics_overlay_region(
+    assert!(is_model_physics_overlay_region(
         &data,
-        &state,
         &data.preview.regions[1]
+    ));
+    // A physics tag opened on its own lists its region.
+    let mut alone = (*data.preview).clone();
+    alone.batches.retain(|batch| batch.layer == ModelPreviewLayer::Physics);
+    let alone = model_preview_data(String::new(), String::new(), alone, Vec::new());
+    assert!(!is_model_physics_overlay_region(
+        &alone,
+        &alone.preview.regions[1]
     ));
 }
 
@@ -533,7 +614,8 @@ fn permutation_rows_fit_a_narrow_setup_card() {
                     let available = ui.available_width();
                     card_rect = draw_model_preview_section(ui, "Model Setup", None, |ui, part| {
                         if part == ModelPreviewSectionPart::Body {
-                            draw_variant_controls(ui, &data, &mut state);
+                            let mut rows = super::rows::CardRows::default();
+                            draw_variant_controls(ui, &data, &mut state, &mut rows);
                         }
                     });
                     assert!(
@@ -574,7 +656,7 @@ fn variant_rows_are_not_capped_shorter_than_the_setup_card() {
         |context| {
             egui::CentralPanel::default().show(context, |ui| {
                 let top = ui.next_widget_position().y;
-                draw_variant_controls(ui, &data, &mut state);
+                draw_variant_controls(ui, &data, &mut state, &mut super::rows::CardRows::default());
                 assert!(ui.min_rect().bottom() - top > 500.0);
             });
         },
@@ -880,6 +962,57 @@ fn two_panes_advance_the_clock_once_per_pass() {
     assert!((playback.time - 0.2).abs() < 1e-6, "{}", playback.time);
 }
 
+/// The header's model toggles take the bitmap channels' shortcuts: a click
+/// flips one, Alt shows only it, Shift hides only it, and a toggle that
+/// can't be used (no collision model) is left as it is.
+#[test]
+fn model_toggles_take_alt_and_shift_clicks() {
+    use super::view_menu::{LayerAction, ModelLayer, apply_layer_actions};
+    let mut state = ModelPreviewState::default();
+    let shown = |state: &ModelPreviewState| {
+        (state.show_render, state.show_collision, state.show_physics, state.show_armature)
+    };
+    let drawn = |clicked: ModelLayer, action: LayerAction| {
+        [ModelLayer::Render, ModelLayer::Collision, ModelLayer::Physics, ModelLayer::Armature]
+            .map(|layer| {
+                let enabled = layer != ModelLayer::Collision;
+                (layer, enabled, if layer == clicked { action } else { LayerAction::None })
+            })
+    };
+    state.show_render = true;
+    apply_layer_actions(&mut state, &drawn(ModelLayer::Armature, LayerAction::Toggle));
+    assert_eq!(shown(&state), (true, false, false, true));
+    apply_layer_actions(&mut state, &drawn(ModelLayer::Physics, LayerAction::Solo));
+    assert_eq!(shown(&state), (false, false, true, false));
+    apply_layer_actions(&mut state, &drawn(ModelLayer::Physics, LayerAction::Exclude));
+    // Collision has nothing to show, so it stays off.
+    assert_eq!(shown(&state), (true, false, false, true));
+}
+
+/// A clip carried through a reload (Game Shaders on or off) comes back as it
+/// was, paused, stopped or playing, at its time; one picked from the list
+/// plays from the top.
+#[test]
+fn a_reloaded_clip_resumes_as_it_was() {
+    use super::super::animation::resume_or_start;
+    for (playing, stopped) in [(false, false), (false, true), (true, false)] {
+        let mut playback = PreviewAnimationPlayback {
+            playing,
+            stopped,
+            time: 1.5,
+            resume_on_decode: true,
+            ..Default::default()
+        };
+        resume_or_start(&mut playback);
+        assert_eq!((playback.playing, playback.stopped), (playing, stopped));
+        assert_eq!(playback.time, 1.5);
+        assert!(!playback.resume_on_decode, "resumed once, not every decode");
+        // The next clip decoded is a pick: it plays from the top.
+        resume_or_start(&mut playback);
+        assert_eq!((playback.playing, playback.stopped, playback.time), (true, false, 0.0));
+    }
+}
+
 /// A looping clock wraps to the animation's loop frame, not to 0, so the
 /// slider and the pose agree on where playback is.
 #[test]
@@ -990,15 +1123,16 @@ fn a_long_animation_is_ticked_every_few_frames() {
     assert!(ticks.windows(2).all(|pair| pair[1] - pair[0] >= 3.0));
 }
 
-/// A shading mode is picked from inside the View menu. It was a combo box
-/// there, whose list is a popup of its own; egui 0.36 keeps one popup open at
-/// a time, so opening the list closed the menu and nothing could be picked.
+/// A shading choice is picked from inside the Shading menu. It was a combo
+/// box in the View menu, whose list is a popup of its own; egui 0.36 keeps one
+/// popup open at a time, so opening the list closed the menu and nothing could
+/// be picked. Game Shaders is one of the choices, and picking it turns the
+/// game's shaders on.
 #[test]
-fn a_shading_mode_is_picked_inside_the_view_menu() {
+fn a_shading_choice_is_picked_inside_the_shading_menu() {
     let ctx = egui::Context::default();
     ctx.set_fonts(crate::app::foundation_fonts());
     ctx.set_global_style(crate::app::foundation_style());
-    let tag = TagFile::new(locate_definitions_root().join("halo3_mcc/render_model.json")).unwrap();
     let data = model_preview_data(
         "test".to_owned(),
         "test".to_owned(),
@@ -1006,10 +1140,8 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
         Vec::new(),
     );
     let mut state = ModelPreviewState::default();
-    let target = ModelRenderMode::ALL
-        .into_iter()
-        .find(|mode| *mode != state.render_mode)
-        .expect("more than one mode");
+    let target = ModelShading::GameShaders;
+    assert_ne!(state.shading(), target);
     let mut time = 0.0;
     type Painted = Vec<(String, egui::Rect)>;
     let mut frame = |events: Vec<egui::Event>, state: &mut ModelPreviewState| -> Painted {
@@ -1029,13 +1161,10 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
                 egui::CentralPanel::default().show(ui, |ui| {
                     draw_model_view_settings_menu(
                         ui,
-                        &tag,
                         &data,
                         state,
                         true,
                         None,
-                        Some(GameId::Halo3),
-                        false,
                     );
                 });
             },
@@ -1082,8 +1211,8 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
     let shown = frame(Vec::new(), &mut state);
     let menu = shown
         .iter()
-        .find(|(text, _)| text.starts_with("View:"))
-        .unwrap_or_else(|| panic!("the View button: {shown:?}"))
+        .find(|(text, _)| text == "Textured")
+        .unwrap_or_else(|| panic!("the Shading button: {shown:?}"))
         .1
         .center();
     let shown = click(&mut frame, menu, &mut state);
@@ -1094,7 +1223,8 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
         .1
         .center();
     click(&mut frame, option, &mut state);
-    assert_eq!(state.render_mode, target, "the mode was picked");
+    assert_eq!(state.shading(), target, "the choice was picked");
+    assert!(state.game_shaders, "Game Shaders is on");
 }
 
 #[test]
@@ -1129,7 +1259,6 @@ fn icon_checkbox_label_has_no_text_cursor() {
                     &mut checked,
                     ModelViewCheckboxIcon::Markers,
                     "Markers",
-                    None,
                 );
             },
         )
@@ -1183,7 +1312,6 @@ fn menu_checkbox_glyphs_align_with_option_icons() {
                             &mut checked,
                             ModelViewCheckboxIcon::Markers,
                             "Markers",
-                            None,
                         );
                         ui.baboon_checkbox(&mut checked, "Show prefixes");
                         ui.baboon_radio_value(&mut checked, true, "Textured");
@@ -1569,4 +1697,81 @@ fn permutation_dropdown_filters_and_picks() {
         selection.enabled,
         "picking a permutation turns its region on"
     );
+}
+
+/// An object's bounding sphere is its bounding radius about its bounding
+/// offset, found under the parent groups' fields; none until the radius is
+/// set, and none for a tag that is no object.
+#[test]
+fn an_objects_bounding_sphere_reads_its_radius_and_offset() {
+    let definitions = crate::core::bundled::locate_definitions_root();
+    let mut biped = blam_tags::TagFile::new(definitions.join("halo3_mcc/biped.json")).unwrap();
+    let game = Some(GameId::Halo3);
+    assert_eq!(super::view_menu::object_bounding_sphere(&biped, game), None);
+    // The parent groups' fields sit in a struct named after each.
+    let (radius, offset) = ("unit/object/bounding radius", "unit/object/bounding offset");
+    let mut root = biped.root_mut();
+    root.field_path_mut(radius)
+        .unwrap_or_else(|| panic!("{radius}"))
+        .set(blam_tags::TagFieldData::Real(0.75))
+        .unwrap();
+    root.field_path_mut(offset)
+        .unwrap_or_else(|| panic!("{offset}"))
+        .set(blam_tags::TagFieldData::RealPoint3d(blam_tags::math::RealPoint3d {
+            x: 0.0,
+            y: 0.0,
+            z: 0.5,
+        }))
+        .unwrap();
+    let sphere = super::view_menu::object_bounding_sphere(&biped, game).expect("a sphere");
+    assert_eq!(sphere.radius, 0.75);
+    assert_eq!(sphere.center, [0.0, 0.0, 0.5]);
+
+    let render = blam_tags::TagFile::new(definitions.join("halo3_mcc/render_model.json")).unwrap();
+    assert_eq!(super::view_menu::object_bounding_sphere(&render, game), None);
+}
+
+/// With the H3 and Halo CE kits: a shipped object's bounding sphere sits
+/// about its root node, as the game puts it, so it holds the middle of what
+/// it bounds. From the object's origin, a biped's sat at its feet.
+#[test]
+fn a_shipped_objects_bounding_sphere_holds_its_geometry() {
+    use crate::app::model_preview::harness::kit::kit_preview;
+    let cases: &[(GameId, &str, &str, &[u8; 4])] = &[
+        (GameId::Halo3, r"objects\characters\masterchief\masterchief", "biped", b"bipd"),
+        (GameId::Halo3, r"objects\weapons\rifle\assault_rifle\assault_rifle", "weapon", b"weap"),
+        (GameId::Halo3, r"objects\vehicles\warthog\warthog", "vehicle", b"vehi"),
+        (GameId::HaloCe, r"characters\cyborg\cyborg", "biped", b"bipd"),
+        (GameId::HaloCe, r"vehicles\warthog\mp_warthog", "vehicle", b"vehi"),
+    ];
+    for (game, path, extension, group) in cases {
+        let Some(root) = kit_root(*game) else { continue };
+        let source = crate::app::model_preview::harness::kit::kit_source(*game).unwrap();
+        let tag = crate::app::export::load_referenced_tag_from_source(&source, path, extension, group)
+            .unwrap_or_else(|error| panic!("{game:?} {path}: {error}"));
+        let sphere = super::view_menu::object_bounding_sphere(&tag, Some(*game));
+        let data = kit_preview(&root, *game, path, extension, group);
+        let mut min = [f32::MAX; 3];
+        let mut max = [f32::MIN; 3];
+        for vertex in &data.preview.vertices {
+            for axis in 0..3 {
+                min[axis] = min[axis].min(vertex.position[axis]);
+                max[axis] = max[axis].max(vertex.position[axis]);
+            }
+        }
+        let mid: Vec<f32> = (0..3).map(|a| (min[a] + max[a]) * 0.5).collect();
+        let state = ModelPreviewState::default();
+        let root = crate::app::model_preview::armature_node_matrices(&data, &state);
+        let placed = sphere
+            .expect("a bounding sphere")
+            .about_root(root.first());
+        let distance = (0..3)
+            .map(|axis| (placed.center[axis] - mid[axis]).powi(2))
+            .sum::<f32>()
+            .sqrt();
+        assert!(
+            distance < placed.radius * 0.5,
+            "{game:?} {path}: {placed:?} about the middle {mid:?}"
+        );
+    }
 }
