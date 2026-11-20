@@ -298,7 +298,7 @@ fn paint_icon_tinted(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32
 /// pass once a URI has two, and a cached id never asks again. The icon then
 /// painted nothing for the rest of the session.
 #[derive(Clone, Default)]
-struct IconTextures(HashMap<(ButtonIcon, Color32, u32, u32, bool), (egui::TextureHandle, u64)>);
+struct IconTextures(HashMap<(ButtonIcon, Color32, u32, u32), (egui::TextureHandle, u64)>);
 
 /// Passes an icon texture may go unpainted before a miss sweeps it out,
 /// so sizes left behind by a zoom or a monitor change do not pile up.
@@ -315,7 +315,7 @@ fn icon_texture(
     size: f32,
     pixels: Vec2,
 ) -> Option<egui::TextureId> {
-    let key = (icon, color, pixels.x as u32, pixels.y as u32, is_dark_mode());
+    let key = (icon, color, pixels.x as u32, pixels.y as u32);
     let id = egui::Id::unique("baboon_icon_textures");
     let pass = ctx.cumulative_pass_nr();
     let cached = ctx.data_mut(|data| {
@@ -444,8 +444,6 @@ fn mono_icon_uri(ctx: &egui::Context, icon: ButtonIcon, color: Color32) -> Strin
 
 /// Colorized icon SVGs, made once per icon and color.
 type IconSvgCache = std::cell::RefCell<HashMap<(ButtonIcon, Color32), Arc<[u8]>>>;
-/// [`IconSvgCache`] keyed by theme too: light mode darkens icons' colours.
-type ThemedIconSvgCache = std::cell::RefCell<HashMap<(ButtonIcon, Color32, bool), Arc<[u8]>>>;
 
 /// `icon` entirely in `color`, its own accent colors included.
 fn mono_icon_bytes(icon: ButtonIcon, color: Color32) -> egui::load::Bytes {
@@ -457,7 +455,7 @@ fn mono_icon_bytes(icon: ButtonIcon, color: Color32) -> egui::load::Bytes {
         mono.borrow_mut()
             .entry((icon, color))
             .or_insert_with(|| {
-                let svg = recolored_icon_svg(icon, color);
+                let svg = colorized_icon_svg(icon, color);
                 ["#EB4747", "#7EEB47", "#60DF20", "#00B2FF"]
                     .into_iter()
                     .fold(svg, |svg, accent| svg.replace(accent, &svg_color(color)))
@@ -562,47 +560,20 @@ fn icon_color(icon: ButtonIcon, fallback: Color32) -> Color32 {
 /// a sixth of a frame with one weapon tag open.
 fn colorized_icon_bytes(icon: ButtonIcon, color: Color32) -> egui::load::Bytes {
     thread_local! {
-        static COLORIZED: ThemedIconSvgCache =
+        static COLORIZED: IconSvgCache =
             std::cell::RefCell::new(HashMap::new());
     }
     let bytes = COLORIZED.with(|colorized| {
         colorized
             .borrow_mut()
-            .entry((icon, color, is_dark_mode()))
+            .entry((icon, color))
             .or_insert_with(|| colorized_icon_svg(icon, color).into_bytes().into())
             .clone()
     });
     egui::load::Bytes::Shared(bytes)
 }
 
-/// [`recolored_icon_svg`], with the icon's own colours darkened in light
-/// mode, as tag icons are, so a green Add or a yellow star still reads on a
-/// white button. `color`, the icon's ink, is left as it is.
 fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
-    let svg = recolored_icon_svg(icon, color);
-    if is_dark_mode() {
-        return svg;
-    }
-    let [r, g, b, _] = left_panel().to_array();
-    let ink = svg_color(color);
-    let mut own: Vec<&str> = Vec::new();
-    let source = button_icon_svg(icon);
-    for (at, _) in source.match_indices('#') {
-        if let Some(hex) = source.get(at..at + 7)
-            && hex[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
-            && !own.contains(&hex)
-            && !hex.eq_ignore_ascii_case(&ink)
-        {
-            own.push(hex);
-        }
-    }
-    own.into_iter().fold(svg, |svg, hex| {
-        svg.replace(hex, &darken_for_light_mode(hex, [r, g, b]))
-    })
-}
-
-/// `icon` with its ink in `color`, its own accent colours kept.
-fn recolored_icon_svg(icon: ButtonIcon, color: Color32) -> String {
     if matches!(
         icon,
         ButtonIcon::ChangeAdded
@@ -1149,13 +1120,12 @@ fn button_icon_uri_for_pixels_per_point_and_size(
     let dpi = icon_dpi_bucket(pixels_per_point);
     let pixels = (size * pixels_per_point).round().max(1.0) as u32;
     format!(
-        "bytes://baboon_button_icons/{:?}-{:02x}{:02x}{:02x}{:02x}-dpi{dpi}-{pixels}px{}.svg",
+        "bytes://baboon_button_icons/{:?}-{:02x}{:02x}{:02x}{:02x}-dpi{dpi}-{pixels}px.svg",
         icon,
         color.r(),
         color.g(),
         color.b(),
-        color.a(),
-        if is_dark_mode() { "" } else { "-light" }
+        color.a()
     )
 }
 
@@ -1215,9 +1185,9 @@ mod tests {
     fn tab_close_uses_the_current_color_while_clear_keeps_its_destructive_color() {
         let color=Color32::from_rgb(17,34,51);
         assert_eq!(icon_color(ButtonIcon::CloseTab,color),color);
-        let svg=recolored_icon_svg(ButtonIcon::CloseTab,color);
+        let svg=colorized_icon_svg(ButtonIcon::CloseTab,color);
         assert!(svg.contains("#112233"));assert!(!svg.contains("#EB4747"));
-        assert!(recolored_icon_svg(ButtonIcon::Clear,color).contains("#EB4747"));
+        assert!(colorized_icon_svg(ButtonIcon::Clear,color).contains("#EB4747"));
     }
 
     #[test]
@@ -1368,19 +1338,8 @@ mod tests {
 
     #[test]
     fn marker_view_icon_keeps_its_blue_color() {
-        let svg = recolored_icon_svg(ButtonIcon::Markers, Color32::from_rgb(1, 2, 3));
+        let svg = colorized_icon_svg(ButtonIcon::Markers, Color32::from_rgb(1, 2, 3));
         assert!(svg.contains("#00B2FF"), "View marker artwork must retain its original blue");
-    }
-
-    /// Light mode darkens a button icon's own washed-out colours (Add's
-    /// green, Favorite's yellow) and leaves one that already reads.
-    #[test]
-    fn light_mode_darkens_a_button_icons_own_colors() {
-        let backdrop = [235, 229, 224];
-        for faint in ["#7EEB47", "#FFD138", "#47AEEB"] {
-            assert_ne!(darken_for_light_mode(faint, backdrop).to_uppercase(), faint);
-        }
-        assert_eq!(darken_for_light_mode("#1C1815", backdrop), "#1c1815");
     }
 
     #[test]

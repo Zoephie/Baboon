@@ -278,22 +278,14 @@ pub(in crate::app) fn tag_icon_image(
     size: f32,
 ) -> egui::Image<'static> {
     let uri = tag_icon_uri_for_pixels_per_point_and_size(icon.name, ctx.pixels_per_point(), size);
-    // On light panels the icons' bright colours wash out, so each is
-    // darkened, keeping its hue, until it reads against the tag tree's
-    // panel, the deepest they sit on.
-    let backdrop = (!is_dark_mode()).then(|| {
-        let [r, g, b, _] = left_panel().to_array();
-        [r, g, b]
-    });
-    if icon.svg.contains("currentColor") || backdrop.is_some() {
+    if icon.svg.contains("currentColor") {
         let [r, g, b, _] = text_dark().to_array();
-        let on = backdrop.map_or(String::new(), |[r, g, b]| format!("-on{r:02x}{g:02x}{b:02x}"));
         return egui::Image::from_bytes(
             format!(
-                "{}-rgb{r:02x}{g:02x}{b:02x}{on}.svg",
+                "{}-rgb{r:02x}{g:02x}{b:02x}.svg",
                 uri.trim_end_matches(".svg")
             ),
-            themed_tag_icon_bytes(icon, [r, g, b], backdrop),
+            themed_tag_icon_bytes(icon, [r, g, b]),
         );
     }
     egui::Image::from_bytes(uri, icon.svg.as_bytes())
@@ -355,132 +347,14 @@ pub(in crate::app) fn tag_icon_image_in(
     )
 }
 
-/// Each tag icon in the theme: its text colour, and the backdrop its own
-/// colours are darkened against (light mode only).
-type ThemedIconBytes = std::cell::RefCell<
-    std::collections::HashMap<(&'static str, [u8; 3], Option<[u8; 3]>), std::sync::Arc<[u8]>>,
->;
-
-/// `icon` with `currentColor` as `rgb`, and, given a `backdrop`, each of its
-/// own colours darkened until it reads against that backdrop.
-fn themed_tag_icon_bytes(
-    icon: TagIcon,
-    rgb: [u8; 3],
-    backdrop: Option<[u8; 3]>,
-) -> std::sync::Arc<[u8]> {
+fn themed_tag_icon_bytes(icon: TagIcon, rgb: [u8; 3]) -> std::sync::Arc<[u8]> {
     thread_local! {
-        static SVGS: ThemedIconBytes = Default::default();
+        static SVGS: std::cell::RefCell<std::collections::HashMap<(&'static str, [u8; 3]), std::sync::Arc<[u8]>>> = Default::default();
     }
-    SVGS.with(|cache| cache.borrow_mut().entry((icon.name, rgb, backdrop)).or_insert_with(|| {
+    SVGS.with(|cache| cache.borrow_mut().entry((icon.name, rgb)).or_insert_with(|| {
         let [r, g, b] = rgb;
-        let svg = icon.svg.replace("currentColor", &format!("#{r:02x}{g:02x}{b:02x}"));
-        match backdrop {
-            Some(backdrop) => darken_hex_colors(&svg, backdrop),
-            None => svg,
-        }
-        .into_bytes()
-        .into()
+        icon.svg.replace("currentColor", &format!("#{r:02x}{g:02x}{b:02x}")).into_bytes().into()
     }).clone())
-}
-
-/// The contrast an icon's colour needs against its panel: WCAG's minimum
-/// for graphics.
-const ICON_CONTRAST: f32 = 3.0;
-
-/// `svg` with every `#RRGGBB` darkened as [`readable_on`] does.
-fn darken_hex_colors(svg: &str, backdrop: [u8; 3]) -> String {
-    let mut out = String::with_capacity(svg.len());
-    let mut rest = svg;
-    while let Some(at) = rest.find('#') {
-        out.push_str(&rest[..at]);
-        let value = rest
-            .get(at + 1..at + 7)
-            .filter(|digits| {
-                digits.bytes().all(|byte| byte.is_ascii_hexdigit())
-                    && !rest[at + 7..].starts_with(|c: char| c.is_ascii_hexdigit())
-            })
-            .and_then(|digits| u32::from_str_radix(digits, 16).ok());
-        match value {
-            Some(value) => {
-                let color = [(value >> 16) as u8, (value >> 8) as u8, value as u8];
-                let [r, g, b] = readable_on(color, backdrop);
-                out.push_str(&format!("#{r:02x}{g:02x}{b:02x}"));
-                rest = &rest[at + 7..];
-            }
-            None => {
-                out.push('#');
-                rest = &rest[at + 1..];
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
-/// `#RRGGBB` darkened as [`readable_on`] does, for a button icon's own
-/// colours in light mode.
-pub(in crate::app) fn darken_for_light_mode(hex: &str, backdrop: [u8; 3]) -> String {
-    darken_hex_colors(hex, backdrop)
-}
-
-/// `color`, unchanged if it is white or already reaches [`ICON_CONTRAST`] on
-/// `backdrop`, else darkened in OKLab lightness, keeping its hue, until it
-/// does.
-fn readable_on(color: [u8; 3], backdrop: [u8; 3]) -> [u8; 3] {
-    // White is a highlight or a cut-out, never ink to darken.
-    if color == [255; 3] || contrast(color, backdrop) >= ICON_CONTRAST {
-        return color;
-    }
-    let [lightness, a, b] = to_oklab(color);
-    (1..=100)
-        .map(|step| from_oklab([(lightness - step as f32 * 0.01).max(0.0), a, b]))
-        .find(|darker| contrast(*darker, backdrop) >= ICON_CONTRAST)
-        .unwrap_or(color)
-}
-
-fn linear(channel: u8) -> f32 {
-    let value = channel as f32 / 255.0;
-    if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
-}
-
-fn encoded(value: f32) -> u8 {
-    let value = if value <= 0.003_130_8 {
-        12.92 * value
-    } else {
-        1.055 * value.max(0.0).powf(1.0 / 2.4) - 0.055
-    };
-    (value * 255.0).round().clamp(0.0, 255.0) as u8
-}
-
-/// WCAG contrast between two sRGB colours.
-fn contrast(one: [u8; 3], other: [u8; 3]) -> f32 {
-    let luminance =
-        |[r, g, b]: [u8; 3]| 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
-    let (one, other) = (luminance(one), luminance(other));
-    (one.max(other) + 0.05) / (one.min(other) + 0.05)
-}
-
-fn to_oklab([r, g, b]: [u8; 3]) -> [f32; 3] {
-    let [r, g, b] = [linear(r), linear(g), linear(b)];
-    let l = (0.412_221_46 * r + 0.536_332_55 * g + 0.051_445_995 * b).cbrt();
-    let m = (0.211_903_5 * r + 0.680_699_5 * g + 0.107_396_96 * b).cbrt();
-    let s = (0.088_302_46 * r + 0.281_718_85 * g + 0.629_978_7 * b).cbrt();
-    [
-        0.210_454_26 * l + 0.793_617_8 * m - 0.004_072_047 * s,
-        1.977_998_5 * l - 2.428_592_2 * m + 0.450_593_7 * s,
-        0.025_904_037 * l + 0.782_771_77 * m - 0.808_675_77 * s,
-    ]
-}
-
-fn from_oklab([lightness, a, b]: [f32; 3]) -> [u8; 3] {
-    let l = (lightness + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
-    let m = (lightness - 0.105_561_346 * a - 0.063_854_17 * b).powi(3);
-    let s = (lightness - 0.089_484_18 * a - 1.291_485_5 * b).powi(3);
-    [
-        encoded(4.076_741_7 * l - 3.307_711_6 * m + 0.230_969_94 * s),
-        encoded(-1.268_438 * l + 2.609_757_4 * m - 0.341_319_38 * s),
-        encoded(-0.004_196_086_3 * l - 0.703_418_6 * m + 1.707_614_7 * s),
-    ]
 }
 
 #[cfg(test)]
@@ -686,40 +560,13 @@ mod tests {
     #[test]
     fn current_color_icons_reuse_bytes_for_each_theme_color() {
         let icon = tag_icon!("default_tag");
-        let dark = themed_tag_icon_bytes(icon, [255; 3], None);
-        assert!(std::sync::Arc::ptr_eq(&dark, &themed_tag_icon_bytes(icon, [255; 3], None)));
-        let light = themed_tag_icon_bytes(icon, [0; 3], None);
+        let dark = themed_tag_icon_bytes(icon, [255; 3]);
+        assert!(std::sync::Arc::ptr_eq(&dark, &themed_tag_icon_bytes(icon, [255; 3])));
+        let light = themed_tag_icon_bytes(icon, [0; 3]);
         assert!(!std::sync::Arc::ptr_eq(&dark, &light));
         assert!(std::str::from_utf8(&dark).unwrap().contains("#ffffff"));
         assert!(std::str::from_utf8(&light).unwrap().contains("#000000"));
         assert!(!std::str::from_utf8(&dark).unwrap().contains("currentColor"));
-    }
-
-    /// On a light backdrop every coloured icon is darkened to read at 3:1,
-    /// keeping its hue; one that already reads keeps its colour.
-    #[test]
-    fn light_mode_icons_darken_until_they_read() {
-        let backdrop = [235, 229, 224];
-        let yellow = readable_on([0xF8, 0xBE, 0x00], backdrop);
-        assert!(contrast(yellow, backdrop) >= ICON_CONTRAST, "{yellow:?}");
-        assert!(yellow[0] > yellow[2] && yellow[1] > yellow[2], "still yellow: {yellow:?}");
-        assert_eq!(readable_on([0x3A, 0x1C, 0x08], backdrop), [0x3A, 0x1C, 0x08]);
-        assert_eq!(readable_on([255; 3], backdrop), [255; 3], "white stays white");
-        for (icon, _) in GROUP_ICONS {
-            let svg = themed_tag_icon_bytes(*icon, [0; 3], Some(backdrop));
-            let svg = std::str::from_utf8(&svg).unwrap();
-            for (at, _) in svg.match_indices("fill=\"#") {
-                let value = u32::from_str_radix(&svg[at + 7..at + 13], 16).unwrap();
-                let color = [(value >> 16) as u8, (value >> 8) as u8, value as u8];
-                assert!(
-                    color == [255; 3] || contrast(color, backdrop) >= ICON_CONTRAST - 0.01,
-                    "{}: {color:?}",
-                    icon.name
-                );
-            }
-        }
-        let biped = themed_tag_icon_bytes(tag_icon!("biped"), [0; 3], Some(backdrop));
-        assert!(!std::str::from_utf8(&biped).unwrap().to_lowercase().contains("#ff6619"));
     }
 
     /// Every group the icon table names exists, with that name, in some
