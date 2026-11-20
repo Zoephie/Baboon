@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 use blam_tags::{TagFieldData, TagFile};
 
 use crate::core::game::GameId;
-use crate::core::source::KitLayout;
 use crate::core::tag_path;
 
 /// The group of a tag holding one script.
@@ -28,15 +27,13 @@ pub(crate) fn supports_script_tags(game: Option<GameId>) -> bool {
     )
 }
 
-/// The `.hsc` file under `data\` the script tag at `display_path` (with its
-/// extension) compiles from. `None` when the kit has no folder around its
-/// tags folder.
-pub(crate) fn data_file(tags_root: &Path, display_path: &str) -> Option<PathBuf> {
-    let layout = KitLayout::from_tags_folder(tags_root)?;
+/// The `.hsc` file in the kit's data folder, `data_root`, that the script
+/// tag at `display_path` (with its extension) compiles from.
+pub(crate) fn data_file(data_root: &Path, display_path: &str) -> PathBuf {
     let stem = tag_path::without_extension(display_path);
     let folder = tag_path::parent(stem).unwrap_or("");
     let file = format!("{}.hsc", tag_path::name(stem));
-    Some(layout.data.join(tag_path::to_relative(folder)).join(file))
+    data_root.join(tag_path::to_relative(folder)).join(file)
 }
 
 /// The script tags a scenario lists, as tag paths with their extension.
@@ -81,8 +78,8 @@ mod tests {
     fn a_script_tags_data_file_is_beside_it_under_data() {
         let kit = Path::new("kit");
         assert_eq!(
-            data_file(&kit.join("tags"), r"levels\solo\m10\scripts\m10_mission.scenario_hs_source_file"),
-            Some(kit.join("data").join("levels").join("solo").join("m10").join("scripts").join("m10_mission.hsc"))
+            data_file(&kit.join("data"), r"levels\solo\m10\scripts\m10_mission.scenario_hs_source_file"),
+            kit.join("data").join("levels").join("solo").join("m10").join("scripts").join("m10_mission.hsc")
         );
     }
 

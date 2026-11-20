@@ -497,6 +497,12 @@ pub(crate) fn count_in_sidecar(path: &std::path::Path, keyword: &str) -> usize {
     read_sidecar(path).map_or(0, |by_tag| count_in(&by_identity(&by_tag), keyword))
 }
 
+/// Whether the sidecar at `path` can be read, so a change across games can
+/// stop before touching any of them. A missing file reads as empty.
+pub(crate) fn check_sidecar(path: &std::path::Path) -> Result<(), String> {
+    read_sidecar(path).map(|_| ()).map_err(|error| error.message())
+}
+
 /// [`KeywordStore::replace_keyword`] on the sidecar at `path`, for a game
 /// with no kit open: read, change and written back at once. A missing file
 /// is left missing.
@@ -865,6 +871,13 @@ mod tests {
         assert_eq!(written, json!({ "x": ["keep"] }));
         assert_eq!(replace_in_sidecar(&dir.join("missing.json"), "wip", None), Ok(0));
         assert!(!dir.join("missing.json").exists());
+        // A change across games checks each file first: a missing one is
+        // fine, a broken one stops it.
+        assert_eq!(check_sidecar(&path), Ok(()));
+        assert_eq!(check_sidecar(&dir.join("missing.json")), Ok(()));
+        let broken = dir.join("halo3_mcc_keywords.json");
+        std::fs::write(&broken, "not json").unwrap();
+        assert!(check_sidecar(&broken).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

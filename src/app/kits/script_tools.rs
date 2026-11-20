@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::app::shell::frame::{is_file_cached, recheck_cached};
+use crate::app::export::string_list_window::StringToolReload;
 use crate::core::script_tags::{self, data_file, listed_scripts, scenario_folder};
 
 /// What the header's VS Code button and the row menu's Open in VS Code item
@@ -12,16 +13,16 @@ const NO_VSCODE: &str = "Baboon couldn't find VS Code. Install it, or put its co
                          your PATH, to open scripts in it.";
 
 /// Why Open in VS Code can't open the script tag at `display_path` in the
-/// kit whose tags folder is `tags_root`, or `None` when it can: VS Code isn't
+/// kit whose data folder is `data_root`, or `None` when it can: VS Code isn't
 /// installed, or the script has no `.hsc` data file. The header and the row
 /// menu ask every frame, so both are re-checked at most once a second.
 pub(in crate::app) fn vscode_unavailable(
     ctx: &egui::Context,
-    tags_root: Option<&Path>,
+    data_root: Option<&Path>,
     display_path: &str,
 ) -> Option<String> {
     let installed = recheck_cached(ctx, "vscode_program", || vscode_program().is_some());
-    let file = tags_root.and_then(|root| data_file(root, display_path));
+    let file = data_root.map(|root| data_file(root, display_path));
     let exists = file.as_deref().is_some_and(|file| is_file_cached(ctx, file));
     unavailable_reason(installed, file.as_deref(), exists)
 }
@@ -47,14 +48,14 @@ impl Baboon {
     /// The header and menu grey the command out when VS Code or the file is
     /// missing; this says why again if either went missing since.
     pub(in crate::app) fn open_script_in_vscode(&mut self, key: &str) {
-        let (entry, tags_root) = match self.script_tag(key) {
+        let (entry, data_root) = match self.script_tag(key) {
             Ok(found) => found,
             Err(error) => {
                 self.model.status = error;
                 return;
             }
         };
-        let file = data_file(&tags_root, &entry.display_path);
+        let file = data_root.map(|root| data_file(&root, &entry.display_path));
         let exists = file.as_deref().is_some_and(Path::is_file);
         if let Some(reason) = unavailable_reason(vscode_program().is_some(), file.as_deref(), exists) {
             self.model.status = reason;
@@ -88,33 +89,54 @@ impl Baboon {
             }
         };
         if self.model.source().and_then(|source| source.game) == Some(GameId::Halo2) {
-            let path = tag_path::without_extension(&scenario.display_path).to_owned();
-            let path = if path.contains(' ') { format!("\"{path}\"") } else { path };
-            let id = self.model.kits[self.model.active].id;
-            self.views[id].terminal.open = true;
-            self.submit_terminal_command(format!("tool rebuild-scenario-scripts {path}"), ctx.clone());
+            // Tool writes the compiled scripts into the scenario tag, which
+            // an open, edited copy would then save over.
+            let active = self.model.active;
+            let open = self.model.kits[active].parsed_tags.get(&scenario.key);
+            if open.is_some_and(|document| document.dirty.is_set()) {
+                self.model.status = "Save the scenario before recompiling its scripts".to_owned();
+                return;
+            }
+            let documents = open
+                .map(|document| vec![(scenario.key.clone(), document.id, document.dirty.revision())])
+                .unwrap_or_default();
+            let (kit, source_session) = (self.model.kits[active].id, self.model.kits[active].source_session);
+            let path = tag_path::without_extension(&scenario.display_path);
+            // A run already going refuses this one; its id isn't ours.
+            let busy = self.kit_tools.terminal.running;
+            self.spawn_terminal_command(format!("tool rebuild-scenario-scripts \"{path}\""), ctx.clone());
+            // Once Tool is done, the open scenario shows what it wrote.
+            if let Some(run_id) = self.kit_tools.terminal.running_id
+                && !busy
+                && !documents.is_empty()
+            {
+                self.export.pending_string_tool_reload =
+                    Some(StringToolReload::new(run_id, kit, source_session, documents, "scenarios"));
+            }
         } else {
             self.launch_scenario_in_sapien(&scenario.key);
         }
     }
 
-    /// The active kit's script tag at `key`, and its tags folder, when its
-    /// game's script tags can be opened and recompiled.
-    fn script_tag(&self, key: &str) -> Result<(TagEntry, PathBuf), String> {
+    /// The active kit's script tag at `key`, and its data folder from the
+    /// kit's chosen layout, when its game's script tags can be opened and
+    /// recompiled.
+    fn script_tag(&self, key: &str) -> Result<(TagEntry, Option<PathBuf>), String> {
         let game = self.model.source().and_then(|source| source.game);
         if !script_tags::supports_script_tags(game) {
             return Err("Opening and recompiling scripts works for Halo 2, Halo 3, ODST and Reach".to_owned());
         }
-        let Some(tags_root) = self.model.loaded_tags_root_for(self.model.active) else {
+        if self.model.loaded_tags_root_for(self.model.active).is_none() {
             return Err("Opening and recompiling scripts needs an editing kit".to_owned());
-        };
+        }
         let Some(entry) = self.model.entry_for_key(key).cloned() else {
             return Err("The script tag is no longer in this kit".to_owned());
         };
         if &entry.group_tag.to_be_bytes() != b"hsc*" {
             return Err("Only script tags can be opened or recompiled".to_owned());
         }
-        Ok((entry, tags_root))
+        let data_root = self.model.kit_layout_for(self.model.active).map(|layout| layout.data);
+        Ok((entry, data_root))
     }
 
     /// The one scenario that lists the script tag `script`: among the

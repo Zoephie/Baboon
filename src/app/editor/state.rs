@@ -507,6 +507,10 @@ pub(in crate::app) struct TsvPasteState {
 pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) view_scope: &'a str,
     pub(in crate::app) tag_key: &'a str,
+    /// The open document's id and edit revision: a reload (a reimport, say)
+    /// gives it a new id, an edit a new revision. Players keep what they
+    /// built from the tag until this changes.
+    pub(in crate::app) document_revision: (u64, u64),
     /// Group tag of the tag being rendered — gates block paste compatibility.
     pub(in crate::app) group_tag: u32,
     /// Root struct of the tag being rendered — used to resolve block-index
@@ -797,6 +801,7 @@ impl<'a> FieldEditContext<'a> {
             sound_help_requested: false,
             string_row_document: None,
             string_row_request: None,
+            document_revision: (0, 0),
             buffers: &mut sinks.buffers,
             pending: &mut sinks.pending,
             block_ops: &mut sinks.block_ops,

@@ -452,12 +452,24 @@ impl Baboon {
     /// Rename `old` to `new` (`None` deletes it) on every tag and folder in
     /// every game, and in the keyword list. An open kit changes its own
     /// keywords, which it saves with its other edits; a game with no kit
-    /// open has its file rewritten now.
+    /// open has its file rewritten now. A game's file that can't be read
+    /// stops the change before anything moves, so no game is left behind.
     pub(in crate::app) fn change_keyword_everywhere(&mut self, old: &str, new: Option<&str>) {
         let same_key = new.is_some_and(|new| keyword_key(new) == keyword_key(old));
         let mut problem = None;
         if !same_key {
-            for path in Self::keyword_sidecars() {
+            let sidecars = Self::keyword_sidecars();
+            for path in &sidecars {
+                let open = self.model.kits.iter().any(|kit| kit.keywords.path() == Some(path.as_path()));
+                if !open
+                    && let Err(error) = crate::core::keywords::check_sidecar(path)
+                {
+                    let file = path.file_name().unwrap_or_default().to_string_lossy();
+                    self.model.status = format!("Nothing changed: {file}: {error}");
+                    return;
+                }
+            }
+            for path in sidecars {
                 let mut open = false;
                 for kit in &mut self.model.kits {
                     if kit.keywords.path() == Some(path.as_path()) {

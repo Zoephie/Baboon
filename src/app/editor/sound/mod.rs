@@ -2582,6 +2582,10 @@ pub(in crate::app) fn draw_dialogue_summary(
             draw_sound_errors(ui, edit);
         } else {
             draw_clip_player(ui, None, edit, "dialogue", &clips, &languages, &mut play);
+            // Its player in sight keeps the mini player away, as a card's does.
+            if ui.is_rect_visible(ui.min_rect()) {
+                mini_player::mark_player_on_screen(ui.ctx());
+            }
         }
         if total == 0 {
             ui.label(RichText::new("(no vocalizations)").color(subtle_dark()));

@@ -285,19 +285,18 @@ pub(in crate::app) fn browser_loose_source(ui: &Ui) -> bool {
     ui.data(|data| data.get_temp(browser_loose_source_id()).unwrap_or(false))
 }
 
-/// The tags folder of the loose kit being drawn, for row menus that check
-/// files beside a tag, such as a script tag's `.hsc` data file.
-fn browser_tags_root_id() -> egui::Id {
-    egui::Id::unique("browser_tags_root")
+/// The data folder of the kit being drawn, from its chosen layout, published
+/// beside its tags folder for the row menu's Open in VS Code.
+fn browser_data_root_id() -> egui::Id {
+    egui::Id::unique("browser_data_root")
 }
 
-pub(in crate::app) fn set_browser_tags_root(ui: &Ui, tags_root: Option<&Path>) {
-    let tags_root = tags_root.map(Path::to_path_buf);
-    ui.data_mut(|data| data.insert_temp(browser_tags_root_id(), tags_root));
+pub(in crate::app) fn set_browser_data_root(ui: &Ui, data_root: Option<PathBuf>) {
+    ui.data_mut(|data| data.insert_temp(browser_data_root_id(), data_root));
 }
 
-pub(in crate::app) fn browser_tags_root(ui: &Ui) -> Option<PathBuf> {
-    ui.data(|data| data.get_temp(browser_tags_root_id())).flatten()
+pub(in crate::app) fn browser_data_root(ui: &Ui) -> Option<PathBuf> {
+    ui.data(|data| data.get_temp(browser_data_root_id())).flatten()
 }
 
 /// What the kit currently being drawn can launch a scenario in, published the

@@ -368,6 +368,7 @@ pub(in crate::app) fn draw_tag_pane(
     let mut edit_context = FieldEditContext {
         view_scope: scope,
         tag_key: &key,
+        document_revision: (doc.id, doc.dirty.revision()),
         group_tag: entry.group_tag,
         root: Some(doc.tag.root()),
         game: source.and_then(|source| source.game),
@@ -927,7 +928,7 @@ fn draw_script_tag_buttons(cx: &Ctx, ui: &mut Ui, kit_index: usize, entry: &TagE
         .then(|| {
             crate::app::kits::script_tools::vscode_unavailable(
                 ui.ctx(),
-                cx.model.loaded_tags_root_for(kit_index).as_deref(),
+                cx.model.kit_layout_for(kit_index).map(|layout| layout.data).as_deref(),
                 &entry.display_path,
             )
         })

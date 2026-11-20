@@ -3377,7 +3377,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
         }
         let blocked = crate::app::kits::script_tools::vscode_unavailable(
             ui.ctx(),
-            browser_tags_root(ui).as_deref(),
+            browser_data_root(ui).as_deref(),
             &entry.display_path,
         );
         let response = ui

@@ -16,6 +16,22 @@ pub(in crate::app) struct StringToolReload {
     kit: KitId,
     source_session: u64,
     documents: Vec<(String, u64, u64)>,
+    /// What the documents are, plural, for the status: "string lists".
+    what: &'static str,
+}
+
+impl StringToolReload {
+    /// Reload `documents` (key, document id, revision) of the kit `kit`
+    /// once the terminal run `run_id` ends, unless edited since.
+    pub(in crate::app) fn new(
+        run_id: u64,
+        kit: KitId,
+        source_session: u64,
+        documents: Vec<(String, u64, u64)>,
+        what: &'static str,
+    ) -> Self {
+        Self { run_id, kit, source_session, documents, what }
+    }
 }
 
 pub(in crate::app) struct StringTransferWindow {
@@ -285,6 +301,7 @@ mod tests {
             app.export.pending_string_tool_reload = Some(StringToolReload {
                 run_id, kit: app.model.kits[0].id, source_session: app.model.kits[0].source_session,
                 documents: vec![(key.clone(), doc.id, doc.dirty.revision())],
+                what: "string lists",
             });
         };
         queue_reload(&mut app, 1);
@@ -450,6 +467,7 @@ impl Baboon {
             if import {
                 self.export.pending_string_tool_reload = Some(StringToolReload {
                     run_id: self.kit_tools.terminal.running_id.unwrap(), kit: stamp.kit, source_session, documents,
+                    what: "string lists",
                 });
             }
             self.dialogs.close::<StringTransferWindow>();
@@ -488,6 +506,7 @@ impl Baboon {
                 Err(error) => { self.model.status = format!("Tool finished; could not reload {key}: {error}"); return; }
             }
         }
-        self.model.status = format!("Tool finished; reloaded {reloaded} changed string lists; preserved {skipped} documents with newer edits");
+        let what = pending.what;
+        self.model.status = format!("Tool finished; reloaded {reloaded} changed {what}; preserved {skipped} documents with newer edits");
     }
 }

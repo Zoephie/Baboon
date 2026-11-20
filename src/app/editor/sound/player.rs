@@ -533,6 +533,8 @@ pub(super) struct PlayerDeck {
     /// Each clip's id and the play it starts, if it has one of its own.
     pub(super) clips: Vec<(String, Option<SoundAction>)>,
     language: Option<String>,
+    /// The document it was built from: see `FieldEditContext::document_revision`.
+    document_revision: (u64, u64),
 }
 
 pub(super) fn deck_id(tag_key: &str) -> egui::Id {
@@ -540,7 +542,10 @@ pub(super) fn deck_id(tag_key: &str) -> egui::Id {
 }
 
 /// Keep the tab's [`PlayerDeck`] while its sound is the one loaded: built
-/// once per clip list and language, and dropped once another sound is.
+/// once per clip list, language and document revision (so a reimport or an
+/// edit rebuilds it), and dropped once another sound is or the tab closes.
+/// It holds every clip's play, inline audio included, for the one sound
+/// loaded at a time.
 fn publish_deck(
     ui: &Ui,
     card: bool,
@@ -562,6 +567,7 @@ fn publish_deck(
         .data(|data| data.get_temp::<std::sync::Arc<PlayerDeck>>(id))
         .is_some_and(|deck| {
             deck.language.as_deref() == edit.sound_language
+                && deck.document_revision == edit.document_revision
                 && deck.clips.len() == clips.len()
                 && deck.clips.iter().zip(clips).all(|((id, _), clip)| *id == clip.id)
         });
@@ -584,6 +590,7 @@ fn publish_deck(
             })
             .collect(),
         language: edit.sound_language.map(str::to_owned),
+        document_revision: edit.document_revision,
     };
     ui.data_mut(|data| data.insert_temp(id, std::sync::Arc::new(deck)));
 }
@@ -1410,6 +1417,7 @@ pub(in crate::app) fn forget_closed_players(ctx: &egui::Context, is_open: impl F
             data.remove::<HashSet<String>>(nothing_to_preview_id(tag_key));
             data.remove::<bool>(was_playing_id(tag_key));
             data.remove::<f64>(drag_anchor_id(tag_key));
+            data.remove::<std::sync::Arc<PlayerDeck>>(deck_id(tag_key));
         }
         let players = data.get_temp_mut_or_default::<HashSet<(String, String)>>(players_id());
         for player in &closed {

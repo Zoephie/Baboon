@@ -5,7 +5,7 @@ use super::super::super::ui_kit::style::{
     foundation_input_edge, foundation_section_bar, subtle_dark, text_dark,
 };
 use super::super::{
-    MaterialTextures, ModelPreviewData, ModelPreviewState, RenderModelPreviewMaterial,
+    MaterialTextures, ModelPreviewData, ModelPreviewLayer, RenderModelPreview, ModelPreviewState, RenderModelPreviewMaterial,
     draw_model_viewport, model_gl_notes,
 };
 use super::section::MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
@@ -72,13 +72,6 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
     {
         state.help_requested = true;
     }
-    // The model's own: a stand-in drawn with it is counted apart.
-    let (stand_in_vertices, stand_in_triangles) = [&data.preview.lod_model, &data.preview.imposter]
-        .into_iter()
-        .flatten()
-        .fold((0, 0), |(vertices, triangles), stand_in| {
-            (vertices + stand_in.vertices, triangles + stand_in.triangles)
-        });
     // While the LOD model stands in for the render model, its counts show.
     let swapped = data
         .preview
@@ -87,10 +80,12 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
         .filter(|lod| lod.missing.is_none() && state.show_lod_model && state.show_render);
     let (vertices, triangles) = match swapped {
         Some(lod) => (lod.vertices, lod.triangles),
-        None => (
-            data.preview.vertices.len().saturating_sub(stand_in_vertices),
-            (data.preview.indices.len() / 3).saturating_sub(stand_in_triangles),
-        ),
+        None => {
+            let id = egui::Id::unique(("model_render_counts", data.mesh_id));
+            footer.ctx().data_mut(|memory| {
+                *memory.get_temp_mut_or_insert_with(id, || render_counts(&data.preview))
+            })
+        }
     };
     footer.label(model_counts(&footer, vertices, triangles));
     footer.spacing_mut().item_spacing.x = 12.0;
@@ -136,6 +131,25 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
 }
 
 /// "N vertices · N triangles", the dot muted as the other footers' are.
+/// The model's own vertices and triangles: its render geometry, without the
+/// collision, physics or stand-in geometry drawn with it. The footer counts
+/// once per load of the mesh (`mesh_id`), not every frame.
+fn render_counts(preview: &RenderModelPreview) -> (usize, usize) {
+    let mut used = vec![false; preview.vertices.len()];
+    let mut triangles = 0;
+    for batch in preview.batches.iter().filter(|batch| batch.layer == ModelPreviewLayer::Render) {
+        let start = (batch.index_start as usize).min(preview.indices.len());
+        let end = start.saturating_add(batch.index_count as usize).min(preview.indices.len());
+        triangles += (end - start) / 3;
+        for &index in &preview.indices[start..end] {
+            if let Some(slot) = used.get_mut(index as usize) {
+                *slot = true;
+            }
+        }
+    }
+    (used.into_iter().filter(|used| *used).count(), triangles)
+}
+
 fn model_counts(ui: &Ui, vertices: usize, triangles: usize) -> egui::text::LayoutJob {
     let count = |count: usize, one: &str, many: &str| {
         format!("{count} {}", if count == 1 { one } else { many })
@@ -262,4 +276,31 @@ pub(in crate::app::model_preview) fn texture_resolve_note(
         format!("{} — hover for why", summary.join("; ")),
         detail.join("\n"),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::{
+        ModelPreviewLayer, RenderModelPreview, RenderModelPreviewBatch, RenderModelPreviewVertex,
+    };
+
+    /// The footer counts the render model alone: collision drawn with it
+    /// adds nothing.
+    #[test]
+    fn the_footer_counts_the_render_geometry_alone() {
+        let batch = |index_start, layer| RenderModelPreviewBatch {
+            index_start,
+            index_count: 3,
+            layer,
+            ..Default::default()
+        };
+        let preview = RenderModelPreview {
+            vertices: vec![RenderModelPreviewVertex::default(); 7],
+            // A render triangle on 0-2, a collision one on 3-5, vertex 6 unused.
+            indices: vec![0, 1, 2, 3, 4, 5],
+            batches: vec![batch(0, ModelPreviewLayer::Render), batch(3, ModelPreviewLayer::Collision)],
+            ..Default::default()
+        };
+        assert_eq!(super::render_counts(&preview), (3, 1));
+    }
 }
