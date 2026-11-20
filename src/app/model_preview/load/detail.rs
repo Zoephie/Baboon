@@ -168,7 +168,7 @@ mod tests {
         use crate::core::game::GameId;
         let cases = [
             (GameId::HaloCe, r"characters\cyborg\cyborg", "gbxmodel", b"mod2", 5),
-            (GameId::Halo2, r"objects\characters\covenant\brute\brute", "render_model", b"mode", 6),
+            (GameId::Halo2, r"objects\characters\brute\brute", "render_model", b"mode", 6),
         ];
         for (game, path, extension, group, count) in cases {
             let Some(root) = kit_root(game) else {

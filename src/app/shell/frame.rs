@@ -8342,8 +8342,8 @@ mod tests {
         let folder = root.join("ui").join("refresh");
         std::fs::create_dir_all(&folder).unwrap();
         let tag = folder.join("picture.bitmap");
-        let blip = kit.join(r"ui\hud\bitmaps\hud_sensor_blip.bitmap");
-        let null = kit.join(r"ui\global_bitmaps\null.bitmap");
+        let blip = kit.join("ui").join("hud").join("bitmaps").join("hud_sensor_blip.bitmap");
+        let null = kit.join("ui").join("global_bitmaps").join("null.bitmap");
         std::fs::copy(&blip, &tag).unwrap();
 
         let mut h = Harness::recording();
@@ -8424,8 +8424,8 @@ mod tests {
         let mut h = Harness::recording();
         h.frame(Vec::new());
         let entries =
-            install_kit_subtree(&mut h, &root, GameId::Halo2, "objects/characters/covenant/brute");
-        let key = open_model_page(&mut h, &entries, "objects/characters/covenant/brute/brute.biped");
+            install_kit_subtree(&mut h, &root, GameId::Halo2, "objects/characters/brute");
+        let key = open_model_page(&mut h, &entries, "objects/characters/brute/brute.biped");
         let id = h.app.model.kits[h.app.model.active].id;
         let state = h.app.views[id].caches.model_previews.get_mut(&key).unwrap();
         state.set_shading(crate::app::model_preview::ModelShading::GameShaders);
@@ -8504,7 +8504,7 @@ mod tests {
         let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
         let dir = std::path::PathBuf::from(dir);
         let tag = std::env::var("BABOON_SHOT_TAG")
-            .unwrap_or_else(|_| "objects/characters/covenant/brute/brute.model".to_owned());
+            .unwrap_or_else(|_| "objects/characters/brute/brute.model".to_owned());
         let subtree = tag.rsplit_once('/').map_or("", |(folder, _)| folder).to_owned();
         // BABOON_SHOT_GAME names the kit's game ("halo3_mcc"; Halo 2 by
         // default), and BABOON_SHOT_DARK shoots the dark theme instead.
@@ -8811,7 +8811,7 @@ mod tests {
         let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
         let dir = std::path::PathBuf::from(dir);
         // The H2 Rebalance brute by default; BABOON_SHOT_TAG names another
-        // model in the kit, as objects/characters/covenant/brute/brute.model.
+        // model in the kit, as objects/characters/elite/elite.model.
         let tag = std::env::var("BABOON_SHOT_TAG")
             .unwrap_or_else(|_| "objects/characters/brute/brute.model".to_owned());
         let subtree = tag.rsplit_once('/').map_or("", |(folder, _)| folder).to_owned();

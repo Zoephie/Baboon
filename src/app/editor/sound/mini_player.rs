@@ -108,11 +108,7 @@ pub(in crate::app) fn draw_sound_mini_player(cx: &Ctx<'_>, audio: &AudioState) {
     let offset = ctx
         .data(|data| data.get_temp::<Vec2>(offset_id()))
         .unwrap_or(Vec2::splat(-INSET));
-    // Kept in the workspace however the window was resized since.
-    let corner = (area.right_bottom() + offset).clamp(
-        area.left_top() + Vec2::new(WIDTH, CARD_HEIGHT),
-        area.right_bottom(),
-    );
+    let corner = card_corner(area, offset);
     egui::Area::new(egui::Id::unique("sound_mini_player"))
         .order(egui::Order::Middle)
         .pivot(Align2::RIGHT_BOTTOM)
@@ -274,6 +270,15 @@ pub(in crate::app) fn draw_sound_mini_player(cx: &Ctx<'_>, audio: &AudioState) {
 }
 
 /// The clip `by` places from `current` in the player's order, wrapping.
+/// The card's bottom-right corner, `offset` from the workspace's, kept in
+/// the workspace however the window was resized since. A workspace smaller
+/// than the card pins it to the bottom right, rather than asking `clamp`
+/// for a lowest corner past its highest, which panics.
+fn card_corner(area: egui::Rect, offset: Vec2) -> egui::Pos2 {
+    let lowest = (area.left_top() + Vec2::new(WIDTH, CARD_HEIGHT)).min(area.right_bottom());
+    (area.right_bottom() + offset).clamp(lowest, area.right_bottom())
+}
+
 fn step(deck: Option<&PlayerDeck>, current: Option<usize>, by: isize) -> Option<usize> {
     let deck = deck?;
     let rank = deck.order.iter().position(|&index| Some(index) == current)?;
@@ -338,6 +343,19 @@ fn clock(seconds: f64) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// The card stays in a workspace of any size, even one smaller than
+    /// itself, where it used to panic.
+    #[test]
+    fn the_card_stays_in_a_workspace_of_any_size() {
+        use super::{CARD_HEIGHT, WIDTH, card_corner};
+        use eframe::egui::{Rect, Vec2, pos2};
+        let big = Rect::from_min_size(pos2(0.0, 0.0), Vec2::new(1000.0, 800.0));
+        assert_eq!(card_corner(big, Vec2::splat(-16.0)), pos2(984.0, 784.0));
+        assert_eq!(card_corner(big, Vec2::splat(-5000.0)), pos2(WIDTH, CARD_HEIGHT));
+        let tiny = Rect::from_min_size(pos2(10.0, 20.0), Vec2::new(120.0, 90.0));
+        assert_eq!(card_corner(tiny, Vec2::splat(-16.0)), tiny.right_bottom());
+    }
+
     use super::*;
 
     #[test]
