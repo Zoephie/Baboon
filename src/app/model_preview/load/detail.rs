@@ -101,8 +101,10 @@ pub(super) fn apply_detail_level(
 }
 
 /// Per level of `count`, whether any of `permutations` (each its geometry
-/// per level, lowest first) has geometry there other than what it draws at
-/// the nearest lower level it has.
+/// per level, lowest first) has geometry there other than the nearest
+/// higher level it has. A level a tag lacks is filled from above, as
+/// [`level_or_nearest`] fills one: the top of a run of one geometry is the
+/// level it belongs to.
 fn own_levels<'a>(
     permutations: impl Iterator<Item = &'a Vec<Option<i16>>> + Clone,
     count: usize,
@@ -113,8 +115,8 @@ fn own_levels<'a>(
                 let Some(index) = levels.get(level).copied().flatten() else {
                     return false;
                 };
-                let below = levels[..level].iter().rev().find_map(|index| *index);
-                below != Some(index)
+                let above = levels[level + 1..].iter().find_map(|index| *index);
+                above != Some(index)
             })
         })
         .collect()
@@ -133,21 +135,21 @@ fn level_or_nearest(levels: &[Option<i16>], level: usize) -> Option<i16> {
 mod tests {
     use super::*;
 
-    /// A level only repeating the one below it, as a tag fills a level it
+    /// A level only repeating the one above it, as a tag fills a level it
     /// lacks, is not one of its own.
     #[test]
-    fn a_level_repeating_the_one_below_is_not_its_own() {
+    fn a_level_repeating_the_one_above_is_not_its_own() {
         let permutations = [
             vec![Some(0), Some(0), Some(1), Some(1), Some(2)],
             vec![None, Some(3), Some(3), Some(3), Some(3)],
         ];
         assert_eq!(
             own_levels(permutations.iter(), 5),
-            [true, true, true, false, true],
+            [false, true, false, true, true],
         );
         // One permutation's own geometry is enough, whatever the others do.
         let one = [vec![Some(0), Some(0), Some(0)], vec![Some(1), Some(2), Some(2)]];
-        assert_eq!(own_levels(one.iter(), 3), [true, true, false]);
+        assert_eq!(own_levels(one.iter(), 3), [true, false, true]);
     }
 
     #[test]

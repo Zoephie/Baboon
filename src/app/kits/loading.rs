@@ -1276,11 +1276,7 @@ pub(in crate::app) fn extraction_scope_key(path: &Path) -> String {
 }
 
 pub(in crate::app) fn scope_contains(parent: &str, child: &str) -> bool {
-    parent.is_empty()
-        || child == parent
-        || child
-            .strip_prefix(parent)
-            .is_some_and(|rest| rest.starts_with(tag_path::SEPARATOR))
+    parent.is_empty() || tag_path::is_within(child, parent)
 }
 
 pub(in crate::app) fn mark_tree_loaded(tree: &mut TagTree) {

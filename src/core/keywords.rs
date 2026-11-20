@@ -42,7 +42,7 @@ fn key_is_in_kit(identity: &str, root: Option<&str>) -> bool {
         .or_else(|| identity.strip_prefix(crate::core::tag_key::FOLDER_KEY_PREFIX));
     match (path, root) {
         (Some(path), Some(root)) => {
-            path == root || (path.starts_with(root) && path[root.len()..].starts_with('\\'))
+            crate::core::tag_path::is_within(path, root)
         }
         (Some(_), None) => false,
         (None, root) => root.is_none(),
@@ -233,7 +233,7 @@ impl KeywordStore {
                 let identity = key_identity(key);
                 let rest = if identity == old {
                     ""
-                } else if identity.starts_with(&old) && identity[old.len()..].starts_with('\\') {
+                } else if crate::core::tag_path::is_within(&identity, &old) {
                     &key[old.len()..]
                 } else {
                     return None;
@@ -254,8 +254,7 @@ impl KeywordStore {
             .keys()
             .filter(|key| {
                 let identity = key_identity(key);
-                identity == old
-                    || (identity.starts_with(&old) && identity[old.len()..].starts_with('\\'))
+                crate::core::tag_path::is_within(&identity, &old)
             })
             .cloned()
             .collect();

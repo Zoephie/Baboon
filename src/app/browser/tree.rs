@@ -848,11 +848,7 @@ fn current_open_request(ui: &Ui) -> Option<OpenRequest> {
 
 /// Whether search key `key` is `root` or beneath it; `""` holds everything.
 fn key_is_beneath(key: &str, root: &str) -> bool {
-    root.is_empty()
-        || key == root
-        || key
-            .strip_prefix(root)
-            .is_some_and(|rest| rest.starts_with(tag_path::SEPARATOR))
+    crate::app::kits::loading::scope_contains(root, key)
 }
 
 /// What a folder header needs to know to open: from a search, or from the

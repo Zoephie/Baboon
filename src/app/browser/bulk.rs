@@ -637,11 +637,7 @@ pub(in crate::app) fn without_covered(
         let lower = path.to_ascii_lowercase();
         folders
             .iter()
-            .filter(|folder| {
-                lower.len() > folder.len()
-                    && lower.starts_with(folder.as_str())
-                    && lower[folder.len()..].starts_with('\\')
-            })
+            .filter(|folder| lower != **folder && tag_path::is_within(&lower, folder))
             .min_by_key(|folder| folder.len())
             .cloned()
     };

@@ -70,6 +70,8 @@ pub(in crate::app::model_preview) struct ShotOptions {
     pub(in crate::app::model_preview) mode: Option<String>,
     pub(in crate::app::model_preview) light_theme: bool,
     pub(in crate::app::model_preview) grid: bool,
+    /// The imposter drawn beside the model (`H2_SHOT_IMPOSTER`).
+    pub(in crate::app::model_preview) imposter: bool,
     pub(in crate::app::model_preview) camo: bool,
     pub(in crate::app::model_preview) bloom: bool,
     pub(in crate::app::model_preview) shadow: bool,
@@ -111,6 +113,7 @@ impl ShotOptions {
             mode: None,
             light_theme: false,
             grid: false,
+            imposter: false,
             camo: false,
             bloom: false,
             shadow: false,
@@ -168,6 +171,7 @@ impl ShotOptions {
             mode: var("H2_SHOT_MODE"),
             light_theme: set("H2_SHOT_LIGHT"),
             grid: set("H2_SHOT_GRID"),
+            imposter: set("H2_SHOT_IMPOSTER"),
             camo: set("H2_SHOT_CAMO"),
             bloom: set("H2_SHOT_BLOOM"),
             shadow: set("H2_SHOT_SHADOW"),
@@ -398,7 +402,7 @@ pub(super) fn render(
         state.render_mode = mode;
     }
     state.show_grid = options.grid;
-    state.show_imposter = std::env::var_os("H2_SHOT_IMPOSTER").is_some();
+    state.show_imposter = options.imposter;
     state.active_camo = options.camo;
     state.bloom = options.bloom;
     state.self_shadow = options.shadow;
@@ -869,6 +873,7 @@ fn imposter_shots() {
         std::env::var_os("BABOON_IMPOSTER_SHOTS"),
         super::kit::kit_source(GameId::HaloReach),
     ) else {
+        eprintln!("imposter_shots: skipped; set BABOON_IMPOSTER_SHOTS and BLAM_TEST_HREK to shoot");
         return;
     };
     let dir = std::path::PathBuf::from(dir);
@@ -877,21 +882,13 @@ fn imposter_shots() {
         eprintln!("GL {}", gl.get_parameter_string(glow::VERSION));
     }
     let mut renderer = ModelGlRenderer::new(&gl).unwrap();
-    let options = ShotOptions::new(GameId::HaloReach);
     let model = r"objects\vehicles\covenant\banshee\banshee";
     for (name, kind, imposter) in [
         ("imposter", Some("imposter"), false),
         ("model", None, false),
         ("model_with_imposter", None, true),
     ] {
-        // SAFETY: the test sets it before the shot reads it, on this thread.
-        unsafe {
-            if imposter {
-                std::env::set_var("H2_SHOT_IMPOSTER", "1");
-            } else {
-                std::env::remove_var("H2_SHOT_IMPOSTER");
-            }
-        }
+        let options = ShotOptions { imposter, ..ShotOptions::new(GameId::HaloReach) };
         let shot = Shot {
             model: model.to_owned(),
             shaders: false,
@@ -901,6 +898,11 @@ fn imposter_shots() {
             kind: kind.map(str::to_owned),
         };
         let pixels = render(&gl, &mut renderer, &source, &shot, &options).pixels;
+        // Something drew: not every pixel is the background's.
+        assert!(
+            pixels.chunks_exact(4).any(|pixel| pixel != &pixels[..4]),
+            "banshee_{name}: nothing drawn"
+        );
         let row = SHOT_SIZE[0] as usize * 4;
         let upright: Vec<u8> = pixels.chunks_exact(row).rev().flatten().copied().collect();
         let image = image::RgbaImage::from_raw(SHOT_SIZE[0], SHOT_SIZE[1], upright).unwrap();

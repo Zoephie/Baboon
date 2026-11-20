@@ -36,12 +36,18 @@ pub(super) fn load_imposter_tag(
 }
 
 /// Append the imposter `model_tag` names to `preview` on the Imposter layer.
-/// `None` when the `.model` names none.
+/// `None` when the `.model` names none, or its game draws none: Reach and
+/// Halo 2 Anniversary only, though Halo 4's models have the field too.
 pub(super) fn append_imposter(
     model_tag: &TagFile,
     reader: Option<&TagReader>,
     preview: &mut RenderModelPreview,
 ) -> Option<StandIn> {
+    use crate::core::game::GameId;
+    let game = reader.and_then(|reader| reader.source.game());
+    if !matches!(game, Some(GameId::HaloReach | GameId::Halo2Amp)) {
+        return None;
+    }
     let (_, path) = model_tag.root().read_tag_ref_with_group("imposter model")?;
     let path = path.trim().to_owned();
     if path.is_empty() {

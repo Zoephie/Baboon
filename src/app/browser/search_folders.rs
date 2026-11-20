@@ -41,11 +41,7 @@ pub(super) fn match_counts(
 
 /// Whether `key` is `root` or beneath it; an empty root holds everything.
 fn is_beneath(key: &str, root: &str) -> bool {
-    root.is_empty()
-        || key == root
-        || key
-            .strip_prefix(root)
-            .is_some_and(|rest| rest.starts_with(tag_path::SEPARATOR))
+    crate::app::kits::loading::scope_contains(root, key)
 }
 
 /// One search's open folders, for one tree. Reset when the search is cleared.
