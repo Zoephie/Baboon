@@ -579,6 +579,10 @@ pub(in crate::app) struct IndexJobs {
     pub(in crate::app) refresh_browser: bool,
     /// When the next periodic refresh is due, in egui time.
     pub(in crate::app) next_refresh_at: f64,
+    /// The folder watch saw changes while a refresh was already running,
+    /// which may have listed the folder before them: run another as soon as
+    /// it ends.
+    pub(in crate::app) refresh_again: bool,
     /// A reference-index build is running.
     pub(in crate::app) building_references: bool,
     /// That build was started by a tag-index build, which reports them as one.

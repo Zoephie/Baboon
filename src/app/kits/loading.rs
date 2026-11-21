@@ -3,8 +3,12 @@
 
 use super::*;
 
-/// How often a loaded loose folder's entry index is checked against disk.
+/// How often a loaded loose folder's entry index is checked against disk
+/// when nothing tells Baboon the folder changed.
 const ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 30.0;
+/// The same, for a kit whose folder watch reports changes as they land: the
+/// timed scan is only a backstop for notifications the OS dropped.
+const WATCHED_ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 300.0;
 
 impl Baboon {
     /// Applies `WorkerMessage::SourceLoaded`, including source reset and follow-up index work.
@@ -1059,7 +1063,30 @@ impl Baboon {
 
     pub(in crate::app) fn schedule_next_entry_index_refresh(&mut self, kit: usize, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
-        self.model.kits[kit].index_jobs.next_refresh_at = now + ENTRY_INDEX_REFRESH_INTERVAL_SECS;
+        let kit = &mut self.model.kits[kit];
+        let interval = if kit.disk.folder.is_some() {
+            WATCHED_ENTRY_INDEX_REFRESH_INTERVAL_SECS
+        } else {
+            ENTRY_INDEX_REFRESH_INTERVAL_SECS
+        };
+        kit.index_jobs.next_refresh_at = if std::mem::take(&mut kit.index_jobs.refresh_again) {
+            ctx.request_repaint();
+            now
+        } else {
+            now + interval
+        };
+    }
+
+    /// The kit's folder changed: refresh its browser at the next chance, or
+    /// right after the refresh already running.
+    pub(in crate::app) fn refresh_entry_index_soon(&mut self, kit: usize, ctx: &egui::Context) {
+        let jobs = &mut self.model.kits[kit].index_jobs;
+        if jobs.refreshing {
+            jobs.refresh_again = true;
+        } else {
+            jobs.next_refresh_at = 0.0;
+            ctx.request_repaint();
+        }
     }
 
     pub(in crate::app) fn apply_entry_index_refresh(

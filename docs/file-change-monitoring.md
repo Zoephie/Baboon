@@ -14,6 +14,11 @@ writing in bursts is checked once), Baboon checks its open tags. This works
 while Baboon stays in front, for example with Tool or a script running
 beside it.
 
+The same notifications keep the tag browser current: a tag created,
+deleted or renamed outside Baboon appears or disappears within about a
+second. Without a watch the browser rescans the folder every 30 seconds;
+with one, only every 5 minutes, as a backstop.
+
 Open tags are also checked whenever Baboon's window regains focus, in case
 a notification was missed or the folder could not be watched. Both checks
 run in the background.

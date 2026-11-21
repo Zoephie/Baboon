@@ -100,8 +100,8 @@ impl Baboon {
         }
     }
 
-    /// Check a kit's open tags once a burst of changes under its folder has
-    /// gone quiet.
+    /// Once a burst of changes under a kit's folder has gone quiet, check its
+    /// open tags and refresh its browser.
     pub(in crate::app) fn check_open_tags_on_watch(&mut self, ctx: &egui::Context) {
         for index in 0..self.model.kits.len() {
             let settled = self.model.kits[index]
@@ -111,6 +111,7 @@ impl Baboon {
                 .is_some_and(|folder| folder.settled(WATCH_QUIET));
             if settled {
                 self.check_open_tags_in(index, ctx);
+                self.refresh_entry_index_soon(index, ctx);
             }
         }
     }
@@ -135,6 +136,11 @@ impl Baboon {
 
     /// Start a check of one kit's open loose tags against their files.
     fn check_open_tags_in(&mut self, index: usize, ctx: &egui::Context) {
+        // Baboon's own move is renaming files under open tabs; it reloads
+        // them itself when it ends.
+        if self.tag_ops.folder_refactor.is_some() {
+            return;
+        }
         let kit = &self.model.kits[index];
         let Some(source) = kit.source.as_ref() else {
             return;
@@ -181,6 +187,11 @@ impl Baboon {
         let Some(index) = self.model.resolve_kit(kit) else {
             return true;
         };
+        // A move that started while the check ran: a file it already moved
+        // is not missing, and its tab is about to follow it.
+        if self.tag_ops.folder_refactor.is_some() {
+            return false;
+        }
         for OpenTagCheck { key, checked, result } in checks {
             let kit = &mut self.model.kits[index];
             let entry = kit.entry_for_key(&key).cloned();
@@ -425,6 +436,36 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "timed out; status: {}", app.model.status);
         }
         assert_eq!(app.model.status, "Reloaded warthog.model: changed on disk");
+    }
+
+    /// A tag made outside Baboon reaches the browser through the folder
+    /// watch, with the timed refresh never due.
+    #[test]
+    fn a_watched_new_tag_appears_in_the_browser_without_the_timed_refresh() {
+        let fixture = LooseKit::new("disk-watch-index", "halo3_mcc");
+        fixture.write_mcc("vehicles\\warthog", "model", |_| {});
+        let mut app = app();
+        fixture.install_indexed(&mut app);
+        app.model.kits[0].index_jobs.next_refresh_at = f64::INFINITY;
+
+        fixture.write_mcc("vehicles\\ghost", "model", |_| {});
+        let key = fixture.key("vehicles\\ghost.model");
+        let ctx = ctx();
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        let listed = |app: &Baboon| {
+            app.model.kits[0].source.as_ref().unwrap().all_entries.iter().any(|entry| entry.key == key)
+        };
+        while !listed(&app) {
+            assert!(std::time::Instant::now() < deadline, "timed out; status: {}", app.model.status);
+            app.check_open_tags_on_watch(&ctx);
+            app.maybe_refresh_entry_index(ctx.clone());
+            if let Ok(message) = app.rx.recv_timeout(Duration::from_millis(50)) {
+                app.apply_worker_message(message, &ctx);
+                app.process_worker_messages(&ctx);
+            }
+        }
+        let next = app.model.kits[0].index_jobs.next_refresh_at;
+        assert!(next >= 300.0, "the timed refresh becomes a slow backstop, due at {next}");
     }
 
     fn edited_then_changed_on_disk(name: &str) -> (LooseKit, Baboon, String, PathBuf) {
