@@ -430,14 +430,68 @@ mod tests {
         assert!(app.model.kits[0].disk.notices.contains_key(&key));
     }
 
-    /// Saving answers the banner too: the edits are now the file.
+    /// Saving with the banner up does not answer it: the file is not
+    /// written over until the user chooses.
     #[test]
-    fn saving_over_the_changed_file_clears_the_banner() {
-        let (_fixture, mut app, key, _) = edited_then_changed_on_disk("disk-save-clears");
+    fn saving_with_the_banner_up_asks_first() {
+        let (_fixture, mut app, key, path) = edited_then_changed_on_disk("disk-save-banner");
+
+        let refused = app.save_tag_by_key(&key).expect_err("the save waits for an answer");
+
+        assert!(refused.contains("changed on disk since it was opened"), "{refused}");
+        assert!(app.model.kits[0].disk.notices.contains_key(&key));
+        assert!(app.model.kits[0].parsed_tags[&key].dirty.is_set());
+        let on_disk = TagFile::read(&path).unwrap();
+        assert_eq!(real_of(&on_disk, DISTANCE), Some(7.5), "the file was left alone");
+    }
+
+    /// The save backstop: a file changed while Baboon kept the focus, so no
+    /// check saw it, still stops the save and raises the banner.
+    #[test]
+    fn save_notices_a_change_no_check_saw() {
+        let fixture = LooseKit::new("disk-save-backstop", "halo3_mcc");
+        let path = fixture.write_mcc("warthog", "model", |_| {});
+        let mut app = app();
+        fixture.install(&mut app);
+        let key = fixture.open(&mut app, "warthog.model");
+        edit_field(&mut app, &key, DISTANCE, "3");
+        fixture.write_mcc("warthog", "model", |tag| set_distance(tag, 7.5));
+        bump_modified(&path);
+
+        assert!(app.save_tag_by_key(&key).is_err());
+
+        assert!(matches!(app.model.kits[0].disk.notices.get(&key), Some(DiskNotice::Changed(_))));
+        assert_eq!(real_of(&TagFile::read(&path).unwrap(), DISTANCE), Some(7.5));
+    }
+
+    /// Keep My Edits is trusted: the next Save writes over the file.
+    #[test]
+    fn save_after_keep_my_edits_writes_over_the_file() {
+        let (_fixture, mut app, key, path) = edited_then_changed_on_disk("disk-save-kept");
+        choose(&mut app, &key, DiskChoice::KeepMyEdits);
 
         app.save_tag_by_key(&key).expect("save");
 
+        assert_eq!(real_of(&TagFile::read(&path).unwrap(), DISTANCE), Some(3.0));
         assert!(app.model.kits[0].disk.notices.is_empty());
+        assert!(!app.model.kits[0].parsed_tags[&key].dirty.is_set());
+    }
+
+    /// A file deleted while Baboon kept the focus: Save puts it back, folder
+    /// and all, without a check having marked it missing first.
+    #[test]
+    fn save_recreates_a_file_no_check_saw_go() {
+        let fixture = LooseKit::new("disk-save-gone", "halo3_mcc");
+        let path = fixture.write_mcc("vehicles\\warthog", "model", |_| {});
+        fixture.write_mcc("scenery\\rock", "model", |_| {});
+        let mut app = app();
+        fixture.install_indexed(&mut app);
+        let key = fixture.open(&mut app, "vehicles\\warthog.model");
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+
+        app.save_tag_by_key(&key).expect("save");
+
+        assert!(path.is_file());
     }
 
     /// A kit with an indexed tag in its own folder, open, then deleted along

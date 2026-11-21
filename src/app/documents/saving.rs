@@ -491,9 +491,23 @@ impl Baboon {
             });
         };
         let output = path.clone();
+        // The last look at the file before writing over it: changed since
+        // it was opened, and not yet answered with Keep My Edits (which
+        // restamps the document), the save stops and the banner asks. This
+        // catches what the focus check could not see, such as a change made
+        // while Baboon kept the focus.
+        let on_disk = doc.disk.map(|stamp| stamp.check(&output));
+        if let Some(DiskCheck::Changed(now)) = on_disk {
+            let name = tag_file_name(&entry);
+            self.model.kits[self.model.active].disk.notices.insert(key.to_owned(), DiskNotice::Changed(now));
+            return Err(format!(
+                "{name} changed on disk since it was opened. Choose Reload from Disk or Keep My Edits, then save again"
+            ));
+        }
         // A tag whose file was deleted is saved back where it was, folder
         // and all.
-        let restoring = self.model.kits[self.model.active].disk.missing_entry(key).is_some();
+        let restoring = matches!(on_disk, Some(DiskCheck::Missing))
+            || self.model.kits[self.model.active].disk.missing_entry(key).is_some();
         if restoring
             && let Some(folder) = output.parent()
         {
