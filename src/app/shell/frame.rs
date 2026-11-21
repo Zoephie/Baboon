@@ -8838,6 +8838,99 @@ mod tests {
     /// `BABOON_APP_SHOTS` shots of the changed-on-disk banner over
     /// `BABOON_SHOT_TAG` (under `BLAM_TEST_H2EK`'s tags), light and dark, at
     /// the full width and about half of it.
+    /// A Git Review with a revision list, changed tags and a chosen tag, made
+    /// up rather than read from Git, so a frame can show any loading state.
+    fn staged_git_review(h: &mut Harness) {
+        use crate::app::compare::{GitReviewCommit, GitReviewFile};
+        loose_kit(h);
+        h.app.kit_and_view(h.app.model.active).open_tag_pane(GIT_REVIEW_KEY);
+        let id = h.app.model.kits[h.app.model.active].id;
+        let state = &mut h.app.views[id].git_review;
+        state.repo_root = Some(std::path::PathBuf::from(r"C:\kits\H3EK"));
+        state.branch = "main".to_owned();
+        state.commits = ["Tune the rifle's spread", "Add the smoke level"]
+            .iter()
+            .enumerate()
+            .map(|(index, subject)| GitReviewCommit {
+                hash: format!("{index}abcdef"),
+                short_hash: format!("{index}abcdef"),
+                author: "Baboon Test".to_owned(),
+                date: "2026-11-21".to_owned(),
+                subject: (*subject).to_owned(),
+            })
+            .collect();
+        state.files = vec![
+            GitReviewFile {
+                status: "M".to_owned(),
+                path: "tags/objects/weapons/rifle/rifle.biped".to_owned(),
+                group_tag: u32::from_be_bytes(*b"bipd"),
+            },
+            GitReviewFile {
+                status: "?".to_owned(),
+                path: "tags/levels/smoke/smoke.scenario".to_owned(),
+                group_tag: u32::from_be_bytes(*b"scnr"),
+            },
+        ];
+        state.local_files = state.files.clone();
+        state.selected_path = Some(state.files[0].path.clone());
+        h.idle(4);
+    }
+
+    fn set_git_review_loading(h: &mut Harness, changes: bool, diff: bool) {
+        let id = h.app.model.kits[h.app.model.active].id;
+        let state = &mut h.app.views[id].git_review;
+        state.loading = changes || diff;
+        state.loading_panes = crate::app::compare::GitReviewPanes { changes, diff };
+        h.idle(4);
+    }
+
+    /// Loading shows a spinner inside the pane being replaced instead of a
+    /// line above the panes: nothing else on the page moves.
+    #[test]
+    fn git_review_loading_spins_in_its_pane_without_moving_the_page() {
+        let mut h = Harness::new();
+        staged_git_review(&mut h);
+        // The scenario is a change only the review lists; the browser and
+        // the differences title name the biped too.
+        let changes_listed = |h: &Harness| h.painted.iter().any(|text| text.contains("smoke.scenario"));
+        let commit = painted_at(&h, "Tune the rifle's spread");
+        assert!(changes_listed(&h));
+
+        // Choosing a revision: the changed tags give way to a spinner.
+        set_git_review_loading(&mut h, true, false);
+        assert!(!changes_listed(&h), "the stale changes are not shown");
+        assert!(!h.painted_contains("Reading Git"), "no line above the panes");
+        assert_eq!(painted_at(&h, "Tune the rifle's spread"), commit, "the revisions stay put");
+
+        // Choosing a tag: only its differences wait.
+        set_git_review_loading(&mut h, false, true);
+        assert!(changes_listed(&h));
+        assert!(!h.painted_contains("Choose a tag to inspect"));
+        assert_eq!(painted_at(&h, "Tune the rifle's spread"), commit);
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
+    fn app_shots_of_git_review_loading() {
+        let Some(dir) = std::env::var_os("BABOON_APP_SHOTS") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        for dark in [false, true] {
+            let mut h = Harness::recording();
+            h.app.model.prefs.follow_system_theme = false;
+            h.app.model.prefs.dark_mode = dark;
+            h.frame(Vec::new());
+            staged_git_review(&mut h);
+            let theme = if dark { "dark" } else { "light" };
+            for (name, changes, diff) in [("idle", false, false), ("changes", true, false), ("diff", false, true)] {
+                set_git_review_loading(&mut h, changes, diff);
+                h.shoot(&dir.join(format!("git_review_loading_{name}_{theme}.png")));
+            }
+        }
+    }
+
     #[cfg(any(target_os = "macos", windows))]
     #[test]
     #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]

@@ -77,6 +77,8 @@ pub(in crate::app) struct GitReviewState {
     pub(in crate::app) request: u64,
     /// A Git job is running.
     pub(in crate::app) loading: bool,
+    /// Which panes the running job will replace, where the page shows it.
+    pub(in crate::app) loading_panes: GitReviewPanes,
     /// The kit's files or the repository may have changed since the last
     /// refresh (the folder watch, or Baboon regaining focus after a commit
     /// elsewhere): refresh once no job is running, so a diff the user asked
@@ -234,6 +236,16 @@ pub(in crate::app) struct GitReviewView {
     pub(in crate::app) selected_path: Option<String>,
     pub(in crate::app) results: Option<TagDiffResults>,
     pub(in crate::app) error: Option<String>,
+}
+
+/// The panes a Git Review job replaces: its spinner sits in their middle
+/// rather than above the page, which would push every pane down.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::app) struct GitReviewPanes {
+    /// The changed tags of the selected revision.
+    pub(in crate::app) changes: bool,
+    /// The selected tag's field differences.
+    pub(in crate::app) diff: bool,
 }
 
 /// A Git Review job for a worker.
@@ -529,6 +541,12 @@ impl Baboon {
         state.request += 1;
         state.loading = true;
         state.background = false;
+        state.loading_panes = match &job {
+            // Refresh reselects the revision, and the tag if one is chosen.
+            GitReviewJob::Refresh => GitReviewPanes { changes: true, diff: state.selected_path.is_some() },
+            GitReviewJob::SelectRevision(_) => GitReviewPanes { changes: true, diff: false },
+            GitReviewJob::SelectFile(_) => GitReviewPanes { changes: false, diff: true },
+        };
         let request = state.request;
         let mut view = state.view();
         spawn_worker(

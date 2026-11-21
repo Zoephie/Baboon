@@ -360,6 +360,18 @@ fn change_list_header(
     }
 }
 
+/// A pane's contents while Git reads them: a spinner in the middle of the
+/// space they would fill, so nothing around it moves.
+fn pane_spinner(ui: &mut Ui) {
+    const SIZE: f32 = 24.0;
+    let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
+    ui.put(
+        egui::Rect::from_center_size(rect.center(), Vec2::splat(SIZE)),
+        egui::Spinner::new().size(SIZE).color(subtle_dark()),
+    )
+    .on_hover_text("Reading Git…");
+}
+
 fn list_header(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
     Frame::NONE
         .inner_margin(egui::Margin {
@@ -572,7 +584,11 @@ pub(in crate::app) fn draw_git_review(cx: &Ctx, ui: &mut Ui, kit: KitId, state: 
     let results = &state.results;
     let error = state.error.clone();
     // A refresh Baboon started on its own replaces the page quietly.
-    let loading = state.loading && !state.background;
+    let loading = if state.loading && !state.background {
+        state.loading_panes
+    } else {
+        GitReviewPanes::default()
+    };
     let local_count = state.local_files.len();
     let mut commit_filter = state.commit_filter.clone();
     let mut filter_text = state.filter.clone();
@@ -657,21 +673,6 @@ pub(in crate::app) fn draw_git_review(cx: &Ctx, ui: &mut Ui, kit: KitId, state: 
                 Stroke::new(1.0_f32, grid_line()),
             );
 
-            if loading {
-                Frame::NONE
-                    .inner_margin(egui::Margin {
-                        left: 10,
-                        right: 10,
-                        top: 0,
-                        bottom: 8,
-                    })
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label(RichText::new("Reading Git…").color(subtle_dark()));
-                        });
-                    });
-            }
             if let Some(error) = error.as_ref() {
                 Frame::NONE
                     .inner_margin(egui::Margin {
@@ -765,6 +766,10 @@ pub(in crate::app) fn draw_git_review(cx: &Ctx, ui: &mut Ui, kit: KitId, state: 
                                     );
                             });
                             ui.separator();
+                            if loading.changes {
+                                pane_spinner(ui);
+                                return;
+                            }
                             crate::app::ScrollArea::vertical()
                                 .id_salt(("git_review_files", kit))
                                 .show(ui, |ui| {
@@ -807,7 +812,9 @@ pub(in crate::app) fn draw_git_review(cx: &Ctx, ui: &mut Ui, kit: KitId, state: 
                                     compare_pane_title(ui, selected_path.as_deref());
                                 });
                             ui.separator();
-                            if let Some(results) = results.as_ref() {
+                            if loading.diff {
+                                pane_spinner(ui);
+                            } else if let Some(results) = results.as_ref() {
                                 let (before, after) = match &selection {
                                     GitReviewSelection::Local => ("HEAD", "Working copy"),
                                     GitReviewSelection::Commit(_) => ("Before", "After"),
