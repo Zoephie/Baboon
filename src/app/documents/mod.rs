@@ -14,6 +14,7 @@ use crate::app::mods::OverwriteConfirm;
 use crate::app::references::collect_tag_dependency_refs;
 use crate::app::chimp::ChimpLevelPhase;
 use crate::core::document::value::unsaveable_reason;
+use crate::core::source::watch::{FolderWatch, WATCH_QUIET};
 use crate::app::editor::{ColorPopupWindow, DeferredFileAction, FunctionPopupWindow, format_byte_count};
 use crate::app::export::ContainerDumpReport;
 

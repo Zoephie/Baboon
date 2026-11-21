@@ -7,9 +7,16 @@ Save does not quietly roll the file back.
 
 ## When Baboon checks
 
-Open tags in a loose editing kit are checked whenever Baboon's window
-regains focus: switching back to Baboon after working elsewhere. The check
-runs in the background.
+A loose editing kit watches its tags folder for changes, using the
+operating system's file notifications. Moments after something under the
+folder changes (about a third of a second after the last write, so a tool
+writing in bursts is checked once), Baboon checks its open tags. This works
+while Baboon stays in front, for example with Tool or a script running
+beside it.
+
+Open tags are also checked whenever Baboon's window regains focus, in case
+a notification was missed or the folder could not be watched. Both checks
+run in the background.
 
 A file counts as changed when it differs from what Baboon loaded or last
 saved, not when it is merely newer. A copy made in File Explorer keeps the

@@ -459,6 +459,7 @@ impl Baboon {
             },
             ..Kit::empty(id, self.model.default_names.clone())
         };
+        self.start_folder_watch(index);
     }
 }
 

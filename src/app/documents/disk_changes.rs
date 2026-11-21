@@ -5,6 +5,10 @@
 //! with no unsaved edits is read again; one with edits gets a banner asking
 //! whether to reload it or keep the edits. A tag whose file is gone stays
 //! open, marked missing, until it is saved back or closed.
+//!
+//! A loose kit also watches its folder ([`FolderWatch`]), so a change is
+//! noticed moments after it lands rather than at the next focus change; the
+//! focus check stays as the fallback for a watch that could not start.
 
 use super::*;
 
@@ -53,6 +57,8 @@ pub(in crate::app) enum DiskChoice {
 pub(in crate::app) struct DiskWatch {
     pub(in crate::app) reloads: HashMap<String, DiskReload>,
     pub(in crate::app) notices: HashMap<String, DiskNotice>,
+    /// The OS watch on a loose kit's folder, if it started.
+    pub(in crate::app) folder: Option<FolderWatch>,
 }
 
 impl DiskWatch {
@@ -94,43 +100,75 @@ impl Baboon {
         }
     }
 
+    /// Check a kit's open tags once a burst of changes under its folder has
+    /// gone quiet.
+    pub(in crate::app) fn check_open_tags_on_watch(&mut self, ctx: &egui::Context) {
+        for index in 0..self.model.kits.len() {
+            let settled = self.model.kits[index]
+                .disk
+                .folder
+                .as_ref()
+                .is_some_and(|folder| folder.settled(WATCH_QUIET));
+            if settled {
+                self.check_open_tags_in(index, ctx);
+            }
+        }
+    }
+
+    /// Start watching a newly loaded loose kit's folder. Without a watch
+    /// (the OS refused one) the focus check still catches changes.
+    pub(in crate::app) fn start_folder_watch(&mut self, index: usize) {
+        let kit = &mut self.model.kits[index];
+        let Some(TagSource::LooseFolder { root, .. }) = kit.source.as_ref().map(|source| &source.source) else {
+            return;
+        };
+        let ctx = self.egui_ctx.clone();
+        kit.disk.folder = FolderWatch::start(root, move |after| ctx.request_repaint_after(after)).ok();
+    }
+
     /// Start a check of every open loose tag, in every kit, against its file.
     pub(in crate::app) fn check_open_tags_on_disk(&mut self, ctx: &egui::Context) {
-        for kit in &self.model.kits {
-            let Some(source) = kit.source.as_ref() else {
-                continue;
-            };
-            if !matches!(source.source, TagSource::LooseFolder { .. }) {
-                continue;
-            }
-            let files: Vec<(String, PathBuf, DiskStamp)> = kit
-                .open_tabs
-                .iter()
-                .filter_map(|key| {
-                    let stamp = kit.parsed_tags.get(key)?.disk?;
-                    let TagEntryLocation::LooseFile(path) = &kit.entry_for_key(key)?.location else {
-                        return None;
-                    };
-                    Some((key.clone(), path.clone(), stamp))
-                })
-                .collect();
-            if files.is_empty() {
-                continue;
-            }
-            let id = kit.id;
-            spawn_worker(
-                &self.tx,
-                ctx,
-                move || WorkerMessage::OpenTagsChecked {
-                    kit: id,
-                    checks: files
-                        .into_iter()
-                        .map(|(key, path, checked)| OpenTagCheck { result: checked.check(&path), key, checked })
-                        .collect(),
-                },
-                move |_| WorkerMessage::OpenTagsChecked { kit: id, checks: Vec::new() },
-            );
+        for index in 0..self.model.kits.len() {
+            self.check_open_tags_in(index, ctx);
         }
+    }
+
+    /// Start a check of one kit's open loose tags against their files.
+    fn check_open_tags_in(&mut self, index: usize, ctx: &egui::Context) {
+        let kit = &self.model.kits[index];
+        let Some(source) = kit.source.as_ref() else {
+            return;
+        };
+        if !matches!(source.source, TagSource::LooseFolder { .. }) {
+            return;
+        }
+        let files: Vec<(String, PathBuf, DiskStamp)> = kit
+            .open_tabs
+            .iter()
+            .filter_map(|key| {
+                let stamp = kit.parsed_tags.get(key)?.disk?;
+                let TagEntryLocation::LooseFile(path) = &kit.entry_for_key(key)?.location else {
+                    return None;
+                };
+                Some((key.clone(), path.clone(), stamp))
+            })
+            .collect();
+        if files.is_empty() {
+            return;
+        }
+        let id = kit.id;
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || WorkerMessage::OpenTagsChecked {
+                kit: id,
+                checks: files
+                    .into_iter()
+                    .map(|(key, path, checked)| OpenTagCheck { result: checked.check(&path), key, checked })
+                    .collect(),
+            },
+            move |_| WorkerMessage::OpenTagsChecked { kit: id, checks: Vec::new() },
+        );
     }
 
     /// Applies `WorkerMessage::OpenTagsChecked`.
@@ -359,6 +397,36 @@ mod tests {
 
     /// A tag edited to 3 whose file was then rewritten with 7.5, checked: the
     /// state a banner is up in.
+    /// The folder watch notices a change with no focus change and no
+    /// explicit check: only the frame's settled-burst poll runs.
+    #[test]
+    fn a_watched_change_reloads_the_tag_without_a_focus_change() {
+        let fixture = LooseKit::new("disk-watch", "halo3_mcc");
+        let path = fixture.write_mcc("warthog", "model", |_| {});
+        let mut app = app();
+        fixture.install(&mut app);
+        let key = fixture.open(&mut app, "warthog.model");
+        assert!(app.model.kits[0].disk.folder.is_some(), "a loose kit watches its folder");
+
+        fixture.write_mcc("warthog", "model", |tag| set_distance(tag, 7.5));
+        bump_modified(&path);
+        let ctx = ctx();
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        loop {
+            app.check_open_tags_on_watch(&ctx);
+            if let Ok(message) = app.rx.recv_timeout(Duration::from_millis(50)) {
+                app.apply_worker_message(message, &ctx);
+                app.process_worker_messages(&ctx);
+            }
+            let doc = &app.model.kits[0].parsed_tags[&key];
+            if real_of(&doc.tag, DISTANCE) == Some(7.5) {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "timed out; status: {}", app.model.status);
+        }
+        assert_eq!(app.model.status, "Reloaded warthog.model: changed on disk");
+    }
+
     fn edited_then_changed_on_disk(name: &str) -> (LooseKit, Baboon, String, PathBuf) {
         let fixture = LooseKit::new(name, "halo3_mcc");
         let path = fixture.write_mcc("warthog", "model", |_| {});

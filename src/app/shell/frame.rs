@@ -1017,6 +1017,7 @@ impl Baboon {
         if self.dialogs.get::<FirstRunWizardState>().is_none() {
             self.process_worker_messages(ctx);
             self.check_open_tags_on_focus(ctx);
+            self.check_open_tags_on_watch(ctx);
             self.expire_status(ctx);
         }
         // Raised by the previous frame, whose UI has since committed any edit
