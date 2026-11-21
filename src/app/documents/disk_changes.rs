@@ -3,7 +3,8 @@
 //! file as it was read or saved ([`DiskStamp`]); when Baboon's window regains
 //! focus the open loose tags are checked against it off the UI thread. A tag
 //! with no unsaved edits is read again; one with edits gets a banner asking
-//! whether to reload it or keep the edits.
+//! whether to reload it or keep the edits. A tag whose file is gone stays
+//! open, marked missing, until it is saved back or closed.
 
 use super::*;
 
@@ -24,11 +25,15 @@ pub(in crate::app) enum DiskReload {
 }
 
 /// A question the tag's banner is asking about its file.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 pub(in crate::app) enum DiskNotice {
     /// The file changed while the tag had unsaved edits. Holds the file as
     /// it is now, which Keep My Edits accepts as the version it replaces.
     Changed(DiskStamp),
+    /// Nothing is at the tag's path any more. Holds the tag's browser entry:
+    /// the kit's next index refresh drops it, and the tab, its banner and
+    /// Save still need it.
+    Missing(TagEntry),
 }
 
 /// The banner's answers.
@@ -36,6 +41,8 @@ pub(in crate::app) enum DiskNotice {
 pub(in crate::app) enum DiskChoice {
     ReloadFromDisk,
     KeepMyEdits,
+    /// Close a missing tag's tab, through the usual prompt if it has edits.
+    CloseTab,
 }
 
 /// One kit's open tags whose files changed: reads in flight and banners
@@ -54,6 +61,14 @@ impl DiskWatch {
         }
         if let Some(notice) = self.notices.remove(old) {
             self.notices.insert(new.to_owned(), notice);
+        }
+    }
+
+    /// The entry of an open tag whose file is missing.
+    pub(in crate::app) fn missing_entry(&self, key: &str) -> Option<&TagEntry> {
+        match self.notices.get(key)? {
+            DiskNotice::Missing(entry) => Some(entry),
+            DiskNotice::Changed(_) => None,
         }
     }
 
@@ -91,7 +106,7 @@ impl Baboon {
                 .iter()
                 .filter_map(|key| {
                     let stamp = kit.parsed_tags.get(key)?.disk?;
-                    let TagEntryLocation::LooseFile(path) = &source.entry_for_key(key)?.location else {
+                    let TagEntryLocation::LooseFile(path) = &kit.entry_for_key(key)?.location else {
                         return None;
                     };
                     Some((key.clone(), path.clone(), stamp))
@@ -128,6 +143,8 @@ impl Baboon {
         };
         for OpenTagCheck { key, checked, result } in checks {
             let kit = &mut self.model.kits[index];
+            let entry = kit.entry_for_key(&key).cloned();
+            let was_missing = kit.disk.missing_entry(&key).is_some();
             let Some(doc) = kit.parsed_tags.get_mut(&key) else {
                 continue;
             };
@@ -135,6 +152,10 @@ impl Baboon {
             // the answer is about a file the document no longer stands for.
             if doc.disk != Some(checked) {
                 continue;
+            }
+            // The file is back: whatever it holds is answered below.
+            if was_missing && !matches!(result, DiskCheck::Missing | DiskCheck::Unreadable(_)) {
+                kit.disk.notices.remove(&key);
             }
             match result {
                 DiskCheck::Same | DiskCheck::Unreadable(_) => {}
@@ -151,8 +172,13 @@ impl Baboon {
                 DiskCheck::Changed(now) => {
                     kit.disk.notices.insert(key, DiskNotice::Changed(now));
                 }
-                // A deleted file is left as it is for now.
-                DiskCheck::Missing => {}
+                // The tab stays open with what it holds; saving puts the
+                // file back.
+                DiskCheck::Missing => {
+                    if let (Some(entry), false) = (entry, was_missing) {
+                        kit.disk.notices.insert(key, DiskNotice::Missing(entry));
+                    }
+                }
             }
         }
         false
@@ -163,6 +189,13 @@ impl Baboon {
         let Some(index) = self.model.resolve_kit(kit) else {
             return;
         };
+        if choice == DiskChoice::CloseTab {
+            // The banner stays until the tab is gone: the save-changes
+            // prompt this may raise can be cancelled.
+            self.focus_kit(index);
+            self.request_close_action(PendingCloseAction::CloseTab(key), ctx);
+            return;
+        }
         let kit = &mut self.model.kits[index];
         let Some(notice) = kit.disk.notices.remove(&key) else {
             return;
@@ -178,6 +211,10 @@ impl Baboon {
             (DiskChoice::ReloadFromDisk, DiskNotice::Changed(_)) => {
                 kit.disk.reloads.insert(key.clone(), DiskReload::DiscardEdits);
                 self.load_tag_in(index, key, ctx.clone(), true);
+            }
+            // Not offered for a missing file; it keeps its banner.
+            (_, notice) => {
+                kit.disk.notices.insert(key, notice);
             }
         }
     }
@@ -401,5 +438,117 @@ mod tests {
         app.save_tag_by_key(&key).expect("save");
 
         assert!(app.model.kits[0].disk.notices.is_empty());
+    }
+
+    /// A kit with an indexed tag in its own folder, open, then deleted along
+    /// with that folder and checked.
+    fn opened_then_deleted(name: &str) -> (LooseKit, Baboon, String, PathBuf) {
+        let fixture = LooseKit::new(name, "halo3_mcc");
+        let path = fixture.write_mcc("vehicles\\warthog", "model", |tag| set_distance(tag, 4.0));
+        // A second tag, as any real kit has: an empty listing reads as one
+        // not scanned yet.
+        fixture.write_mcc("scenery\\rock", "model", |_| {});
+        let mut app = app();
+        fixture.install_indexed(&mut app);
+        let key = fixture.open(&mut app, "vehicles\\warthog.model");
+        let kit = app.model.kits[0].id;
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        check_and_wait(&mut app, kit);
+        (fixture, app, key, path)
+    }
+
+    /// A full refresh, as the periodic one is once its cached index sees a
+    /// file go. The fixture kit has no cached index to compare against.
+    fn refresh_index(app: &mut Baboon) {
+        app.model.kits[0].index_jobs.refresh_browser = true;
+        app.begin_refresh_entry_index(ctx());
+        pump_until(app, "the index refresh", |app| !app.model.kits[0].index_jobs.refreshing);
+    }
+
+    #[test]
+    fn a_deleted_tag_stays_open_marked_missing() {
+        let (_fixture, app, key, _) = opened_then_deleted("disk-missing");
+
+        let kit = &app.model.kits[0];
+        assert!(kit.open_tabs.contains(&key));
+        assert_eq!(real_of(&kit.parsed_tags[&key].tag, DISTANCE), Some(4.0));
+        assert!(kit.disk.missing_entry(&key).is_some());
+    }
+
+    /// The index refresh drops the deleted tag from the browser, but the open
+    /// tab keeps its entry, and a tag deleted before any focus check is
+    /// marked missing by the refresh itself.
+    #[test]
+    fn the_index_refresh_marks_a_deleted_open_tag_missing_and_keeps_its_entry() {
+        let fixture = LooseKit::new("disk-missing-refresh", "halo3_mcc");
+        let path = fixture.write_mcc("vehicles\\warthog", "model", |_| {});
+        let mut app = app();
+        fixture.install_indexed(&mut app);
+        let key = fixture.open(&mut app, "vehicles\\warthog.model");
+        fs::remove_file(&path).unwrap();
+
+        refresh_index(&mut app);
+
+        let kit = &app.model.kits[0];
+        let listed = |key: &str| kit.source.as_ref().unwrap().all_entries.iter().any(|entry| entry.key == key);
+        assert!(!listed(&key), "gone from the browser; status {}", app.model.status);
+        assert!(kit.disk.missing_entry(&key).is_some());
+        assert!(app.model.entry_for_key(&key).is_some(), "the tab still finds its tag");
+    }
+
+    /// Saving puts the file back, folder and all, and the tag back in the
+    /// browser, after the refresh had dropped it.
+    #[test]
+    fn saving_a_missing_tag_recreates_its_file() {
+        let (_fixture, mut app, key, path) = opened_then_deleted("disk-missing-save");
+        refresh_index(&mut app);
+
+        app.save_tag_by_key(&key).expect("save");
+
+        assert!(path.is_file());
+        let kit = &app.model.kits[0];
+        assert!(kit.disk.notices.is_empty());
+        assert!(
+            kit.source.as_ref().unwrap().all_entries.iter().any(|entry| entry.key == key),
+            "back in the browser"
+        );
+    }
+
+    /// The file put back outside Baboon (an undo in Explorer, a Git
+    /// restore): the tag is no longer missing.
+    #[test]
+    fn a_missing_file_put_back_clears_the_banner() {
+        let (fixture, mut app, key, _) = opened_then_deleted("disk-missing-back");
+        let kit = app.model.kits[0].id;
+
+        fixture.write_mcc("vehicles\\warthog", "model", |tag| set_distance(tag, 4.0));
+        check_and_wait(&mut app, kit);
+
+        assert!(app.model.kits[0].disk.notices.is_empty());
+        assert_eq!(real_of(&app.model.kits[0].parsed_tags[&key].tag, DISTANCE), Some(4.0));
+    }
+
+    #[test]
+    fn close_tab_closes_a_missing_tag() {
+        let (_fixture, mut app, key, _) = opened_then_deleted("disk-missing-close");
+
+        choose(&mut app, &key, DiskChoice::CloseTab);
+
+        let kit = &app.model.kits[0];
+        assert!(!kit.open_tabs.contains(&key));
+        assert!(kit.disk.notices.is_empty());
+    }
+
+    /// Unsaved edits on a missing tag are the only copy left: closing asks
+    /// first, and the banner stays while it does.
+    #[test]
+    fn close_tab_on_an_edited_missing_tag_asks_first() {
+        let (_fixture, mut app, key, _) = opened_then_deleted("disk-missing-close-edited");
+        edit_field(&mut app, &key, DISTANCE, "3");
+
+        choose(&mut app, &key, DiskChoice::CloseTab);
+
+        assert!(app.dialogs.get::<SaveChangesPrompt>().is_some());
+        assert!(app.model.kits[0].disk.missing_entry(&key).is_some());
     }
 }

@@ -1458,6 +1458,34 @@ pub(in crate::app) fn disk_banner_icon() -> Color32 {
     }
 }
 
+/// The banner across a tag whose file was deleted: a red wash behind the
+/// pane's own text colour.
+pub(in crate::app) fn disk_missing_fill() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(78, 32, 30)
+    } else {
+        Color32::from_rgb(252, 226, 223)
+    }
+}
+
+/// The deleted-file banner's border.
+pub(in crate::app) fn disk_missing_edge() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(158, 62, 56)
+    } else {
+        Color32::from_rgb(224, 128, 118)
+    }
+}
+
+/// The deleted-file banner's warning icon, and the dot on its tag's tab.
+pub(in crate::app) fn disk_missing_icon() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(240, 92, 80)
+    } else {
+        Color32::from_rgb(200, 48, 38)
+    }
+}
+
 /// Read-only and missing notes in Chimp's headers and the New Tag window.
 pub(in crate::app) fn header_notice_text() -> Color32 {
     Color32::from_rgb(170, 130, 60)

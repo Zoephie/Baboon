@@ -8828,6 +8828,12 @@ mod tests {
             settle(&mut h);
             let theme = if dark { "dark" } else { "light" };
             h.shoot(&dir.join(format!("disk_banner_{theme}_{width}.png")));
+            // The same tag deleted with unsaved edits: the red banner and dot.
+            let kit = &mut h.app.model.kits[h.app.model.active];
+            kit.disk.notices.insert(entry.key.clone(), crate::app::documents::DiskNotice::Missing(entry.clone()));
+            kit.parsed_tags.get_mut(&entry.key).expect("the tag is open").dirty.touch();
+            settle(&mut h);
+            h.shoot(&dir.join(format!("disk_missing_{theme}_{width}.png")));
         }
     }
 

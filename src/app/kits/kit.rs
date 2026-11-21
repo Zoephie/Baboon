@@ -556,11 +556,16 @@ impl Kit {
     /// from elsewhere.
     pub(in crate::app) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
         let source = self.source.as_ref()?;
-        source.entry_for_key(key).or_else(|| {
-            self.active_favorite_entries
-                .iter()
-                .find(|entry| entry.key == key)
-        })
+        source
+            .entry_for_key(key)
+            .or_else(|| {
+                self.active_favorite_entries
+                    .iter()
+                    .find(|entry| entry.key == key)
+            })
+            // An open tag whose file was deleted: gone from the source once
+            // the index refreshes, still open and saveable.
+            .or_else(|| self.disk.missing_entry(key))
     }
 }
 

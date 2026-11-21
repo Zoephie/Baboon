@@ -416,6 +416,9 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         let git_icon = pane_key.is_some_and(|key| key == GIT_REVIEW_KEY);
         let dirty = pane_key.is_some_and(|key| self.cx.model.kits[self.kit_index]
             .parsed_tags.get(key).is_some_and(|document| document.dirty.is_set()));
+        // A tag whose file was deleted: its dot shows, in red, edited or not.
+        let missing = pane_key.is_some_and(|key| self.cx.model.kits[self.kit_index]
+            .disk.missing_entry(key).is_some());
         let text = self.tab_title_for_tile(tiles, tile_id);
         let close_size = Vec2::splat(self.close_button_outer_size());
         let font_id = egui::TextStyle::Button.resolve(ui.style());
@@ -447,9 +450,10 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
             let focused = workspace_has_focus(ui.ctx()) && self.cx.model.active == self.kit_index
                 && pane_key.is_some_and(|key| self.cx.model.kits[self.kit_index].current_pane.as_ref() == Some(key));
             crate::app::shell::frame::paint_connected_tab(ui, tab_rect, bg, state.active, focused);
-            if dirty {
-                ui.painter().rect_filled(tab_rect.shrink(2.0), 2.0,
-                    crate::app::browser::modified_text().gamma_multiply(0.12));
+            // A missing tag's tab is tinted the red of its dot, edited or not.
+            if dirty || missing {
+                let tint = if missing { disk_missing_icon() } else { crate::app::browser::modified_text() };
+                ui.painter().rect_filled(tab_rect.shrink(2.0), 2.0, tint.gamma_multiply(0.12));
             }
             if !state.active && self.inactive_dividers.contains(&tile_id) {
                 ui.painter().vline(tab_rect.right() - 0.5, (tab_rect.top() + 5.0)..=(tab_rect.bottom() - 5.0),
@@ -489,10 +493,11 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
             if state.closable {
                 let close_rect =
                     egui::Align2::RIGHT_CENTER.align_size_within_rect(close_size, inner);
-                if dirty {
+                if dirty || missing {
+                    let color = if missing { disk_missing_icon() } else { crate::app::browser::modified_text() };
                     ui.painter().circle_filled(
                         egui::pos2(close_rect.left() - CLOSE_GAP * 0.5, close_rect.center().y),
-                        2.0, crate::app::browser::modified_text(),
+                        2.0, color,
                     );
                 }
                 let close_id = ui.auto_id_with("tab_close_btn");
@@ -633,34 +638,17 @@ fn tab_labels_for_open_panes(
             labels.insert(key.clone(), (label, None));
             continue;
         }
-        let found = kit
-            .source
-            .as_ref()
-            .and_then(|source| source.entry_for_key(key))
-            .or_else(|| {
-                kit.active_favorite_entries
-                    .iter()
-                    .find(|entry| &entry.key == key)
-            });
-        if let Some(entry) = found {
+        if let Some(entry) = kit.entry_for_key(key) {
             labels.insert(key.clone(), (tag_tab_label(entry), Some(entry.group_tag)));
         }
     }
     labels
 }
 
-/// The entry a tag pane shows: from the kit's source, or one of its favorites
-/// from outside it.
+/// The entry a tag pane shows: from the kit's source, one of its favorites
+/// from outside it, or an open tag whose file is missing.
 fn tag_pane_entry(kit: &Kit, key: &str) -> Option<TagEntry> {
-    kit.source
-        .as_ref()
-        .and_then(|source| source.entry_for_key(key))
-        .or_else(|| {
-            kit.active_favorite_entries
-                .iter()
-                .find(|entry| entry.key == key)
-        })
-        .cloned()
+    kit.entry_for_key(key).cloned()
 }
 
 /// One open tag pane's caches, filled before the tiles draw.

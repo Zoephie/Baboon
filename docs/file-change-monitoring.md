@@ -38,4 +38,13 @@ Tags in containers, packages and monolithic caches are not checked.
     If the file changes again afterwards, the banner comes back.
   - Saving while the banner shows also answers it: your version becomes
     the file.
-- **A tag whose file was deleted** stays open as it was.
+- **A tag whose file was deleted** (or moved away) stays open as it was,
+  with a red banner: "brute.model was deleted from disk." The tab's dot
+  turns red, whether or not the tag has unsaved edits, and the tag leaves
+  the browser.
+  - **Save** writes the tag back where it was, recreating its folder if
+    needed, and it returns to the browser.
+  - **Close Tab** closes it, asking first if it has unsaved edits, since
+    they are the only copy left.
+  - If the file comes back on its own (restored in Explorer or by Git),
+    the banner goes at the next check.

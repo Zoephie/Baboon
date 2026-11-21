@@ -1079,6 +1079,24 @@ impl Baboon {
             errors,
             ..
         } = refresh;
+        // An open tag whose file is not in the refreshed set keeps its
+        // entry, so its tab stays open, marked missing, and can still be
+        // saved.
+        {
+            let kit = &mut self.model.kits[kit_index];
+            let lost: Vec<TagEntry> = kit
+                .open_tabs
+                .iter()
+                .filter(|key| kit.disk.missing_entry(key).is_none())
+                .filter(|key| kit.parsed_tags.get(*key).is_some_and(|doc| doc.disk.is_some()))
+                .filter(|key| !entries.iter().any(|entry| crate::core::tag_key::same_entry_key(&entry.key, key)))
+                .filter_map(|key| kit.entry_for_key(key).cloned())
+                .filter(|entry| matches!(entry.location, TagEntryLocation::LooseFile(_)))
+                .collect();
+            for entry in lost {
+                kit.disk.notices.insert(entry.key.clone(), DiskNotice::Missing(entry));
+            }
+        }
         let n = entries.len();
         let initialized = self.model.kits[kit_index].source.as_ref()
             .is_some_and(|source| source.complete_scan && source.all_entries.len() == n);

@@ -491,6 +491,14 @@ impl Baboon {
             });
         };
         let output = path.clone();
+        // A tag whose file was deleted is saved back where it was, folder
+        // and all.
+        let restoring = self.model.kits[self.model.active].disk.missing_entry(key).is_some();
+        if restoring
+            && let Some(folder) = output.parent()
+        {
+            std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+        }
         doc.tag
             .write_atomic(&output)
             .map_err(|error| error.to_string())?;
@@ -505,6 +513,10 @@ impl Baboon {
             // Baboon's own write, so the next check for changes on disk
             // does not take it for someone else's.
             doc.disk = DiskStamp::of_file(&output).ok();
+        }
+        // Back in the browser before the banner holding its entry goes.
+        if restoring {
+            self.register_saved_copy_if_in_loaded_folder(&output)?;
         }
         self.model.kits[self.model.active].disk.notices.remove(key);
         // The save also writes the index row, so the periodic refresh will
