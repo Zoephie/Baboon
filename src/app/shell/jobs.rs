@@ -140,6 +140,9 @@ impl Baboon {
                         self.handle_tag_loaded(kit, key, result)
                     } else { true }
                 }
+                WorkerMessage::OpenTagsChecked { kit, checks } => {
+                    self.handle_open_tags_checked(kit, checks, ctx)
+                }
                 WorkerMessage::RefJumpOccurrences {
                     kit,
                     index,

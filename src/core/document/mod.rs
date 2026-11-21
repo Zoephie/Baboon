@@ -3,12 +3,14 @@
 //! how they apply; and how typed text becomes a field value.
 
 pub(crate) mod apply;
+pub(crate) mod disk;
 pub(crate) mod journal;
 pub(crate) mod ops;
 pub(crate) mod value;
 
 use blam_tags::TagFile;
 
+use disk::DiskStamp;
 use journal::EditJournal;
 
 /// Whether a document diverges from its last save, and how many times it has
@@ -67,6 +69,11 @@ pub(crate) struct TagDocument {
     /// match. An undo or redo landing back on it means the document is as
     /// saved again.
     saved_at: Option<Option<u64>>,
+    /// The loose file this document was read from or last saved to, as it
+    /// was then. `None` when there is no such file, or it is not known (a
+    /// container tag, a new tag, a reimported bitmap): those are not checked
+    /// for changes on disk.
+    pub(crate) disk: Option<DiskStamp>,
 }
 
 fn next_document_id() -> u64 {
@@ -83,6 +90,7 @@ impl TagDocument {
             journal: EditJournal::default(),
             layout_revision: 0,
             saved_at: Some(None),
+            disk: None,
         }
     }
 
@@ -100,6 +108,7 @@ impl TagDocument {
             journal: EditJournal::default(),
             layout_revision: 0,
             saved_at: None,
+            disk: None,
         }
     }
 

@@ -9,6 +9,7 @@ use crate::app::kits::{
     tag_tree_id, trim_terminal_lines,
 };
 use crate::app::tag_ops::NewTagGroup;
+use crate::app::browser::tag_file_name;
 use crate::app::mods::OverwriteConfirm;
 use crate::app::references::collect_tag_dependency_refs;
 use crate::app::chimp::ChimpLevelPhase;
@@ -17,6 +18,8 @@ use crate::app::editor::{ColorPopupWindow, DeferredFileAction, FunctionPopupWind
 use crate::app::export::ContainerDumpReport;
 
 pub(in crate::app) mod selection;
+pub(in crate::app) mod disk_changes;
+pub(in crate::app) use disk_changes::OpenTagCheck;
 pub(in crate::app) mod saving;
 pub(in crate::app) use saving::ordered_unique_keys;
 pub(in crate::app) mod close;
@@ -32,6 +35,9 @@ pub(in crate::app) struct DocumentsFeature {
     /// once the prompt has been answered and the app is closing for real. See
     /// [`Baboon::handle_app_close_request`].
     pub(in crate::app) allow_app_close_once: bool,
+    /// Whether the window had focus last frame, so regaining it can be told
+    /// apart: that is when open tags are checked for changes on disk.
+    pub(in crate::app) window_focused: bool,
 }
 
 /// What the document windows can be asked to do.

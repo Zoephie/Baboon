@@ -9,7 +9,7 @@ impl Baboon {
         &mut self,
         kit: KitId,
         key: String,
-        result: Result<TagFile, String>,
+        result: Result<(TagFile, Option<DiskStamp>), String>,
     ) -> bool {
         // Routed by kit id rather than generation: a parsed document stays
         // valid across a source reload, and must land in the kit that asked
@@ -18,23 +18,34 @@ impl Baboon {
             return true;
         };
         self.model.kits[index].loading_tags.remove(&key);
+        let changed_on_disk = self.model.kits[index].disk_reloads.remove(&key);
         if !self.model.kits[index].open_tabs.iter().any(|tab| tab == &key) {
             return true;
         }
         match result {
-            Ok(tag) => {
+            Ok((tag, stamp)) => {
                 // A user edit made while a refresh was reading wins over the
                 // older disk snapshot returned by that read.
                 if self.model.kits[index].parsed_tags.get(&key).is_some_and(|doc| doc.dirty.is_set()) { return false; }
                 // A read again (after a rename, say) leaves the status alone:
-                // it holds what the action that asked for it said.
+                // it holds what the action that asked for it said. One read
+                // because the file changed on disk is the exception: nothing
+                // the user did asked for it, so it says what happened.
                 let reloaded = self.model.kits[index].parsed_tags.contains_key(&key);
-                if !reloaded {
+                if changed_on_disk && reloaded {
+                    let name = self
+                        .model.entry_for_key_in(index, &key)
+                        .map(tag_file_name)
+                        .unwrap_or_else(|| key.clone());
+                    self.model.status = format!("Reloaded {name}: changed on disk");
+                } else if !reloaded {
                     self.model.status = "Tag loaded".to_owned();
                 }
-                self.model.kits[index]
-                    .parsed_tags
-                    .insert(key.clone(), TagDocument::clean(tag));
+                // A fresh document: its undo history starts here, so undo
+                // cannot bring back the version the file no longer holds.
+                let mut doc = TagDocument::clean(tag);
+                doc.disk = stamp;
+                self.model.kits[index].parsed_tags.insert(key.clone(), doc);
                 // Read again from disk (Refresh Bitmap, or after a rename):
                 // previews drawn from the old bytes go, or a reimported
                 // bitmap kept showing its old image.
@@ -206,7 +217,7 @@ impl Baboon {
             &self.tx,
             &ctx,
             move || {
-                let result = read_entry(&source_kind, &entry).map_err(|error| format!("{error:#}"));
+                let result = read_entry_stamped(&source_kind, &entry).map_err(|error| format!("{error:#}"));
                 WorkerMessage::TagLoaded { kit, epoch, key, result }
             },
             move |error| WorkerMessage::TagLoaded {

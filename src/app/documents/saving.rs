@@ -502,6 +502,9 @@ impl Baboon {
         };
         if let Some(doc) = self.model.kits[self.model.active].parsed_tags.get_mut(key) {
             doc.mark_saved();
+            // Baboon's own write, so the next check for changes on disk
+            // does not take it for someone else's.
+            doc.disk = DiskStamp::of_file(&output).ok();
         }
         // The save also writes the index row, so the periodic refresh will
         // not see this file change; the shader grid has to hear it here.
@@ -656,6 +659,10 @@ impl Baboon {
         let kit = &mut self.model.kits[active];
         if let Some(doc) = kit.parsed_tags.get_mut(&new) {
             doc.mark_saved();
+            doc.disk = match &saved.location {
+                TagEntryLocation::LooseFile(path) => DiskStamp::of_file(path).ok(),
+                _ => None,
+            };
         }
         kit.selected_key = Some(new);
         self.record_saved_tag_in_indexes(&saved, dependencies);
