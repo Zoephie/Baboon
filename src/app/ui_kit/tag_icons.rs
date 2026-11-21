@@ -281,10 +281,7 @@ pub(in crate::app) fn tag_icon_image(
     // On light panels the icons' bright colours wash out, so each is
     // darkened, keeping its hue, until it reads against the tag tree's
     // panel, the deepest they sit on.
-    let backdrop = (!is_dark_mode()).then(|| {
-        let [r, g, b, _] = left_panel().to_array();
-        [r, g, b]
-    });
+    let backdrop = icon_backdrop().map(|on| [on.r(), on.g(), on.b()]);
     if icon.svg.contains("currentColor") || backdrop.is_some() {
         let [r, g, b, _] = text_dark().to_array();
         let on = backdrop.map_or(String::new(), |[r, g, b]| format!("-on{r:02x}{g:02x}{b:02x}"));
@@ -720,6 +717,39 @@ mod tests {
         }
         let biped = themed_tag_icon_bytes(tag_icon!("biped"), [0; 3], Some(backdrop));
         assert!(!std::str::from_utf8(&biped).unwrap().to_lowercase().contains("#ff6619"));
+    }
+
+    /// In each light theme, every tag icon reads at 3:1 on every surface
+    /// icons sit on: the warm theme's tab bar and sand wells, the classic
+    /// theme's darker page. Each is darkened for the darkest of them.
+    #[test]
+    fn light_mode_icons_read_on_every_surface_they_sit_on() {
+        use crate::app::ui_kit::{LightTheme, icon_backdrop, icon_backdrops, with_theme};
+        for theme in [LightTheme::Warm, LightTheme::Classic] {
+            with_theme(false, theme, || {
+                let rgb = |colour: egui::Color32| [colour.r(), colour.g(), colour.b()];
+                let darkest = rgb(icon_backdrop().unwrap());
+                for (icon, _) in GROUP_ICONS {
+                    let svg = themed_tag_icon_bytes(*icon, [0; 3], Some(darkest));
+                    let svg = std::str::from_utf8(&svg).unwrap();
+                    for (at, _) in svg.match_indices("fill=\"#") {
+                        let value = u32::from_str_radix(&svg[at + 7..at + 13], 16).unwrap();
+                        let color = [(value >> 16) as u8, (value >> 8) as u8, value as u8];
+                        if color == [255; 3] {
+                            continue;
+                        }
+                        for surface in icon_backdrops() {
+                            let ratio = contrast(color, rgb(surface));
+                            assert!(
+                                ratio >= ICON_CONTRAST - 0.01,
+                                "{theme:?} {}: {color:?} on {surface:?} at {ratio:.2}",
+                                icon.name
+                            );
+                        }
+                    }
+                }
+            });
+        }
     }
 
     /// Every group the icon table names exists, with that name, in some

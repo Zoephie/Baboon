@@ -21,11 +21,7 @@ fn draw_welcome_columns(ui: &mut Ui, contents: impl FnOnce(&mut [Ui])) {
             .fold(bounds.top(), f32::max);
         left = egui::Rect::from_min_max(bounds.min, egui::pos2(bounds.right(), bottom));
     });
-    painter.set(
-        background,
-        // fixed: shade over the banner art
-        egui::Shape::rect_filled(left, 0.0, Color32::from_black_alpha(51)),
-    );
+    painter.set(background, egui::Shape::rect_filled(left, 0.0, welcome_side_panel()));
 }
 
 /// What the welcome screen asks the app to do once the frame is drawn.
@@ -634,51 +630,53 @@ mod tests {
 
     #[test]
     fn welcome_left_background_reaches_taller_column_bottom() {
+        use crate::app::ui_kit::{LightTheme, with_theme};
         for taller_left in [false, true] {
-            let ctx = egui::Context::default();
-            let mut bottom = 0.0;
-            let output = crate::app::run_ui_test(
-                &ctx,
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        Vec2::new(820.0, 600.0),
-                    )),
-                    ..Default::default()
-                },
-                |ui| {
-                    egui::CentralPanel::default().show(ui, |ui| {
-                        draw_welcome_columns(ui, |columns| {
-                            for (index, column) in columns.iter_mut().enumerate() {
-                                let height = if (index == 0) == taller_left {
-                                    400.0
-                                } else {
-                                    120.0
-                                };
-                                column.allocate_exact_size(
-                                    Vec2::new(column.available_width(), height),
-                                    Sense::hover(),
-                                );
-                            }
-                            bottom = columns
-                                .iter()
-                                .map(|column| column.min_rect().bottom())
-                                .fold(0.0, f32::max);
+            with_theme(false, LightTheme::Warm, || {
+                let panel = welcome_side_panel();
+                let ctx = egui::Context::default();
+                let mut bottom = 0.0;
+                let output = crate::app::run_ui_test(
+                    &ctx,
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(820.0, 600.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            draw_welcome_columns(ui, |columns| {
+                                for (index, column) in columns.iter_mut().enumerate() {
+                                    let height = if (index == 0) == taller_left {
+                                        400.0
+                                    } else {
+                                        120.0
+                                    };
+                                    column.allocate_exact_size(
+                                        Vec2::new(column.available_width(), height),
+                                        Sense::hover(),
+                                    );
+                                }
+                                bottom = columns
+                                    .iter()
+                                    .map(|column| column.min_rect().bottom())
+                                    .fold(0.0, f32::max);
+                            });
                         });
-                    });
-                },
-            );
-            let background = output
-                .shapes
-                .iter()
-                .find_map(|shape| match &shape.shape {
-                    egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(51) => {
-                        Some(rect.rect)
-                    }
-                    _ => None,
-                })
-                .expect("missing left pane background");
-            assert_eq!(background.bottom(), bottom);
+                    },
+                );
+                let background = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect) if rect.fill == panel => Some(rect.rect),
+                        _ => None,
+                    })
+                    .expect("missing left pane background");
+                assert_eq!(background.bottom(), bottom);
+            });
         }
     }
 

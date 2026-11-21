@@ -33,11 +33,15 @@ pub(in crate::app) fn draw_standalone_mesh_preview(
     let least = min_preview_scale(&data.preview);
     ui.horizontal(|ui| {
         ui.label(RichText::new("Scale").color(subtle_dark()));
-        ui.add(
+        let background = ui.visuals().window_fill;
+        crate::app::ui_kit::plain_railed_slider(
+            ui,
             egui::Slider::new(&mut state.scale, least..=MAX_PREVIEW_SCALE)
                 .logarithmic(true)
                 .show_value(false)
                 .clamping(egui::SliderClamping::Always),
+            true,
+            background,
         );
         let drag_speed = (state.scale * 0.05) as f64;
         ui.add(

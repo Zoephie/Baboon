@@ -166,7 +166,6 @@ pub(in crate::app) struct FolderBrowserState {
     pub(in crate::app) filter: String,
     /// Keyword pills in the search box: each must be on a match exactly.
     pub(in crate::app) keyword_terms: Vec<String>,
-    pub(in crate::app) focus_search: bool,
     pub(in crate::app) mode: BrowserMode,
     pub(in crate::app) sort: BrowserSort,
     pub(in crate::app) cached_generation: u64,

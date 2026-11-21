@@ -674,7 +674,6 @@ impl Baboon {
                         rel_path,
                         label,
                         filter: String::new(),
-                        focus_search: false,
                         mode: BrowserMode::Flat,
                         sort: self.model.prefs.browser_sort,
                         cached_generation: u64::MAX,

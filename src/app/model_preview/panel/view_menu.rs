@@ -342,11 +342,15 @@ fn draw_camera_settings(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelP
     ui.label(RichText::new("Camera").color(subtle_dark()).small());
     ui.horizontal(|ui| {
         ui.label("Zoom");
-        ui.add(
+        let background = ui.visuals().window_fill;
+        crate::app::ui_kit::plain_railed_slider(
+            ui,
             egui::Slider::new(&mut state.scale, least..=MAX_PREVIEW_SCALE)
                 .logarithmic(true)
                 .show_value(false)
                 .clamping(egui::SliderClamping::Always),
+            true,
+            background,
         );
         let drag_speed = (state.scale * 0.05) as f64;
         ui.add(

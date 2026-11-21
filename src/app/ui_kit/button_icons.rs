@@ -298,7 +298,11 @@ fn paint_icon_tinted(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32
 /// pass once a URI has two, and a cached id never asks again. The icon then
 /// painted nothing for the rest of the session.
 #[derive(Clone, Default)]
-struct IconTextures(HashMap<(ButtonIcon, Color32, u32, u32, bool), (egui::TextureHandle, u64)>);
+struct IconTextures(HashMap<IconTextureKey, (egui::TextureHandle, u64)>);
+
+/// An icon, its ink, its size in pixels and the backdrop it was darkened
+/// for, if any.
+type IconTextureKey = (ButtonIcon, Color32, u32, u32, Option<Color32>);
 
 /// Passes an icon texture may go unpainted before a miss sweeps it out,
 /// so sizes left behind by a zoom or a monitor change do not pile up.
@@ -315,7 +319,7 @@ fn icon_texture(
     size: f32,
     pixels: Vec2,
 ) -> Option<egui::TextureId> {
-    let key = (icon, color, pixels.x as u32, pixels.y as u32, is_dark_mode());
+    let key = (icon, color, pixels.x as u32, pixels.y as u32, icon_backdrop());
     let id = egui::Id::unique("baboon_icon_textures");
     let pass = ctx.cumulative_pass_nr();
     let cached = ctx.data_mut(|data| {
@@ -444,8 +448,9 @@ fn mono_icon_uri(ctx: &egui::Context, icon: ButtonIcon, color: Color32) -> Strin
 
 /// Colorized icon SVGs, made once per icon and color.
 type IconSvgCache = std::cell::RefCell<HashMap<(ButtonIcon, Color32), Arc<[u8]>>>;
-/// [`IconSvgCache`] keyed by theme too: light mode darkens icons' colours.
-type ThemedIconSvgCache = std::cell::RefCell<HashMap<(ButtonIcon, Color32, bool), Arc<[u8]>>>;
+/// [`IconSvgCache`] keyed by the backdrop too: light mode darkens icons'
+/// colours to read on it, and each light theme has its own.
+type ThemedIconSvgCache = std::cell::RefCell<HashMap<(ButtonIcon, Color32, Option<Color32>), Arc<[u8]>>>;
 
 /// `icon` entirely in `color`, its own accent colors included.
 fn mono_icon_bytes(icon: ButtonIcon, color: Color32) -> egui::load::Bytes {
@@ -568,7 +573,7 @@ fn colorized_icon_bytes(icon: ButtonIcon, color: Color32) -> egui::load::Bytes {
     let bytes = COLORIZED.with(|colorized| {
         colorized
             .borrow_mut()
-            .entry((icon, color, is_dark_mode()))
+            .entry((icon, color, icon_backdrop()))
             .or_insert_with(|| colorized_icon_svg(icon, color).into_bytes().into())
             .clone()
     });
@@ -580,10 +585,10 @@ fn colorized_icon_bytes(icon: ButtonIcon, color: Color32) -> egui::load::Bytes {
 /// white button. `color`, the icon's ink, is left as it is.
 fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
     let svg = recolored_icon_svg(icon, color);
-    if is_dark_mode() {
+    let Some(backdrop) = icon_backdrop() else {
         return svg;
-    }
-    let [r, g, b, _] = left_panel().to_array();
+    };
+    let [r, g, b, _] = backdrop.to_array();
     let ink = svg_color(color);
     let mut own: Vec<&str> = Vec::new();
     let source = button_icon_svg(icon);
@@ -1155,7 +1160,7 @@ fn button_icon_uri_for_pixels_per_point_and_size(
         color.g(),
         color.b(),
         color.a(),
-        if is_dark_mode() { "" } else { "-light" }
+        icon_backdrop().map_or(String::new(), |on| format!("-on{:02x}{:02x}{:02x}", on.r(), on.g(), on.b()))
     )
 }
 
