@@ -97,6 +97,11 @@ impl Baboon {
         self.documents.window_focused = focused;
         if gained {
             self.check_open_tags_on_disk(ctx);
+            // A commit, pull or checkout made in another app changes Git's
+            // records without touching the tags the watch sees.
+            for index in 0..self.model.kits.len() {
+                self.git_review_refresh_due(index);
+            }
         }
     }
 
@@ -112,6 +117,7 @@ impl Baboon {
             if settled {
                 self.check_open_tags_in(index, ctx);
                 self.refresh_entry_index_soon(index, ctx);
+                self.git_review_refresh_due(index);
             }
         }
     }

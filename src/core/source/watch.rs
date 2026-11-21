@@ -13,6 +13,13 @@ use notify::{EventKind, RecursiveMode, Watcher};
 /// How long changes must stop before a burst of them counts as settled.
 pub(crate) const WATCH_QUIET: Duration = Duration::from_millis(300);
 
+/// Git's own records, which a repository kept inside the tags folder
+/// rewrites on every `git status`. Watching them would make anything that
+/// reads Git on a change (Git Review) trigger itself forever.
+fn inside_git(path: &Path) -> bool {
+    path.components().any(|component| component.as_os_str() == ".git")
+}
+
 /// A recursive watch on one folder. Dropping it stops watching.
 pub(crate) struct FolderWatch {
     _watcher: notify::RecommendedWatcher,
@@ -30,7 +37,7 @@ impl FolderWatch {
             // Reads are not changes. An error (the OS dropped events when its
             // buffer overflowed) may have hidden one, so it counts as one.
             if let Ok(event) = &event
-                && matches!(event.kind, EventKind::Access(_))
+                && (matches!(event.kind, EventKind::Access(_)) || (!event.paths.is_empty() && event.paths.iter().all(|path| inside_git(path))))
             {
                 return;
             }
@@ -85,6 +92,25 @@ mod tests {
 
         std::fs::remove_file(nested.join("warthog.model")).unwrap();
         wait_for(&watch, "the deletion to settle");
+
+        drop(watch);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn changes_inside_git_are_not_changes() {
+        let root = std::env::temp_dir().join(format!("baboon-folder-watch-git-{}", std::process::id()));
+        let git = root.join(".git").join("refs");
+        std::fs::create_dir_all(&git).unwrap();
+        let watch = FolderWatch::start(&root, |_| {}).unwrap();
+
+        std::fs::write(root.join(".git").join("index"), b"index").unwrap();
+        std::fs::write(git.join("main"), b"ref").unwrap();
+        std::thread::sleep(WATCH_QUIET * 3);
+        assert!(!watch.settled(WATCH_QUIET), "Git's own records are ignored");
+
+        std::fs::write(root.join("warthog.model"), b"tag").unwrap();
+        wait_for(&watch, "a tag beside the repository");
 
         drop(watch);
         let _ = std::fs::remove_dir_all(&root);

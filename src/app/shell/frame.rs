@@ -1018,6 +1018,7 @@ impl Baboon {
             self.process_worker_messages(ctx);
             self.check_open_tags_on_focus(ctx);
             self.check_open_tags_on_watch(ctx);
+            self.run_due_git_review_refreshes(ctx);
             self.expire_status(ctx);
         }
         // Raised by the previous frame, whose UI has since committed any edit

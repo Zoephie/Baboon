@@ -571,7 +571,8 @@ pub(in crate::app) fn draw_git_review(cx: &Ctx, ui: &mut Ui, kit: KitId, state: 
     let selected_path = state.selected_path.clone();
     let results = &state.results;
     let error = state.error.clone();
-    let loading = state.loading;
+    // A refresh Baboon started on its own replaces the page quietly.
+    let loading = state.loading && !state.background;
     let local_count = state.local_files.len();
     let mut commit_filter = state.commit_filter.clone();
     let mut filter_text = state.filter.clone();

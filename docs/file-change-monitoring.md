@@ -19,6 +19,14 @@ deleted or renamed outside Baboon appears or disappears within about a
 second. Without a watch the browser rescans the folder every 30 seconds;
 with one, only every 5 minutes, as a backstop.
 
+An open **Git Review** tab follows along too. A change in the tags folder,
+or Baboon regaining focus (say, after committing or pulling in GitHub
+Desktop, which changes Git's records but no tags), refreshes it quietly,
+with no "Reading Git…" line. It keeps the selected commit and file, and it
+waits for a diff you just clicked to finish loading first. Changes inside
+a `.git` folder are ignored, so a repository kept inside the tags folder
+does not set off a refresh every time Git Review reads it.
+
 Open tags are also checked whenever Baboon's window regains focus, in case
 a notification was missed or the folder could not be watched. Both checks
 run in the background.
