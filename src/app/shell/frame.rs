@@ -3122,6 +3122,37 @@ mod tests {
         h.painted_rects.iter().find(|(text, _)| text == label).map(|(_, rect)| rect.min.y)
     }
 
+    /// Cancel in Save's changed-on-disk window closes it and leaves the
+    /// tag's banner, so the choice is still waiting.
+    #[test]
+    fn cancelling_the_disk_save_window_keeps_the_banner() {
+        let mut h = Harness::new();
+        loose_kit(&mut h);
+        let path = loose_root(&h).join("objects/weapons/rifle/rifle.biped");
+        let key = file_entry_key(&path);
+        let now = DiskStamp::of_file(&path).unwrap();
+        let kit = active_id(&h);
+        h.app.model.kits[h.app.model.active]
+            .disk
+            .notices
+            .insert(key.clone(), crate::app::documents::DiskNotice::Changed(now));
+        h.app.dialogs.open(crate::app::documents::DiskSaveConfirm {
+            kit,
+            key: key.clone(),
+            display_path: "objects\\weapons\\rifle\\rifle.biped".to_owned(),
+            group_tag: crate::app::loose_fixture::group_tag(fixture::GAME, "biped"),
+        });
+        h.idle(3);
+        assert!(h.painted_contains("Tag Changed on Disk"));
+
+        h.click("Cancel", 0);
+        h.idle(2);
+
+        assert!(h.app.dialogs.get::<crate::app::documents::DiskSaveConfirm>().is_none());
+        assert!(!h.painted_contains("Tag Changed on Disk"));
+        assert!(h.app.model.kits[h.app.model.active].disk.notices.contains_key(&key));
+    }
+
     /// The changed-on-disk banner sits above the scrolling fields: showing it
     /// moves them down by its own height and no more, and answering it puts
     /// them back. The scroll position itself is untouched.
@@ -4830,6 +4861,29 @@ mod tests {
                     });
                 },
                 &["Delete Tag?", "Delete Tag", "Cancel", "smoke.scenario", "1 Tag Will Have Missing References"],
+            ),
+            case(
+                "disk_save_confirm",
+                &["dialog:DiskSaveConfirm"],
+                &[],
+                loose_kit,
+                |h| {
+                    let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
+                    let key = file_entry_key(&path);
+                    let now = DiskStamp::of_file(&path).unwrap();
+                    let kit = active_id(h);
+                    h.app.model.kits[h.app.model.active]
+                        .disk
+                        .notices
+                        .insert(key.clone(), crate::app::documents::DiskNotice::Changed(now));
+                    h.app.dialogs.open(crate::app::documents::DiskSaveConfirm {
+                        kit,
+                        key,
+                        display_path: "objects\\weapons\\rifle\\rifle.biped".to_owned(),
+                        group_tag: crate::app::loose_fixture::group_tag(fixture::GAME, "biped"),
+                    });
+                },
+                &["Tag Changed on Disk", "Keep My Edits and Save", "Reload from Disk", "Cancel", "rifle.biped"],
             ),
             case(
                 "delete_folder_confirm",
@@ -8828,6 +8882,16 @@ mod tests {
             settle(&mut h);
             let theme = if dark { "dark" } else { "light" };
             h.shoot(&dir.join(format!("disk_banner_{theme}_{width}.png")));
+            // Save over the changed file: the window that makes the user choose.
+            h.app.dialogs.open(crate::app::documents::DiskSaveConfirm {
+                kit: h.app.model.kits[h.app.model.active].id,
+                key: entry.key.clone(),
+                display_path: entry.display_path.clone(),
+                group_tag: entry.group_tag,
+            });
+            settle(&mut h);
+            h.shoot(&dir.join(format!("disk_save_window_{theme}_{width}.png")));
+            h.app.dialogs.close::<crate::app::documents::DiskSaveConfirm>();
             // The same tag deleted with unsaved edits: the red banner and dot.
             let kit = &mut h.app.model.kits[h.app.model.active];
             kit.disk.notices.insert(entry.key.clone(), crate::app::documents::DiskNotice::Missing(entry.clone()));

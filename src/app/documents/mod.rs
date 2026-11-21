@@ -19,6 +19,8 @@ use crate::app::export::ContainerDumpReport;
 
 pub(in crate::app) mod selection;
 pub(in crate::app) mod disk_changes;
+pub(in crate::app) mod disk_save_confirm;
+pub(in crate::app) use disk_save_confirm::DiskSaveConfirm;
 pub(in crate::app) use disk_changes::{DiskChoice, DiskNotice, DiskReload, DiskWatch, OpenTagCheck};
 pub(in crate::app) mod saving;
 pub(in crate::app) use saving::ordered_unique_keys;

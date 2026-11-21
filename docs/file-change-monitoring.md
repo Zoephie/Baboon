@@ -19,9 +19,16 @@ did not is left alone. Baboon's own saves are never mistaken for outside
 changes.
 
 Save also looks at the file once more just before writing. If it changed
-since you opened the tag (say, while Baboon stayed in front), the save stops
-and the banner below appears, unless you already chose Keep My Edits for
-that version. A file deleted in the meantime is simply written back.
+since you opened the tag (say, while Baboon stayed in front), and you have
+not already chosen Keep My Edits for that version, nothing is written and a
+**Tag Changed on Disk** window asks what to do:
+
+- **Keep My Edits and Save** replaces the file with your version.
+- **Reload from Disk** discards your edits and loads the file.
+- **Cancel** saves nothing. The banner below stays on the tag, so the
+  choice is still waiting.
+
+A file deleted in the meantime is simply written back.
 
 Tags in containers, packages and monolithic caches are not checked.
 
@@ -41,8 +48,8 @@ Tags in containers, packages and monolithic caches are not checked.
   - **Keep My Edits** dismisses the banner and keeps your version. Baboon
     trusts that choice: your next Save replaces the file without asking.
     If the file changes again afterwards, the banner comes back.
-  - Saving while the banner shows does not write: Baboon asks you to
-    choose first.
+  - Saving while the banner shows does not write: the Tag Changed on
+    Disk window asks you to choose first.
 - **A tag whose file was deleted** (or moved away) stays open as it was,
   with a red banner: "brute.model was deleted from disk." The tab's dot
   turns red, whether or not the tag has unsaved edits, and the tag leaves

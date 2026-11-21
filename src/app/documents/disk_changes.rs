@@ -43,6 +43,8 @@ pub(in crate::app) enum DiskChoice {
     KeepMyEdits,
     /// Close a missing tag's tab, through the usual prompt if it has edits.
     CloseTab,
+    /// Keep My Edits, then the Save that found the file changed.
+    KeepAndSave,
 }
 
 /// One kit's open tags whose files changed: reads in flight and banners
@@ -189,6 +191,16 @@ impl Baboon {
         let Some(index) = self.model.resolve_kit(kit) else {
             return;
         };
+        if choice == DiskChoice::KeepAndSave {
+            self.apply_disk_choice(kit, key.clone(), DiskChoice::KeepMyEdits, ctx);
+            // Save addresses the active kit's documents.
+            self.focus_kit(index);
+            self.model.status = match self.save_tag_by_key(&key) {
+                Ok(path) => format!("Saved {}", path.display()),
+                Err(error) => format!("Save failed: {error}"),
+            };
+            return;
+        }
         if choice == DiskChoice::CloseTab {
             // The banner stays until the tab is gone: the save-changes
             // prompt this may raise can be cancelled.
@@ -431,7 +443,7 @@ mod tests {
     }
 
     /// Saving with the banner up does not answer it: the file is not
-    /// written over until the user chooses.
+    /// written over, and a window asks the user to choose.
     #[test]
     fn saving_with_the_banner_up_asks_first() {
         let (_fixture, mut app, key, path) = edited_then_changed_on_disk("disk-save-banner");
@@ -443,6 +455,24 @@ mod tests {
         assert!(app.model.kits[0].parsed_tags[&key].dirty.is_set());
         let on_disk = TagFile::read(&path).unwrap();
         assert_eq!(real_of(&on_disk, DISTANCE), Some(7.5), "the file was left alone");
+        let window = app.dialogs.get::<DiskSaveConfirm>().expect("the window asks");
+        assert_eq!(window.key, key);
+    }
+
+    /// The window's Keep My Edits and Save: the save the user asked for
+    /// goes through, over the changed file.
+    #[test]
+    fn keep_my_edits_and_save_writes_over_the_file() {
+        let (_fixture, mut app, key, path) = edited_then_changed_on_disk("disk-keep-and-save");
+        assert!(app.save_tag_by_key(&key).is_err());
+
+        choose(&mut app, &key, DiskChoice::KeepAndSave);
+
+        assert_eq!(real_of(&TagFile::read(&path).unwrap(), DISTANCE), Some(3.0));
+        let kit = &app.model.kits[0];
+        assert!(kit.disk.notices.is_empty());
+        assert!(!kit.parsed_tags[&key].dirty.is_set());
+        assert!(app.model.status.starts_with("Saved "), "{}", app.model.status);
     }
 
     /// The save backstop: a file changed while Baboon kept the focus, so no

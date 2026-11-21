@@ -499,7 +499,17 @@ impl Baboon {
         let on_disk = doc.disk.map(|stamp| stamp.check(&output));
         if let Some(DiskCheck::Changed(now)) = on_disk {
             let name = tag_file_name(&entry);
-            self.model.kits[self.model.active].disk.notices.insert(key.to_owned(), DiskNotice::Changed(now));
+            let kit = &mut self.model.kits[self.model.active];
+            kit.disk.notices.insert(key.to_owned(), DiskNotice::Changed(now));
+            // A save that just stopped would look like nothing happened: the
+            // window makes the user choose, and its Cancel leaves the banner.
+            let kit = kit.id;
+            self.dialogs.open(DiskSaveConfirm {
+                kit,
+                key: key.to_owned(),
+                display_path: entry.display_path.clone(),
+                group_tag: entry.group_tag,
+            });
             return Err(format!(
                 "{name} changed on disk since it was opened. Choose Reload from Disk or Keep My Edits, then save again"
             ));
