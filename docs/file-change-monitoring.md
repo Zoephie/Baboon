@@ -26,5 +26,16 @@ Tags in containers, packages and monolithic caches are not checked.
   says so ("Reloaded warthog.model: changed on disk"), and open previews
   refresh with it. Its undo history starts again from the reloaded version,
   so Undo cannot bring back what the file no longer holds.
-- **A tag with unsaved edits** is not touched.
+- **A tag with unsaved edits** keeps them, and an amber banner appears
+  under its header: "brute.model changed on disk. You have unsaved edits."
+  It waits on a background tab until you open it, and editing carries on
+  while it shows. The fields move down to make room, but stay scrolled
+  where they were.
+  - **Reload from Disk** discards your edits and loads the file as it is
+    now.
+  - **Keep My Edits** dismisses the banner and keeps your version. Baboon
+    trusts that choice: your next Save replaces the file without asking.
+    If the file changes again afterwards, the banner comes back.
+  - Saving while the banner shows also answers it: your version becomes
+    the file.
 - **A tag whose file was deleted** stays open as it was.

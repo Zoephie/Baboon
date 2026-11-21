@@ -160,6 +160,7 @@ pub(in crate::app) fn draw_tag_pane(
     } else { hud_messages::HudMessageUsage::Unknown };
     let kit_read_only = cx.model.editing_kit_is_read_only(kit_index);
     draw_responsive_tag_header(cx, ui, kit_index, entry, show_keyword_bar);
+    disk_banner::draw_disk_banner(cx, ui, kit_index, entry);
     if kit_read_only {
         ui.label(
             RichText::new("Read-Only Editing Kit")

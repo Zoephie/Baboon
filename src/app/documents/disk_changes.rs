@@ -1,8 +1,9 @@
 //! Noticing that an open tag's file changed on disk outside Baboon: Explorer,
 //! Tool's bitmap monitoring, another editor. Each open document remembers its
 //! file as it was read or saved ([`DiskStamp`]); when Baboon's window regains
-//! focus the open loose tags are checked against it off the UI thread, and a
-//! tag with no unsaved edits is read again.
+//! focus the open loose tags are checked against it off the UI thread. A tag
+//! with no unsaved edits is read again; one with edits gets a banner asking
+//! whether to reload it or keep the edits.
 
 use super::*;
 
@@ -11,6 +12,56 @@ pub(in crate::app) struct OpenTagCheck {
     pub(in crate::app) key: String,
     pub(in crate::app) checked: DiskStamp,
     pub(in crate::app) result: DiskCheck,
+}
+
+/// Why an open tag is being read again from its file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum DiskReload {
+    /// It had no unsaved edits and the file changed.
+    Unedited,
+    /// The user chose Reload from Disk over their unsaved edits.
+    DiscardEdits,
+}
+
+/// A question the tag's banner is asking about its file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum DiskNotice {
+    /// The file changed while the tag had unsaved edits. Holds the file as
+    /// it is now, which Keep My Edits accepts as the version it replaces.
+    Changed(DiskStamp),
+}
+
+/// The banner's answers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum DiskChoice {
+    ReloadFromDisk,
+    KeepMyEdits,
+}
+
+/// One kit's open tags whose files changed: reads in flight and banners
+/// waiting for an answer, by key.
+#[derive(Default)]
+pub(in crate::app) struct DiskWatch {
+    pub(in crate::app) reloads: HashMap<String, DiskReload>,
+    pub(in crate::app) notices: HashMap<String, DiskNotice>,
+}
+
+impl DiskWatch {
+    /// A renamed tag keeps its read in flight and its banner.
+    pub(in crate::app) fn rekey(&mut self, old: &str, new: &str) {
+        if let Some(reload) = self.reloads.remove(old) {
+            self.reloads.insert(new.to_owned(), reload);
+        }
+        if let Some(notice) = self.notices.remove(old) {
+            self.notices.insert(new.to_owned(), notice);
+        }
+    }
+
+    /// The tag's document went or now matches its file: nothing to ask.
+    pub(in crate::app) fn forget(&mut self, key: &str) {
+        self.reloads.remove(key);
+        self.notices.remove(key);
+    }
 }
 
 impl Baboon {
@@ -88,19 +139,47 @@ impl Baboon {
             match result {
                 DiskCheck::Same | DiskCheck::Unreadable(_) => {}
                 DiskCheck::Restamped(stamp) => doc.disk = Some(stamp),
-                DiskCheck::Changed if !doc.dirty.is_set() => {
+                DiskCheck::Changed(_) if !doc.dirty.is_set() => {
                     if kit.loading_tags.contains(&key) {
                         continue;
                     }
-                    kit.disk_reloads.insert(key.clone());
+                    kit.disk.reloads.insert(key.clone(), DiskReload::Unedited);
                     self.load_tag_in(index, key, ctx.clone(), true);
                 }
-                // A tag with unsaved edits, or whose file is gone, is left
-                // as it is for now: asking the user about it comes next.
-                DiskCheck::Changed | DiskCheck::Missing => {}
+                // Unsaved edits are never replaced without asking. A banner
+                // already up takes the newer file, so Keep accepts that one.
+                DiskCheck::Changed(now) => {
+                    kit.disk.notices.insert(key, DiskNotice::Changed(now));
+                }
+                // A deleted file is left as it is for now.
+                DiskCheck::Missing => {}
             }
         }
         false
+    }
+
+    /// Carry out the answer to a tag's changed-on-disk banner.
+    pub(in crate::app) fn apply_disk_choice(&mut self, kit: KitId, key: String, choice: DiskChoice, ctx: &egui::Context) {
+        let Some(index) = self.model.resolve_kit(kit) else {
+            return;
+        };
+        let kit = &mut self.model.kits[index];
+        let Some(notice) = kit.disk.notices.remove(&key) else {
+            return;
+        };
+        match (choice, notice) {
+            // Trusted from here on: the document now stands for the file as
+            // it is, so the next Save writes over it without asking again.
+            (DiskChoice::KeepMyEdits, DiskNotice::Changed(now)) => {
+                if let Some(doc) = kit.parsed_tags.get_mut(&key) {
+                    doc.disk = Some(now);
+                }
+            }
+            (DiskChoice::ReloadFromDisk, DiskNotice::Changed(_)) => {
+                kit.disk.reloads.insert(key.clone(), DiskReload::DiscardEdits);
+                self.load_tag_in(index, key, ctx.clone(), true);
+            }
+        }
     }
 }
 
@@ -141,7 +220,7 @@ mod tests {
         }
         pump_until(app, "the reload", |app| {
             let kit = &app.model.kits[app.model.resolve_kit(kit).unwrap()];
-            kit.loading_tags.is_empty() && kit.disk_reloads.is_empty()
+            kit.loading_tags.is_empty() && kit.disk.reloads.is_empty()
         });
     }
 
@@ -229,26 +308,98 @@ mod tests {
         assert_eq!(app.model.kits[0].parsed_tags[&key].id, first);
     }
 
-    /// Unsaved edits are never replaced silently; the banner that asks about
-    /// them is the next step.
-    #[test]
-    fn a_tag_with_unsaved_edits_is_not_reloaded() {
-        let fixture = LooseKit::new("disk-dirty", "halo3_mcc");
+    /// A tag edited to 3 whose file was then rewritten with 7.5, checked: the
+    /// state a banner is up in.
+    fn edited_then_changed_on_disk(name: &str) -> (LooseKit, Baboon, String, PathBuf) {
+        let fixture = LooseKit::new(name, "halo3_mcc");
         let path = fixture.write_mcc("warthog", "model", |_| {});
         let mut app = app();
         fixture.install(&mut app);
         let key = fixture.open(&mut app, "warthog.model");
         let kit = app.model.kits[0].id;
         edit_field(&mut app, &key, DISTANCE, "3");
-
-        fixture.write_mcc("warthog", "model", |tag| {
-            set_distance(tag, 7.5);
-        });
+        fixture.write_mcc("warthog", "model", |tag| set_distance(tag, 7.5));
         bump_modified(&path);
+        check_and_wait(&mut app, kit);
+        (fixture, app, key, path)
+    }
+
+    fn choose(app: &mut Baboon, key: &str, choice: DiskChoice) {
+        let kit = app.model.kits[0].id;
+        app.apply_disk_choice(kit, key.to_owned(), choice, &ctx());
+        pump_until(app, "the choice to settle", |app| {
+            app.model.kits[0].loading_tags.is_empty() && app.model.kits[0].disk.reloads.is_empty()
+        });
+    }
+
+    /// Unsaved edits are never replaced silently: the tag keeps them and its
+    /// banner asks.
+    #[test]
+    fn a_tag_with_unsaved_edits_gets_a_banner_instead_of_a_reload() {
+        let (_fixture, app, key, _) = edited_then_changed_on_disk("disk-dirty");
+
+        let doc = &app.model.kits[0].parsed_tags[&key];
+        assert!(doc.dirty.is_set());
+        assert_eq!(real_of(&doc.tag, DISTANCE), Some(3.0));
+        assert!(matches!(app.model.kits[0].disk.notices.get(&key), Some(DiskNotice::Changed(_))));
+    }
+
+    #[test]
+    fn reload_from_disk_discards_the_edits_for_the_file() {
+        let (_fixture, mut app, key, _) = edited_then_changed_on_disk("disk-choose-reload");
+
+        choose(&mut app, &key, DiskChoice::ReloadFromDisk);
+
+        let doc = &app.model.kits[0].parsed_tags[&key];
+        assert!(!doc.dirty.is_set());
+        assert_eq!(real_of(&doc.tag, DISTANCE), Some(7.5));
+        assert!(app.model.kits[0].disk.notices.is_empty());
+        assert_eq!(app.model.status, "Reloaded warthog.model from disk; unsaved edits discarded");
+    }
+
+    /// Keep is trusted: the banner goes, the edits stay, and the file as it
+    /// was when the user chose is not asked about again.
+    #[test]
+    fn keep_my_edits_keeps_them_and_stops_asking() {
+        let (_fixture, mut app, key, _) = edited_then_changed_on_disk("disk-choose-keep");
+        let kit = app.model.kits[0].id;
+
+        choose(&mut app, &key, DiskChoice::KeepMyEdits);
+        assert!(app.model.kits[0].disk.notices.is_empty());
         check_and_wait(&mut app, kit);
 
         let doc = &app.model.kits[0].parsed_tags[&key];
         assert!(doc.dirty.is_set());
         assert_eq!(real_of(&doc.tag, DISTANCE), Some(3.0));
+        assert!(app.model.kits[0].disk.notices.is_empty(), "the same file is not asked about twice");
+    }
+
+    /// Kept edits whose file then changes again: that is a new question.
+    #[test]
+    fn a_later_change_after_keep_asks_again() {
+        let (fixture, mut app, key, path) = edited_then_changed_on_disk("disk-keep-again");
+        let kit = app.model.kits[0].id;
+        choose(&mut app, &key, DiskChoice::KeepMyEdits);
+
+        fixture.write_mcc("warthog", "model", |tag| set_distance(tag, 9.0));
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(SystemTime::now() + Duration::from_secs(600))
+            .unwrap();
+        check_and_wait(&mut app, kit);
+
+        assert!(app.model.kits[0].disk.notices.contains_key(&key));
+    }
+
+    /// Saving answers the banner too: the edits are now the file.
+    #[test]
+    fn saving_over_the_changed_file_clears_the_banner() {
+        let (_fixture, mut app, key, _) = edited_then_changed_on_disk("disk-save-clears");
+
+        app.save_tag_by_key(&key).expect("save");
+
+        assert!(app.model.kits[0].disk.notices.is_empty());
     }
 }

@@ -1430,6 +1430,34 @@ pub(in crate::app) fn bitmap_error_text() -> Color32 {
     Color32::from_rgb(130, 32, 24)
 }
 
+/// The banner across a tag whose file changed on disk while it had unsaved
+/// edits: an amber wash behind the pane's own text colour.
+pub(in crate::app) fn disk_banner_fill() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(72, 56, 22)
+    } else {
+        Color32::from_rgb(252, 240, 204)
+    }
+}
+
+/// The changed-on-disk banner's border.
+pub(in crate::app) fn disk_banner_edge() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(140, 104, 32)
+    } else {
+        Color32::from_rgb(222, 176, 72)
+    }
+}
+
+/// The changed-on-disk banner's warning icon.
+pub(in crate::app) fn disk_banner_icon() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(242, 196, 48)
+    } else {
+        Color32::from_rgb(176, 120, 0)
+    }
+}
+
 /// Read-only and missing notes in Chimp's headers and the New Tag window.
 pub(in crate::app) fn header_notice_text() -> Color32 {
     Color32::from_rgb(170, 130, 60)

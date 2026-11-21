@@ -33,8 +33,9 @@ pub(crate) enum DiskCheck {
     /// The metadata moved but the bytes are the same: keep the document and
     /// remember the file as it is now, so the next check is quick.
     Restamped(DiskStamp),
-    /// The bytes are different.
-    Changed,
+    /// The bytes are different. Holds the file as it is now, so a user who
+    /// keeps their own edits can take it as the version they are replacing.
+    Changed(DiskStamp),
     /// Nothing is at the path.
     Missing,
     /// The file is there but could not be read (locked mid-write, say).
@@ -73,11 +74,11 @@ impl DiskStamp {
             return DiskCheck::Same;
         }
         let Some(hash) = self.hash else {
-            return DiskCheck::Changed;
+            return DiskCheck::Changed(Self { size: metadata.len(), modified: metadata.modified().ok(), hash: None });
         };
         match std::fs::read(path) {
             Ok(bytes) if hash_bytes(&bytes) == hash => DiskCheck::Restamped(Self::of(&metadata, &bytes)),
-            Ok(_) => DiskCheck::Changed,
+            Ok(bytes) => DiskCheck::Changed(Self::of(&metadata, &bytes)),
             Err(error) if error.kind() == ErrorKind::NotFound => DiskCheck::Missing,
             Err(error) => DiskCheck::Unreadable(error.to_string()),
         }
@@ -126,7 +127,10 @@ mod tests {
         let stamp = stamp_of(&path);
         fs::write(&path, b"two").unwrap();
         set_modified(&path, SystemTime::now() - Duration::from_secs(86_400 * 365));
-        assert_eq!(stamp.check(&path), DiskCheck::Changed);
+        let DiskCheck::Changed(now) = stamp.check(&path) else {
+            panic!("a replacement is a change");
+        };
+        assert_eq!(now.check(&path), DiskCheck::Same, "the change carries the file as it is now");
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -165,7 +169,7 @@ mod tests {
         let stamp = DiskStamp::of_file(&path).unwrap();
         assert_eq!(stamp.check(&path), DiskCheck::Same);
         set_modified(&path, SystemTime::now() + Duration::from_secs(60));
-        assert_eq!(stamp.check(&path), DiskCheck::Changed);
+        assert!(matches!(stamp.check(&path), DiskCheck::Changed(_)));
         let _ = fs::remove_dir_all(dir);
     }
 }

@@ -18,7 +18,7 @@ impl Baboon {
             return true;
         };
         self.model.kits[index].loading_tags.remove(&key);
-        let changed_on_disk = self.model.kits[index].disk_reloads.remove(&key);
+        let disk_reload = self.model.kits[index].disk.reloads.remove(&key);
         if !self.model.kits[index].open_tabs.iter().any(|tab| tab == &key) {
             return true;
         }
@@ -26,18 +26,27 @@ impl Baboon {
             Ok((tag, stamp)) => {
                 // A user edit made while a refresh was reading wins over the
                 // older disk snapshot returned by that read.
-                if self.model.kits[index].parsed_tags.get(&key).is_some_and(|doc| doc.dirty.is_set()) { return false; }
+                // Reload from Disk is the user choosing the file over their
+                // edits, so it is the one read that lands on them.
+                if disk_reload != Some(DiskReload::DiscardEdits)
+                    && self.model.kits[index].parsed_tags.get(&key).is_some_and(|doc| doc.dirty.is_set())
+                {
+                    return false;
+                }
                 // A read again (after a rename, say) leaves the status alone:
                 // it holds what the action that asked for it said. One read
                 // because the file changed on disk is the exception: nothing
                 // the user did asked for it, so it says what happened.
                 let reloaded = self.model.kits[index].parsed_tags.contains_key(&key);
-                if changed_on_disk && reloaded {
+                if let (Some(why), true) = (disk_reload, reloaded) {
                     let name = self
                         .model.entry_for_key_in(index, &key)
                         .map(tag_file_name)
                         .unwrap_or_else(|| key.clone());
-                    self.model.status = format!("Reloaded {name}: changed on disk");
+                    self.model.status = match why {
+                        DiskReload::Unedited => format!("Reloaded {name}: changed on disk"),
+                        DiskReload::DiscardEdits => format!("Reloaded {name} from disk; unsaved edits discarded"),
+                    };
                 } else if !reloaded {
                     self.model.status = "Tag loaded".to_owned();
                 }
@@ -46,6 +55,8 @@ impl Baboon {
                 let mut doc = TagDocument::clean(tag);
                 doc.disk = stamp;
                 self.model.kits[index].parsed_tags.insert(key.clone(), doc);
+                // The document is the file again: any banner about it goes.
+                self.model.kits[index].disk.notices.remove(&key);
                 // Read again from disk (Refresh Bitmap, or after a rename):
                 // previews drawn from the old bytes go, or a reimported
                 // bitmap kept showing its old image.

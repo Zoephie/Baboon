@@ -506,6 +506,7 @@ impl Baboon {
             // does not take it for someone else's.
             doc.disk = DiskStamp::of_file(&output).ok();
         }
+        self.model.kits[self.model.active].disk.notices.remove(key);
         // The save also writes the index row, so the periodic refresh will
         // not see this file change; the shader grid has to hear it here.
         if is_render_method_layout_group(entry.group_tag) {

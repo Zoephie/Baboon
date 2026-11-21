@@ -252,9 +252,7 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, view: &mut KitView, old: &
     if kit.loading_tags.remove(old) {
         kit.loading_tags.insert(new.to_owned());
     }
-    if kit.disk_reloads.remove(old) {
-        kit.disk_reloads.insert(new.to_owned());
-    }
+    kit.disk.rekey(old, new);
 
     // Half-typed field values are dropped rather than carried. A draft is a
     // value the user is mid-way through typing into a specific document, and
@@ -1011,7 +1009,7 @@ mod tests {
             // Carried by `rekey_tag_in_kit`.
             parsed_tags: _,
             loading_tags: _,
-            disk_reloads: _,
+            disk: _,
             tag_load_epoch: _,
             selected_key: _,
             // Follows `selected_key` at the next sync.

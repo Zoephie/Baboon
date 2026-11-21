@@ -19,7 +19,7 @@ use crate::app::export::ContainerDumpReport;
 
 pub(in crate::app) mod selection;
 pub(in crate::app) mod disk_changes;
-pub(in crate::app) use disk_changes::OpenTagCheck;
+pub(in crate::app) use disk_changes::{DiskChoice, DiskNotice, DiskReload, DiskWatch, OpenTagCheck};
 pub(in crate::app) mod saving;
 pub(in crate::app) use saving::ordered_unique_keys;
 pub(in crate::app) mod close;
@@ -44,12 +44,15 @@ pub(in crate::app) struct DocumentsFeature {
 pub(in crate::app) enum DocumentsCommand {
     /// Carry out the save-changes prompt's answer.
     SaveChangesPrompt(SaveChangesPromptAction),
+    /// Answer a tag's changed-on-disk banner.
+    DiskChoice { kit: KitId, key: String, choice: DiskChoice },
 }
 
 impl Baboon {
     pub(in crate::app) fn apply_documents_command(&mut self, command: DocumentsCommand, ctx: &egui::Context) {
         match command {
             DocumentsCommand::SaveChangesPrompt(action) => self.apply_save_changes_prompt_action(action, ctx),
+            DocumentsCommand::DiskChoice { kit, key, choice } => self.apply_disk_choice(kit, key, choice, ctx),
         }
     }
 }

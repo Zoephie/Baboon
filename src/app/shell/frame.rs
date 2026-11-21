@@ -3102,6 +3102,66 @@ mod tests {
         h.idle(3);
     }
 
+    /// A field label painted once, partway down the tag pane, and where.
+    fn pane_label(h: &Harness) -> (String, f32) {
+        h.painted_rects
+            .iter()
+            .filter(|(text, rect)| {
+                rect.min.x > SCREEN.x * 0.3
+                    && rect.min.y > SCREEN.y * 0.4
+                    && rect.min.y < SCREEN.y * 0.7
+                    && text.chars().any(|c| c.is_alphabetic())
+                    && h.painted.iter().filter(|other| *other == text).count() == 1
+            })
+            .map(|(text, rect)| (text.clone(), rect.min.y))
+            .next()
+            .expect("a field label in the middle of the pane")
+    }
+
+    fn label_y(h: &Harness, label: &str) -> Option<f32> {
+        h.painted_rects.iter().find(|(text, _)| text == label).map(|(_, rect)| rect.min.y)
+    }
+
+    /// The changed-on-disk banner sits above the scrolling fields: showing it
+    /// moves them down by its own height and no more, and answering it puts
+    /// them back. The scroll position itself is untouched.
+    #[test]
+    fn the_disk_banner_keeps_the_fields_scrolled_where_they_were() {
+        let mut h = Harness::new();
+        let key = setup_large_tag(&mut h);
+        fixture::expand_all(&mut h.app, &key);
+        h.idle(3);
+        let over = egui::pos2(SCREEN.x * 0.6, SCREEN.y * 0.6);
+        h.frame(vec![pointer_at(over)]);
+        let (top_label, _) = pane_label(&h);
+        for _ in 0..12 {
+            h.frame(vec![pointer_at(over), wheel(-120.0)]);
+        }
+        h.idle(30);
+        assert!(
+            label_y(&h, &top_label).is_none_or(|y| y < SCREEN.y * 0.4),
+            "the wheel did not scroll the pane"
+        );
+        let (label, before) = pane_label(&h);
+
+        let file = temp_dir("disk-banner").join("perf.scenario");
+        std::fs::write(&file, b"changed").unwrap();
+        let now = DiskStamp::of_file(&file).unwrap();
+        h.app.model.kits[h.app.model.active].disk.notices.insert(key.clone(), crate::app::documents::DiskNotice::Changed(now));
+        h.idle(3);
+        assert!(h.painted_contains("perf.scenario changed on disk. You have unsaved edits."));
+        let shown = label_y(&h, &label).expect("the field stays on screen");
+        let moved = shown - before;
+        assert!((16.0..=48.0).contains(&moved), "the fields moved {moved} points under the banner");
+
+        h.click("Keep My Edits", 0);
+        h.idle(3);
+        assert!(!h.painted_contains("changed on disk"), "the banner goes once answered");
+        assert!(!h.app.model.kits[h.app.model.active].disk.notices.contains_key(&key));
+        let back = label_y(&h, &label).expect("the field is still on screen");
+        assert!((back - before).abs() < 1.0, "the fields return to {before}, not {back}");
+    }
+
     /// Typing `tag_075`, deleting back to `t`, then `tag_14`: every frame is a
     /// new query, so every frame re-filters all 60,000 entries.
     const FILTER_KEYSTROKES: [&str; 16] = [
@@ -8716,6 +8776,58 @@ mod tests {
             h.app.select_entry(other, h.ctx.clone());
             settle(&mut h);
             h.shoot(&dir.join(format!("mini_{theme}.png")));
+        }
+    }
+
+    /// `BABOON_APP_SHOTS` shots of the changed-on-disk banner over
+    /// `BABOON_SHOT_TAG` (under `BLAM_TEST_H2EK`'s tags), light and dark, at
+    /// the full width and about half of it.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
+    fn app_shots_of_the_disk_banner() {
+        let (Some(dir), Ok(root), Ok(tag)) = (
+            std::env::var_os("BABOON_APP_SHOTS"),
+            std::env::var("BLAM_TEST_H2EK"),
+            std::env::var("BABOON_SHOT_TAG"),
+        ) else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let dir = std::path::PathBuf::from(dir);
+        let subtree = tag.rsplit_once('/').map_or("", |(folder, _)| folder).to_owned();
+        for (dark, width) in [(false, SCREEN.x), (true, SCREEN.x), (false, 960.0), (true, 960.0)] {
+            let mut h = Harness::recording();
+            h.screen = egui::vec2(width, SCREEN.y);
+            h.app.model.prefs.follow_system_theme = false;
+            h.app.model.prefs.dark_mode = dark;
+            h.frame(Vec::new());
+            let entries = install_kit_subtree(&mut h, &root, GameId::Halo2, &subtree);
+            let wanted = tag.replace('/', "\\");
+            let entry = entries
+                .iter()
+                .find(|entry| entry.display_path.to_ascii_lowercase().ends_with(&wanted))
+                .expect("the tag")
+                .clone();
+            let settle = |h: &mut Harness| {
+                for _ in 0..90 {
+                    h.frame(Vec::new());
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            };
+            h.app.select_entry(entry.key.clone(), h.ctx.clone());
+            settle(&mut h);
+            let TagEntryLocation::LooseFile(path) = &entry.location else {
+                panic!("a loose tag");
+            };
+            let now = DiskStamp::of_file(path).unwrap();
+            h.app.model.kits[h.app.model.active]
+                .disk
+                .notices
+                .insert(entry.key.clone(), crate::app::documents::DiskNotice::Changed(now));
+            settle(&mut h);
+            let theme = if dark { "dark" } else { "light" };
+            h.shoot(&dir.join(format!("disk_banner_{theme}_{width}.png")));
         }
     }
 

@@ -271,6 +271,7 @@ impl<'a> KitMut<'a> {
     pub(in crate::app) fn drop_document(&mut self, key: &str) {
         self.kit.parsed_tags.remove(key);
         self.kit.loading_tags.remove(key);
+        self.kit.disk.forget(key);
         self.view.caches.bitmap_previews.remove(key);
         self.view.caches.model_previews.remove(key);
         self.view.find_filter_applied.remove(key);

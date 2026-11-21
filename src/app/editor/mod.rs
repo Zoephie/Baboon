@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::app::shell::{WorkerMessage, draw_keyword_bar, draw_scenario_launcher_buttons, spawn_worker};
-use crate::app::documents::PendingCloseAction;
+use crate::app::documents::{DiskChoice, DiskNotice, DocumentsCommand, PendingCloseAction};
 use crate::app::kits::{KitId, KitStamp, KitView, KitsCommand};
 use crate::app::references::ReferencesCommand;
 use crate::app::search::{
@@ -22,9 +22,11 @@ use crate::app::browser::{
     begin_bitmap_hovers, bitmap_hover_preview_ui, bitmap_hover_texture, context_menu_separator,
     draw_tag_context_menu_contents, entry_matches, entry_reference_input, entry_rel_path,
     is_bitmap_tag, paint_bitmap_hover_preview, queue_bitmap_hover_thumbnails, style_list_menu,
+    tag_file_name,
 };
 
 mod sound;
+mod disk_banner;
 pub(super) use sound::*;
 mod apply_doc;
 pub(in crate::app) mod hud_messages;
