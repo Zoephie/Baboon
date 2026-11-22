@@ -4,6 +4,7 @@
 //! for the burst to go quiet (Tool and Explorer write in bursts), then take
 //! the files and look at the ones they care about themselves.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -35,6 +36,9 @@ pub(crate) struct Burst {
 struct Pending {
     last_change: Option<Instant>,
     burst: Burst,
+    /// `burst.paths` as a set: a checkout or batch import names tens of
+    /// thousands of files, too many to search a list for each.
+    seen: HashSet<PathBuf>,
 }
 
 /// A recursive watch on one folder. Dropping it stops watching.
@@ -63,7 +67,7 @@ impl FolderWatch {
                 match event {
                     Ok(event) => {
                         for path in event.paths {
-                            if !inside_git(&path) && !pending.burst.paths.contains(&path) {
+                            if !inside_git(&path) && pending.seen.insert(path.clone()) {
                                 pending.burst.paths.push(path);
                             }
                         }
@@ -84,6 +88,7 @@ impl FolderWatch {
         match pending.last_change {
             Some(at) if at.elapsed() >= quiet => {
                 pending.last_change = None;
+                pending.seen.clear();
                 Some(std::mem::take(&mut pending.burst))
             }
             _ => None,

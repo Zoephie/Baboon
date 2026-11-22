@@ -43,6 +43,9 @@ pub(in crate::app) struct ModelPreviewState {
     /// Open tags' edits that differ from what the model was drawn with, and
     /// since when (UI clock): it loads again once they stop changing.
     pub(in crate::app) edits_seen: Option<(u64, f64)>,
+    /// The open documents and reads (in short) when they were last found
+    /// to match what was drawn: nothing to compare until either changes.
+    pub(in crate::app) edits_checked: Option<u64>,
     pub(in crate::app) active_tab: ModelTagPanelTab,
     pub(in crate::app) new_variant_name: String,
     pub(in crate::app) selected_variant: Option<usize>,
@@ -192,6 +195,7 @@ impl Default for ModelPreviewState {
             reads_changed: false,
             show_unsaved_edits: false,
             edits_seen: None,
+            edits_checked: None,
             settling: None,
             render_model_path: None,
             data: None,

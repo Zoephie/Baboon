@@ -663,6 +663,10 @@ impl Baboon {
             collect_tag_dependency_refs(doc.tag.root(), &mut refs);
             refs
         };
+        // Written over a tag a preview draws: as for Save, it shows the new
+        // file without waiting on the folder watch (or with none).
+        let ctx = self.egui_ctx.clone();
+        self.reload_previews_reading(self.model.active, &Changed::Files(&[output]), &ctx);
         self.model.status = match self.register_saved_copy_if_in_loaded_folder(output) {
             Ok(Some(saved)) => {
                 self.switch_to_saved_copy(key, saved, dependencies);

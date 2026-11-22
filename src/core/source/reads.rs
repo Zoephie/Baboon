@@ -11,7 +11,7 @@
 //! noted as read from that version of the document.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -33,7 +33,10 @@ pub(crate) enum ReadAs {
 pub(crate) struct Edited {
     /// The document's content stamp when the edits were taken.
     pub(crate) stamp: (u64, u64),
-    pub(crate) bytes: Vec<u8>,
+    /// `None` when the document could not be written out: the file is read,
+    /// but noted at the document's stamp all the same, so the work is not
+    /// redone (and fails the same way) until the document changes again.
+    pub(crate) bytes: Option<Vec<u8>>,
 }
 
 /// An open tag document as [`ReadFiles::edits_out_of_date`] compares it.
@@ -84,7 +87,7 @@ pub(crate) fn note_read(path: &Path) -> Option<Vec<u8>> {
             Some(edited) => ReadAs::Edits(edited.stamp),
             None => ReadAs::Disk(DiskStamp::of_file(path).ok()),
         });
-        edited.map(|edited| edited.bytes.clone())
+        edited.and_then(|edited| edited.bytes.clone())
     })
 }
 
@@ -115,6 +118,11 @@ impl ReadFiles {
         Self { read: Arc::default(), edits: Arc::new(edits) }
     }
 
+    /// How many files have been read so far.
+    pub(crate) fn len(&self) -> usize {
+        self.read.lock().map(|read| read.len()).unwrap_or_default()
+    }
+
     /// The files read so far, by [`file_key`].
     pub(crate) fn keys(&self) -> Vec<String> {
         self.read.lock().map(|read| read.keys().cloned().collect()).unwrap_or_default()
@@ -122,8 +130,9 @@ impl ReadFiles {
 
     /// Whether a file read from disk is no longer as it was then. `Anything`
     /// looks at every file read, which costs a disk lookup each. Files read
-    /// from unsaved edits are [`Self::edits_out_of_date`]'s to judge.
-    pub(crate) fn any_changed(&self, changed: &Changed) -> bool {
+    /// from unsaved edits are [`Self::edits_out_of_date`]'s to judge, and
+    /// `skip` (by [`file_key`]) is left out.
+    pub(crate) fn any_changed(&self, changed: &Changed, skip: Option<&str>) -> bool {
         let Ok(read) = self.read.lock() else {
             return false;
         };
@@ -132,12 +141,20 @@ impl ReadFiles {
             ReadAs::Disk(None) => path.is_file(),
             ReadAs::Disk(Some(stamp)) => !matches!(stamp.check(path), DiskCheck::Same | DiskCheck::Unreadable(_)),
         };
-        match changed {
-            Changed::Files(paths) => paths
-                .iter()
-                .any(|path| read.get(&file_key(path)).is_some_and(|read_as| differs(path, read_as))),
-            Changed::Anything => read.iter().any(|(key, read_as)| differs(Path::new(key), read_as)),
-        }
+        let named: Option<HashSet<String>> = match changed {
+            Changed::Files(paths) => Some(paths.iter().map(|path| file_key(path)).collect()),
+            Changed::Anything => None,
+        };
+        read.iter()
+            .filter(|(key, _)| Some(key.as_str()) != skip)
+            // A folder renamed or deleted whole is named alone, not the
+            // files in it: a file read under it counts as named too.
+            .filter(|(key, _)| {
+                named.as_ref().is_none_or(|named| {
+                    Path::new(key.as_str()).ancestors().any(|path| path.to_str().is_some_and(|path| named.contains(path)))
+                })
+            })
+            .any(|(key, read_as)| differs(Path::new(key.as_str()), read_as))
     }
 
     /// Whether the open documents, by [`file_key`], now differ from what was
@@ -231,20 +248,20 @@ mod tests {
             note_read(&missing);
         }
         let spelled_otherwise = dir.join("rock.shader");
-        assert!(!files.any_changed(&Changed::Files(&[&spelled_otherwise])), "nothing changed yet");
-        assert!(!files.any_changed(&Changed::Anything));
+        assert!(!files.any_changed(&Changed::Files(&[&spelled_otherwise]), None), "nothing changed yet");
+        assert!(!files.any_changed(&Changed::Anything, None));
         std::fs::write(&other, b"other").unwrap();
-        assert!(!files.any_changed(&Changed::Files(&[&other])), "a file it never read");
+        assert!(!files.any_changed(&Changed::Files(&[&other]), None), "a file it never read");
 
         std::fs::write(&shader, b"shader, saved again").unwrap();
         if cfg!(windows) {
-            assert!(files.any_changed(&Changed::Files(&[&spelled_otherwise])), "the same file in other letter case");
+            assert!(files.any_changed(&Changed::Files(&[&spelled_otherwise]), None), "the same file in other letter case");
         }
-        assert!(files.any_changed(&Changed::Files(&[&shader])));
+        assert!(files.any_changed(&Changed::Files(&[&shader]), None));
 
         std::fs::write(&missing, b"bitmap").unwrap();
-        assert!(files.any_changed(&Changed::Files(&[&missing])), "a file that was missing appeared");
-        assert!(files.any_changed(&Changed::Anything));
+        assert!(files.any_changed(&Changed::Files(&[&missing]), None), "a file that was missing appeared");
+        assert!(files.any_changed(&Changed::Anything, None));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -254,7 +271,7 @@ mod tests {
         let (shader, bitmap) = (dir.join("rock.shader"), dir.join("rock.bitmap"));
         std::fs::write(&shader, b"saved").unwrap();
         std::fs::write(&bitmap, b"bitmap").unwrap();
-        let edits = HashMap::from([(file_key(&shader), Edited { stamp: (7, 3), bytes: b"edited".to_vec() })]);
+        let edits = HashMap::from([(file_key(&shader), Edited { stamp: (7, 3), bytes: Some(b"edited".to_vec()) })]);
         let files = ReadFiles::with_edits(edits);
         let _recording = record_reads(&files);
         assert_eq!(note_read(&shader).as_deref(), Some(&b"edited"[..]));
@@ -262,7 +279,7 @@ mod tests {
         assert_eq!(files.read_as(&shader), Some(ReadAs::Edits((7, 3))));
         assert!(matches!(files.read_as(&bitmap), Some(ReadAs::Disk(Some(_)))));
         std::fs::write(&shader, b"saved again elsewhere").unwrap();
-        assert!(!files.any_changed(&Changed::Files(&[&shader])), "edits read are judged by their document");
+        assert!(!files.any_changed(&Changed::Files(&[&shader]), None), "edits read are judged by their document");
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -273,7 +290,7 @@ mod tests {
         for path in [&shader, &bitmap, &own] {
             std::fs::write(path, b"tag").unwrap();
         }
-        let edits = HashMap::from([(file_key(&shader), Edited { stamp: (7, 3), bytes: b"edited".to_vec() })]);
+        let edits = HashMap::from([(file_key(&shader), Edited { stamp: (7, 3), bytes: Some(b"edited".to_vec()) })]);
         let files = ReadFiles::with_edits(edits);
         {
             let _recording = record_reads(&files);
@@ -302,6 +319,53 @@ mod tests {
         assert!(files.edits_out_of_date(&open(&[(&shader, document((8, 0), false))]), own).is_some(), "reloaded from disk");
         let bitmap_edited = open(&[(&shader, document((7, 3), true)), (&bitmap, document((9, 1), true))]);
         assert!(files.edits_out_of_date(&bitmap_edited, own).is_some(), "a file read from disk now has edits");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Explorer names only the folder when one is renamed or sent to the
+    /// Recycle Bin whole: the files read inside it count as named.
+    #[test]
+    fn a_folder_named_alone_stands_for_the_files_read_inside_it() {
+        let dir = temp("folder");
+        let shaders = dir.join("objects").join("rock").join("shaders");
+        std::fs::create_dir_all(&shaders).unwrap();
+        let (shader, own) = (shaders.join("rock.shader"), shaders.join("rock.render_model"));
+        std::fs::write(&shader, b"shader").unwrap();
+        std::fs::write(&own, b"model").unwrap();
+        let files = ReadFiles::default();
+        {
+            let _recording = record_reads(&files);
+            note_read(&shader);
+            note_read(&own);
+        }
+        let sibling = dir.join("objects").join("rock").join("shaders2");
+        std::fs::create_dir_all(&sibling).unwrap();
+        assert!(!files.any_changed(&Changed::Files(&[&shaders]), None), "named, but nothing in it changed");
+
+        std::fs::write(&own, b"model, saved").unwrap();
+        let own_key = file_key(&own);
+        assert!(!files.any_changed(&Changed::Files(&[&shaders]), Some(&own_key)), "the skipped file is left out");
+
+        std::fs::remove_file(&shader).unwrap();
+        assert!(!files.any_changed(&Changed::Files(&[&sibling]), None), "a folder whose name only starts the same");
+        assert!(files.any_changed(&Changed::Files(&[&shaders]), None), "its shader is gone");
+        assert!(files.any_changed(&Changed::Files(&[&dir.join("objects")]), None), "and so is a grandparent named");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Edits that could not be written out are read from the file, but noted
+    /// at the document's stamp, so the work is not redone until it changes.
+    #[test]
+    fn unwritable_edits_read_the_file_but_note_the_document() {
+        let dir = temp("unwritable");
+        let shader = dir.join("rock.shader");
+        std::fs::write(&shader, b"saved").unwrap();
+        let files = ReadFiles::with_edits(HashMap::from([(file_key(&shader), Edited { stamp: (7, 3), bytes: None })]));
+        let _recording = record_reads(&files);
+        assert_eq!(note_read(&shader), None, "the file is read");
+        assert_eq!(files.read_as(&shader), Some(ReadAs::Edits((7, 3))));
+        let open = HashMap::from([(file_key(&shader), OpenDocument { stamp: (7, 3), dirty: true })]);
+        assert_eq!(files.edits_out_of_date(&open, None), None, "as drawn: nothing to load again");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

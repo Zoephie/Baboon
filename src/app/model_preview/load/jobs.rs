@@ -10,6 +10,7 @@ use super::super::{
 use super::load_model_preview;
 use crate::core::source::TagEntryLocation;
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use super::merge::merge_preview_append;
 use super::overlays::{Overlay, hlmt_collision_overlay, hlmt_physics_overlay};
 use std::sync::Arc;
@@ -140,7 +141,7 @@ impl Baboon {
         changed: &crate::core::source::reads::Changed,
         ctx: &egui::Context,
     ) {
-        use crate::core::source::reads::{Changed, file_key};
+        use crate::core::source::reads::file_key;
         let kit = &self.model.kits[kit_index];
         let mut any = false;
         for (key, state) in self.views[kit.id].caches.model_previews.iter_mut() {
@@ -151,15 +152,7 @@ impl Baboon {
                 TagEntryLocation::LooseFile(path) => Some(file_key(path)),
                 _ => None,
             });
-            let others: Vec<&std::path::Path>;
-            let changed = match changed {
-                Changed::Files(paths) => {
-                    others = paths.iter().copied().filter(|path| Some(file_key(path)) != own).collect();
-                    &Changed::Files(&others)
-                }
-                Changed::Anything => changed,
-            };
-            if state.reads.any_changed(changed) {
+            if state.reads.any_changed(changed, own.as_deref()) {
                 state.reads_changed = true;
                 any = true;
             }
@@ -191,14 +184,14 @@ impl Baboon {
                 TagEntryLocation::LooseFile(path) => Some(file_key(path)),
                 _ => None,
             };
-            let open: HashMap<String, OpenDocument> = kit
-                .parsed_tags
-                .iter()
-                .filter_map(|(key, document)| {
-                    let stamp = document.content_stamp();
-                    Some((loose_file(key)?, OpenDocument { stamp, dirty: document.dirty.is_set() }))
-                })
-                .collect();
+            // What the open documents hold, cheaply, so a preview already
+            // checked against them is not compared again every frame.
+            let documents = kit.parsed_tags.values().fold(kit.parsed_tags.len() as u64, |sum, document| {
+                let mut hasher = DefaultHasher::new();
+                (document.content_stamp(), document.dirty.is_set()).hash(&mut hasher);
+                sum ^ hasher.finish()
+            });
+            let mut open: Option<HashMap<String, OpenDocument>> = None;
             for (key, state) in previews.iter_mut() {
                 let settled = state.loaded_key.as_deref() == Some(key.as_str())
                     && state.data.is_some()
@@ -207,11 +200,27 @@ impl Baboon {
                     state.edits_seen = None;
                     continue;
                 }
+                // Jobs that follow the load (textures, clips) add reads.
+                let checked = documents ^ (state.reads.len() as u64).rotate_left(32);
+                if state.edits_seen.is_none() && state.edits_checked == Some(checked) {
+                    continue;
+                }
+                let open = open.get_or_insert_with(|| {
+                    kit.parsed_tags
+                        .iter()
+                        .filter_map(|(key, document)| {
+                            let stamp = document.content_stamp();
+                            Some((loose_file(key)?, OpenDocument { stamp, dirty: document.dirty.is_set() }))
+                        })
+                        .collect()
+                });
                 let own = loose_file(key);
-                let Some(difference) = state.reads.edits_out_of_date(&open, own.as_deref()) else {
+                let Some(difference) = state.reads.edits_out_of_date(open, own.as_deref()) else {
                     state.edits_seen = None;
+                    state.edits_checked = Some(checked);
                     continue;
                 };
+                state.edits_checked = None;
                 match state.edits_seen {
                     Some((seen, since)) if seen == difference => {
                         if now - since >= UNSAVED_EDITS_QUIET {
@@ -444,6 +453,7 @@ impl Baboon {
         state.reads = crate::core::source::reads::ReadFiles::with_edits(unsaved);
         state.reads_changed = false;
         state.edits_seen = None;
+        state.edits_checked = None;
         let reads = state.reads.clone();
         state.remember_selection();
         let previous = match state.data.take() {
@@ -751,7 +761,10 @@ fn open_tag_edits(
             if !previous.is_empty() && !previous.contains(&file) {
                 return None;
             }
-            let bytes = document.tag.write_to_bytes().ok()?;
+            // One that cannot be written out is still noted at its stamp, or
+            // the preview would see edits it never drew and load again
+            // forever.
+            let bytes = document.tag.write_to_bytes().ok();
             Some((file, Edited { stamp: document.content_stamp(), bytes }))
         })
         .collect()

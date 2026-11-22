@@ -59,6 +59,9 @@ pub(in crate::app) struct DiskWatch {
     pub(in crate::app) notices: HashMap<String, DiskNotice>,
     /// The OS watch on a loose kit's folder, if it started.
     pub(in crate::app) folder: Option<FolderWatch>,
+    /// A check of the open tags was put off while Baboon moved files: run
+    /// it once the move is done, or changes made meanwhile go unseen.
+    pub(in crate::app) check_due: bool,
 }
 
 impl DiskWatch {
@@ -119,6 +122,9 @@ impl Baboon {
                 .as_ref()
                 .and_then(|folder| folder.settled(WATCH_QUIET))
             else {
+                if self.model.kits[index].disk.check_due && self.tag_ops.folder_refactor.is_none() {
+                    self.check_open_tags_in(index, ctx);
+                }
                 continue;
             };
             self.check_open_tags_in(index, ctx);
@@ -151,8 +157,9 @@ impl Baboon {
     /// Start a check of one kit's open loose tags against their files.
     fn check_open_tags_in(&mut self, index: usize, ctx: &egui::Context) {
         // Baboon's own move is renaming files under open tabs; it reloads
-        // them itself when it ends.
-        if self.tag_ops.folder_refactor.is_some() {
+        // them itself when it ends, and the check runs after.
+        self.model.kits[index].disk.check_due = self.tag_ops.folder_refactor.is_some();
+        if self.model.kits[index].disk.check_due {
             return;
         }
         let kit = &self.model.kits[index];
@@ -202,8 +209,10 @@ impl Baboon {
             return true;
         };
         // A move that started while the check ran: a file it already moved
-        // is not missing, and its tab is about to follow it.
+        // is not missing, and its tab is about to follow it. The check runs
+        // again once it ends.
         if self.tag_ops.folder_refactor.is_some() {
+            self.model.kits[index].disk.check_due = true;
             return false;
         }
         for OpenTagCheck { key, checked, result } in checks {
@@ -452,6 +461,38 @@ mod tests {
         assert_eq!(app.model.status, "Reloaded warthog.model: changed on disk");
     }
 
+    /// A check that came while Baboon was moving files waits for the move,
+    /// then runs: a change made meanwhile is still noticed.
+    #[test]
+    fn a_check_put_off_by_a_move_runs_once_the_move_ends() {
+        let fixture = LooseKit::new("disk-after-move", "halo3_mcc");
+        let path = fixture.write_mcc("warthog", "model", |_| {});
+        let mut app = app();
+        fixture.install(&mut app);
+        // No watch: only the put-off check can notice.
+        app.model.kits[0].disk.folder = None;
+        let key = fixture.open(&mut app, "warthog.model");
+        app.tag_ops.folder_refactor = Some(crate::app::shell::worker::FolderRefactorUiState {
+            label: "Moving".to_owned(),
+            phase: "Moving files".to_owned(),
+            progress: None,
+        });
+        fixture.write_mcc("warthog", "model", |tag| set_distance(tag, 7.5));
+        bump_modified(&path);
+        let ctx = ctx();
+        app.check_open_tags_on_disk(&ctx);
+        app.check_open_tags_on_watch(&ctx);
+        assert!(app.rx.recv_timeout(Duration::from_millis(200)).is_err(), "no check during the move");
+        assert!(app.model.kits[0].disk.check_due);
+
+        app.tag_ops.folder_refactor = None;
+        app.check_open_tags_on_watch(&ctx);
+        assert!(!app.model.kits[0].disk.check_due);
+        pump_until(&mut app, "the reload", |app| {
+            real_of(&app.model.kits[0].parsed_tags[&key].tag, DISTANCE) == Some(7.5)
+        });
+    }
+
     /// A tag made outside Baboon reaches the browser through the folder
     /// watch, with the timed refresh never due.
     #[test]
@@ -569,6 +610,7 @@ mod tests {
         let ctx = ctx();
         app.check_previews_for_unsaved_edits_at(10.0, &ctx);
         assert!(preview(&app, &key).edits_seen.is_none(), "nothing edited yet");
+        assert!(preview(&app, &key).edits_checked.is_some(), "not compared again until something changes");
 
         app.model.kits[0].parsed_tags.get_mut(&rock).unwrap().dirty.touch();
         app.check_previews_for_unsaved_edits_at(10.0, &ctx);
@@ -605,7 +647,7 @@ mod tests {
         // Drawn from the shader's edits, as a load with the option on reads it.
         let stamp = app.model.kits[0].parsed_tags[&rock].content_stamp();
         let bytes = std::fs::read(&shader).unwrap();
-        let reads = ReadFiles::with_edits(HashMap::from([(file_key(&shader), Edited { stamp, bytes })]));
+        let reads = ReadFiles::with_edits(HashMap::from([(file_key(&shader), Edited { stamp, bytes: Some(bytes) })]));
         {
             let _recording = record_reads(&reads);
             let source = app.model.kits[0].source.as_ref().unwrap().source.clone();
@@ -624,7 +666,7 @@ mod tests {
 
         app.model.kits[0].parsed_tags.get_mut(&rock).unwrap().dirty.touch();
         let stamp = app.model.kits[0].parsed_tags[&rock].content_stamp();
-        let reads = ReadFiles::with_edits(HashMap::from([(file_key(&shader), Edited { stamp, bytes: Vec::new() })]));
+        let reads = ReadFiles::with_edits(HashMap::from([(file_key(&shader), Edited { stamp, bytes: Some(Vec::new()) })]));
         {
             let _recording = record_reads(&reads);
             crate::core::source::reads::note_read(&shader);
