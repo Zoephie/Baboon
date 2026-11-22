@@ -134,11 +134,16 @@ mod tests {
         let git = root.join(".git").join("refs");
         std::fs::create_dir_all(&git).unwrap();
         let watch = FolderWatch::start(&root, |_| {}).unwrap();
+        // macOS's FSEvents can report the folders made just before the watch
+        // started a moment late: let them pass first.
+        std::thread::sleep(WATCH_QUIET * 3);
+        let _ = watch.settled(WATCH_QUIET);
 
         std::fs::write(root.join(".git").join("index"), b"index").unwrap();
         std::fs::write(git.join("main"), b"ref").unwrap();
         std::thread::sleep(WATCH_QUIET * 3);
-        assert!(watch.settled(WATCH_QUIET).is_none(), "Git's own records are ignored");
+        let burst = watch.settled(WATCH_QUIET);
+        assert!(burst.is_none(), "Git's own records are ignored, but the watch saw {burst:?}");
 
         std::fs::write(root.join("warthog.model"), b"tag").unwrap();
         wait_for(&watch, "a tag beside the repository");
