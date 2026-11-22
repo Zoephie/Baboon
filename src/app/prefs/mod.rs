@@ -238,6 +238,10 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             .get("model_preview_perspective")
             .and_then(Value::as_bool)
             .unwrap_or(true),
+        model_preview_unsaved_edits: value
+            .get("model_preview_unsaved_edits")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         model_preview_background: value
             .get("model_preview_background")
             .and_then(Value::as_str)
@@ -885,6 +889,7 @@ fn prefs_to_value(
         "terminal_open_games": games,
     });
     value["model_preview_background"] = json!(prefs.model_preview_background.as_str());
+    value["model_preview_unsaved_edits"] = json!(prefs.model_preview_unsaved_edits);
     let view = &prefs.bitmap_preview_view;
     value["bitmap_preview_sidebar_width"] = json!(view.sidebar_width);
     value["bitmap_sprites_show_all"] = json!(view.sprites.show_all);
@@ -1997,6 +2002,7 @@ mod tests {
             zoom_speed: 0.75,
             model_setup_width: 333.0,
             model_preview_perspective: false,
+            model_preview_unsaved_edits: true,
             model_preview_background: crate::app::model_preview::ModelPreviewBackground::GreenScreen,
             blender_path: Some(PathBuf::from("/blender")),
             tool_commands_window_pos: Some(egui::pos2(10.0, 20.0)),

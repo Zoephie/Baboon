@@ -8,6 +8,8 @@ use super::super::{
     reset_model_preview_selection, spawn_worker,
 };
 use super::load_model_preview;
+use crate::core::source::TagEntryLocation;
+use std::collections::HashMap;
 use super::merge::merge_preview_append;
 use super::overlays::{Overlay, hlmt_collision_overlay, hlmt_physics_overlay};
 use std::sync::Arc;
@@ -146,7 +148,7 @@ impl Baboon {
                 continue;
             }
             let own = kit.entry_for_key(key).and_then(|entry| match &entry.location {
-                crate::core::source::TagEntryLocation::LooseFile(path) => Some(file_key(path)),
+                TagEntryLocation::LooseFile(path) => Some(file_key(path)),
                 _ => None,
             });
             let others: Vec<&std::path::Path>;
@@ -164,6 +166,66 @@ impl Baboon {
         }
         if any {
             ctx.request_repaint();
+        }
+    }
+
+    /// With View > Show Unsaved Edits on, load a preview again once the open
+    /// tags it was drawn from have changed and then stayed put for a moment:
+    /// edited further, or reverted, reloaded or closed (its edits discarded),
+    /// so it never keeps drawing edits no tag holds any more.
+    pub(in crate::app) fn check_previews_for_unsaved_edits(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|input| input.time);
+        self.check_previews_for_unsaved_edits_at(now, ctx);
+    }
+
+    /// [`Self::check_previews_for_unsaved_edits`] at `now`, by the UI clock.
+    pub(in crate::app) fn check_previews_for_unsaved_edits_at(&mut self, now: f64, ctx: &egui::Context) {
+        use crate::core::source::reads::{OpenDocument, file_key};
+        for kit_index in 0..self.model.kits.len() {
+            let kit = &self.model.kits[kit_index];
+            let previews = &mut self.views[kit.id].caches.model_previews;
+            if !previews.values().any(|state| state.show_unsaved_edits) {
+                continue;
+            }
+            let loose_file = |key: &str| match &kit.entry_for_key(key)?.location {
+                TagEntryLocation::LooseFile(path) => Some(file_key(path)),
+                _ => None,
+            };
+            let open: HashMap<String, OpenDocument> = kit
+                .parsed_tags
+                .iter()
+                .filter_map(|(key, document)| {
+                    let stamp = document.content_stamp();
+                    Some((loose_file(key)?, OpenDocument { stamp, dirty: document.dirty.is_set() }))
+                })
+                .collect();
+            for (key, state) in previews.iter_mut() {
+                let settled = state.loaded_key.as_deref() == Some(key.as_str())
+                    && state.data.is_some()
+                    && state.preview_load_id.is_none();
+                if !state.show_unsaved_edits || state.reads_changed || !settled {
+                    state.edits_seen = None;
+                    continue;
+                }
+                let own = loose_file(key);
+                let Some(difference) = state.reads.edits_out_of_date(&open, own.as_deref()) else {
+                    state.edits_seen = None;
+                    continue;
+                };
+                match state.edits_seen {
+                    Some((seen, since)) if seen == difference => {
+                        if now - since >= UNSAVED_EDITS_QUIET {
+                            state.edits_seen = None;
+                            state.reads_changed = true;
+                            ctx.request_repaint();
+                        }
+                    }
+                    _ => {
+                        state.edits_seen = Some((difference, now));
+                        ctx.request_repaint_after(std::time::Duration::from_secs_f64(UNSAVED_EDITS_QUIET + 0.05));
+                    }
+                }
+            }
         }
     }
 
@@ -344,6 +406,13 @@ impl Baboon {
             return false;
         };
         let edits = snapshot_edits(kit.parsed_tags.get(key));
+        // View > Show Unsaved Edits: other open tags' edits stand in for
+        // their files.
+        let unsaved = if state.show_unsaved_edits {
+            open_tag_edits(kit, key, &state.reads)
+        } else {
+            Default::default()
+        };
         let names = kit.names.clone();
         let stamp = KitStamp {
             kit: kit.id,
@@ -372,8 +441,9 @@ impl Baboon {
         state.preview_load_id = Some(request_id);
         // What this load reads, from scratch: the last one's list described
         // the model being replaced.
-        state.reads = Default::default();
+        state.reads = crate::core::source::reads::ReadFiles::with_edits(unsaved);
         state.reads_changed = false;
+        state.edits_seen = None;
         let reads = state.reads.clone();
         state.remember_selection();
         let previous = match state.data.take() {
@@ -658,6 +728,38 @@ pub(in crate::app::model_preview) fn snapshot_edits(
             .map_err(|error| format!("Could not snapshot edited model: {error}")),
     )
 }
+
+/// The unsaved edits of `kit`'s open loose tags other than `own`, by file,
+/// for a preview to read instead of their files. Only those the preview's
+/// last load read are taken, when it has one: serializing every edited
+/// document for each load would cost an open animation graph dearly.
+fn open_tag_edits(
+    kit: &crate::app::kits::Kit,
+    own: &str,
+    previous: &crate::core::source::reads::ReadFiles,
+) -> HashMap<String, crate::core::source::reads::Edited> {
+    use crate::core::source::reads::{Edited, file_key};
+    let previous: std::collections::HashSet<String> = previous.keys().into_iter().collect();
+    kit.parsed_tags
+        .iter()
+        .filter(|(key, document)| key.as_str() != own && document.dirty.is_set())
+        .filter_map(|(key, document)| {
+            let TagEntryLocation::LooseFile(path) = &kit.entry_for_key(key)?.location else {
+                return None;
+            };
+            let file = file_key(path);
+            if !previous.is_empty() && !previous.contains(&file) {
+                return None;
+            }
+            let bytes = document.tag.write_to_bytes().ok()?;
+            Some((file, Edited { stamp: document.content_stamp(), bytes }))
+        })
+        .collect()
+}
+
+/// How long open tags' edits must stop changing before a preview showing
+/// them loads again, in seconds: a dragged slider is one change, not fifty.
+const UNSAVED_EDITS_QUIET: f64 = 0.3;
 
 /// The opened tag as the editor holds it: `edits` from [`snapshot_edits`],
 /// or the file when there are none.

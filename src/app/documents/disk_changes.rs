@@ -557,6 +557,85 @@ mod tests {
         assert!(!preview(&app, &key).reads_changed);
     }
 
+    /// With Show Unsaved Edits on, editing a shader the preview drew from
+    /// its file loads the preview again once the edits pause; each edit
+    /// before then starts the pause over.
+    #[test]
+    fn with_unsaved_edits_shown_an_edited_shader_reloads_once_edits_pause() {
+        let (fixture, mut app, key, _) = previewed_rock("preview-unsaved-edit");
+        let id = app.model.kits[0].id;
+        app.views[id].caches.model_previews.get_mut(&key).unwrap().show_unsaved_edits = true;
+        let rock = fixture.open(&mut app, "objects/rock/shaders/rock.shader");
+        let ctx = ctx();
+        app.check_previews_for_unsaved_edits_at(10.0, &ctx);
+        assert!(preview(&app, &key).edits_seen.is_none(), "nothing edited yet");
+
+        app.model.kits[0].parsed_tags.get_mut(&rock).unwrap().dirty.touch();
+        app.check_previews_for_unsaved_edits_at(10.0, &ctx);
+        app.check_previews_for_unsaved_edits_at(10.2, &ctx);
+        app.model.kits[0].parsed_tags.get_mut(&rock).unwrap().dirty.touch();
+        app.check_previews_for_unsaved_edits_at(10.25, &ctx);
+        app.check_previews_for_unsaved_edits_at(10.5, &ctx);
+        assert!(!preview(&app, &key).reads_changed, "still editing");
+        app.check_previews_for_unsaved_edits_at(10.6, &ctx);
+        assert!(preview(&app, &key).reads_changed, "the edits paused: load again");
+    }
+
+    /// With the option off, the preview keeps drawing the saved shader.
+    #[test]
+    fn with_unsaved_edits_hidden_an_edited_shader_changes_nothing() {
+        let (fixture, mut app, key, _) = previewed_rock("preview-unsaved-off");
+        let rock = fixture.open(&mut app, "objects/rock/shaders/rock.shader");
+        app.model.kits[0].parsed_tags.get_mut(&rock).unwrap().dirty.touch();
+        let ctx = ctx();
+        app.check_previews_for_unsaved_edits_at(10.0, &ctx);
+        app.check_previews_for_unsaved_edits_at(20.0, &ctx);
+        assert!(!preview(&app, &key).reads_changed);
+    }
+
+    /// A preview drawn from a shader's unsaved edits loads again from the
+    /// file when those edits are discarded by closing the shader, but not
+    /// when they are saved (the file then holds what it drew).
+    #[test]
+    fn discarding_edits_a_preview_shows_reloads_it_from_the_file() {
+        use crate::core::source::reads::{Edited, ReadFiles, file_key, record_reads};
+        let (fixture, mut app, key, shader) = previewed_rock("preview-unsaved-discard");
+        let rock = fixture.open(&mut app, "objects/rock/shaders/rock.shader");
+        app.model.kits[0].parsed_tags.get_mut(&rock).unwrap().dirty.touch();
+        // Drawn from the shader's edits, as a load with the option on reads it.
+        let stamp = app.model.kits[0].parsed_tags[&rock].content_stamp();
+        let bytes = std::fs::read(&shader).unwrap();
+        let reads = ReadFiles::with_edits(HashMap::from([(file_key(&shader), Edited { stamp, bytes })]));
+        {
+            let _recording = record_reads(&reads);
+            let source = app.model.kits[0].source.as_ref().unwrap().source.clone();
+            crate::core::source::read_entry(&source, app.model.entry_for_key(&rock).unwrap()).unwrap();
+        }
+        let id = app.model.kits[0].id;
+        let state = app.views[id].caches.model_previews.get_mut(&key).unwrap();
+        state.reads = reads;
+        state.show_unsaved_edits = true;
+        let ctx = ctx();
+
+        app.save_tag_by_key(&rock).expect("save the shader");
+        app.check_previews_for_unsaved_edits_at(10.0, &ctx);
+        app.check_previews_for_unsaved_edits_at(20.0, &ctx);
+        assert!(!preview(&app, &key).reads_changed, "saved: the file holds what it drew");
+
+        app.model.kits[0].parsed_tags.get_mut(&rock).unwrap().dirty.touch();
+        let stamp = app.model.kits[0].parsed_tags[&rock].content_stamp();
+        let reads = ReadFiles::with_edits(HashMap::from([(file_key(&shader), Edited { stamp, bytes: Vec::new() })]));
+        {
+            let _recording = record_reads(&reads);
+            crate::core::source::reads::note_read(&shader);
+        }
+        app.views[id].caches.model_previews.get_mut(&key).unwrap().reads = reads;
+        app.kit_and_view(0).drop_document(&rock);
+        app.check_previews_for_unsaved_edits_at(30.0, &ctx);
+        app.check_previews_for_unsaved_edits_at(30.5, &ctx);
+        assert!(preview(&app, &key).reads_changed, "discarded: draw the file again");
+    }
+
     /// A shader rewritten outside Baboon reaches the preview through the
     /// folder watch.
     #[test]

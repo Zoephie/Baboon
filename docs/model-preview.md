@@ -2,7 +2,7 @@ Open a model, object, render model, collision model, physics model, structure BS
 
 ## Keeping up with saved tags
 
-The preview draws its shaders, bitmaps, render model and the rest from the files on disk. When one of them is saved (in another tab, say a shader you are tuning) the preview loads again on its own, keeping its camera, picks and clip, with the old picture up until the new one is ready. The same happens when one changes outside Baboon, for example a bitmap reimported by Tool. Unsaved edits to those other tags do not show until they are saved. A preview in a background tab catches up when it is shown. See [File Change Monitoring](file-change-monitoring.md).
+The preview draws its shaders, bitmaps, render model and the rest from the files on disk. When one of them is saved (in another tab, say a shader you are tuning) the preview loads again on its own, keeping its camera, picks and clip, with the old picture up until the new one is ready. The same happens when one changes outside Baboon, for example a bitmap reimported by Tool. Unsaved edits to those other tags show only with **View > Show Unsaved Edits**; otherwise they appear once saved. A preview in a background tab catches up when it is shown. See [File Change Monitoring](file-change-monitoring.md).
 
 ## Moving around
 
@@ -51,6 +51,7 @@ The **Other** menu (the **…** button beside the model buttons):
 ### View
 
 - **Show Grid** draws a ground grid, spaced to the model's size.
+- **Show Unsaved Edits** draws the unsaved edits of other open tags the model uses (a shader you are tuning, say) instead of their saved files, so the preview follows them as you edit: it loads again a moment after you stop changing them. Closing such a tag without saving, or undoing back to its saved version, puts the preview back on the file. The previewed tag's own edits always show. The choice is shared by every preview and remembered; it starts off.
 - **Background Color** clears the viewport to the **Theme**'s own background, **White**, **Black** or **Green Screen**. The choice is kept for every tag and the next time Baboon opens.
 - **Camera** has the zoom, projection and reset.
 

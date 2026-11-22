@@ -191,6 +191,7 @@ pub(in crate::app) fn draw_tag_pane(
     } = inputs;
     let bitmap_preview_view = cx.model.prefs.bitmap_preview_view;
     let model_preview_perspective = cx.model.prefs.model_preview_perspective;
+    let model_preview_unsaved_edits = cx.model.prefs.model_preview_unsaved_edits;
     let model_preview_background = cx.model.prefs.model_preview_background;
 
     let Some(doc) = cx.model.kits[kit_index].parsed_tags.get(&key) else {
@@ -497,6 +498,12 @@ pub(in crate::app) fn draw_tag_pane(
         // applied going in, and a toggle in this pane written back.
         model_preview.perspective = model_preview_perspective;
         model_preview.background = model_preview_background;
+        // Turned on or off (here or in another pane): draw again from the
+        // edits, or from the files.
+        if model_preview.show_unsaved_edits != model_preview_unsaved_edits {
+            model_preview.show_unsaved_edits = model_preview_unsaved_edits;
+            model_preview.reads_changed = true;
+        }
         let document_revision = (
             doc.id,
             doc.dirty.revision(),
@@ -538,6 +545,11 @@ pub(in crate::app) fn draw_tag_pane(
         if model_preview.perspective != model_preview_perspective {
             let perspective = model_preview.perspective;
             cx.edit_prefs(move |prefs| prefs.model_preview_perspective = perspective);
+        }
+        if model_preview.show_unsaved_edits != model_preview_unsaved_edits {
+            let unsaved_edits = model_preview.show_unsaved_edits;
+            model_preview.reads_changed = true;
+            cx.edit_prefs(move |prefs| prefs.model_preview_unsaved_edits = unsaved_edits);
         }
         if edit_context.sound_help_requested {
             cx.send(crate::app::help::HelpCommand::ShowDocSection(

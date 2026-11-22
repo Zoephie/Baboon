@@ -1019,6 +1019,7 @@ impl Baboon {
             self.check_open_tags_on_focus(ctx);
             self.check_open_tags_on_watch(ctx);
             self.run_due_git_review_refreshes(ctx);
+            self.check_previews_for_unsaved_edits(ctx);
             self.expire_status(ctx);
         }
         // Raised by the previous frame, whose UI has since committed any edit
@@ -8464,6 +8465,70 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(read(&h, "render_model"));
+    }
+
+    /// With View > Show Unsaved Edits on, a real preview draws its shader's
+    /// unsaved edits: an edit made in memory loads the model again, reading
+    /// the shader from the document; closing the shader without saving loads
+    /// it from the file again. Nothing is written to the kit. With
+    /// `BLAM_TEST_H3EK` naming the kit's tags.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn a_real_preview_draws_and_drops_a_shaders_unsaved_edits() {
+        use crate::core::source::reads::{ReadAs, file_key};
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let mut h = Harness::recording();
+        h.frame(Vec::new());
+        h.app.model.prefs.model_preview_unsaved_edits = true;
+        let entries = install_kit_subtree(&mut h, &root, GameId::Halo3, "objects/characters/ambient_life");
+        let key = open_model_page(&mut h, &entries, "butterfly_b/butterfly_b.render_model");
+        let id = h.app.model.kits[h.app.model.active].id;
+        let wait = |h: &mut Harness, what: &str, done: &dyn Fn(&Harness) -> bool| {
+            let started = Instant::now();
+            while !done(h) {
+                assert!(started.elapsed() < Duration::from_secs(120), "timed out waiting for {what}");
+                h.frame(Vec::new());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        wait(&mut h, "the shader to be read", &|h| {
+            h.app.views[id].caches.model_previews[&key].reads.contains_extension("shader")
+        });
+        let shader_file = h.app.views[id].caches.model_previews[&key]
+            .reads
+            .keys()
+            .into_iter()
+            .find(|file| file.ends_with(".shader"))
+            .unwrap();
+        let shader = entries
+            .iter()
+            .find(|entry| matches!(&entry.location, TagEntryLocation::LooseFile(path) if file_key(path) == shader_file))
+            .expect("the shader is in the kit")
+            .key
+            .clone();
+        let shader_path = std::path::PathBuf::from(&shader_file);
+        let active = h.app.model.active;
+        // Beside the preview, as when tuning a shader while watching it.
+        h.app.kit_and_view(active).open_tag_pane_beside(&shader);
+        h.app.load_tag_in(active, shader.clone(), h.ctx.clone(), false);
+        wait(&mut h, "the shader to open", &|h| h.app.model.kits[active].parsed_tags.contains_key(&shader));
+
+        h.app.model.kits[active].parsed_tags.get_mut(&shader).unwrap().dirty.touch();
+        let stamp = h.app.model.kits[active].parsed_tags[&shader].content_stamp();
+        wait(&mut h, "the preview to draw the edits", &|h| {
+            let state = &h.app.views[id].caches.model_previews[&key];
+            state.reads.read_as(&shader_path) == Some(ReadAs::Edits(stamp)) && !state.needs_preview_load(&key)
+        });
+
+        // Closed without saving.
+        h.app.kit_and_view(active).drop_document(&shader);
+        wait(&mut h, "the preview to draw the file again", &|h| {
+            let state = &h.app.views[id].caches.model_previews[&key];
+            matches!(state.reads.read_as(&shader_path), Some(ReadAs::Disk(_))) && !state.needs_preview_load(&key)
+        });
     }
 
     /// Refresh Bitmap reads the tag from disk again: a bitmap reimported

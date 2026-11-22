@@ -1086,8 +1086,12 @@ fn read_loose_tag(
     game: Option<GameId>,
     definitions_root: &Path,
 ) -> Result<TagFile> {
-    super::reads::note_read(path);
-    parse_loose_tag(std::fs::read(path)?, entry, game, definitions_root)
+    // Work drawing from open tags' unsaved edits reads those instead.
+    let bytes = match super::reads::note_read(path) {
+        Some(edits) => edits,
+        None => std::fs::read(path)?,
+    };
+    parse_loose_tag(bytes, entry, game, definitions_root)
 }
 
 fn parse_loose_tag(

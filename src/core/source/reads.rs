@@ -5,18 +5,51 @@
 //! read. A Model Preview keeps one for all the jobs behind it (the model, its
 //! textures, overlays, weapons and clips), and reloads when Baboon saves, or
 //! the folder watch sees, a file in it that has since changed.
+//!
+//! A [`ReadFiles`] can also carry open tags' unsaved edits ([`Edited`]):
+//! a read of one of those files gets the edits instead of the file, and is
+//! noted as read from that version of the document.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crate::core::document::disk::{DiskCheck, DiskStamp};
 
-/// The files read, by [`file_key`], each with its stamp when read (`None`
-/// for one that was missing then, which counts as changed once it appears).
+/// How a file was read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReadAs {
+    /// From disk, as stamped then (`None` for a file missing then, which
+    /// counts as changed once it appears).
+    Disk(Option<DiskStamp>),
+    /// From an open document's unsaved edits, at its content stamp.
+    Edits((u64, u64)),
+}
+
+/// An open document's unsaved edits, handed to background work to read in
+/// place of its file.
+pub(crate) struct Edited {
+    /// The document's content stamp when the edits were taken.
+    pub(crate) stamp: (u64, u64),
+    pub(crate) bytes: Vec<u8>,
+}
+
+/// An open tag document as [`ReadFiles::edits_out_of_date`] compares it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct OpenDocument {
+    pub(crate) stamp: (u64, u64),
+    pub(crate) dirty: bool,
+}
+
+/// The files read, by [`file_key`], and how; with the unsaved edits reads
+/// take in place of their files.
 #[derive(Clone, Default)]
-pub(crate) struct ReadFiles(Arc<Mutex<HashMap<String, Option<DiskStamp>>>>);
+pub(crate) struct ReadFiles {
+    read: Arc<Mutex<HashMap<String, ReadAs>>>,
+    edits: Arc<HashMap<String, Edited>>,
+}
 
 thread_local! {
     static RECORDING: RefCell<Option<ReadFiles>> = const { RefCell::new(None) };
@@ -38,19 +71,21 @@ pub(crate) fn record_reads(files: &ReadFiles) -> Recording {
     Recording(RECORDING.with(|recording| recording.borrow_mut().replace(files.clone())))
 }
 
-/// Called by the tag readers for each loose file they open.
-pub(crate) fn note_read(path: &Path) {
+/// Called by the loose tag reader for each file it opens. Returns the
+/// unsaved edits to read instead, when the recording carries them.
+pub(crate) fn note_read(path: &Path) -> Option<Vec<u8>> {
     RECORDING.with(|recording| {
-        let Some(files) = recording.borrow().as_ref().map(ReadFiles::clone) else {
-            return;
-        };
+        let files = recording.borrow().as_ref().map(ReadFiles::clone)?;
         let key = file_key(path);
-        let Ok(mut read) = files.0.lock() else {
-            return;
-        };
+        let edited = files.edits.get(&key);
+        let mut read = files.read.lock().ok()?;
         // The first read is the one the work was built from.
-        read.entry(key).or_insert_with(|| DiskStamp::of_file(path).ok());
-    });
+        read.entry(key).or_insert_with(|| match edited {
+            Some(edited) => ReadAs::Edits(edited.stamp),
+            None => ReadAs::Disk(DiskStamp::of_file(path).ok()),
+        });
+        edited.map(|edited| edited.bytes.clone())
+    })
 }
 
 /// How two spellings of one file compare: the file system is not case
@@ -74,34 +109,83 @@ pub(crate) enum Changed<'a> {
 }
 
 impl ReadFiles {
-    /// Whether a file this read is no longer as it was then. `Anything`
-    /// looks at every file read, which costs a disk lookup each.
+    /// A new list whose reads take `edits` (by [`file_key`]) in place of
+    /// their files.
+    pub(crate) fn with_edits(edits: HashMap<String, Edited>) -> Self {
+        Self { read: Arc::default(), edits: Arc::new(edits) }
+    }
+
+    /// The files read so far, by [`file_key`].
+    pub(crate) fn keys(&self) -> Vec<String> {
+        self.read.lock().map(|read| read.keys().cloned().collect()).unwrap_or_default()
+    }
+
+    /// Whether a file read from disk is no longer as it was then. `Anything`
+    /// looks at every file read, which costs a disk lookup each. Files read
+    /// from unsaved edits are [`Self::edits_out_of_date`]'s to judge.
     pub(crate) fn any_changed(&self, changed: &Changed) -> bool {
-        let Ok(read) = self.0.lock() else {
+        let Ok(read) = self.read.lock() else {
             return false;
         };
-        let differs = |path: &Path, stamp: &Option<DiskStamp>| match stamp {
-            None => path.is_file(),
-            Some(stamp) => !matches!(stamp.check(path), DiskCheck::Same | DiskCheck::Unreadable(_)),
+        let differs = |path: &Path, read_as: &ReadAs| match read_as {
+            ReadAs::Edits(_) => false,
+            ReadAs::Disk(None) => path.is_file(),
+            ReadAs::Disk(Some(stamp)) => !matches!(stamp.check(path), DiskCheck::Same | DiskCheck::Unreadable(_)),
         };
         match changed {
             Changed::Files(paths) => paths
                 .iter()
-                .any(|path| read.get(&file_key(path)).is_some_and(|stamp| differs(path, stamp))),
-            Changed::Anything => read.iter().any(|(key, stamp)| differs(Path::new(key), stamp)),
+                .any(|path| read.get(&file_key(path)).is_some_and(|read_as| differs(path, read_as))),
+            Changed::Anything => read.iter().any(|(key, read_as)| differs(Path::new(key), read_as)),
         }
+    }
+
+    /// Whether the open documents, by [`file_key`], now differ from what was
+    /// read: a file read from disk whose document now has unsaved edits, or
+    /// edits read from a document that has since changed, been reverted,
+    /// reloaded or closed. `own` (the previewed tag) is left out. `Some`
+    /// names the difference, so a caller can wait for edits to settle.
+    pub(crate) fn edits_out_of_date(&self, open: &HashMap<String, OpenDocument>, own: Option<&str>) -> Option<u64> {
+        let read = self.read.lock().ok()?;
+        let mut differences = 0_u64;
+        let mut differs = false;
+        for (key, read_as) in read.iter() {
+            if Some(key.as_str()) == own {
+                continue;
+            }
+            let document = open.get(key);
+            let same = match (read_as, document) {
+                (ReadAs::Edits(stamp), Some(document)) => document.stamp == *stamp,
+                (ReadAs::Edits(_), None) => false,
+                (ReadAs::Disk(_), document) => !document.is_some_and(|document| document.dirty),
+            };
+            if !same {
+                differs = true;
+                let mut hasher = DefaultHasher::new();
+                (key, document.map(|document| document.stamp)).hash(&mut hasher);
+                // Order-free: the map's iteration order is not the point.
+                differences ^= hasher.finish();
+            }
+        }
+        differs.then_some(differences)
     }
 
     /// Whether any file read ends in `.extension`.
     #[cfg(test)]
     pub(crate) fn contains_extension(&self, extension: &str) -> bool {
         let suffix = format!(".{extension}");
-        self.0.lock().is_ok_and(|read| read.keys().any(|key| key.ends_with(&suffix)))
+        self.read.lock().is_ok_and(|read| read.keys().any(|key| key.ends_with(&suffix)))
     }
 
     #[cfg(test)]
     pub(crate) fn contains(&self, path: &Path) -> bool {
-        self.0.lock().is_ok_and(|read| read.contains_key(&file_key(path)))
+        self.read.lock().is_ok_and(|read| read.contains_key(&file_key(path)))
+    }
+
+    /// How `path` was read, if it was.
+    #[cfg(test)]
+    pub(crate) fn read_as(&self, path: &Path) -> Option<ReadAs> {
+        self.read.lock().ok()?.get(&file_key(path)).copied()
     }
 }
 
@@ -161,6 +245,63 @@ mod tests {
         std::fs::write(&missing, b"bitmap").unwrap();
         assert!(files.any_changed(&Changed::Files(&[&missing])), "a file that was missing appeared");
         assert!(files.any_changed(&Changed::Anything));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_read_of_an_edited_file_takes_the_edits_and_notes_them() {
+        let dir = temp("edits");
+        let (shader, bitmap) = (dir.join("rock.shader"), dir.join("rock.bitmap"));
+        std::fs::write(&shader, b"saved").unwrap();
+        std::fs::write(&bitmap, b"bitmap").unwrap();
+        let edits = HashMap::from([(file_key(&shader), Edited { stamp: (7, 3), bytes: b"edited".to_vec() })]);
+        let files = ReadFiles::with_edits(edits);
+        let _recording = record_reads(&files);
+        assert_eq!(note_read(&shader).as_deref(), Some(&b"edited"[..]));
+        assert_eq!(note_read(&bitmap), None, "no edits: the file is read");
+        assert_eq!(files.read_as(&shader), Some(ReadAs::Edits((7, 3))));
+        assert!(matches!(files.read_as(&bitmap), Some(ReadAs::Disk(Some(_)))));
+        std::fs::write(&shader, b"saved again elsewhere").unwrap();
+        assert!(!files.any_changed(&Changed::Files(&[&shader])), "edits read are judged by their document");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn edits_out_of_date_follows_the_open_documents() {
+        let dir = temp("out-of-date");
+        let (shader, bitmap, own) = (dir.join("rock.shader"), dir.join("rock.bitmap"), dir.join("rock.render_model"));
+        for path in [&shader, &bitmap, &own] {
+            std::fs::write(path, b"tag").unwrap();
+        }
+        let edits = HashMap::from([(file_key(&shader), Edited { stamp: (7, 3), bytes: b"edited".to_vec() })]);
+        let files = ReadFiles::with_edits(edits);
+        {
+            let _recording = record_reads(&files);
+            for path in [&shader, &bitmap, &own] {
+                note_read(path);
+            }
+        }
+        let document = |stamp, dirty| OpenDocument { stamp, dirty };
+        let open = |documents: &[(&std::path::PathBuf, OpenDocument)]| -> HashMap<String, OpenDocument> {
+            documents.iter().map(|(path, document)| (file_key(path), *document)).collect()
+        };
+        let own_key = file_key(&own);
+        let own = Some(own_key.as_str());
+
+        // As drawn: the shader at its stamp, the bitmap clean, the previewed
+        // tag itself edited (its own document's business).
+        let drawn = open(&[(&shader, document((7, 3), true)), (&bitmap, document((9, 0), false)), (&own.map(std::path::PathBuf::from).unwrap(), document((1, 5), true))]);
+        assert_eq!(files.edits_out_of_date(&drawn, own), None);
+        // Saved: same stamp, no longer dirty, still what was drawn.
+        assert_eq!(files.edits_out_of_date(&open(&[(&shader, document((7, 3), false))]), own), None);
+
+        let edited_again = files.edits_out_of_date(&open(&[(&shader, document((7, 4), true))]), own);
+        let edited_more = files.edits_out_of_date(&open(&[(&shader, document((7, 5), true))]), own);
+        assert!(edited_again.is_some() && edited_again != edited_more, "each edit is a new difference");
+        assert!(files.edits_out_of_date(&open(&[]), own).is_some(), "closed, its edits discarded");
+        assert!(files.edits_out_of_date(&open(&[(&shader, document((8, 0), false))]), own).is_some(), "reloaded from disk");
+        let bitmap_edited = open(&[(&shader, document((7, 3), true)), (&bitmap, document((9, 1), true))]);
+        assert!(files.edits_out_of_date(&bitmap_edited, own).is_some(), "a file read from disk now has edits");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
