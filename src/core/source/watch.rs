@@ -1,10 +1,10 @@
 //! Hearing about changes under a loose kit's folder as they happen, through
-//! the operating system's file notifications (`notify`). A watch says only
-//! that *something* under the folder changed and when it last did; callers
-//! wait for the burst to go quiet (Tool and Explorer write in bursts) and
-//! then look at the files they care about themselves.
+//! the operating system's file notifications (`notify`). A watch collects
+//! the files a burst of changes touched and when it last did; callers wait
+//! for the burst to go quiet (Tool and Explorer write in bursts), then take
+//! the files and look at the ones they care about themselves.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -20,10 +20,27 @@ fn inside_git(path: &Path) -> bool {
     path.components().any(|component| component.as_os_str() == ".git")
 }
 
+/// One burst of changes, as [`FolderWatch::settled`] hands it over.
+#[derive(Debug, Default)]
+pub(crate) struct Burst {
+    /// Every path the OS named, each once.
+    pub(crate) paths: Vec<PathBuf>,
+    /// The OS dropped events (its buffer overflowed), so `paths` may be
+    /// missing some: anything might have changed.
+    pub(crate) incomplete: bool,
+}
+
+/// What the watcher's thread collects for [`FolderWatch::settled`].
+#[derive(Default)]
+struct Pending {
+    last_change: Option<Instant>,
+    burst: Burst,
+}
+
 /// A recursive watch on one folder. Dropping it stops watching.
 pub(crate) struct FolderWatch {
     _watcher: notify::RecommendedWatcher,
-    last_change: Arc<Mutex<Option<Instant>>>,
+    pending: Arc<Mutex<Pending>>,
 }
 
 impl FolderWatch {
@@ -31,8 +48,8 @@ impl FolderWatch {
     /// thread after each change, with how long until the burst could settle,
     /// so the caller can come back and call [`FolderWatch::settled`].
     pub(crate) fn start(root: &Path, wake: impl Fn(Duration) + Send + 'static) -> notify::Result<Self> {
-        let last_change = Arc::new(Mutex::new(None));
-        let noted = Arc::clone(&last_change);
+        let pending = Arc::new(Mutex::new(Pending::default()));
+        let noted = Arc::clone(&pending);
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
             // Reads are not changes. An error (the OS dropped events when its
             // buffer overflowed) may have hidden one, so it counts as one.
@@ -41,26 +58,35 @@ impl FolderWatch {
             {
                 return;
             }
-            if let Ok(mut last) = noted.lock() {
-                *last = Some(Instant::now());
+            if let Ok(mut pending) = noted.lock() {
+                pending.last_change = Some(Instant::now());
+                match event {
+                    Ok(event) => {
+                        for path in event.paths {
+                            if !inside_git(&path) && !pending.burst.paths.contains(&path) {
+                                pending.burst.paths.push(path);
+                            }
+                        }
+                    }
+                    Err(_) => pending.burst.incomplete = true,
+                }
             }
             wake(WATCH_QUIET + Duration::from_millis(50));
         })?;
         watcher.watch(root, RecursiveMode::Recursive)?;
-        Ok(Self { _watcher: watcher, last_change })
+        Ok(Self { _watcher: watcher, pending })
     }
 
-    /// True once per burst: there were changes, and none for `quiet` since.
-    pub(crate) fn settled(&self, quiet: Duration) -> bool {
-        let Ok(mut last) = self.last_change.lock() else {
-            return false;
-        };
-        match *last {
+    /// Once per burst, when there were changes and none for `quiet` since:
+    /// what changed.
+    pub(crate) fn settled(&self, quiet: Duration) -> Option<Burst> {
+        let mut pending = self.pending.lock().ok()?;
+        match pending.last_change {
             Some(at) if at.elapsed() >= quiet => {
-                *last = None;
-                true
+                pending.last_change = None;
+                Some(std::mem::take(&mut pending.burst))
             }
-            _ => false,
+            _ => None,
         }
     }
 }
@@ -71,7 +97,7 @@ mod tests {
 
     fn wait_for(watch: &FolderWatch, what: &str) {
         let deadline = Instant::now() + Duration::from_secs(30);
-        while !watch.settled(WATCH_QUIET) {
+        while watch.settled(WATCH_QUIET).is_none() {
             assert!(Instant::now() < deadline, "timed out waiting for {what}");
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -83,12 +109,12 @@ mod tests {
         let nested = root.join("objects").join("vehicles");
         std::fs::create_dir_all(&nested).unwrap();
         let watch = FolderWatch::start(&root, |_| {}).unwrap();
-        assert!(!watch.settled(WATCH_QUIET), "nothing changed yet");
+        assert!(watch.settled(WATCH_QUIET).is_none(), "nothing changed yet");
 
         std::fs::write(nested.join("warthog.model"), b"one").unwrap();
         std::fs::write(nested.join("warthog.model"), b"two").unwrap();
         wait_for(&watch, "the write burst to settle");
-        assert!(!watch.settled(WATCH_QUIET), "a burst settles once");
+        assert!(watch.settled(WATCH_QUIET).is_none(), "a burst settles once");
 
         std::fs::remove_file(nested.join("warthog.model")).unwrap();
         wait_for(&watch, "the deletion to settle");
@@ -107,7 +133,7 @@ mod tests {
         std::fs::write(root.join(".git").join("index"), b"index").unwrap();
         std::fs::write(git.join("main"), b"ref").unwrap();
         std::thread::sleep(WATCH_QUIET * 3);
-        assert!(!watch.settled(WATCH_QUIET), "Git's own records are ignored");
+        assert!(watch.settled(WATCH_QUIET).is_none(), "Git's own records are ignored");
 
         std::fs::write(root.join("warthog.model"), b"tag").unwrap();
         wait_for(&watch, "a tag beside the repository");

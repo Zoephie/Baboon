@@ -29,6 +29,13 @@ pub(in crate::app) struct ModelPreviewState {
     /// collision and physics, its weapons, its clip) arrives, so the
     /// sidebar and player change once, not card by card.
     pub(in crate::app) settling: Option<SettlingPreview>,
+    /// The loose tag files the shown model was built from, by every job
+    /// behind it: its tag, render model, shaders, bitmaps, overlays, weapons
+    /// and clips. A new load starts a new list.
+    pub(in crate::app) reads: crate::core::source::reads::ReadFiles,
+    /// One of `reads` changed on disk (saved in Baboon, or outside it):
+    /// load again, keeping the page up meanwhile as a settings change does.
+    pub(in crate::app) reads_changed: bool,
     pub(in crate::app) active_tab: ModelTagPanelTab,
     pub(in crate::app) new_variant_name: String,
     pub(in crate::app) selected_variant: Option<usize>,
@@ -174,6 +181,8 @@ impl Default for ModelPreviewState {
             loaded_key: None,
             preview_load_id: None,
             reloading: None,
+            reads: Default::default(),
+            reads_changed: false,
             settling: None,
             render_model_path: None,
             data: None,
@@ -309,6 +318,7 @@ impl ModelPreviewState {
     /// a setting that marks the page out of date always starts its load.
     pub(in crate::app) fn load_settings_match(&self, entry_key: &str) -> bool {
         self.loaded_key.as_deref() == Some(entry_key)
+            && !self.reads_changed
             && self.campaign_evolved.loaded_as_set()
             && self.loaded_weapon == self.weapon
             && self.loaded_secondary_weapon == self.secondary_weapon

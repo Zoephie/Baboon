@@ -716,8 +716,13 @@ mod tests {
         settle_until(&mut app, "the review to list the new tag", |app| {
             local_paths(app).iter().any(|path| path.ends_with("ghost.model"))
         });
-        let state = &app.views[app.model.kits[0].id].git_review;
-        assert!(!state.loading && !state.background && !state.refresh_due);
+        // The OS may report the write in more than one burst, each a quiet
+        // refresh of its own; once they are done, nothing is left waiting.
+        settle_until(&mut app, "the refreshes to finish", |app| {
+            let state = &app.views[app.model.kits[0].id].git_review;
+            !state.loading && !state.refresh_due
+        });
+        assert!(!app.views[app.model.kits[0].id].git_review.background);
     }
 
     /// A refresh that comes due while the user's own Git job runs waits for

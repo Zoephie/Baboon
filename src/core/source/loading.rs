@@ -1086,6 +1086,7 @@ fn read_loose_tag(
     game: Option<GameId>,
     definitions_root: &Path,
 ) -> Result<TagFile> {
+    super::reads::note_read(path);
     parse_loose_tag(std::fs::read(path)?, entry, game, definitions_root)
 }
 

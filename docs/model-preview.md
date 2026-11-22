@@ -1,5 +1,9 @@
 Open a model, object, render model, collision model, physics model, structure BSP or scenario and choose **Model Preview** to see it drawn. The page has the viewport, the **Model Setup** sidebar beside it, and the **Animation Player** along the bottom.
 
+## Keeping up with saved tags
+
+The preview draws its shaders, bitmaps, render model and the rest from the files on disk. When one of them is saved (in another tab, say a shader you are tuning) the preview loads again on its own, keeping its camera, picks and clip, with the old picture up until the new one is ready. The same happens when one changes outside Baboon, for example a bitmap reimported by Tool. Unsaved edits to those other tags do not show until they are saved. A preview in a background tab catches up when it is shown. See [File Change Monitoring](file-change-monitoring.md).
+
 ## Moving around
 
 - **Drag** to orbit around the model.

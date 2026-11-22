@@ -19,6 +19,11 @@ deleted or renamed outside Baboon appears or disappears within about a
 second. Without a watch the browser rescans the folder every 30 seconds;
 with one, only every 5 minutes, as a backstop.
 
+An open **Model Preview** reloads when a tag it was drawn from (a shader,
+a bitmap, its render model) is saved in Baboon or changes on disk, so
+saving a shader in one tab updates the model using it in another. See
+[Model Preview](model-preview.md).
+
 An open **Git Review** tab follows along too. A change in the tags folder,
 or Baboon regaining focus (say, after committing or pulling in GitHub
 Desktop, which changes Git's records but no tags), refreshes it quietly,

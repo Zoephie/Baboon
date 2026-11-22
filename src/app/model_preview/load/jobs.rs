@@ -73,6 +73,7 @@ impl Baboon {
         // Through `spawn_worker` like every preview worker: a panicking tag
         // must still send its message or the pending flag sticks and the
         // overlays never arrive.
+        let reads = self.model_preview_reads(kit_index, &key);
         let (key, panic_key) = (key.to_owned(), key.to_owned());
         let build = move || -> Option<(Overlay, Overlay)> {
             let model = super::super::load::read_opened_tag(&source, &entry, edits).ok()?;
@@ -96,6 +97,7 @@ impl Baboon {
             &self.tx,
             ctx,
             move || {
+                let _recording = crate::core::source::reads::record_reads(&reads);
                 let (collision, physics) = build().unwrap_or((Ok(None), Ok(None)));
                 let mut notes = Vec::new();
                 let mut kept = |overlay: Overlay| {
@@ -124,6 +126,60 @@ impl Baboon {
             },
         );
         true
+    }
+
+    /// Tag files changed on disk (saved here, or seen by the folder watch):
+    /// load again any of the kit's previews built from one of them. The page
+    /// stays up while it loads, as it does for a settings change. A
+    /// preview's own tag is left out: its document already carries it.
+    pub(in crate::app) fn reload_previews_reading(
+        &mut self,
+        kit_index: usize,
+        changed: &crate::core::source::reads::Changed,
+        ctx: &egui::Context,
+    ) {
+        use crate::core::source::reads::{Changed, file_key};
+        let kit = &self.model.kits[kit_index];
+        let mut any = false;
+        for (key, state) in self.views[kit.id].caches.model_previews.iter_mut() {
+            if state.reads_changed || state.loaded_key.as_deref() != Some(key.as_str()) {
+                continue;
+            }
+            let own = kit.entry_for_key(key).and_then(|entry| match &entry.location {
+                crate::core::source::TagEntryLocation::LooseFile(path) => Some(file_key(path)),
+                _ => None,
+            });
+            let others: Vec<&std::path::Path>;
+            let changed = match changed {
+                Changed::Files(paths) => {
+                    others = paths.iter().copied().filter(|path| Some(file_key(path)) != own).collect();
+                    &Changed::Files(&others)
+                }
+                Changed::Anything => changed,
+            };
+            if state.reads.any_changed(changed) {
+                state.reads_changed = true;
+                any = true;
+            }
+        }
+        if any {
+            ctx.request_repaint();
+        }
+    }
+
+    /// The list a preview's jobs note their reads in. Each job turns it on
+    /// for its own thread, so a save of any tag they read reloads the model.
+    pub(in crate::app) fn model_preview_reads(
+        &self,
+        kit_index: usize,
+        key: &str,
+    ) -> crate::core::source::reads::ReadFiles {
+        self.views[self.model.kits[kit_index].id]
+            .caches
+            .model_previews
+            .get(key)
+            .map(|state| state.reads.clone())
+            .unwrap_or_default()
     }
 
     /// Merge a worker's overlay geometry into the preview it was built for.
@@ -314,6 +370,11 @@ impl Baboon {
         state.loaded_game_shaders = settings.game_shaders;
         state.loaded_detail_level = settings.detail_level;
         state.preview_load_id = Some(request_id);
+        // What this load reads, from scratch: the last one's list described
+        // the model being replaced.
+        state.reads = Default::default();
+        state.reads_changed = false;
+        let reads = state.reads.clone();
         state.remember_selection();
         let previous = match state.data.take() {
             Some(Ok(data)) if same_model => Some(super::super::state::ReloadingPreview {
@@ -357,6 +418,7 @@ impl Baboon {
 
         let (worker_key, panic_key) = (key.to_owned(), key.to_owned());
         let load = move || -> Result<_, String> {
+            let _recording = crate::core::source::reads::record_reads(&reads);
             let model_tag = read_opened_tag(&source, &entry, edits)?;
             load_model_preview(&model_tag, &entry, &names, Some(&source), &settings)
         };
@@ -499,15 +561,19 @@ impl Baboon {
             state.list_weapons = false;
             state.weapons_pending = true;
         }
+        let reads = self.model_preview_reads(kit_index, &key);
         let (key, panic_key) = (key.to_owned(), key.to_owned());
         spawn_worker(
             &self.tx,
             ctx,
-            move || WorkerMessage::UnitWeaponsListed {
-                stamp,
-                key,
-                geometry_id,
-                listed: Some(super::super::weapons::list_weapons(&source, &entry, edits)),
+            move || {
+                let _recording = crate::core::source::reads::record_reads(&reads);
+                WorkerMessage::UnitWeaponsListed {
+                    stamp,
+                    key,
+                    geometry_id,
+                    listed: Some(super::super::weapons::list_weapons(&source, &entry, edits)),
+                }
             },
             // The picker stops waiting, and lists nothing.
             move |_| WorkerMessage::UnitWeaponsListed {

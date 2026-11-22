@@ -101,6 +101,10 @@ impl Baboon {
             // records without touching the tags the watch sees.
             for index in 0..self.model.kits.len() {
                 self.git_review_refresh_due(index);
+                // Without a watch, nothing named what changed meanwhile.
+                if self.model.kits[index].disk.folder.is_none() {
+                    self.reload_previews_reading(index, &Changed::Anything, ctx);
+                }
             }
         }
     }
@@ -109,16 +113,20 @@ impl Baboon {
     /// open tags and refresh its browser.
     pub(in crate::app) fn check_open_tags_on_watch(&mut self, ctx: &egui::Context) {
         for index in 0..self.model.kits.len() {
-            let settled = self.model.kits[index]
+            let Some(burst) = self.model.kits[index]
                 .disk
                 .folder
                 .as_ref()
-                .is_some_and(|folder| folder.settled(WATCH_QUIET));
-            if settled {
-                self.check_open_tags_in(index, ctx);
-                self.refresh_entry_index_soon(index, ctx);
-                self.git_review_refresh_due(index);
-            }
+                .and_then(|folder| folder.settled(WATCH_QUIET))
+            else {
+                continue;
+            };
+            self.check_open_tags_in(index, ctx);
+            self.refresh_entry_index_soon(index, ctx);
+            self.git_review_refresh_due(index);
+            let paths: Vec<&Path> = burst.paths.iter().map(PathBuf::as_path).collect();
+            let changed = if burst.incomplete { Changed::Anything } else { Changed::Files(&paths) };
+            self.reload_previews_reading(index, &changed, ctx);
         }
     }
 
@@ -470,8 +478,99 @@ mod tests {
                 app.process_worker_messages(&ctx);
             }
         }
+        // A later burst may already have asked for another refresh; the
+        // timed one, scheduled now, is the slow backstop.
+        app.model.kits[0].index_jobs.refresh_again = false;
+        app.schedule_next_entry_index_refresh(0, &ctx);
         let next = app.model.kits[0].index_jobs.next_refresh_at;
         assert!(next >= 300.0, "the timed refresh becomes a slow backstop, due at {next}");
+    }
+
+    /// A render model open with its Model Preview shown, which (as a real
+    /// load's material jobs would) read the shader `objects/rock/shaders/rock`.
+    /// Beside them, an unrelated shader. The real loads' reads are covered by
+    /// `model_preview_reads_note_a_real_models_shaders_and_bitmaps`.
+    fn previewed_rock(name: &str) -> (LooseKit, Baboon, String, PathBuf) {
+        use crate::app::model_preview::state::{ModelPreviewState, ModelTagPanelTab};
+        let fixture = LooseKit::new(name, "halo3_mcc");
+        fixture.write_mcc("objects/rock/rock", "render_model", |_| {});
+        let shader = fixture.write_mcc("objects/rock/shaders/rock", "shader", |_| {});
+        fixture.write_mcc("objects/tree/shaders/bark", "shader", |_| {});
+        let mut app = app();
+        fixture.install(&mut app);
+        let key = fixture.open(&mut app, "objects/rock/rock.render_model");
+        let state = ModelPreviewState {
+            active_tab: ModelTagPanelTab::ModelPreview,
+            ..ModelPreviewState::loaded_empty_for_test(&key)
+        };
+        {
+            let _recording = crate::core::source::reads::record_reads(&state.reads);
+            let source = app.model.kits[0].source.as_ref().unwrap().source.clone();
+            let entry = app.model.entry_for_key(&fixture.key("objects/rock/shaders/rock.shader")).unwrap().clone();
+            crate::core::source::read_entry(&source, &entry).expect("read the shader");
+        }
+        let id = app.model.kits[0].id;
+        app.views[id].caches.model_previews.insert(key.clone(), state);
+        (fixture, app, key, shader)
+    }
+
+    fn preview<'a>(app: &'a Baboon, key: &str) -> &'a crate::app::model_preview::state::ModelPreviewState {
+        &app.views[app.model.kits[0].id].caches.model_previews[key]
+    }
+
+    fn save_edited(app: &mut Baboon, fixture: &LooseKit, rel: &str) {
+        let key = fixture.open(app, rel);
+        app.model.kits[0].parsed_tags.get_mut(&key).unwrap().dirty.touch();
+        app.save_tag_by_key(&key).expect("save");
+    }
+
+    /// Saving a shader in Baboon marks an open preview drawn with it out of
+    /// date, which loads it again; saving a shader it never read does not.
+    #[test]
+    fn saving_a_shader_reloads_the_model_preview_using_it() {
+        let (fixture, mut app, key, shader) = previewed_rock("preview-shader-save");
+        assert!(preview(&app, &key).reads.contains(&shader));
+        assert!(!preview(&app, &key).needs_preview_load(&key));
+
+        save_edited(&mut app, &fixture, "objects/tree/shaders/bark.shader");
+        assert!(!preview(&app, &key).reads_changed, "the bark shader is not in the preview");
+
+        save_edited(&mut app, &fixture, "objects/rock/shaders/rock.shader");
+        let state = preview(&app, &key);
+        assert!(state.reads_changed, "the preview is out of date");
+        assert!(state.needs_preview_load(&key), "so the pane loads it again");
+        assert!(state.data.is_some(), "keeping the page up meanwhile");
+    }
+
+    /// Saving the previewed tag itself is not a reason to reload: the preview
+    /// already draws its document, edits and all.
+    #[test]
+    fn saving_the_previewed_tag_itself_does_not_reload_it() {
+        let (fixture, mut app, key, _) = previewed_rock("preview-own-save");
+        {
+            let state = preview(&app, &key);
+            let _recording = crate::core::source::reads::record_reads(&state.reads);
+            let source = app.model.kits[0].source.as_ref().unwrap().source.clone();
+            crate::core::source::read_entry(&source, app.model.entry_for_key(&key).unwrap()).unwrap();
+        }
+        save_edited(&mut app, &fixture, "objects/rock/rock.render_model");
+        assert!(!preview(&app, &key).reads_changed);
+    }
+
+    /// A shader rewritten outside Baboon reaches the preview through the
+    /// folder watch.
+    #[test]
+    fn a_shader_changed_outside_baboon_reloads_the_model_preview() {
+        let (fixture, mut app, key, shader) = previewed_rock("preview-shader-watch");
+        fixture.write_mcc("objects/rock/shaders/rock", "shader", |_| {});
+        bump_modified(&shader);
+        let ctx = ctx();
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while !preview(&app, &key).reads_changed {
+            assert!(std::time::Instant::now() < deadline, "the watch never reached the preview");
+            app.check_open_tags_on_watch(&ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     fn edited_then_changed_on_disk(name: &str) -> (LooseKit, Baboon, String, PathBuf) {

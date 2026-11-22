@@ -543,6 +543,10 @@ impl Baboon {
             self.register_saved_copy_if_in_loaded_folder(&output)?;
         }
         self.model.kits[self.model.active].disk.notices.remove(key);
+        // A preview drawn from this tag (a model using a shader being
+        // edited) shows the saved version.
+        let ctx = self.egui_ctx.clone();
+        self.reload_previews_reading(self.model.active, &Changed::Files(&[&output]), &ctx);
         // The save also writes the index row, so the periodic refresh will
         // not see this file change; the shader grid has to hear it here.
         if is_render_method_layout_group(entry.group_tag) {

@@ -8437,6 +8437,35 @@ mod tests {
         h.shoot(&dir.join("app_banshee_model_with_imposter.png"));
     }
 
+    /// A real model's preview notes every tag file its jobs read, its
+    /// shaders and bitmaps among them: what a save or the folder watch checks
+    /// to reload it. Reads the kit only. With `BLAM_TEST_H3EK` naming the
+    /// kit's tags.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn model_preview_reads_note_a_real_models_shaders_and_bitmaps() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let mut h = Harness::recording();
+        h.frame(Vec::new());
+        let folder = "objects/characters/ambient_life/butterfly_b";
+        let entries = install_kit_subtree(&mut h, &root, GameId::Halo3, folder);
+        let key = open_model_page(&mut h, &entries, &format!("{folder}/butterfly_b.render_model"));
+        let id = h.app.model.kits[h.app.model.active].id;
+        let read = |h: &Harness, extension: &str| {
+            h.app.views[id].caches.model_previews[&key].reads.contains_extension(extension)
+        };
+        let started = Instant::now();
+        while !(read(&h, "shader") && read(&h, "bitmap")) {
+            assert!(started.elapsed() < Duration::from_secs(120), "the preview never read its shaders and bitmaps");
+            h.frame(Vec::new());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(read(&h, "render_model"));
+    }
+
     /// Refresh Bitmap reads the tag from disk again: a bitmap reimported
     /// outside Baboon shows its new image without closing the tab. It is
     /// greyed out while the tag has unsaved edits, which a reload would
