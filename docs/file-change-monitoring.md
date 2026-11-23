@@ -16,8 +16,19 @@ beside it.
 
 The same notifications keep the tag browser current: a tag created,
 deleted or renamed outside Baboon appears or disappears within about a
-second. Without a watch the browser rescans the folder every 30 seconds;
-with one, only every 5 minutes, as a backstop.
+second. A rescan of a large kit takes a few seconds (about 3 for H3EK's
+57,000 tags, in the background), so while something keeps writing, such as
+a long Tool batch, rescans are spaced at least 5 seconds apart. Baboon's own
+saves don't set one off: the save already updates the browser.
+
+Without a watch the browser rescans the folder every 30 seconds; with one
+that has reported something in the last 5 minutes, only every 5 minutes,
+as a backstop. The OS can drop notifications when a lot changes at once
+(a large Git checkout). Baboon then treats anything as possibly changed:
+it checks every open tag, rescans the browser and reloads every Model
+Preview. Windows can also stop a watch after such an error without saying
+so. That's why a watch that has gone quiet gets the 30-second rescan again.
+A watch is restarted if a rescan finds a change it never reported.
 
 An open **Model Preview** reloads when a tag it was drawn from (a shader,
 a bitmap, its render model) is saved in Baboon or changes on disk, so
@@ -33,8 +44,9 @@ a `.git` folder are ignored, so a repository kept inside the tags folder
 does not set off a refresh every time Git Review reads it.
 
 Open tags are also checked whenever Baboon's window regains focus, in case
-a notification was missed or the folder could not be watched. Both checks
-run in the background.
+a notification was missed or the folder could not be watched. Model
+Previews are rechecked on focus too, unless the watch has reported
+something lately. Both checks run in the background.
 
 A file counts as changed when it differs from what Baboon loaded or last
 saved, not when it is merely newer. A copy made in File Explorer keeps the
@@ -48,8 +60,14 @@ since you opened the tag (say, while Baboon stayed in front), and you have
 not already chosen Keep My Edits for that version, nothing is written and a
 **Tag Changed on Disk** window asks what to do:
 
-- **Keep My Edits and Save** replaces the file with your version.
+- **Keep My Edits and Save** replaces the file with your version. If you
+  were closing tabs or quitting, that carries on once nothing is left
+  unsaved.
 - **Reload from Disk** discards your edits and loads the file.
+
+Save on a tag with no unsaved edits stops the same way. The window then
+offers **Save Anyway**, which writes the version open in Baboon over the
+file.
 - **Cancel** saves nothing. The banner below stays on the tag, so the
   choice is still waiting.
 

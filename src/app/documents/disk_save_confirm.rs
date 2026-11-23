@@ -8,7 +8,8 @@ use super::*;
 use crate::app::browser::bulk_rename::{ITEM_ROW_HEIGHT, RenameIcon, draw_item_row, padded_body};
 use crate::app::search::draw_icon_window_header_without_close;
 
-/// Save stopped because `key`'s file changed under unsaved edits.
+/// Save stopped because `key`'s file changed since it was opened. Usually
+/// under unsaved edits, but Save on a clean tag stops too.
 pub(in crate::app) struct DiskSaveConfirm {
     pub(in crate::app) kit: KitId,
     pub(in crate::app) key: String,
@@ -30,6 +31,24 @@ impl Dialog for DiskSaveConfirm {
             return false;
         }
         let game = kit.source.as_ref().and_then(|source| source.game);
+        let edited = kit.parsed_tags.get(&self.key).is_some_and(|document| document.dirty.is_set());
+        let (situation, choices, save_label) = if edited {
+            (
+                "This tag was changed outside Baboon after you opened it, and you have unsaved edits. \
+                 Choose which version to keep before saving.",
+                "Keep My Edits and Save replaces the file on disk with your version. \
+                 Reload from Disk discards your edits and loads the file as it is now.",
+                "Keep My Edits and Save",
+            )
+        } else {
+            (
+                "This tag was changed outside Baboon after you opened it. \
+                 Choose which version to keep before saving.",
+                "Save Anyway replaces the file on disk with the version open in Baboon. \
+                 Reload from Disk loads the file as it is now.",
+                "Save Anyway",
+            )
+        };
         let mut choice = None;
         let mut cancel = false;
         let response = egui::Modal::new(egui::Id::unique("disk_save_confirm"))
@@ -41,21 +60,9 @@ impl Dialog for DiskSaveConfirm {
                 padded_body(ui, |ui| {
                     draw_item_row(ui, RenameIcon::Tag(Some(self.group_tag)), game, &self.display_path, ITEM_ROW_HEIGHT);
                     ui.add_space(10.0);
-                    ui.label(
-                        RichText::new(
-                            "This tag was changed outside Baboon after you opened it, and you have \
-                             unsaved edits. Choose which version to keep before saving.",
-                        )
-                        .color(text_dark()),
-                    );
+                    ui.label(RichText::new(situation).color(text_dark()));
                     ui.add_space(6.0);
-                    ui.label(
-                        RichText::new(
-                            "Keep My Edits and Save replaces the file on disk with your version. \
-                             Reload from Disk discards your edits and loads the file as it is now.",
-                        )
-                        .color(subtle_dark()),
-                    );
+                    ui.label(RichText::new(choices).color(subtle_dark()));
                 });
                 ui.add_space(12.0);
                 popup_footer(ui, |ui| {
@@ -66,7 +73,7 @@ impl Dialog for DiskSaveConfirm {
                         if icon_text_button(ui, ButtonIcon::Refresh, "Reload from Disk", true).clicked() {
                             choice = Some(DiskChoice::ReloadFromDisk);
                         }
-                        if icon_text_button(ui, ButtonIcon::Save, "Keep My Edits and Save", true).clicked() {
+                        if icon_text_button(ui, ButtonIcon::Save, save_label, true).clicked() {
                             choice = Some(DiskChoice::KeepAndSave);
                         }
                     });

@@ -4886,7 +4886,7 @@ mod tests {
                         group_tag: crate::app::loose_fixture::group_tag(fixture::GAME, "biped"),
                     });
                 },
-                &["Tag Changed on Disk", "Keep My Edits and Save", "Reload from Disk", "Cancel", "rifle.biped"],
+                &["Tag Changed on Disk", "Save Anyway", "Reload from Disk", "Cancel", "rifle.biped"],
             ),
             case(
                 "delete_folder_confirm",

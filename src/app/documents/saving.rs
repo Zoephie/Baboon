@@ -538,9 +538,16 @@ impl Baboon {
             // does not take it for someone else's.
             doc.disk = DiskStamp::of_file(&output).ok();
         }
-        // Back in the browser before the banner holding its entry goes.
-        if restoring {
-            self.register_saved_copy_if_in_loaded_folder(&output)?;
+        self.model.kits[self.model.active].disk.note_own_write(&output);
+        // Back in the browser before the banner holding its entry goes. The
+        // file is written either way, so a failure here is not a failed
+        // save: the browser's own refresh finds the file instead.
+        if restoring
+            && let Err(error) = self.register_saved_copy_if_in_loaded_folder(&output)
+        {
+            eprintln!("Saved {} but could not add it back to the browser: {error}", output.display());
+            let ctx = self.egui_ctx.clone();
+            self.refresh_entry_index_soon(self.model.active, &ctx);
         }
         self.model.kits[self.model.active].disk.notices.remove(key);
         // A preview drawn from this tag (a model using a shader being
@@ -663,6 +670,7 @@ impl Baboon {
             collect_tag_dependency_refs(doc.tag.root(), &mut refs);
             refs
         };
+        self.model.kits[self.model.active].disk.note_own_write(output);
         // Written over a tag a preview draws: as for Save, it shows the new
         // file without waiting on the folder watch (or with none).
         let ctx = self.egui_ctx.clone();

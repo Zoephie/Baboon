@@ -580,9 +580,12 @@ pub(in crate::app) struct IndexJobs {
     /// When the next periodic refresh is due, in egui time.
     pub(in crate::app) next_refresh_at: f64,
     /// The folder watch saw changes while a refresh was already running,
-    /// which may have listed the folder before them: run another as soon as
-    /// it ends.
+    /// which may have listed the folder before them: run another once it
+    /// ends.
     pub(in crate::app) refresh_again: bool,
+    /// When the last refresh ended. Refreshes the folder watch asks for
+    /// leave a gap after it (`WATCHED_REFRESH_GAP`).
+    pub(in crate::app) last_refresh_ended: Option<std::time::Instant>,
     /// A reference-index build is running.
     pub(in crate::app) building_references: bool,
     /// That build was started by a tag-index build, which reports them as one.

@@ -312,6 +312,25 @@ impl Baboon {
     ///
     /// The prompt is taken out of the host while it is, and put back when it
     /// stays up: an armed discard, or a save or stash that failed.
+    /// A tag the save-changes prompt could not save (its file changed on
+    /// disk, and the Tag Changed on Disk window asked) has been saved since.
+    /// Once nothing the prompt listed is left unsaved, carry on with what it
+    /// was for: closing the tab, the workspace or the app. Otherwise it lists
+    /// what is left.
+    pub(in crate::app) fn resume_save_changes_prompt(&mut self, ctx: &egui::Context) {
+        let Some(mut prompt) = self.dialogs.close::<SaveChangesPrompt>() else {
+            return;
+        };
+        let left = self.model.dirty_tags_for_close_action(&prompt.pending_action);
+        if prompt.dirty_tags.iter().any(|entry| left.iter().any(|dirty| dirty.tag_id == entry.tag_id)) {
+            prompt.dirty_tags = left;
+            prompt.error = None;
+            self.dialogs.open(prompt);
+            return;
+        }
+        self.request_close_action(prompt.pending_action, ctx);
+    }
+
     pub(in crate::app) fn apply_save_changes_prompt_action(&mut self, action: SaveChangesPromptAction, ctx: &egui::Context) {
         let Some(mut prompt) = self.dialogs.close::<SaveChangesPrompt>() else {
             return;
@@ -961,6 +980,35 @@ mod tests {
             reference_of(&saved, "render model").as_deref(),
             Some("objects\\props\\crate")
         );
+    }
+
+    /// The prompt's Save stops on a tag whose file changed on disk, and the
+    /// Tag Changed on Disk window asks. Its Keep My Edits and Save writes
+    /// the tag and carries on with the close.
+    #[test]
+    fn the_close_goes_ahead_once_the_changed_on_disk_window_saves() {
+        let (kit, mut app, key, other) = edited("close-save-changed-on-disk");
+        let kit_id = app.model.active_kit_id();
+        kit.write_mcc("objects\\props\\crate", "model", |_| {});
+        fs::File::options()
+            .write(true)
+            .open(kit.path(MODEL))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(120))
+            .unwrap();
+        app.request_close_action(PendingCloseAction::CloseTab(key.clone()), &ctx());
+        let mut driver = PromptDriver::new();
+
+        driver.click(&mut app, "Save");
+        assert!(tab_open(&app, &key), "the save stopped to ask");
+        assert!(app.dialogs.get::<crate::app::documents::DiskSaveConfirm>().is_some());
+
+        app.apply_disk_choice(kit_id, key.clone(), DiskChoice::KeepAndSave, &ctx());
+
+        assert_eq!(distance_on_disk(&kit, MODEL), 12.5);
+        assert!(app.dialogs.get::<SaveChangesPrompt>().is_none(), "nothing is left to ask about");
+        assert!(!tab_open(&app, &key), "the close went ahead");
+        assert!(tab_open(&app, &other));
     }
 
     #[test]

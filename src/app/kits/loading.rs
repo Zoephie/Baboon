@@ -6,9 +6,23 @@ use super::*;
 /// How often a loaded loose folder's entry index is checked against disk
 /// when nothing tells Baboon the folder changed.
 const ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 30.0;
-/// The same, for a kit whose folder watch reports changes as they land: the
-/// timed scan is only a backstop for notifications the OS dropped.
+/// The same, for a kit whose folder watch reports changes as they land and
+/// has been heard from lately: the timed scan is only a backstop.
 const WATCHED_ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 300.0;
+/// The least time between two refreshes the folder watch asks for. A
+/// refresh rescans the whole folder (about 3 s for H3EK's 57,000 tags, off
+/// the UI thread), and Tool writing steadily for minutes would otherwise
+/// keep one running back to back.
+const WATCHED_REFRESH_GAP: std::time::Duration = std::time::Duration::from_secs(5);
+
+impl IndexJobs {
+    /// How long a refresh the folder watch asks for waits, so it starts
+    /// [`WATCHED_REFRESH_GAP`] after the last one ended.
+    fn watched_refresh_wait(&self) -> std::time::Duration {
+        self.last_refresh_ended
+            .map_or(std::time::Duration::ZERO, |ended| WATCHED_REFRESH_GAP.saturating_sub(ended.elapsed()))
+    }
+}
 
 impl Baboon {
     /// Applies `WorkerMessage::SourceLoaded`, including source reset and follow-up index work.
@@ -320,6 +334,7 @@ impl Baboon {
             return true;
         };
         self.model.kits[kit_index].index_jobs.refreshing = false;
+        self.model.kits[kit_index].index_jobs.last_refresh_ended = Some(std::time::Instant::now());
         if self.model.resolve_stamp(stamp).is_none() {
             return true;
         }
@@ -336,6 +351,16 @@ impl Baboon {
         }
         self.schedule_next_entry_index_refresh(kit_index, ctx);
         let refresh_browser = std::mem::take(&mut self.model.kits[kit_index].index_jobs.refresh_browser);
+        // The scan found a change the folder watch never reported, though
+        // anything it reports refreshes the browser within a moment: the
+        // watch has stopped.
+        if let Ok(refresh) = &result
+            && refresh.changed
+            && let Some(folder) = &self.model.kits[kit_index].disk.folder
+            && folder.silent_for(std::time::Duration::from_secs_f64(ENTRY_INDEX_REFRESH_INTERVAL_SECS))
+        {
+            self.restart_silent_folder_watch(kit_index, ctx);
+        }
         match result {
             Ok(mut refresh) if refresh.changed || refresh_browser => {
                 // A definition or option written by anything but a Baboon
@@ -1064,29 +1089,33 @@ impl Baboon {
     pub(in crate::app) fn schedule_next_entry_index_refresh(&mut self, kit: usize, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
         let kit = &mut self.model.kits[kit];
-        let interval = if kit.disk.folder.is_some() {
+        let interval = if kit.disk.trusted() {
             WATCHED_ENTRY_INDEX_REFRESH_INTERVAL_SECS
         } else {
             ENTRY_INDEX_REFRESH_INTERVAL_SECS
         };
         kit.index_jobs.next_refresh_at = if std::mem::take(&mut kit.index_jobs.refresh_again) {
-            ctx.request_repaint();
-            now
+            let wait = kit.index_jobs.watched_refresh_wait();
+            ctx.request_repaint_after(wait);
+            now + wait.as_secs_f64()
         } else {
             now + interval
         };
     }
 
     /// The kit's folder changed: refresh its browser at the next chance, or
-    /// right after the refresh already running.
+    /// after the refresh already running, leaving [`WATCHED_REFRESH_GAP`]
+    /// after the last one.
     pub(in crate::app) fn refresh_entry_index_soon(&mut self, kit: usize, ctx: &egui::Context) {
         let jobs = &mut self.model.kits[kit].index_jobs;
         if jobs.refreshing {
             jobs.refresh_again = true;
-        } else {
-            jobs.next_refresh_at = 0.0;
-            ctx.request_repaint();
+            return;
         }
+        let wait = jobs.watched_refresh_wait();
+        let now = ctx.input(|input| input.time);
+        jobs.next_refresh_at = jobs.next_refresh_at.min(now + wait.as_secs_f64());
+        ctx.request_repaint_after(wait);
     }
 
     pub(in crate::app) fn apply_entry_index_refresh(

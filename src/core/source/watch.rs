@@ -27,7 +27,8 @@ pub(crate) struct Burst {
     /// Every path the OS named, each once.
     pub(crate) paths: Vec<PathBuf>,
     /// The OS dropped events (its buffer overflowed), so `paths` may be
-    /// missing some: anything might have changed.
+    /// missing some: anything might have changed. Windows reports this as an
+    /// error; macOS and Linux as an event asking for a rescan.
     pub(crate) incomplete: bool,
 }
 
@@ -35,16 +36,50 @@ pub(crate) struct Burst {
 #[derive(Default)]
 struct Pending {
     last_change: Option<Instant>,
+    /// When the OS last reported anything at all, reads included: proof
+    /// the watch is still running.
+    last_heard: Option<Instant>,
     burst: Burst,
     /// `burst.paths` as a set: a checkout or batch import names tens of
     /// thousands of files, too many to search a list for each.
     seen: HashSet<PathBuf>,
 }
 
+impl Pending {
+    /// Take one report from the OS. Whether it may be a change.
+    fn note(&mut self, event: notify::Result<notify::Event>) -> bool {
+        let now = Instant::now();
+        self.last_heard = Some(now);
+        match event {
+            // An error or a rescan request (the OS dropped events when its
+            // buffer overflowed) may have hidden a change, so it counts as one.
+            Err(_) => self.burst.incomplete = true,
+            Ok(event) if event.need_rescan() => self.burst.incomplete = true,
+            // Reads are not changes, nor are Git's own records.
+            Ok(event)
+                if matches!(event.kind, EventKind::Access(_))
+                    || (!event.paths.is_empty() && event.paths.iter().all(|path| inside_git(path))) =>
+            {
+                return false;
+            }
+            Ok(event) => {
+                for path in event.paths {
+                    if !inside_git(&path) && self.seen.insert(path.clone()) {
+                        self.burst.paths.push(path);
+                    }
+                }
+            }
+        }
+        self.last_change = Some(now);
+        true
+    }
+}
+
 /// A recursive watch on one folder. Dropping it stops watching.
 pub(crate) struct FolderWatch {
     _watcher: notify::RecommendedWatcher,
     pending: Arc<Mutex<Pending>>,
+    started: Instant,
 }
 
 impl FolderWatch {
@@ -55,30 +90,31 @@ impl FolderWatch {
         let pending = Arc::new(Mutex::new(Pending::default()));
         let noted = Arc::clone(&pending);
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            // Reads are not changes. An error (the OS dropped events when its
-            // buffer overflowed) may have hidden one, so it counts as one.
-            if let Ok(event) = &event
-                && (matches!(event.kind, EventKind::Access(_)) || (!event.paths.is_empty() && event.paths.iter().all(|path| inside_git(path))))
-            {
-                return;
+            let changed = noted.lock().is_ok_and(|mut pending| pending.note(event));
+            if changed {
+                wake(WATCH_QUIET + Duration::from_millis(50));
             }
-            if let Ok(mut pending) = noted.lock() {
-                pending.last_change = Some(Instant::now());
-                match event {
-                    Ok(event) => {
-                        for path in event.paths {
-                            if !inside_git(&path) && pending.seen.insert(path.clone()) {
-                                pending.burst.paths.push(path);
-                            }
-                        }
-                    }
-                    Err(_) => pending.burst.incomplete = true,
-                }
-            }
-            wake(WATCH_QUIET + Duration::from_millis(50));
         })?;
         watcher.watch(root, RecursiveMode::Recursive)?;
-        Ok(Self { _watcher: watcher, pending })
+        Ok(Self { _watcher: watcher, pending, started: Instant::now() })
+    }
+
+    /// Whether the OS has reported anything within `within`. Windows can
+    /// stop a watch after an error without saying so, so a watch that has
+    /// gone quiet may have stopped.
+    pub(crate) fn heard_within(&self, within: Duration) -> bool {
+        self.pending
+            .lock()
+            .ok()
+            .and_then(|pending| pending.last_heard)
+            .is_some_and(|at| at.elapsed() <= within)
+    }
+
+    /// Whether the watch has run for all of the last `span` and reported
+    /// nothing in it. A change made in that time that it did not report
+    /// means it has stopped.
+    pub(crate) fn silent_for(&self, span: Duration) -> bool {
+        self.started.elapsed() >= span && !self.heard_within(span)
     }
 
     /// Once per burst, when there were changes and none for `quiet` since:
@@ -147,6 +183,34 @@ mod tests {
 
         std::fs::write(root.join("warthog.model"), b"tag").unwrap();
         wait_for(&watch, "a tag beside the repository");
+
+        drop(watch);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_rescan_request_means_anything_may_have_changed() {
+        let mut pending = Pending::default();
+        let rescan = notify::Event::new(EventKind::Other).set_flag(notify::event::Flag::Rescan);
+        assert!(pending.note(Ok(rescan)), "a rescan request may hide a change");
+        assert!(pending.burst.incomplete);
+        assert!(pending.burst.paths.is_empty());
+
+        let mut pending = Pending::default();
+        let read = notify::Event::new(EventKind::Access(notify::event::AccessKind::Any)).add_path(PathBuf::from("a.model"));
+        assert!(!pending.note(Ok(read)), "a read is not a change");
+        assert!(pending.last_heard.is_some(), "but it shows the watch is running");
+        assert!(pending.last_change.is_none());
+    }
+
+    #[test]
+    fn a_reported_change_shows_the_watch_is_running() {
+        let root = std::env::temp_dir().join(format!("baboon-folder-watch-heard-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let watch = FolderWatch::start(&root, |_| {}).unwrap();
+        std::fs::write(root.join("warthog.model"), b"tag").unwrap();
+        wait_for(&watch, "the write to settle");
+        assert!(watch.heard_within(Duration::from_secs(30)), "the write was heard");
 
         drop(watch);
         let _ = std::fs::remove_dir_all(&root);

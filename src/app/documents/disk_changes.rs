@@ -9,8 +9,17 @@
 //! A loose kit also watches its folder ([`FolderWatch`]), so a change is
 //! noticed moments after it lands rather than at the next focus change; the
 //! focus check stays as the fallback for a watch that could not start.
+//! Windows can stop a watch after an error without saying so, so a watch is
+//! only trusted while it is heard from ([`TRUSTED_WATCH`]), and one that
+//! missed a change the timed browser refresh found is started again.
 
 use super::*;
+use crate::core::source::reads::file_key;
+
+/// How long a folder watch is trusted after it last reported anything. A
+/// quieter one may have stopped, so the browser goes back to the 30-second
+/// refresh and a focus change rechecks the previews too.
+pub(in crate::app) const TRUSTED_WATCH: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// One open tag's file, checked against the stamp it had when the check began.
 pub(in crate::app) struct OpenTagCheck {
@@ -62,9 +71,43 @@ pub(in crate::app) struct DiskWatch {
     /// A check of the open tags was put off while Baboon moved files: run
     /// it once the move is done, or changes made meanwhile go unseen.
     pub(in crate::app) check_due: bool,
+    /// Files Baboon itself just wrote, by [`file_key`], as it wrote them.
+    /// The burst they cause is not a change: the save already updated the
+    /// browser, the tag and its previews.
+    pub(in crate::app) own_writes: HashMap<String, DiskStamp>,
 }
 
 impl DiskWatch {
+    /// Whether the folder watch has been heard from lately, so it can be
+    /// relied on to report changes.
+    pub(in crate::app) fn trusted(&self) -> bool {
+        self.folder.as_ref().is_some_and(|folder| folder.heard_within(TRUSTED_WATCH))
+    }
+
+    /// Baboon just wrote `path`: the watch's report of it is not a change.
+    pub(in crate::app) fn note_own_write(&mut self, path: &Path) {
+        if self.folder.is_some()
+            && let Ok(stamp) = DiskStamp::of_file(path)
+        {
+            self.own_writes.insert(file_key(path), stamp);
+        }
+    }
+
+    /// Whether `path` in a burst is only Baboon's own write: the file as
+    /// Baboon left it, the temporary file a save writes first, or a folder
+    /// holding one (Windows reports the folder as modified too).
+    fn own_write(&self, path: &Path) -> bool {
+        let saving = format!(".blam-save-{}-", std::process::id());
+        if path.file_name().is_some_and(|name| name.to_string_lossy().contains(&saving)) {
+            return true;
+        }
+        let key = file_key(path);
+        if let Some(stamp) = self.own_writes.get(&key) {
+            return stamp.check(path) == DiskCheck::Same;
+        }
+        path.is_dir() && self.own_writes.keys().any(|written| written.starts_with(&format!("{key}{}", std::path::MAIN_SEPARATOR)))
+    }
+
     /// A renamed tag keeps its read in flight and its banner.
     pub(in crate::app) fn rekey(&mut self, old: &str, new: &str) {
         if let Some(reload) = self.reloads.remove(old) {
@@ -104,8 +147,9 @@ impl Baboon {
             // records without touching the tags the watch sees.
             for index in 0..self.model.kits.len() {
                 self.git_review_refresh_due(index);
-                // Without a watch, nothing named what changed meanwhile.
-                if self.model.kits[index].disk.folder.is_none() {
+                // Without a watch it trusts, nothing named what changed
+                // meanwhile.
+                if !self.model.kits[index].disk.trusted() {
                     self.reload_previews_reading(index, &Changed::Anything, ctx);
                 }
             }
@@ -127,13 +171,31 @@ impl Baboon {
                 }
                 continue;
             };
+            // A commit's own records aside, Git sees a save as a change.
+            self.git_review_refresh_due(index);
+            let disk = &mut self.model.kits[index].disk;
+            let paths: Vec<&Path> =
+                burst.paths.iter().map(PathBuf::as_path).filter(|path| !disk.own_write(path)).collect();
+            disk.own_writes.clear();
+            if paths.is_empty() && !burst.incomplete {
+                continue;
+            }
             self.check_open_tags_in(index, ctx);
             self.refresh_entry_index_soon(index, ctx);
-            self.git_review_refresh_due(index);
-            let paths: Vec<&Path> = burst.paths.iter().map(PathBuf::as_path).collect();
             let changed = if burst.incomplete { Changed::Anything } else { Changed::Files(&paths) };
             self.reload_previews_reading(index, &changed, ctx);
         }
+    }
+
+    /// The timed browser refresh found a change on disk that the folder
+    /// watch never reported, so the watch has stopped (Windows stops one
+    /// after an error without saying so). Start it again, and check what it
+    /// may have missed.
+    pub(in crate::app) fn restart_silent_folder_watch(&mut self, index: usize, ctx: &egui::Context) {
+        self.start_folder_watch(index);
+        self.check_open_tags_in(index, ctx);
+        self.git_review_refresh_due(index);
+        self.reload_previews_reading(index, &Changed::Anything, ctx);
     }
 
     /// Start watching a newly loaded loose kit's folder. Without a watch
@@ -267,10 +329,15 @@ impl Baboon {
             self.apply_disk_choice(kit, key.clone(), DiskChoice::KeepMyEdits, ctx);
             // Save addresses the active kit's documents.
             self.focus_kit(index);
-            self.model.status = match self.save_tag_by_key(&key) {
-                Ok(path) => format!("Saved {}", path.display()),
-                Err(error) => format!("Save failed: {error}"),
-            };
+            match self.save_tag_by_key(&key) {
+                Ok(path) => {
+                    self.model.status = format!("Saved {}", path.display());
+                    // The save the save-changes prompt (closing a tab,
+                    // quitting) stopped on: carry on with it.
+                    self.resume_save_changes_prompt(ctx);
+                }
+                Err(error) => self.model.status = format!("Save failed: {error}"),
+            }
             return;
         }
         if choice == DiskChoice::CloseTab {
@@ -525,6 +592,56 @@ mod tests {
         app.schedule_next_entry_index_refresh(0, &ctx);
         let next = app.model.kits[0].index_jobs.next_refresh_at;
         assert!(next >= 300.0, "the timed refresh becomes a slow backstop, due at {next}");
+    }
+
+    /// A change the watch reports refreshes the browser at once, unless a
+    /// refresh only just ended: then it waits for the gap.
+    #[test]
+    fn watched_refreshes_leave_a_gap_after_the_last_one() {
+        let fixture = LooseKit::new("disk-watch-gap", "halo3_mcc");
+        fixture.write_mcc("warthog", "model", |_| {});
+        let mut app = app();
+        fixture.install(&mut app);
+        let ctx = ctx();
+        let now = ctx.input(|input| input.time);
+
+        app.model.kits[0].index_jobs.last_refresh_ended = None;
+        app.model.kits[0].index_jobs.next_refresh_at = f64::INFINITY;
+        app.refresh_entry_index_soon(0, &ctx);
+        assert_eq!(app.model.kits[0].index_jobs.next_refresh_at, now, "nothing ran lately: at once");
+
+        app.model.kits[0].index_jobs.last_refresh_ended = Some(std::time::Instant::now());
+        app.model.kits[0].index_jobs.next_refresh_at = f64::INFINITY;
+        app.refresh_entry_index_soon(0, &ctx);
+        let wait = app.model.kits[0].index_jobs.next_refresh_at - now;
+        assert!((4.0..=5.0).contains(&wait), "waits out the gap, {wait} s");
+    }
+
+    /// The watch reports Baboon's own save like any write, but the save has
+    /// already updated the browser and the tag: no rescan, no check.
+    #[test]
+    fn baboons_own_save_does_not_rescan_the_browser() {
+        let fixture = LooseKit::new("disk-watch-own-save", "halo3_mcc");
+        fixture.write_mcc("vehicles\\warthog", "model", |_| {});
+        let mut app = app();
+        fixture.install_indexed(&mut app);
+        let key = fixture.open(&mut app, "vehicles\\warthog.model");
+        edit_field(&mut app, &key, DISTANCE, "3");
+        app.model.kits[0].index_jobs.next_refresh_at = f64::INFINITY;
+        app.save_tag_by_key(&key).expect("save");
+        assert!(!app.model.kits[0].disk.own_writes.is_empty(), "the save is noted");
+
+        let ctx = ctx();
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while !app.model.kits[0].disk.own_writes.is_empty() {
+            assert!(std::time::Instant::now() < deadline, "timed out waiting for the save's burst");
+            app.check_open_tags_on_watch(&ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        assert_eq!(app.model.kits[0].index_jobs.next_refresh_at, f64::INFINITY, "no rescan");
+        assert!(app.rx.try_recv().is_err(), "and no check of the open tags");
+        assert!(app.model.kits[0].disk.trusted(), "the save shows the watch is running");
     }
 
     /// A render model open with its Model Preview shown, which (as a real
