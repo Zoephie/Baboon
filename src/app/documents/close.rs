@@ -308,10 +308,6 @@ impl Baboon {
         self.close_tag_popups(id, |_| true);
     }
 
-    /// Carry out the save-changes prompt's answer.
-    ///
-    /// The prompt is taken out of the host while it is, and put back when it
-    /// stays up: an armed discard, or a save or stash that failed.
     /// A tag the save-changes prompt could not save (its file changed on
     /// disk, and the Tag Changed on Disk window asked) has been saved since.
     /// Once nothing the prompt listed is left unsaved, carry on with what it
@@ -331,6 +327,10 @@ impl Baboon {
         self.request_close_action(prompt.pending_action, ctx);
     }
 
+    /// Carry out the save-changes prompt's answer.
+    ///
+    /// The prompt is taken out of the host while it is, and put back when it
+    /// stays up: an armed discard, or a save or stash that failed.
     pub(in crate::app) fn apply_save_changes_prompt_action(&mut self, action: SaveChangesPromptAction, ctx: &egui::Context) {
         let Some(mut prompt) = self.dialogs.close::<SaveChangesPrompt>() else {
             return;
