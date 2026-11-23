@@ -528,6 +528,9 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) dark_mode: bool,
     /// Follow the OS appearance; dark_mode remains the fallback if unavailable.
     pub(in crate::app) follow_system_theme: bool,
+    /// The look a picked Light theme takes. Following the OS always takes
+    /// the warm one: see [`GuiPrefs::effective_light_theme`].
+    pub(in crate::app) light_theme: crate::app::ui_kit::LightTheme,
     pub(in crate::app) ui_scale: f32,
     /// Multiplier on mouse-wheel and trackpad scrolling in scroll areas.
     /// 1.0 is egui's own speed, which is what Baboon always scrolled at.
@@ -577,6 +580,16 @@ pub(in crate::app) struct UnusableKitEntries {
 }
 
 impl GuiPrefs {
+    /// The light theme in use: Classic only when picked; the system
+    /// setting takes the warm one.
+    pub(in crate::app) fn effective_light_theme(&self) -> crate::app::ui_kit::LightTheme {
+        if self.follow_system_theme {
+            crate::app::ui_kit::LightTheme::Warm
+        } else {
+            self.light_theme
+        }
+    }
+
     pub(in crate::app) fn effective_dark_mode(&self, system_theme: Option<egui::Theme>) -> bool {
         if self.follow_system_theme {
             system_theme
@@ -618,6 +631,7 @@ impl Default for GuiPrefs {
             expert_mode: false,
             dark_mode: false,
             follow_system_theme: true,
+            light_theme: crate::app::ui_kit::LightTheme::Warm,
             ui_scale: DEFAULT_UI_SCALE,
             scroll_speed: DEFAULT_SCROLL_SPEED,
             zoom_speed: DEFAULT_ZOOM_SPEED,

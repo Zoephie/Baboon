@@ -9195,10 +9195,23 @@ mod tests {
         // BABOON_SHOT_GAME names the kit's game ("halo3_mcc"; Halo 2 by default).
         let game = std::env::var("BABOON_SHOT_GAME")
             .map_or(GameId::Halo2, |id| id.parse().expect("a game id"));
-        for dark in [false, true] {
+        use crate::app::ui_kit::LightTheme;
+        for (dark, light, name) in [
+            (false, LightTheme::Warm, "theme_light.png"),
+            (false, LightTheme::Classic, "theme_classic_light.png"),
+            (true, LightTheme::Warm, "theme_dark.png"),
+        ] {
             let mut h = Harness::recording();
             h.app.model.prefs.follow_system_theme = false;
             h.app.model.prefs.dark_mode = dark;
+            h.app.model.prefs.light_theme = light;
+            // The status bar's one coloured message, to judge it on the bar.
+            h.app.shell.available_update = Some(UpdateCheckResult {
+                channel: UpdateChannel::Stable,
+                latest_tag: "v9.9.9".to_owned(),
+                release_url: String::new(),
+                commit: String::new(),
+            });
             h.frame(Vec::new());
             let entries = install_kit_subtree(&mut h, &root, game, &subtree);
             let key = entries
@@ -9230,7 +9243,34 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(10));
                 }
             }
-            let name = if dark { "theme_dark.png" } else { "theme_light.png" };
+            h.shoot(&dir.join(name));
+        }
+    }
+
+    /// `BABOON_APP_SHOTS` shots of Settings' Interface tab in each theme,
+    /// to compare its sliders.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
+    fn app_shots_of_the_interface_settings() {
+        let Some(dir) = std::env::var_os("BABOON_APP_SHOTS") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        use crate::app::ui_kit::LightTheme;
+        for (dark, light, name) in [
+            (false, LightTheme::Warm, "settings_light.png"),
+            (false, LightTheme::Classic, "settings_classic_light.png"),
+            (true, LightTheme::Warm, "settings_dark.png"),
+        ] {
+            let mut h = Harness::recording();
+            h.app.model.prefs.follow_system_theme = false;
+            h.app.model.prefs.dark_mode = dark;
+            h.app.model.prefs.light_theme = light;
+            h.app.open_settings(Some(SettingsTab::Interface));
+            for _ in 0..30 {
+                h.frame(Vec::new());
+            }
             h.shoot(&dir.join(name));
         }
     }

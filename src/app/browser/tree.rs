@@ -3685,7 +3685,7 @@ pub(in crate::app) fn show_browser_navigation_section_with_add<R>(
                 icon_rect,
                 color,
             );
-            let label = ui.label(RichText::new(title).color(color));
+            let label = ui.label(RichText::new(title).color(navigation_title_text(color)));
             let mut content = toggle.union(icon_response).union(label);
             if allow_add {
                 let label_rect = egui::Rect::from_min_max(header_rect.min,

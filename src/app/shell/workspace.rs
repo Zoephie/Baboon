@@ -19,6 +19,7 @@ impl Baboon {
             // Setup draws alone, over an empty window.
             ctx.set_zoom_factor(self.model.prefs.ui_scale);
             set_dark_mode(self.model.prefs.effective_dark_mode(ctx.system_theme()));
+            crate::app::ui_kit::set_light_theme(self.model.prefs.effective_light_theme());
             ctx.set_theme(egui_theme());
             ctx.set_visuals(foundation_visuals());
             egui::CentralPanel::default().show(ui, |_ui| {});
@@ -267,6 +268,7 @@ impl Baboon {
         self.handle_pixels_per_point_change(ctx);
         self.maybe_refresh_entry_index(ctx.clone());
         set_dark_mode(self.model.prefs.effective_dark_mode(ctx.system_theme()));
+        crate::app::ui_kit::set_light_theme(self.model.prefs.effective_light_theme());
         ctx.set_theme(egui_theme());
         // Pushed the same way and for the same reason as the theme: the two
         // halves of the angle conversion are free functions on opposite sides
