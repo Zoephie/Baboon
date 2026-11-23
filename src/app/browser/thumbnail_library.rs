@@ -1181,6 +1181,7 @@ mod tests {
             rel_path: tag_path::to_relative(r"objects\brute"),
             label: "brute".into(),
             filter: String::new(),
+            focus_search: false,
             mode: BrowserMode::Folders,
             sort: BrowserSort::Name,
             cached_generation: 0,

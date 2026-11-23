@@ -366,9 +366,14 @@ pub(in crate::app) fn draw_folder_browser_pane(
                 .inner
             }
             });
+            let search_response = header.inner;
             paint_frame_band(ui, header_background, header.response.rect,
                 egui::CornerRadius::same(crate::app::editor::fields::FOUNDATION_CONTAINER_RADIUS as u8),
                 Stroke::new(1.0, foundation_block_edge()), foundation_block_bar(), true);
+            if pane.focus_search {
+                search_response.request_focus();
+                pane.focus_search = false;
+            }
             if let Some(warning) = browser::browser_filter_warning(&pane.filter) {
                 ui.label(
                     RichText::new(warning)
@@ -1811,6 +1816,9 @@ fn draw_folder_header_common_actions(
         .clicked()
         {
             action.replace(BrowserAction::ToggleFolderFavorite(pane.rel_path.clone()));
+        }
+        if icon_text_button(ui, ButtonIcon::Find, "Find", true).clicked() {
+            pane.focus_search = true;
         }
     });
 }
