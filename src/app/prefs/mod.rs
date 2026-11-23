@@ -207,6 +207,11 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             .get("follow_system_theme")
             .and_then(Value::as_bool)
             .unwrap_or_else(|| value.get("dark_mode").and_then(Value::as_bool).is_none()),
+        light_theme: value
+            .get("light_theme")
+            .and_then(Value::as_str)
+            .and_then(crate::app::ui_kit::LightTheme::from_key)
+            .unwrap_or_default(),
         ui_scale: value
             .get("ui_scale")
             .and_then(Value::as_f64)
@@ -906,6 +911,7 @@ fn prefs_to_value(
     value["hidden_shortcuts"] = json!(prefs.hidden_shortcuts);
     value["blender_shortcut_migrated"] = json!(prefs.blender_shortcut_migrated);
     value["follow_system_theme"] = Value::Bool(prefs.follow_system_theme);
+    value["light_theme"] = json!(prefs.light_theme.key());
     value["string_list_checkboxes"] = Value::Bool(prefs.string_list_checkboxes);
     value["string_list_wrap_text"] = Value::Bool(prefs.string_list_wrap_text);
     value["reveal_active_tab_in_browser"] = Value::Bool(prefs.reveal_active_tab_in_browser);
@@ -1681,6 +1687,21 @@ mod tests {
             assert!(restored.effective_dark_mode(Some(egui::Theme::Dark)));
             assert!(!restored.effective_dark_mode(Some(egui::Theme::Light)));
         }
+    }
+
+    #[test]
+    fn the_light_theme_is_warm_by_default_and_round_trips() {
+        use crate::app::ui_kit::LightTheme;
+        assert_eq!(prefs_from_value(&json!({})).light_theme, LightTheme::Warm);
+        assert_eq!(prefs_from_value(&json!({ "light_theme": "bogus" })).light_theme, LightTheme::Warm);
+        let mut prefs = prefs_from_value(&json!({}));
+        prefs.light_theme = LightTheme::Classic;
+        assert_eq!(stored(&prefs).light_theme, LightTheme::Classic);
+        // The system setting takes the warm theme; Classic is picked alone.
+        prefs.follow_system_theme = false;
+        assert_eq!(prefs.effective_light_theme(), LightTheme::Classic);
+        prefs.follow_system_theme = true;
+        assert_eq!(prefs.effective_light_theme(), LightTheme::Warm);
     }
 
     #[test]

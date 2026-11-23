@@ -2195,34 +2195,65 @@ impl Dialog for CustomEditingKitRemoval {
     }
 }
 
+/// The Theme menu's choices. Following the system takes the warm light
+/// theme in light mode; Classic Light is picked on its own.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ThemeChoice {
+    System,
+    Light,
+    ClassicLight,
+    Dark,
+}
+
+impl ThemeChoice {
+    const ALL: [ThemeChoice; 4] =
+        [ThemeChoice::System, ThemeChoice::Light, ThemeChoice::ClassicLight, ThemeChoice::Dark];
+
+    fn label(self) -> &'static str {
+        match self {
+            ThemeChoice::System => "Use system setting",
+            ThemeChoice::Light => "Light",
+            ThemeChoice::ClassicLight => "Classic Light",
+            ThemeChoice::Dark => "Dark",
+        }
+    }
+
+    fn of(prefs: &GuiPrefs) -> ThemeChoice {
+        use crate::app::ui_kit::LightTheme;
+        if prefs.follow_system_theme {
+            ThemeChoice::System
+        } else if prefs.dark_mode {
+            ThemeChoice::Dark
+        } else if prefs.light_theme == LightTheme::Classic {
+            ThemeChoice::ClassicLight
+        } else {
+            ThemeChoice::Light
+        }
+    }
+
+    fn apply(self, prefs: &mut GuiPrefs) {
+        use crate::app::ui_kit::LightTheme;
+        prefs.follow_system_theme = self == ThemeChoice::System;
+        if self != ThemeChoice::System {
+            prefs.dark_mode = self == ThemeChoice::Dark;
+        }
+        prefs.light_theme =
+            if self == ThemeChoice::ClassicLight { LightTheme::Classic } else { LightTheme::Warm };
+    }
+}
+
 pub(in crate::app) fn draw_theme_picker(ui: &mut Ui, prefs: &mut GuiPrefs) {
-    let mut theme = if prefs.follow_system_theme {
-        egui::ThemePreference::System
-    } else if prefs.dark_mode {
-        egui::ThemePreference::Dark
-    } else {
-        egui::ThemePreference::Light
-    };
-    let label = |theme| match theme {
-        egui::ThemePreference::System => "Use system setting",
-        egui::ThemePreference::Dark => "Dark",
-        egui::ThemePreference::Light => "Light",
-    };
+    let mut theme = ThemeChoice::of(prefs);
     crate::app::ui_kit::ValueComboBox::from_id_salt("settings_theme")
         .width(170.0)
-        .selected_text(label(theme))
+        .selected_text(theme.label())
         .show_ui(ui, |ui| {
-            for option in [
-                egui::ThemePreference::System,
-                egui::ThemePreference::Light,
-                egui::ThemePreference::Dark,
-            ] {
-                ui.selectable_value(&mut theme, option, label(option));
+            for option in ThemeChoice::ALL {
+                ui.selectable_value(&mut theme, option, option.label());
             }
         });
-    prefs.follow_system_theme = theme == egui::ThemePreference::System;
-    if !prefs.follow_system_theme {
-        prefs.dark_mode = theme == egui::ThemePreference::Dark;
+    if theme != ThemeChoice::of(prefs) {
+        theme.apply(prefs);
     }
 }
 
@@ -2399,10 +2430,13 @@ fn draw_speed_row(
         if response.changed() {
             *speed = (percent / 100.0).clamp(*range.start(), *range.end());
         }
-        ui.add(
+        plain_railed_slider(
+            ui,
             egui::Slider::new(speed, range.clone())
                 .show_value(false)
                 .clamping(egui::SliderClamping::Always),
+            true,
+            editor_bg(),
         )
         .on_hover_text(hover);
     });

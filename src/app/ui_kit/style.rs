@@ -170,7 +170,7 @@ pub(in crate::app) fn foundation_visuals() -> egui::Visuals {
     visuals.widgets.inactive.bg_fill = if is_dark_mode() {
         Color32::from_rgb(68, 68, 68)
     } else {
-        Color32::from_rgb(218, 218, 214)
+        light(Color32::from_rgb(236, 232, 228), Color32::from_rgb(218, 218, 214))
     };
     // Buttons and combo boxes paint `weak_bg_fill`. Use premultiplied sRGB
     // values for a visually literal 10% neutral overlay; `from_white_alpha`
@@ -189,6 +189,30 @@ pub(in crate::app) fn foundation_visuals() -> egui::Visuals {
     } else {
         Color32::from_rgb(188, 207, 216)
     };
+    // Warnings and errors take the amber and red a field uses for an
+    // unapplied or invalid value, in both themes: egui's own are a harsh
+    // orange and a pure red, and its light orange sits close to the warm
+    // chrome.
+    visuals.warn_fg_color = unapplied_value_text();
+    visuals.error_fg_color = invalid_value_text();
+    if !is_dark_mode() {
+        // Separators and code backgrounds, which egui draws in neutral grey.
+        visuals.widgets.noninteractive.bg_stroke.color = grid_line();
+        visuals.code_bg_color = row_type();
+    }
+    if !is_dark_mode() && light_theme() == LightTheme::Warm {
+        // Buttons: half-white with a faint warm-grey edge, so they lift off
+        // the panel yet keep some of its colour; brighter on hover, dimmer
+        // when pressed.
+        visuals.widgets.inactive.weak_bg_fill = Color32::from_rgba_unmultiplied(255, 255, 255, 128);
+        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(214, 205, 197));
+        visuals.widgets.hovered.weak_bg_fill = Color32::from_rgba_unmultiplied(255, 255, 255, 191);
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(190, 178, 168));
+        visuals.widgets.active.weak_bg_fill = Color32::from_rgba_unmultiplied(255, 255, 255, 64);
+        visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(176, 162, 151));
+        visuals.widgets.open.weak_bg_fill = Color32::from_rgba_unmultiplied(255, 255, 255, 191);
+        visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(190, 178, 168));
+    }
     if !is_dark_mode() {
         // Sliders paint both their rail and handle with bg_fill, while
         // buttons use weak_bg_fill. Share the button palette so the light
@@ -212,7 +236,9 @@ fn neutral_button_fill(dark_mode: bool, alpha: u8) -> Color32 {
     if dark_mode {
         Color32::from_rgba_premultiplied(alpha, alpha, alpha, alpha)
     } else {
-        Color32::from_black_alpha(alpha)
+        // Warm: a brown rather than black, so light-mode buttons tint the
+        // warm panels instead of greying them.
+        light(Color32::from_rgba_unmultiplied(70, 32, 8, alpha), Color32::from_black_alpha(alpha))
     }
 }
 
@@ -220,7 +246,9 @@ fn selection_fill_for(dark_mode: bool) -> Color32 {
     if dark_mode {
         Color32::from_rgb(64, 108, 134) // #406C86
     } else {
-        Color32::from_rgb(75, 125, 155) // #4B7D9B
+        // A clear blue under the theme's dark text: sky in the warm theme,
+        // steel in the classic one.
+        light(Color32::from_rgb(146, 192, 226), Color32::from_rgb(158, 192, 222)) // #92C0E2 / #9EC0DE
     }
 }
 
@@ -503,14 +531,113 @@ pub(in crate::app) fn set_dark_mode(enabled: bool) {
 }
 
 pub(in crate::app) fn is_dark_mode() -> bool {
+    #[cfg(test)]
+    if let Some((dark, _)) = TEST_THEME.get() {
+        return dark;
+    }
     DARK_MODE_ENABLED.load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// A theme set for this thread alone: see [`with_theme`].
+    static TEST_THEME: std::cell::Cell<Option<(bool, LightTheme)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `f` with this thread in a theme, whatever the app's frames on other
+/// threads set meanwhile.
+#[cfg(test)]
+pub(in crate::app) fn with_theme<R>(dark: bool, light: LightTheme, f: impl FnOnce() -> R) -> R {
+    let before = TEST_THEME.replace(Some((dark, light)));
+    let result = f();
+    TEST_THEME.set(before);
+    result
+}
+
+/// Which look light mode takes: Baboon's warm one, or the classic grey one
+/// with blue highlights.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::app) enum LightTheme {
+    #[default]
+    Warm,
+    Classic,
+}
+
+impl LightTheme {
+    pub(in crate::app) const ALL: [LightTheme; 2] = [LightTheme::Warm, LightTheme::Classic];
+
+    /// The name kept in the preferences file.
+    pub(in crate::app) fn key(self) -> &'static str {
+        match self {
+            LightTheme::Warm => "warm",
+            LightTheme::Classic => "classic",
+        }
+    }
+
+    pub(in crate::app) fn from_key(key: &str) -> Option<LightTheme> {
+        LightTheme::ALL.into_iter().find(|theme| theme.key() == key)
+    }
+}
+
+static CLASSIC_LIGHT: AtomicBool = AtomicBool::new(false);
+
+pub(in crate::app) fn set_light_theme(theme: LightTheme) {
+    CLASSIC_LIGHT.store(theme == LightTheme::Classic, Ordering::Relaxed);
+}
+
+pub(in crate::app) fn light_theme() -> LightTheme {
+    #[cfg(test)]
+    if let Some((_, light)) = TEST_THEME.get() {
+        return light;
+    }
+    if CLASSIC_LIGHT.load(Ordering::Relaxed) { LightTheme::Classic } else { LightTheme::Warm }
+}
+
+/// A light-mode colour: `warm` in the warm theme, `classic` in the classic
+/// one.
+fn light(warm: Color32, classic: Color32) -> Color32 {
+    match light_theme() {
+        LightTheme::Warm => warm,
+        LightTheme::Classic => classic,
+    }
+}
+
+/// What light mode draws icons over, for caches of icons darkened to read on
+/// it: the darkest of [`icon_backdrops`], so an icon reads on all of them.
+/// `None` in dark mode, which leaves icons as drawn.
+pub(in crate::app) fn icon_backdrop() -> Option<Color32> {
+    if is_dark_mode() {
+        return None;
+    }
+    let luminance = |colour: Color32| {
+        let linear = egui::Rgba::from(colour);
+        0.2126 * linear.r() + 0.7152 * linear.g() + 0.0722 * linear.b()
+    };
+    icon_backdrops()
+        .into_iter()
+        .min_by(|one, other| luminance(*one).total_cmp(&luminance(*other)))
+}
+
+/// The light-mode surfaces tag and button icons sit on: the tag tree and
+/// tab bar, open pages and active tabs, the input wells of reference fields
+/// on either, and the welcome screen's tinted column.
+pub(in crate::app) fn icon_backdrops() -> [Color32; 5] {
+    [
+        left_panel(),
+        editor_bg(),
+        left_panel().blend(foundation_input()),
+        editor_bg().blend(foundation_input()),
+        left_panel().blend(welcome_side_panel()),
+    ]
 }
 
 pub(in crate::app) fn menu_bar() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(50, 50, 50)
     } else {
-        Color32::from_rgb(161, 161, 157)
+        // Classic: the top bar's grey, not main's darker 161, on which the
+        // status colours read at about 2.5:1.
+        light(Color32::from_rgb(229, 204, 178), Color32::from_rgb(219, 219, 216))
     }
 }
 
@@ -521,14 +648,14 @@ pub(in crate::app) fn menu_bar() -> Color32 {
 /// bar and over the status bar. Light mode draws them in the focused
 /// tab's border colour; dark mode keeps its divider.
 pub(in crate::app) fn chrome_edge() -> Color32 {
-    grid_line()
+    if is_dark_mode() || light_theme() == LightTheme::Classic { grid_line() } else { focused_tab_border(false) }
 }
 
 /// The window's frame: the menu bar and the workspace tab bar. Light mode
 /// shares the status bar's peach, so the top and bottom read as one frame
 /// around the warmer workspace.
 pub(in crate::app) fn chrome_bar() -> Color32 {
-    row_type()
+    if is_dark_mode() || light_theme() == LightTheme::Classic { row_type() } else { menu_bar() }
 }
 
 pub(in crate::app) fn active_tab() -> Color32 {
@@ -539,7 +666,7 @@ fn active_tab_for(dark_mode: bool) -> Color32 {
     if dark_mode {
         Color32::from_rgb(72, 72, 72)
     } else {
-        Color32::from_rgb(161, 161, 157)
+        light(Color32::from_rgb(229, 204, 178), Color32::from_rgb(161, 161, 157))
     }
 }
 
@@ -547,7 +674,7 @@ pub(in crate::app) fn foundation_blue() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(134, 184, 213)
     } else {
-        Color32::from_rgb(15, 43, 64)
+        light(Color32::from_rgb(180, 68, 12), Color32::from_rgb(15, 43, 64))
     }
 }
 
@@ -555,7 +682,8 @@ pub(in crate::app) fn left_panel() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(31, 31, 31)
     } else {
-        Color32::from_rgb(238, 238, 234)
+        // Warmer than an open page, lighter than the bars around it.
+        light(Color32::from_rgb(235, 229, 224), Color32::from_rgb(238, 238, 234))
     }
 }
 
@@ -563,7 +691,7 @@ pub(in crate::app) fn editor_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(40, 40, 40)
     } else {
-        Color32::from_rgb(224, 224, 220)
+        light(Color32::from_rgb(242, 241, 240), Color32::from_rgb(224, 224, 220))
     }
 }
 
@@ -571,7 +699,7 @@ pub(in crate::app) fn row_type() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(55, 55, 55)
     } else {
-        Color32::from_rgb(219, 219, 216)
+        light(Color32::from_rgb(236, 232, 228), Color32::from_rgb(219, 219, 216))
     }
 }
 
@@ -579,20 +707,26 @@ pub(in crate::app) fn grid_line() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(82, 82, 82)
     } else {
-        Color32::from_rgb(180, 180, 174)
+        light(Color32::from_rgb(222, 214, 207), Color32::from_rgb(180, 180, 174))
     }
 }
 
 /// Neutral emphasis for the tab owning the currently focused pane.
 pub(in crate::app) fn focused_tab_border(dark_mode: bool) -> Color32 {
-    Color32::from_gray(if dark_mode { 160 } else { 90 })
+    if dark_mode {
+        Color32::from_gray(160)
+    } else {
+        // Marks the focused pane without shouting: a muted Baboon Orange,
+        // or in the classic theme a steel blue.
+        light(Color32::from_rgb(208, 150, 106), Color32::from_rgb(78, 120, 160))
+    }
 }
 
 pub(in crate::app) fn foundation_group_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(43, 43, 43)
     } else {
-        Color32::from_rgb(236, 236, 234)
+        light(Color32::from_rgb(245, 244, 243), Color32::from_rgb(236, 236, 234))
     }
 }
 
@@ -603,7 +737,10 @@ pub(in crate::app) fn foundation_documentation_bg() -> Color32 {
         // brighter than the equivalent design-tool/CSS overlay.
         Color32::from_rgba_premultiplied(13, 13, 13, 13)
     } else {
-        Color32::from_black_alpha(13)
+        // The block headers' sand, half-transparent: on an open page it
+        // lands at that sand, and deepens on a darker pane, as the input
+        // wells do. Documentation and the kit banner read as warm notes.
+        light(Color32::from_rgba_unmultiplied(238, 211, 184, 128), Color32::from_black_alpha(13))
     }
 }
 
@@ -611,7 +748,7 @@ pub(in crate::app) fn foundation_group_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(82, 82, 82)
     } else {
-        Color32::from_rgb(152, 152, 148)
+        light(Color32::from_rgb(216, 207, 199), Color32::from_rgb(152, 152, 148))
     }
 }
 
@@ -619,7 +756,7 @@ pub(in crate::app) fn foundation_section_bar() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(68, 68, 68)
     } else {
-        Color32::from_rgb(214, 214, 210)
+        light(Color32::from_rgb(242, 231, 219), Color32::from_rgb(214, 214, 210))
     }
 }
 
@@ -629,7 +766,7 @@ pub(in crate::app) fn foundation_block_bar() -> Color32 {
     } else {
         // Keep block headers distinct from the section bar without carrying
         // the dark-theme slab into an otherwise light editor.
-        Color32::from_rgb(204, 204, 200)
+        light(Color32::from_rgb(240, 226, 212), Color32::from_rgb(204, 204, 200))
     }
 }
 
@@ -651,9 +788,15 @@ pub(in crate::app) fn foundation_jump_cyan() -> Color32 {
 }
 
 fn input_fill_for(dark_mode: bool) -> Color32 {
-    // Match the literal sRGB overlay convention used by buttons: black in
-    // dark mode, white in light mode, both at approximately 30% alpha.
-    neutral_button_fill(!dark_mode, 77)
+    // Dark mode: the buttons' literal sRGB overlay, black at about 30%.
+    // Light mode: a half-transparent warm sand well, set apart from the
+    // pale buttons. On an open page it lands at #F0E2D5; on a darker pane
+    // it deepens with it, as the dark theme's overlay does.
+    if dark_mode {
+        Color32::from_black_alpha(77)
+    } else {
+        light(Color32::from_rgba_unmultiplied(238, 211, 186, 128), neutral_button_fill(true, 77))
+    }
 }
 
 pub(in crate::app) fn foundation_input() -> Color32 {
@@ -674,7 +817,7 @@ pub(in crate::app) fn foundation_input_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(84, 84, 84)
     } else {
-        Color32::from_rgb(112, 112, 108)
+        light(Color32::from_rgb(204, 153, 102), Color32::from_rgb(112, 112, 108))
     }
 }
 
@@ -686,7 +829,7 @@ fn text_dark_for(dark_mode: bool) -> Color32 {
     if dark_mode {
         Color32::from_rgb(242, 242, 242)
     } else {
-        Color32::from_rgb(25, 25, 24)
+        light(Color32::from_rgb(28, 24, 21), Color32::from_rgb(25, 25, 24))
     }
 }
 
@@ -694,7 +837,7 @@ pub(in crate::app) fn subtle_dark() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(164, 164, 164)
     } else {
-        Color32::from_rgb(82, 82, 78)
+        light(Color32::from_rgb(110, 102, 96), Color32::from_rgb(82, 82, 78))
     }
 }
 
@@ -705,7 +848,7 @@ pub(in crate::app) fn good_news() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(126, 205, 133)
     } else {
-        Color32::from_rgb(22, 116, 51)
+        Color32::from_rgb(16, 100, 42)
     }
 }
 
@@ -750,7 +893,7 @@ pub(in crate::app) fn unapplied_value_fill() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(54, 43, 24)
     } else {
-        Color32::from_rgb(255, 247, 220)
+        light(Color32::from_rgb(255, 243, 201), Color32::from_rgb(255, 247, 220))
     }
 }
 
@@ -784,7 +927,7 @@ pub(in crate::app) fn function_plot_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(64, 64, 62)
     } else {
-        Color32::from_rgb(205, 205, 205)
+        light(Color32::from_rgb(230, 224, 219), Color32::from_rgb(205, 205, 205))
     }
 }
 
@@ -792,7 +935,7 @@ pub(in crate::app) fn function_grid_line() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(132, 132, 126)
     } else {
-        Color32::from_rgb(92, 92, 88)
+        light(Color32::from_rgb(118, 108, 100), Color32::from_rgb(92, 92, 88))
     }
 }
 
@@ -800,7 +943,7 @@ pub(in crate::app) fn foundation_flag_hover() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(58, 58, 56)
     } else {
-        Color32::from_rgb(232, 232, 228)
+        light(Color32::from_rgb(236, 232, 228), Color32::from_rgb(232, 232, 228))
     }
 }
 
@@ -812,7 +955,7 @@ pub(in crate::app) fn material_panel() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(58, 60, 56)
     } else {
-        Color32::from_rgb(238, 238, 235)
+        light(Color32::from_rgb(246, 243, 240), Color32::from_rgb(238, 238, 235))
     }
 }
 
@@ -820,7 +963,7 @@ pub(in crate::app) fn material_panel_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(72, 74, 70)
     } else {
-        Color32::from_rgb(168, 168, 162)
+        light(Color32::from_rgb(196, 184, 174), Color32::from_rgb(168, 168, 162))
     }
 }
 pub(in crate::app) const MATERIAL_REF_ROW: Color32 = Color32::from_rgb(166, 205, 166);
@@ -841,7 +984,7 @@ pub(in crate::app) fn foundation_block_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(94, 94, 94)
     } else {
-        Color32::from_rgb(154, 154, 149)
+        light(Color32::from_rgb(214, 200, 188), Color32::from_rgb(154, 154, 149))
     }
 }
 
@@ -849,7 +992,9 @@ pub(in crate::app) fn browser_search_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_black_alpha(102)
     } else {
-        Color32::from_rgba_premultiplied(102, 102, 102, 102)
+        // The input wells' fill, as the keyword field beside it; the classic
+        // theme keeps its grey.
+        light(foundation_input(), Color32::from_rgba_premultiplied(102, 102, 102, 102))
     }
 }
 
@@ -857,7 +1002,7 @@ pub(in crate::app) fn browser_toolbar_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(68, 68, 68)
     } else {
-        Color32::from_rgb(226, 226, 222)
+        light(Color32::from_rgb(238, 236, 234), Color32::from_rgb(226, 226, 222))
     }
 }
 
@@ -897,7 +1042,7 @@ pub(in crate::app) fn material_data_row() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(42, 43, 41)
     } else {
-        Color32::from_rgb(216, 216, 216)
+        light(Color32::from_rgb(232, 226, 221), Color32::from_rgb(216, 216, 216))
     }
 }
 
@@ -905,7 +1050,7 @@ pub(in crate::app) fn material_grid_light() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(54, 56, 52)
     } else {
-        Color32::from_rgb(198, 198, 192)
+        light(Color32::from_rgb(218, 210, 203), Color32::from_rgb(198, 198, 192))
     }
 }
 
@@ -913,7 +1058,7 @@ pub(in crate::app) fn material_input_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(82, 86, 78)
     } else {
-        Color32::from_rgb(112, 112, 112)
+        light(Color32::from_rgb(175, 162, 152), Color32::from_rgb(112, 112, 112))
     }
 }
 
@@ -921,7 +1066,7 @@ pub(in crate::app) fn material_text() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(231, 232, 226)
     } else {
-        Color32::from_rgb(20, 20, 20)
+        light(Color32::from_rgb(28, 24, 21), Color32::from_rgb(20, 20, 20))
     }
 }
 
@@ -939,7 +1084,7 @@ pub(in crate::app) fn material_muted_text() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(155, 158, 150)
     } else {
-        Color32::from_rgb(96, 96, 96)
+        light(Color32::from_rgb(110, 102, 96), Color32::from_rgb(96, 96, 96))
     }
 }
 
@@ -1110,7 +1255,7 @@ pub(in crate::app) fn value_decreased() -> Color32 {
 
 /// A tick for two things that match: an identical tag, a finished step.
 pub(in crate::app) fn match_tick() -> Color32 {
-    disclosure_triangle_green()
+    good_news()
 }
 
 /// An open folder's icon in the tag tree.
@@ -1143,6 +1288,28 @@ pub(in crate::app) fn group_badge_edge() -> Color32 {
 
 pub(in crate::app) fn group_badge_text() -> Color32 {
     if is_dark_mode() { Color32::from_rgb(226, 235, 240) } else { Color32::from_rgb(58, 70, 79) }
+}
+
+/// The welcome screen's left column, over the page. Dark mode shades it;
+/// light mode lays a pale tint over it instead, so it stays light: sand in
+/// the warm theme, the same lightness in grey in the classic one.
+pub(in crate::app) fn welcome_side_panel() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_black_alpha(51)
+    } else {
+        light(
+            Color32::from_rgba_unmultiplied(238, 211, 184, 80),
+            Color32::from_rgba_unmultiplied(214, 214, 212, 80),
+        )
+    }
+}
+
+/// A navigation section's title (Favorites, Shortcuts, Recents) beside its
+/// `accent` icon. Light mode writes it in the text colour, since a pale
+/// accent such as the favourite star's yellow reads poorly on the light
+/// panel.
+pub(in crate::app) fn navigation_title_text(accent: Color32) -> Color32 {
+    if is_dark_mode() { accent } else { text_dark() }
 }
 
 /// A favourite's filled star.
@@ -1263,12 +1430,18 @@ pub(in crate::app) fn terminal_success_text() -> Color32 {
     Color32::from_rgb(123, 184, 137)
 }
 
+/// A dark-mode slider's rail: a see-through shade, so it sinks into
+/// whatever it is drawn on, a card's header bar or its body.
+pub(in crate::app) fn slider_rail_dark() -> Color32 {
+    Color32::from_black_alpha(90)
+}
+
 /// A progress bar's track and its fill.
 pub(in crate::app) fn progress_track() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(31, 31, 30)
     } else {
-        Color32::from_rgb(215, 215, 210)
+        light(Color32::from_rgb(226, 208, 194), Color32::from_rgb(215, 215, 210))
     }
 }
 
@@ -1285,7 +1458,7 @@ pub(in crate::app) fn help_code_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(24, 27, 29)
     } else {
-        Color32::from_rgb(238, 241, 243)
+        light(Color32::from_rgb(247, 238, 231), Color32::from_rgb(238, 241, 243))
     }
 }
 
@@ -1390,80 +1563,82 @@ pub(in crate::app) fn bitmap_channel_colors(icon: ButtonIcon) -> (Color32, Color
     }
 }
 
-// Status colours still to be unified. Each is a status (an error, a warning,
-// a success) drawn in its own shade; they keep their shades for now and are
-// meant to become invalid_value_text, unapplied_value_text and good_news.
+// Statuses. Every error, warning and success message shares one of three
+// colours, invalid_value_text, unapplied_value_text and good_news, each
+// legible in both themes; these names say where each is used.
+// Warnings that something will be lost or overwritten were red before the
+// colours were shared, so they keep the error red rather than amber.
 
 /// Warnings in the import, compatibility and cache windows.
 pub(in crate::app) fn import_warning_text() -> Color32 {
-    Color32::from_rgb(242, 196, 48)
+    unapplied_value_text()
 }
 
 /// Notes that an action will replace or lose something: mods, Chimp,
 /// closing documents, container dumps.
 pub(in crate::app) fn replace_warning_text() -> Color32 {
-    Color32::from_rgb(210, 120, 90)
+    invalid_value_text()
 }
 
 /// Errors in Chimp's property editor and save dialog.
 pub(in crate::app) fn chimp_error_text() -> Color32 {
-    Color32::from_rgb(210, 120, 80)
+    invalid_value_text()
 }
 
 /// A save or close that failed, and a missing source folder.
 pub(in crate::app) fn save_error_text() -> Color32 {
-    Color32::from_rgb(180, 48, 40)
+    invalid_value_text()
 }
 
 /// Saving over the installed game's containers.
 pub(in crate::app) fn installed_overwrite_text() -> Color32 {
-    Color32::from_rgb(190, 72, 56)
+    invalid_value_text()
 }
 
 /// Errors in Chimp's document view and the Model Preview's panels.
 pub(in crate::app) fn panel_error_text() -> Color32 {
-    Color32::from_rgb(150, 56, 44)
+    invalid_value_text()
 }
 
 /// A bitmap that could not be shown.
 pub(in crate::app) fn bitmap_error_text() -> Color32 {
-    Color32::from_rgb(130, 32, 24)
+    invalid_value_text()
 }
 
 /// Read-only and missing notes in Chimp's headers and the New Tag window.
 pub(in crate::app) fn header_notice_text() -> Color32 {
-    Color32::from_rgb(170, 130, 60)
+    unapplied_value_text()
 }
 
 /// A browser filter that cannot match as typed.
 pub(in crate::app) fn filter_warning_text() -> Color32 {
-    Color32::from_rgb(184, 134, 11)
+    unapplied_value_text()
 }
 
 /// Settings that need attention.
 pub(in crate::app) fn settings_warning_text() -> Color32 {
-    Color32::from_rgb(220, 170, 70)
+    unapplied_value_text()
 }
 
 /// Expert mode's note in the reference picker.
 pub(in crate::app) fn expert_mode_text() -> Color32 {
-    Color32::from_rgb(214, 166, 64)
+    unapplied_value_text()
 }
 
 /// A drop target that will take what is dragged over it, and a search's
 /// result count.
 pub(in crate::app) fn accept_text() -> Color32 {
-    Color32::from_rgb(120, 170, 90)
+    good_news()
 }
 
 /// The Add icon on a shortcut row.
 pub(in crate::app) fn add_icon() -> Color32 {
-    Color32::from_rgb(126, 211, 75)
+    good_news()
 }
 
 /// Errors and archive names in Chimp's browser.
 pub(in crate::app) fn chimp_browser_error_text() -> Color32 {
-    Color32::from_rgb(210, 80, 80)
+    invalid_value_text()
 }
 
 pub(in crate::app) fn chimp_archive_text() -> Color32 {
@@ -1472,27 +1647,27 @@ pub(in crate::app) fn chimp_archive_text() -> Color32 {
 
 /// Untyped bytes Chimp keeps read-only.
 pub(in crate::app) fn chimp_raw_value_text() -> Color32 {
-    Color32::from_rgb(190, 150, 70)
+    unapplied_value_text()
 }
 
 /// Errors in the git review window.
 pub(in crate::app) fn review_error_text() -> Color32 {
-    Color32::from_rgb(225, 105, 105)
+    invalid_value_text()
 }
 
 /// Errors in the first-run window.
 pub(in crate::app) fn first_run_error_text() -> Color32 {
-    Color32::from_rgb(220, 70, 70)
+    invalid_value_text()
 }
 
 /// A reference to a tag that is not in the kit.
 pub(in crate::app) fn reference_missing_text() -> Color32 {
-    Color32::from_rgb(216, 92, 92)
+    invalid_value_text()
 }
 
 /// An error message in a window.
 pub(in crate::app) fn error_text() -> Color32 {
-    material_delete_text()
+    invalid_value_text()
 }
 
 /// How long a status message stays on the status line before it clears.
@@ -1627,8 +1802,13 @@ mod tests {
     fn neutral_button_fills_use_literal_ten_and_twenty_percent_channels() {
         assert_eq!(neutral_button_fill(true, 26).to_array(), [26, 26, 26, 26]);
         assert_eq!(neutral_button_fill(true, 51).to_array(), [51, 51, 51, 51]);
-        assert_eq!(neutral_button_fill(false, 26).to_array(), [0, 0, 0, 26]);
-        assert_eq!(neutral_button_fill(false, 51).to_array(), [0, 0, 0, 51]);
+        // Warm light mode: a warm brown at the same opacity, not black.
+        with_theme(false, LightTheme::Warm, || {
+            let light = neutral_button_fill(false, 26);
+            assert_eq!(light.a(), 26);
+            assert!(light.r() > light.g() && light.g() > light.b(), "{light:?}");
+            assert_eq!(neutral_button_fill(false, 51).a(), 51);
+        });
     }
 
     /// WCAG contrast ratio between two opaque colors.
@@ -1642,6 +1822,70 @@ mod tests {
         };
         let (x, y) = (luminance(a) + 0.05, luminance(b) + 0.05);
         x.max(y) / x.min(y)
+    }
+
+    const THEMES: [(bool, LightTheme); 3] =
+        [(false, LightTheme::Warm), (false, LightTheme::Classic), (true, LightTheme::Warm)];
+
+    /// The classic light theme is main's grey look: its panels, pages and
+    /// navy accent are the ones Baboon had before the warm theme.
+    #[test]
+    fn the_classic_light_theme_keeps_the_grey_look() {
+        with_theme(false, LightTheme::Classic, || {
+            assert_eq!(editor_bg(), Color32::from_rgb(224, 224, 220));
+            assert_eq!(left_panel(), Color32::from_rgb(238, 238, 234));
+            assert_eq!(row_type(), Color32::from_rgb(219, 219, 216));
+            assert_eq!(menu_bar(), row_type(), "the status bar matches the top bar");
+            assert_eq!(chrome_bar(), row_type());
+            assert_eq!(foundation_blue(), Color32::from_rgb(15, 43, 64));
+            assert_eq!(neutral_button_fill(false, 26), Color32::from_black_alpha(26));
+            // Blue highlights rather than orange.
+            let border = focused_tab_border(false);
+            assert!(border.b() > border.r(), "{border:?}");
+        });
+        with_theme(false, LightTheme::Warm, || {
+            assert_eq!(editor_bg(), Color32::from_rgb(242, 241, 240));
+            assert_eq!(chrome_bar(), menu_bar());
+        });
+    }
+
+    /// Selected text reads on the selection in every theme. The classic
+    /// theme's old #4B7D9B selection held dark text at about 4:1.
+    #[test]
+    fn selected_text_reads_on_the_selection_in_every_theme() {
+        for (dark, light) in THEMES {
+            with_theme(dark, light, || {
+                let ratio = contrast(text_dark(), selection_fill_for(dark));
+                assert!(ratio >= 4.5, "{light:?}, dark {dark}: {ratio:.2}");
+            });
+        }
+        assert!(contrast(text_dark_for(false), Color32::from_rgb(75, 125, 155)) < 4.5);
+    }
+
+    /// Error, warning and success messages read at 4.5:1 on the pages,
+    /// panels and status bar they sit on, in every theme. The warm status
+    /// bar held the success green at 3.8:1.
+    #[test]
+    fn status_colours_read_on_every_theme_background() {
+        for (dark, light) in THEMES {
+            with_theme(dark, light, || {
+                for (name, colour) in [
+                    ("error", invalid_value_text()),
+                    ("warning", unapplied_value_text()),
+                    ("success", good_news()),
+                ] {
+                    for (place, backdrop) in [
+                        ("page", editor_bg()),
+                        ("panel", left_panel()),
+                        ("group", foundation_group_bg()),
+                        ("status bar", menu_bar()),
+                    ] {
+                        let ratio = contrast(colour, backdrop);
+                        assert!(ratio >= 4.5, "{name} on the {place}, {light:?}, dark {dark}: {ratio:.2}");
+                    }
+                }
+            });
+        }
     }
 
     /// An invalid value's box keeps its text readable in either theme, and
@@ -1661,8 +1905,10 @@ mod tests {
     #[test]
     fn selection_colors_are_lighter_with_a_dark_border_in_light_mode() {
         assert_eq!(selection_fill_for(true), Color32::from_rgb(64, 108, 134));
-        assert_eq!(selection_fill_for(false), Color32::from_rgb(75, 125, 155));
-        assert_eq!(selection_stroke_for(false), Color32::from_rgb(38, 63, 78));
+        with_theme(false, LightTheme::Warm, || {
+            assert_eq!(selection_fill_for(false), Color32::from_rgb(146, 192, 226));
+            assert_eq!(selection_stroke_for(false), Color32::from_rgb(38, 63, 78));
+        });
     }
 
     // Unit tests for shared visual-style helpers.
@@ -1690,7 +1936,9 @@ mod tests {
 
     #[test]
     fn light_active_tab_keeps_the_existing_menu_bar_color() {
-        assert_eq!(active_tab_for(false), Color32::from_rgb(161, 161, 157));
+        with_theme(false, LightTheme::Warm, || {
+            assert_eq!(active_tab_for(false), Color32::from_rgb(229, 204, 178));
+        });
     }
 
     #[test]

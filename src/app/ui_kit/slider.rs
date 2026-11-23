@@ -2,7 +2,7 @@
 //! the handle's own colour, which in light mode is the panel's, so the rail
 //! vanished.
 
-use super::style::{foundation_group_bg, foundation_input, foundation_input_edge, is_dark_mode};
+use super::style::{foundation_group_bg, foundation_input, foundation_input_edge, is_dark_mode, slider_rail_dark};
 use eframe::egui;
 use eframe::egui::{Color32, Ui};
 
@@ -42,8 +42,6 @@ fn railed_slider_over(
     marks: impl FnOnce(egui::Rect) -> Vec<egui::Shape>,
 ) -> egui::Response {
     ui.scope(|ui| {
-        // egui's own rail: the handle's fill, before any fading below.
-        let egui_rail = ui.visuals().widgets.inactive.bg_fill;
         // How much of each colour shows: the opacity egui would have drawn at.
         let opacity = if enabled && ui.is_enabled() {
             1.0
@@ -82,7 +80,7 @@ fn railed_slider_over(
         let rail_height = ui.spacing().slider_rail_height;
         let rail_length = ui.spacing().slider_width;
         let (fill, edge) = if is_dark_mode() {
-            (egui_rail, egui::Stroke::NONE)
+            (slider_rail_dark(), egui::Stroke::NONE)
         } else {
             (foundation_input(), egui::Stroke::new(1.0, foundation_input_edge()))
         };
