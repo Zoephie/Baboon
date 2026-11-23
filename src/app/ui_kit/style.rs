@@ -1800,11 +1800,13 @@ mod tests {
     fn neutral_button_fills_use_literal_ten_and_twenty_percent_channels() {
         assert_eq!(neutral_button_fill(true, 26).to_array(), [26, 26, 26, 26]);
         assert_eq!(neutral_button_fill(true, 51).to_array(), [51, 51, 51, 51]);
-        // Light mode: a warm brown at the same opacity, not black.
-        let light = neutral_button_fill(false, 26);
-        assert_eq!(light.a(), 26);
-        assert!(light.r() > light.g() && light.g() > light.b(), "{light:?}");
-        assert_eq!(neutral_button_fill(false, 51).a(), 51);
+        // Warm light mode: a warm brown at the same opacity, not black.
+        with_theme(false, LightTheme::Warm, || {
+            let light = neutral_button_fill(false, 26);
+            assert_eq!(light.a(), 26);
+            assert!(light.r() > light.g() && light.g() > light.b(), "{light:?}");
+            assert_eq!(neutral_button_fill(false, 51).a(), 51);
+        });
     }
 
     /// WCAG contrast ratio between two opaque colors.
@@ -1901,8 +1903,10 @@ mod tests {
     #[test]
     fn selection_colors_are_lighter_with_a_dark_border_in_light_mode() {
         assert_eq!(selection_fill_for(true), Color32::from_rgb(64, 108, 134));
-        assert_eq!(selection_fill_for(false), Color32::from_rgb(146, 192, 226));
-        assert_eq!(selection_stroke_for(false), Color32::from_rgb(38, 63, 78));
+        with_theme(false, LightTheme::Warm, || {
+            assert_eq!(selection_fill_for(false), Color32::from_rgb(146, 192, 226));
+            assert_eq!(selection_stroke_for(false), Color32::from_rgb(38, 63, 78));
+        });
     }
 
     // Unit tests for shared visual-style helpers.
@@ -1930,7 +1934,9 @@ mod tests {
 
     #[test]
     fn light_active_tab_keeps_the_existing_menu_bar_color() {
-        assert_eq!(active_tab_for(false), Color32::from_rgb(229, 204, 178));
+        with_theme(false, LightTheme::Warm, || {
+            assert_eq!(active_tab_for(false), Color32::from_rgb(229, 204, 178));
+        });
     }
 
     #[test]

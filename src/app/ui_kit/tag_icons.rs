@@ -692,6 +692,27 @@ mod tests {
         assert!(!std::str::from_utf8(&dark).unwrap().contains("currentColor"));
     }
 
+    /// Every `#RRGGBB` an icon paints with, fills, strokes and gradient
+    /// stops alike: the colours [`darken_hex_colors`] changes.
+    fn painted_colors(svg: &str) -> Vec<[u8; 3]> {
+        svg.match_indices('#')
+            .filter_map(|(at, _)| {
+                let digits = svg.get(at + 1..at + 7)?;
+                let whole = digits.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    && !svg[at + 7..].starts_with(|c: char| c.is_ascii_hexdigit());
+                let value = u32::from_str_radix(digits, 16).ok().filter(|_| whole)?;
+                Some([(value >> 16) as u8, (value >> 8) as u8, value as u8])
+            })
+            .collect()
+    }
+
+    /// The colour scan sees strokes and gradient stops, not only fills.
+    #[test]
+    fn painted_colors_include_strokes_and_gradient_stops() {
+        let svg = r##"<path fill="#112233" stroke="#445566"/><stop stop-color="#778899"/><use href="#a"/>"##;
+        assert_eq!(painted_colors(svg), vec![[0x11, 0x22, 0x33], [0x44, 0x55, 0x66], [0x77, 0x88, 0x99]]);
+    }
+
     /// On a light backdrop every coloured icon is darkened to read at 3:1,
     /// keeping its hue; one that already reads keeps its colour.
     #[test]
@@ -705,9 +726,7 @@ mod tests {
         for (icon, _) in GROUP_ICONS {
             let svg = themed_tag_icon_bytes(*icon, [0; 3], Some(backdrop));
             let svg = std::str::from_utf8(&svg).unwrap();
-            for (at, _) in svg.match_indices("fill=\"#") {
-                let value = u32::from_str_radix(&svg[at + 7..at + 13], 16).unwrap();
-                let color = [(value >> 16) as u8, (value >> 8) as u8, value as u8];
+            for color in painted_colors(svg) {
                 assert!(
                     color == [255; 3] || contrast(color, backdrop) >= ICON_CONTRAST - 0.01,
                     "{}: {color:?}",
@@ -732,9 +751,7 @@ mod tests {
                 for (icon, _) in GROUP_ICONS {
                     let svg = themed_tag_icon_bytes(*icon, [0; 3], Some(darkest));
                     let svg = std::str::from_utf8(&svg).unwrap();
-                    for (at, _) in svg.match_indices("fill=\"#") {
-                        let value = u32::from_str_radix(&svg[at + 7..at + 13], 16).unwrap();
-                        let color = [(value >> 16) as u8, (value >> 8) as u8, value as u8];
+                    for color in painted_colors(svg) {
                         if color == [255; 3] {
                             continue;
                         }
