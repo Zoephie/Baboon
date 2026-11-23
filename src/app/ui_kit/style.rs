@@ -1566,6 +1566,8 @@ pub(in crate::app) fn bitmap_channel_colors(icon: ButtonIcon) -> (Color32, Color
 // Statuses. Every error, warning and success message shares one of three
 // colours, invalid_value_text, unapplied_value_text and good_news, each
 // legible in both themes; these names say where each is used.
+// Warnings that something will be lost or overwritten were red before the
+// colours were shared, so they keep the error red rather than amber.
 
 /// Warnings in the import, compatibility and cache windows.
 pub(in crate::app) fn import_warning_text() -> Color32 {
@@ -1575,7 +1577,7 @@ pub(in crate::app) fn import_warning_text() -> Color32 {
 /// Notes that an action will replace or lose something: mods, Chimp,
 /// closing documents, container dumps.
 pub(in crate::app) fn replace_warning_text() -> Color32 {
-    unapplied_value_text()
+    invalid_value_text()
 }
 
 /// Errors in Chimp's property editor and save dialog.
@@ -1590,7 +1592,7 @@ pub(in crate::app) fn save_error_text() -> Color32 {
 
 /// Saving over the installed game's containers.
 pub(in crate::app) fn installed_overwrite_text() -> Color32 {
-    unapplied_value_text()
+    invalid_value_text()
 }
 
 /// Errors in Chimp's document view and the Model Preview's panels.
