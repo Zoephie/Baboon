@@ -2,6 +2,7 @@
 //! It owns source identity, discovery, indexing, and source-aware reads; editor presentation and application workflow state belong elsewhere.
 
 use super::*;
+use crate::core::document::disk::DiskStamp;
 
 /// Loads one self-describing non-classic tag and seeds the document cache with it.
 /// Classic tags intentionally require folder loading so their game layout is known.
@@ -928,6 +929,24 @@ fn chunk_number(utoc: &Path) -> u32 {
         .unwrap_or(u32::MAX)
 }
 
+/// [`read_entry`], plus what a loose kit's file looked like when it was read,
+/// so an open document can tell later whether its file has changed. Other
+/// sources give no stamp.
+pub fn read_entry_stamped(source: &TagSource, entry: &TagEntry) -> Result<(TagFile, Option<DiskStamp>)> {
+    let (TagEntryLocation::LooseFile(path), TagSource::LooseFolder { game, definitions_root, .. }) =
+        (&entry.location, source)
+    else {
+        return Ok((read_entry(source, entry)?, None));
+    };
+    (|| {
+        let metadata = std::fs::metadata(path)?;
+        let bytes = std::fs::read(path)?;
+        let stamp = DiskStamp::of(&metadata, &bytes);
+        anyhow::Ok((parse_loose_tag(bytes, entry, *game, definitions_root)?, Some(stamp)))
+    })()
+    .with_context(|| format!("failed to load {}", path.display()))
+}
+
 /// Reads an entry using the storage and parsing rules of its owning source.
 /// Mismatched source/location pairs are rejected rather than guessed.
 pub fn read_entry(source: &TagSource, entry: &TagEntry) -> Result<TagFile> {
@@ -1067,7 +1086,20 @@ fn read_loose_tag(
     game: Option<GameId>,
     definitions_root: &Path,
 ) -> Result<TagFile> {
-    let bytes = std::fs::read(path)?;
+    // Work drawing from open tags' unsaved edits reads those instead.
+    let bytes = match super::reads::note_read(path) {
+        Some(edits) => edits,
+        None => std::fs::read(path)?,
+    };
+    parse_loose_tag(bytes, entry, game, definitions_root)
+}
+
+fn parse_loose_tag(
+    bytes: Vec<u8>,
+    entry: &TagEntry,
+    game: Option<GameId>,
+    definitions_root: &Path,
+) -> Result<TagFile> {
     if blam_tags::halo5::looks_like_halo5(&bytes) {
         return read_halo5_with_layout(&bytes, entry.group_tag);
     }
@@ -1102,7 +1134,7 @@ fn read_loose_tag(
         return read_classic_tag_file(&bytes, layout)
             .map_err(|error| anyhow::anyhow!("failed to decode classic tag: {error}"));
     }
-    TagFile::read(path).map_err(Into::into)
+    TagFile::read_from_bytes(&bytes).map_err(Into::into)
 }
 
 /// Like classic tags, extracted Halo 5 tags use external JSON definitions. No

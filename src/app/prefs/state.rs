@@ -546,6 +546,10 @@ pub(in crate::app) struct GuiPrefs {
     /// What the model preview's viewport is cleared to. Shared by every tag
     /// pane and remembered across sessions.
     pub(in crate::app) model_preview_background: crate::app::model_preview::ModelPreviewBackground,
+    /// The model preview draws other open tags' unsaved edits (a shader
+    /// being tuned) instead of their saved files. Shared by every tag pane
+    /// and remembered across sessions; off by default.
+    pub(in crate::app) model_preview_unsaved_edits: bool,
     pub(in crate::app) bitmap_preview_view: BitmapPreviewViewSettings,
     pub(in crate::app) blender_path: Option<PathBuf>,
     pub(in crate::app) editing_kit_paths: HashMap<String, PathBuf>,
@@ -633,6 +637,7 @@ impl Default for GuiPrefs {
             zoom_speed: DEFAULT_ZOOM_SPEED,
             model_setup_width: DEFAULT_MODEL_SETUP_WIDTH,
             model_preview_perspective: true,
+            model_preview_unsaved_edits: false,
             model_preview_background: crate::app::model_preview::ModelPreviewBackground::Theme,
             bitmap_preview_view: BitmapPreviewViewSettings::default(),
             blender_path: None,

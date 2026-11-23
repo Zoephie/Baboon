@@ -1016,6 +1016,10 @@ impl Baboon {
         self.window_state.observe(ctx);
         if self.dialogs.get::<FirstRunWizardState>().is_none() {
             self.process_worker_messages(ctx);
+            self.check_open_tags_on_focus(ctx);
+            self.check_open_tags_on_watch(ctx);
+            self.run_due_git_review_refreshes(ctx);
+            self.check_previews_for_unsaved_edits(ctx);
             self.expire_status(ctx);
         }
         // Raised by the previous frame, whose UI has since committed any edit
@@ -3101,6 +3105,97 @@ mod tests {
         h.idle(3);
     }
 
+    /// A field label painted once, partway down the tag pane, and where.
+    fn pane_label(h: &Harness) -> (String, f32) {
+        h.painted_rects
+            .iter()
+            .filter(|(text, rect)| {
+                rect.min.x > SCREEN.x * 0.3
+                    && rect.min.y > SCREEN.y * 0.4
+                    && rect.min.y < SCREEN.y * 0.7
+                    && text.chars().any(|c| c.is_alphabetic())
+                    && h.painted.iter().filter(|other| *other == text).count() == 1
+            })
+            .map(|(text, rect)| (text.clone(), rect.min.y))
+            .next()
+            .expect("a field label in the middle of the pane")
+    }
+
+    fn label_y(h: &Harness, label: &str) -> Option<f32> {
+        h.painted_rects.iter().find(|(text, _)| text == label).map(|(_, rect)| rect.min.y)
+    }
+
+    /// Cancel in Save's changed-on-disk window closes it and leaves the
+    /// tag's banner, so the choice is still waiting.
+    #[test]
+    fn cancelling_the_disk_save_window_keeps_the_banner() {
+        let mut h = Harness::new();
+        loose_kit(&mut h);
+        let path = loose_root(&h).join("objects/weapons/rifle/rifle.biped");
+        let key = file_entry_key(&path);
+        let now = DiskStamp::of_file(&path).unwrap();
+        let kit = active_id(&h);
+        h.app.model.kits[h.app.model.active]
+            .disk
+            .notices
+            .insert(key.clone(), crate::app::documents::DiskNotice::Changed(now));
+        h.app.dialogs.open(crate::app::documents::DiskSaveConfirm {
+            kit,
+            key: key.clone(),
+            display_path: "objects\\weapons\\rifle\\rifle.biped".to_owned(),
+            group_tag: crate::app::loose_fixture::group_tag(fixture::GAME, "biped"),
+        });
+        h.idle(3);
+        assert!(h.painted_contains("Tag Changed on Disk"));
+
+        h.click("Cancel", 0);
+        h.idle(2);
+
+        assert!(h.app.dialogs.get::<crate::app::documents::DiskSaveConfirm>().is_none());
+        assert!(!h.painted_contains("Tag Changed on Disk"));
+        assert!(h.app.model.kits[h.app.model.active].disk.notices.contains_key(&key));
+    }
+
+    /// The changed-on-disk banner sits above the scrolling fields: showing it
+    /// moves them down by its own height and no more, and answering it puts
+    /// them back. The scroll position itself is untouched.
+    #[test]
+    fn the_disk_banner_keeps_the_fields_scrolled_where_they_were() {
+        let mut h = Harness::new();
+        let key = setup_large_tag(&mut h);
+        fixture::expand_all(&mut h.app, &key);
+        h.idle(3);
+        let over = egui::pos2(SCREEN.x * 0.6, SCREEN.y * 0.6);
+        h.frame(vec![pointer_at(over)]);
+        let (top_label, _) = pane_label(&h);
+        for _ in 0..12 {
+            h.frame(vec![pointer_at(over), wheel(-120.0)]);
+        }
+        h.idle(30);
+        assert!(
+            label_y(&h, &top_label).is_none_or(|y| y < SCREEN.y * 0.4),
+            "the wheel did not scroll the pane"
+        );
+        let (label, before) = pane_label(&h);
+
+        let file = temp_dir("disk-banner").join("perf.scenario");
+        std::fs::write(&file, b"changed").unwrap();
+        let now = DiskStamp::of_file(&file).unwrap();
+        h.app.model.kits[h.app.model.active].disk.notices.insert(key.clone(), crate::app::documents::DiskNotice::Changed(now));
+        h.idle(3);
+        assert!(h.painted_contains("perf.scenario changed on disk. You have unsaved edits."));
+        let shown = label_y(&h, &label).expect("the field stays on screen");
+        let moved = shown - before;
+        assert!((16.0..=48.0).contains(&moved), "the fields moved {moved} points under the banner");
+
+        h.click("Keep My Edits", 0);
+        h.idle(3);
+        assert!(!h.painted_contains("changed on disk"), "the banner goes once answered");
+        assert!(!h.app.model.kits[h.app.model.active].disk.notices.contains_key(&key));
+        let back = label_y(&h, &label).expect("the field is still on screen");
+        assert!((back - before).abs() < 1.0, "the fields return to {before}, not {back}");
+    }
+
     /// Typing `tag_075`, deleting back to `t`, then `tag_14`: every frame is a
     /// new query, so every frame re-filters all 60,000 entries.
     const FILTER_KEYSTROKES: [&str; 16] = [
@@ -4771,6 +4866,29 @@ mod tests {
                 &["Delete Tag?", "Delete Tag", "Cancel", "smoke.scenario", "1 Tag Will Have Missing References"],
             ),
             case(
+                "disk_save_confirm",
+                &["dialog:DiskSaveConfirm"],
+                &[],
+                loose_kit,
+                |h| {
+                    let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
+                    let key = file_entry_key(&path);
+                    let now = DiskStamp::of_file(&path).unwrap();
+                    let kit = active_id(h);
+                    h.app.model.kits[h.app.model.active]
+                        .disk
+                        .notices
+                        .insert(key.clone(), crate::app::documents::DiskNotice::Changed(now));
+                    h.app.dialogs.open(crate::app::documents::DiskSaveConfirm {
+                        kit,
+                        key,
+                        display_path: "objects\\weapons\\rifle\\rifle.biped".to_owned(),
+                        group_tag: crate::app::loose_fixture::group_tag(fixture::GAME, "biped"),
+                    });
+                },
+                &["Tag Changed on Disk", "Save Anyway", "Reload from Disk", "Cancel", "rifle.biped"],
+            ),
+            case(
                 "delete_folder_confirm",
                 &["dialog:DeleteFolderConfirm"],
                 &[],
@@ -5359,6 +5477,7 @@ mod tests {
             "documents.allow_app_close_once",
             "lets the confirmed second app-close request through",
         ),
+        ("documents.window_focused", "focus tracker for the disk check"),
         ("kit_tools.kit_tool_drag", "drag-and-drop tracker"),
         ("ce_usmap", "parsed mappings cache"),
         ("export.pending_sound_extract", "a queued request"),
@@ -8319,6 +8438,99 @@ mod tests {
         h.shoot(&dir.join("app_banshee_model_with_imposter.png"));
     }
 
+    /// A real model's preview notes every tag file its jobs read, its
+    /// shaders and bitmaps among them: what a save or the folder watch checks
+    /// to reload it. Reads the kit only. With `BLAM_TEST_H3EK` naming the
+    /// kit's tags.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn model_preview_reads_note_a_real_models_shaders_and_bitmaps() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let mut h = Harness::recording();
+        h.frame(Vec::new());
+        let folder = "objects/characters/ambient_life/butterfly_b";
+        let entries = install_kit_subtree(&mut h, &root, GameId::Halo3, folder);
+        let key = open_model_page(&mut h, &entries, &format!("{folder}/butterfly_b.render_model"));
+        let id = h.app.model.kits[h.app.model.active].id;
+        let read = |h: &Harness, extension: &str| {
+            h.app.views[id].caches.model_previews[&key].reads.contains_extension(extension)
+        };
+        let started = Instant::now();
+        while !(read(&h, "shader") && read(&h, "bitmap")) {
+            assert!(started.elapsed() < Duration::from_secs(120), "the preview never read its shaders and bitmaps");
+            h.frame(Vec::new());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(read(&h, "render_model"));
+    }
+
+    /// With View > Show Unsaved Edits on, a real preview draws its shader's
+    /// unsaved edits: an edit made in memory loads the model again, reading
+    /// the shader from the document; closing the shader without saving loads
+    /// it from the file again. Nothing is written to the kit. With
+    /// `BLAM_TEST_H3EK` naming the kit's tags.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn a_real_preview_draws_and_drops_a_shaders_unsaved_edits() {
+        use crate::core::source::reads::{ReadAs, file_key};
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let mut h = Harness::recording();
+        h.frame(Vec::new());
+        h.app.model.prefs.model_preview_unsaved_edits = true;
+        let entries = install_kit_subtree(&mut h, &root, GameId::Halo3, "objects/characters/ambient_life");
+        let key = open_model_page(&mut h, &entries, "butterfly_b/butterfly_b.render_model");
+        let id = h.app.model.kits[h.app.model.active].id;
+        let wait = |h: &mut Harness, what: &str, done: &dyn Fn(&Harness) -> bool| {
+            let started = Instant::now();
+            while !done(h) {
+                assert!(started.elapsed() < Duration::from_secs(120), "timed out waiting for {what}");
+                h.frame(Vec::new());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        wait(&mut h, "the shader to be read", &|h| {
+            h.app.views[id].caches.model_previews[&key].reads.contains_extension("shader")
+        });
+        let shader_file = h.app.views[id].caches.model_previews[&key]
+            .reads
+            .keys()
+            .into_iter()
+            .find(|file| file.ends_with(".shader"))
+            .unwrap();
+        let shader = entries
+            .iter()
+            .find(|entry| matches!(&entry.location, TagEntryLocation::LooseFile(path) if file_key(path) == shader_file))
+            .expect("the shader is in the kit")
+            .key
+            .clone();
+        let shader_path = std::path::PathBuf::from(&shader_file);
+        let active = h.app.model.active;
+        // Beside the preview, as when tuning a shader while watching it.
+        h.app.kit_and_view(active).open_tag_pane_beside(&shader);
+        h.app.load_tag_in(active, shader.clone(), h.ctx.clone(), false);
+        wait(&mut h, "the shader to open", &|h| h.app.model.kits[active].parsed_tags.contains_key(&shader));
+
+        h.app.model.kits[active].parsed_tags.get_mut(&shader).unwrap().dirty.touch();
+        let stamp = h.app.model.kits[active].parsed_tags[&shader].content_stamp();
+        wait(&mut h, "the preview to draw the edits", &|h| {
+            let state = &h.app.views[id].caches.model_previews[&key];
+            state.reads.read_as(&shader_path) == Some(ReadAs::Edits(stamp)) && !state.needs_preview_load(&key)
+        });
+
+        // Closed without saving.
+        h.app.kit_and_view(active).drop_document(&shader);
+        wait(&mut h, "the preview to draw the file again", &|h| {
+            let state = &h.app.views[id].caches.model_previews[&key];
+            matches!(state.reads.read_as(&shader_path), Some(ReadAs::Disk(_))) && !state.needs_preview_load(&key)
+        });
+    }
+
     /// Refresh Bitmap reads the tag from disk again: a bitmap reimported
     /// outside Baboon shows its new image without closing the tab. It is
     /// greyed out while the tag has unsaved edits, which a reload would
@@ -8714,6 +8926,167 @@ mod tests {
             h.app.select_entry(other, h.ctx.clone());
             settle(&mut h);
             h.shoot(&dir.join(format!("mini_{theme}.png")));
+        }
+    }
+
+    /// `BABOON_APP_SHOTS` shots of the changed-on-disk banner over
+    /// `BABOON_SHOT_TAG` (under `BLAM_TEST_H2EK`'s tags), light and dark, at
+    /// the full width and about half of it.
+    /// A Git Review with a revision list, changed tags and a chosen tag, made
+    /// up rather than read from Git, so a frame can show any loading state.
+    fn staged_git_review(h: &mut Harness) {
+        use crate::app::compare::{GitReviewCommit, GitReviewFile};
+        loose_kit(h);
+        h.app.kit_and_view(h.app.model.active).open_tag_pane(GIT_REVIEW_KEY);
+        let id = h.app.model.kits[h.app.model.active].id;
+        let state = &mut h.app.views[id].git_review;
+        state.repo_root = Some(std::path::PathBuf::from(r"C:\kits\H3EK"));
+        state.branch = "main".to_owned();
+        state.commits = ["Tune the rifle's spread", "Add the smoke level"]
+            .iter()
+            .enumerate()
+            .map(|(index, subject)| GitReviewCommit {
+                hash: format!("{index}abcdef"),
+                short_hash: format!("{index}abcdef"),
+                author: "Baboon Test".to_owned(),
+                date: "2026-11-21".to_owned(),
+                subject: (*subject).to_owned(),
+            })
+            .collect();
+        state.files = vec![
+            GitReviewFile {
+                status: "M".to_owned(),
+                path: "tags/objects/weapons/rifle/rifle.biped".to_owned(),
+                group_tag: u32::from_be_bytes(*b"bipd"),
+            },
+            GitReviewFile {
+                status: "?".to_owned(),
+                path: "tags/levels/smoke/smoke.scenario".to_owned(),
+                group_tag: u32::from_be_bytes(*b"scnr"),
+            },
+        ];
+        state.local_files = state.files.clone();
+        state.selected_path = Some(state.files[0].path.clone());
+        h.idle(4);
+    }
+
+    fn set_git_review_loading(h: &mut Harness, changes: bool, diff: bool) {
+        let id = h.app.model.kits[h.app.model.active].id;
+        let state = &mut h.app.views[id].git_review;
+        state.loading = changes || diff;
+        state.loading_panes = crate::app::compare::GitReviewPanes { changes, diff };
+        h.idle(4);
+    }
+
+    /// Loading shows a spinner inside the pane being replaced instead of a
+    /// line above the panes: nothing else on the page moves.
+    #[test]
+    fn git_review_loading_spins_in_its_pane_without_moving_the_page() {
+        let mut h = Harness::new();
+        staged_git_review(&mut h);
+        // The scenario is a change only the review lists; the browser and
+        // the differences title name the biped too.
+        let changes_listed = |h: &Harness| h.painted.iter().any(|text| text.contains("smoke.scenario"));
+        let commit = painted_at(&h, "Tune the rifle's spread");
+        assert!(changes_listed(&h));
+
+        // Choosing a revision: the changed tags give way to a spinner.
+        set_git_review_loading(&mut h, true, false);
+        assert!(!changes_listed(&h), "the stale changes are not shown");
+        assert!(!h.painted_contains("Reading Git"), "no line above the panes");
+        assert_eq!(painted_at(&h, "Tune the rifle's spread"), commit, "the revisions stay put");
+
+        // Choosing a tag: only its differences wait.
+        set_git_review_loading(&mut h, false, true);
+        assert!(changes_listed(&h));
+        assert!(!h.painted_contains("Choose a tag to inspect"));
+        assert_eq!(painted_at(&h, "Tune the rifle's spread"), commit);
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
+    fn app_shots_of_git_review_loading() {
+        let Some(dir) = std::env::var_os("BABOON_APP_SHOTS") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        for dark in [false, true] {
+            let mut h = Harness::recording();
+            h.app.model.prefs.follow_system_theme = false;
+            h.app.model.prefs.dark_mode = dark;
+            h.frame(Vec::new());
+            staged_git_review(&mut h);
+            let theme = if dark { "dark" } else { "light" };
+            for (name, changes, diff) in [("idle", false, false), ("changes", true, false), ("diff", false, true)] {
+                set_git_review_loading(&mut h, changes, diff);
+                h.shoot(&dir.join(format!("git_review_loading_{name}_{theme}.png")));
+            }
+        }
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
+    fn app_shots_of_the_disk_banner() {
+        let (Some(dir), Ok(root), Ok(tag)) = (
+            std::env::var_os("BABOON_APP_SHOTS"),
+            std::env::var("BLAM_TEST_H2EK"),
+            std::env::var("BABOON_SHOT_TAG"),
+        ) else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let dir = std::path::PathBuf::from(dir);
+        let subtree = tag.rsplit_once('/').map_or("", |(folder, _)| folder).to_owned();
+        for (dark, width) in [(false, SCREEN.x), (true, SCREEN.x), (false, 960.0), (true, 960.0)] {
+            let mut h = Harness::recording();
+            h.screen = egui::vec2(width, SCREEN.y);
+            h.app.model.prefs.follow_system_theme = false;
+            h.app.model.prefs.dark_mode = dark;
+            h.frame(Vec::new());
+            let entries = install_kit_subtree(&mut h, &root, GameId::Halo2, &subtree);
+            let wanted = tag.replace('/', "\\");
+            let entry = entries
+                .iter()
+                .find(|entry| entry.display_path.to_ascii_lowercase().ends_with(&wanted))
+                .expect("the tag")
+                .clone();
+            let settle = |h: &mut Harness| {
+                for _ in 0..90 {
+                    h.frame(Vec::new());
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            };
+            h.app.select_entry(entry.key.clone(), h.ctx.clone());
+            settle(&mut h);
+            let TagEntryLocation::LooseFile(path) = &entry.location else {
+                panic!("a loose tag");
+            };
+            let now = DiskStamp::of_file(path).unwrap();
+            h.app.model.kits[h.app.model.active]
+                .disk
+                .notices
+                .insert(entry.key.clone(), crate::app::documents::DiskNotice::Changed(now));
+            settle(&mut h);
+            let theme = if dark { "dark" } else { "light" };
+            h.shoot(&dir.join(format!("disk_banner_{theme}_{width}.png")));
+            // Save over the changed file: the window that makes the user choose.
+            h.app.dialogs.open(crate::app::documents::DiskSaveConfirm {
+                kit: h.app.model.kits[h.app.model.active].id,
+                key: entry.key.clone(),
+                display_path: entry.display_path.clone(),
+                group_tag: entry.group_tag,
+            });
+            settle(&mut h);
+            h.shoot(&dir.join(format!("disk_save_window_{theme}_{width}.png")));
+            h.app.dialogs.close::<crate::app::documents::DiskSaveConfirm>();
+            // The same tag deleted with unsaved edits: the red banner and dot.
+            let kit = &mut h.app.model.kits[h.app.model.active];
+            kit.disk.notices.insert(entry.key.clone(), crate::app::documents::DiskNotice::Missing(entry.clone()));
+            kit.parsed_tags.get_mut(&entry.key).expect("the tag is open").dirty.touch();
+            settle(&mut h);
+            h.shoot(&dir.join(format!("disk_missing_{theme}_{width}.png")));
         }
     }
 

@@ -240,16 +240,20 @@ impl Baboon {
             state.textures_pending = true;
         }
 
+        let reads = self.model_preview_reads(kit_index, key);
         let (key, panic_key) = (key.to_owned(), key.to_owned());
         spawn_worker(
             &self.tx,
             ctx,
-            move || WorkerMessage::ModelTexturesResolved {
-                stamp,
-                key,
-                textures_id,
-                game_shaders,
-                textures: resolve_model_textures(&source, &materials, game_shaders),
+            move || {
+                let _recording = crate::core::source::reads::record_reads(&reads);
+                WorkerMessage::ModelTexturesResolved {
+                    stamp,
+                    key,
+                    textures_id,
+                    game_shaders,
+                    textures: resolve_model_textures(&source, &materials, game_shaders),
+                }
             },
             // No textures: the preview draws untextured, and stops waiting.
             move |_| WorkerMessage::ModelTexturesResolved {

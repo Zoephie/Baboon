@@ -8,6 +8,9 @@ use super::super::{
     reset_model_preview_selection, spawn_worker,
 };
 use super::load_model_preview;
+use crate::core::source::TagEntryLocation;
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use super::merge::merge_preview_append;
 use super::overlays::{Overlay, hlmt_collision_overlay, hlmt_physics_overlay};
 use std::sync::Arc;
@@ -73,6 +76,7 @@ impl Baboon {
         // Through `spawn_worker` like every preview worker: a panicking tag
         // must still send its message or the pending flag sticks and the
         // overlays never arrive.
+        let reads = self.model_preview_reads(kit_index, &key);
         let (key, panic_key) = (key.to_owned(), key.to_owned());
         let build = move || -> Option<(Overlay, Overlay)> {
             let model = super::super::load::read_opened_tag(&source, &entry, edits).ok()?;
@@ -96,6 +100,7 @@ impl Baboon {
             &self.tx,
             ctx,
             move || {
+                let _recording = crate::core::source::reads::record_reads(&reads);
                 let (collision, physics) = build().unwrap_or((Ok(None), Ok(None)));
                 let mut notes = Vec::new();
                 let mut kept = |overlay: Overlay| {
@@ -124,6 +129,128 @@ impl Baboon {
             },
         );
         true
+    }
+
+    /// Tag files changed on disk (saved here, or seen by the folder watch):
+    /// load again any of the kit's previews built from one of them. The page
+    /// stays up while it loads, as it does for a settings change. A
+    /// preview's own tag is left out: its document already carries it.
+    pub(in crate::app) fn reload_previews_reading(
+        &mut self,
+        kit_index: usize,
+        changed: &crate::core::source::reads::Changed,
+        ctx: &egui::Context,
+    ) {
+        use crate::core::source::reads::file_key;
+        let kit = &self.model.kits[kit_index];
+        let mut any = false;
+        for (key, state) in self.views[kit.id].caches.model_previews.iter_mut() {
+            if state.reads_changed || state.loaded_key.as_deref() != Some(key.as_str()) {
+                continue;
+            }
+            let own = kit.entry_for_key(key).and_then(|entry| match &entry.location {
+                TagEntryLocation::LooseFile(path) => Some(file_key(path)),
+                _ => None,
+            });
+            if state.reads.any_changed(changed, own.as_deref()) {
+                state.reads_changed = true;
+                any = true;
+            }
+        }
+        if any {
+            ctx.request_repaint();
+        }
+    }
+
+    /// With View > Show Unsaved Edits on, load a preview again once the open
+    /// tags it was drawn from have changed and then stayed put for a moment:
+    /// edited further, or reverted, reloaded or closed (its edits discarded),
+    /// so it never keeps drawing edits no tag holds any more.
+    pub(in crate::app) fn check_previews_for_unsaved_edits(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|input| input.time);
+        self.check_previews_for_unsaved_edits_at(now, ctx);
+    }
+
+    /// [`Self::check_previews_for_unsaved_edits`] at `now`, by the UI clock.
+    pub(in crate::app) fn check_previews_for_unsaved_edits_at(&mut self, now: f64, ctx: &egui::Context) {
+        use crate::core::source::reads::{OpenDocument, file_key};
+        for kit_index in 0..self.model.kits.len() {
+            let kit = &self.model.kits[kit_index];
+            let previews = &mut self.views[kit.id].caches.model_previews;
+            if !previews.values().any(|state| state.show_unsaved_edits) {
+                continue;
+            }
+            let loose_file = |key: &str| match &kit.entry_for_key(key)?.location {
+                TagEntryLocation::LooseFile(path) => Some(file_key(path)),
+                _ => None,
+            };
+            // What the open documents hold, cheaply, so a preview already
+            // checked against them is not compared again every frame.
+            let documents = kit.parsed_tags.values().fold(kit.parsed_tags.len() as u64, |sum, document| {
+                let mut hasher = DefaultHasher::new();
+                (document.content_stamp(), document.dirty.is_set()).hash(&mut hasher);
+                sum ^ hasher.finish()
+            });
+            let mut open: Option<HashMap<String, OpenDocument>> = None;
+            for (key, state) in previews.iter_mut() {
+                let settled = state.loaded_key.as_deref() == Some(key.as_str())
+                    && state.data.is_some()
+                    && state.preview_load_id.is_none();
+                if !state.show_unsaved_edits || state.reads_changed || !settled {
+                    state.edits_seen = None;
+                    continue;
+                }
+                // Jobs that follow the load (textures, clips) add reads.
+                let checked = documents ^ (state.reads.len() as u64).rotate_left(32);
+                if state.edits_seen.is_none() && state.edits_checked == Some(checked) {
+                    continue;
+                }
+                let open = open.get_or_insert_with(|| {
+                    kit.parsed_tags
+                        .iter()
+                        .filter_map(|(key, document)| {
+                            let stamp = document.content_stamp();
+                            Some((loose_file(key)?, OpenDocument { stamp, dirty: document.dirty.is_set() }))
+                        })
+                        .collect()
+                });
+                let own = loose_file(key);
+                let Some(difference) = state.reads.edits_out_of_date(open, own.as_deref()) else {
+                    state.edits_seen = None;
+                    state.edits_checked = Some(checked);
+                    continue;
+                };
+                state.edits_checked = None;
+                match state.edits_seen {
+                    Some((seen, since)) if seen == difference => {
+                        if now - since >= UNSAVED_EDITS_QUIET {
+                            state.edits_seen = None;
+                            state.reads_changed = true;
+                            ctx.request_repaint();
+                        }
+                    }
+                    _ => {
+                        state.edits_seen = Some((difference, now));
+                        ctx.request_repaint_after(std::time::Duration::from_secs_f64(UNSAVED_EDITS_QUIET + 0.05));
+                    }
+                }
+            }
+        }
+    }
+
+    /// The list a preview's jobs note their reads in. Each job turns it on
+    /// for its own thread, so a save of any tag they read reloads the model.
+    pub(in crate::app) fn model_preview_reads(
+        &self,
+        kit_index: usize,
+        key: &str,
+    ) -> crate::core::source::reads::ReadFiles {
+        self.views[self.model.kits[kit_index].id]
+            .caches
+            .model_previews
+            .get(key)
+            .map(|state| state.reads.clone())
+            .unwrap_or_default()
     }
 
     /// Merge a worker's overlay geometry into the preview it was built for.
@@ -288,6 +415,13 @@ impl Baboon {
             return false;
         };
         let edits = snapshot_edits(kit.parsed_tags.get(key));
+        // View > Show Unsaved Edits: other open tags' edits stand in for
+        // their files.
+        let unsaved = if state.show_unsaved_edits {
+            open_tag_edits(kit, key, &state.reads)
+        } else {
+            Default::default()
+        };
         let names = kit.names.clone();
         let stamp = KitStamp {
             kit: kit.id,
@@ -314,6 +448,13 @@ impl Baboon {
         state.loaded_game_shaders = settings.game_shaders;
         state.loaded_detail_level = settings.detail_level;
         state.preview_load_id = Some(request_id);
+        // What this load reads, from scratch: the last one's list described
+        // the model being replaced.
+        state.reads = crate::core::source::reads::ReadFiles::with_edits(unsaved);
+        state.reads_changed = false;
+        state.edits_seen = None;
+        state.edits_checked = None;
+        let reads = state.reads.clone();
         state.remember_selection();
         let previous = match state.data.take() {
             Some(Ok(data)) if same_model => Some(super::super::state::ReloadingPreview {
@@ -357,6 +498,7 @@ impl Baboon {
 
         let (worker_key, panic_key) = (key.to_owned(), key.to_owned());
         let load = move || -> Result<_, String> {
+            let _recording = crate::core::source::reads::record_reads(&reads);
             let model_tag = read_opened_tag(&source, &entry, edits)?;
             load_model_preview(&model_tag, &entry, &names, Some(&source), &settings)
         };
@@ -499,15 +641,19 @@ impl Baboon {
             state.list_weapons = false;
             state.weapons_pending = true;
         }
+        let reads = self.model_preview_reads(kit_index, &key);
         let (key, panic_key) = (key.to_owned(), key.to_owned());
         spawn_worker(
             &self.tx,
             ctx,
-            move || WorkerMessage::UnitWeaponsListed {
-                stamp,
-                key,
-                geometry_id,
-                listed: Some(super::super::weapons::list_weapons(&source, &entry, edits)),
+            move || {
+                let _recording = crate::core::source::reads::record_reads(&reads);
+                WorkerMessage::UnitWeaponsListed {
+                    stamp,
+                    key,
+                    geometry_id,
+                    listed: Some(super::super::weapons::list_weapons(&source, &entry, edits)),
+                }
             },
             // The picker stops waiting, and lists nothing.
             move |_| WorkerMessage::UnitWeaponsListed {
@@ -592,6 +738,41 @@ pub(in crate::app::model_preview) fn snapshot_edits(
             .map_err(|error| format!("Could not snapshot edited model: {error}")),
     )
 }
+
+/// The unsaved edits of `kit`'s open loose tags other than `own`, by file,
+/// for a preview to read instead of their files. Only those the preview's
+/// last load read are taken, when it has one: serializing every edited
+/// document for each load would cost an open animation graph dearly.
+fn open_tag_edits(
+    kit: &crate::app::kits::Kit,
+    own: &str,
+    previous: &crate::core::source::reads::ReadFiles,
+) -> HashMap<String, crate::core::source::reads::Edited> {
+    use crate::core::source::reads::{Edited, file_key};
+    let previous: std::collections::HashSet<String> = previous.keys().into_iter().collect();
+    kit.parsed_tags
+        .iter()
+        .filter(|(key, document)| key.as_str() != own && document.dirty.is_set())
+        .filter_map(|(key, document)| {
+            let TagEntryLocation::LooseFile(path) = &kit.entry_for_key(key)?.location else {
+                return None;
+            };
+            let file = file_key(path);
+            if !previous.is_empty() && !previous.contains(&file) {
+                return None;
+            }
+            // One that cannot be written out is still noted at its stamp, or
+            // the preview would see edits it never drew and load again
+            // forever.
+            let bytes = document.tag.write_to_bytes().ok();
+            Some((file, Edited { stamp: document.content_stamp(), bytes }))
+        })
+        .collect()
+}
+
+/// How long open tags' edits must stop changing before a preview showing
+/// them loads again, in seconds: a dragged slider is one change, not fifty.
+const UNSAVED_EDITS_QUIET: f64 = 0.3;
 
 /// The opened tag as the editor holds it: `edits` from [`snapshot_edits`],
 /// or the file when there are none.

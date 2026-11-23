@@ -491,6 +491,38 @@ impl Baboon {
             });
         };
         let output = path.clone();
+        // The last look at the file before writing over it: changed since
+        // it was opened, and not yet answered with Keep My Edits (which
+        // restamps the document), the save stops and the banner asks. This
+        // catches what the focus check could not see, such as a change made
+        // while Baboon kept the focus.
+        let on_disk = doc.disk.map(|stamp| stamp.check(&output));
+        if let Some(DiskCheck::Changed(now)) = on_disk {
+            let name = tag_file_name(&entry);
+            let kit = &mut self.model.kits[self.model.active];
+            kit.disk.notices.insert(key.to_owned(), DiskNotice::Changed(now));
+            // A save that just stopped would look like nothing happened: the
+            // window makes the user choose, and its Cancel leaves the banner.
+            let kit = kit.id;
+            self.dialogs.open(DiskSaveConfirm {
+                kit,
+                key: key.to_owned(),
+                display_path: entry.display_path.clone(),
+                group_tag: entry.group_tag,
+            });
+            return Err(format!(
+                "{name} changed on disk since it was opened. Choose Reload from Disk or Keep My Edits, then save again"
+            ));
+        }
+        // A tag whose file was deleted is saved back where it was, folder
+        // and all.
+        let restoring = matches!(on_disk, Some(DiskCheck::Missing))
+            || self.model.kits[self.model.active].disk.missing_entry(key).is_some();
+        if restoring
+            && let Some(folder) = output.parent()
+        {
+            std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+        }
         doc.tag
             .write_atomic(&output)
             .map_err(|error| error.to_string())?;
@@ -502,7 +534,26 @@ impl Baboon {
         };
         if let Some(doc) = self.model.kits[self.model.active].parsed_tags.get_mut(key) {
             doc.mark_saved();
+            // Baboon's own write, so the next check for changes on disk
+            // does not take it for someone else's.
+            doc.disk = DiskStamp::of_file(&output).ok();
         }
+        self.model.kits[self.model.active].disk.note_own_write(&output);
+        // Back in the browser before the banner holding its entry goes. The
+        // file is written either way, so a failure here is not a failed
+        // save: the browser's own refresh finds the file instead.
+        if restoring
+            && let Err(error) = self.register_saved_copy_if_in_loaded_folder(&output)
+        {
+            eprintln!("Saved {} but could not add it back to the browser: {error}", output.display());
+            let ctx = self.egui_ctx.clone();
+            self.refresh_entry_index_soon(self.model.active, &ctx);
+        }
+        self.model.kits[self.model.active].disk.notices.remove(key);
+        // A preview drawn from this tag (a model using a shader being
+        // edited) shows the saved version.
+        let ctx = self.egui_ctx.clone();
+        self.reload_previews_reading(self.model.active, &Changed::Files(&[&output]), &ctx);
         // The save also writes the index row, so the periodic refresh will
         // not see this file change; the shader grid has to hear it here.
         if is_render_method_layout_group(entry.group_tag) {
@@ -619,6 +670,11 @@ impl Baboon {
             collect_tag_dependency_refs(doc.tag.root(), &mut refs);
             refs
         };
+        self.model.kits[self.model.active].disk.note_own_write(output);
+        // Written over a tag a preview draws: as for Save, it shows the new
+        // file without waiting on the folder watch (or with none).
+        let ctx = self.egui_ctx.clone();
+        self.reload_previews_reading(self.model.active, &Changed::Files(&[output]), &ctx);
         self.model.status = match self.register_saved_copy_if_in_loaded_folder(output) {
             Ok(Some(saved)) => {
                 self.switch_to_saved_copy(key, saved, dependencies);
@@ -656,6 +712,10 @@ impl Baboon {
         let kit = &mut self.model.kits[active];
         if let Some(doc) = kit.parsed_tags.get_mut(&new) {
             doc.mark_saved();
+            doc.disk = match &saved.location {
+                TagEntryLocation::LooseFile(path) => DiskStamp::of_file(path).ok(),
+                _ => None,
+            };
         }
         kit.selected_key = Some(new);
         self.record_saved_tag_in_indexes(&saved, dependencies);

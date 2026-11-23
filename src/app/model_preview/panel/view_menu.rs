@@ -190,6 +190,10 @@ pub(in crate::app::model_preview) fn draw_model_view_menu(
         }
         ui.baboon_checkbox(&mut state.show_grid, "Show Grid")
             .on_hover_text("Ground-reference grid on the z = 0 plane, spaced to the model's size.");
+        ui.baboon_checkbox(&mut state.show_unsaved_edits, "Show Unsaved Edits").on_hover_text(
+            "Draw the unsaved edits of other open tags this model uses, such as a shader \
+             you are tuning, instead of their saved files. The preview updates as you edit.",
+        );
 
         ui.separator();
         ui.label(RichText::new("Background Color").color(subtle_dark()).small());

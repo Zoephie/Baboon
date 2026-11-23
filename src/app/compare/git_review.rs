@@ -77,6 +77,15 @@ pub(in crate::app) struct GitReviewState {
     pub(in crate::app) request: u64,
     /// A Git job is running.
     pub(in crate::app) loading: bool,
+    /// Which panes the running job will replace, where the page shows it.
+    pub(in crate::app) loading_panes: GitReviewPanes,
+    /// The kit's files or the repository may have changed since the last
+    /// refresh (the folder watch, or Baboon regaining focus after a commit
+    /// elsewhere): refresh once no job is running, so a diff the user asked
+    /// for is never dropped for it.
+    pub(in crate::app) refresh_due: bool,
+    /// The running job is such a refresh, which the page does not announce.
+    pub(in crate::app) background: bool,
 }
 
 fn git_output(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
@@ -227,6 +236,16 @@ pub(in crate::app) struct GitReviewView {
     pub(in crate::app) selected_path: Option<String>,
     pub(in crate::app) results: Option<TagDiffResults>,
     pub(in crate::app) error: Option<String>,
+}
+
+/// The panes a Git Review job replaces: its spinner sits in their middle
+/// rather than above the page, which would push every pane down.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::app) struct GitReviewPanes {
+    /// The changed tags of the selected revision.
+    pub(in crate::app) changes: bool,
+    /// The selected tag's field differences.
+    pub(in crate::app) diff: bool,
 }
 
 /// A Git Review job for a worker.
@@ -521,6 +540,13 @@ impl Baboon {
         let state = &mut self.views[self.model.kits[kit_index].id].git_review;
         state.request += 1;
         state.loading = true;
+        state.background = false;
+        state.loading_panes = match &job {
+            // Refresh reselects the revision, and the tag if one is chosen.
+            GitReviewJob::Refresh => GitReviewPanes { changes: true, diff: state.selected_path.is_some() },
+            GitReviewJob::SelectRevision(_) => GitReviewPanes { changes: true, diff: false },
+            GitReviewJob::SelectFile(_) => GitReviewPanes { changes: false, diff: true },
+        };
         let request = state.request;
         let mut view = state.view();
         spawn_worker(
@@ -557,11 +583,35 @@ impl Baboon {
             return false;
         }
         state.loading = false;
+        state.background = false;
         match view {
             Ok(view) => state.apply(view),
             Err(error) => state.error = Some(error),
         }
         false
+    }
+
+    /// The kit's files or repository may have changed: an open Git Review
+    /// refreshes when it is next idle. A closed one refreshes when opened.
+    pub(in crate::app) fn git_review_refresh_due(&mut self, kit_index: usize) {
+        let view = &mut self.views[self.model.kits[kit_index].id];
+        if view.has_pane(GIT_REVIEW_KEY) && view.git_review.repo_root.is_some() {
+            view.git_review.refresh_due = true;
+        }
+    }
+
+    /// Start the refreshes [`Self::git_review_refresh_due`] asked for, in
+    /// kits whose review has no job running.
+    pub(in crate::app) fn run_due_git_review_refreshes(&mut self, ctx: &egui::Context) {
+        for kit_index in 0..self.model.kits.len() {
+            let state = &self.views[self.model.kits[kit_index].id].git_review;
+            if !state.refresh_due || state.loading {
+                continue;
+            }
+            self.views[self.model.kits[kit_index].id].git_review.refresh_due = false;
+            self.run_git_review_job(kit_index, GitReviewJob::Refresh, ctx);
+            self.views[self.model.kits[kit_index].id].git_review.background = true;
+        }
     }
 
     pub(in crate::app) fn open_git_review_file(&mut self, kit: usize, path: &str, ctx: &egui::Context) {
@@ -609,6 +659,110 @@ impl Baboon {
 mod tests {
     use super::*;
     use crate::app::help::bundled_group_hierarchy;
+    use crate::app::loose_fixture::{LooseKit, app, ctx};
+    use std::time::{Duration, Instant};
+
+    fn git(root: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git").arg("-C").arg(root).args(args).output().unwrap();
+        assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    fn local_paths(app: &Baboon) -> Vec<String> {
+        let state = &app.views[app.model.kits[0].id].git_review;
+        state.local_files.iter().map(|file| file.path.clone()).collect()
+    }
+
+    /// Run frames' worth of the due-refresh logic until `done`.
+    fn settle_until(app: &mut Baboon, what: &str, done: impl Fn(&Baboon) -> bool) {
+        let ctx = ctx();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !done(app) {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}; listed: {:?}", local_paths(app));
+            app.check_open_tags_on_watch(&ctx);
+            app.run_due_git_review_refreshes(&ctx);
+            if let Ok(message) = app.rx.recv_timeout(Duration::from_millis(50)) {
+                app.apply_worker_message(message, &ctx);
+                app.process_worker_messages(&ctx);
+            }
+        }
+    }
+
+    /// An open Git Review follows the kit's folder on its own: a tag made
+    /// outside Baboon shows up among the local changes, quietly.
+    #[test]
+    fn an_open_git_review_refreshes_when_the_folder_changes() {
+        let fixture = LooseKit::new("git-review-watch", "halo3_mcc");
+        fixture.write_mcc("vehicles\\warthog", "model", |_| {});
+        git(&fixture.root, &["init", "-q"]);
+        git(&fixture.root, &["add", "-A"]);
+        git(
+            &fixture.root,
+            &["-c", "user.name=Baboon Test", "-c", "user.email=test@example.com", "commit", "-qm", "kit"],
+        );
+        let mut app = app();
+        // The fixture's root is canonical, which on Windows is the `\\?\`
+        // spelling Git never prints; a kit picked in the app is spelled plainly.
+        let mut source = fixture.source();
+        if let TagSource::LooseFolder { root, .. } = &mut source.source {
+            *root = PathBuf::from(root.to_string_lossy().trim_start_matches(r"\\?\"));
+        }
+        app.install_loaded_source(source);
+        app.kit_and_view(0).open_tag_pane(GIT_REVIEW_KEY);
+        app.run_git_review_job(0, GitReviewJob::Refresh, &ctx());
+        settle_until(&mut app, "the first refresh", |app| !app.views[app.model.kits[0].id].git_review.loading);
+        assert!(local_paths(&app).is_empty(), "{:?}", local_paths(&app));
+
+        fixture.write_mcc("vehicles\\ghost", "model", |_| {});
+        settle_until(&mut app, "the review to list the new tag", |app| {
+            local_paths(app).iter().any(|path| path.ends_with("ghost.model"))
+        });
+        // The OS may report the write in more than one burst, each a quiet
+        // refresh of its own; once they are done, nothing is left waiting.
+        settle_until(&mut app, "the refreshes to finish", |app| {
+            let state = &app.views[app.model.kits[0].id].git_review;
+            !state.loading && !state.refresh_due
+        });
+        assert!(!app.views[app.model.kits[0].id].git_review.background);
+    }
+
+    /// A refresh that comes due while the user's own Git job runs waits for
+    /// it, so the diff they asked for is not dropped.
+    #[test]
+    fn a_due_git_review_refresh_waits_for_the_running_job() {
+        let fixture = LooseKit::new("git-review-wait", "halo3_mcc");
+        fixture.write_mcc("vehicles\\warthog", "model", |_| {});
+        let mut app = app();
+        fixture.install(&mut app);
+        app.kit_and_view(0).open_tag_pane(GIT_REVIEW_KEY);
+        let id = app.model.kits[0].id;
+        app.views[id].git_review.repo_root = Some(fixture.root.clone());
+        app.views[id].git_review.loading = true;
+        app.views[id].git_review.request = 7;
+
+        app.git_review_refresh_due(0);
+        app.run_due_git_review_refreshes(&ctx());
+        assert_eq!(app.views[id].git_review.request, 7, "nothing started over the running job");
+        assert!(app.views[id].git_review.refresh_due);
+
+        app.views[id].git_review.loading = false;
+        app.run_due_git_review_refreshes(&ctx());
+        let state = &app.views[id].git_review;
+        assert_eq!(state.request, 8);
+        assert!(state.background && !state.refresh_due);
+    }
+
+    /// A closed review is not refreshed; opening it reads Git anyway.
+    #[test]
+    fn a_closed_git_review_is_left_alone() {
+        let fixture = LooseKit::new("git-review-closed", "halo3_mcc");
+        fixture.write_mcc("vehicles\\warthog", "model", |_| {});
+        let mut app = app();
+        fixture.install(&mut app);
+        let id = app.model.kits[0].id;
+        app.views[id].git_review.repo_root = Some(fixture.root.clone());
+        app.git_review_refresh_due(0);
+        assert!(!app.views[id].git_review.refresh_due);
+    }
 
     fn profile(id: &str, git_tracked: bool) -> CustomEditingKitProfile {
         CustomEditingKitProfile {

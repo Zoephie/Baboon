@@ -49,7 +49,7 @@ use crate::core::source::{
     NewContainerTemplate, ReverseDependencyIndex, TagEntry, TagEntryLocation,
     TagSource, TagTree, TagTreeNode, load_editing_kit_layout, load_folder,
     load_folder_node_entries, load_iostore_container, load_iostore_container_set,
-    load_monolithic_blob_index, load_single_file, loose_file_entry, read_entry,
+    load_monolithic_blob_index, load_single_file, loose_file_entry, read_entry, read_entry_stamped,
     resolve_folder_root, scan_folder_subtree_entries, scan_folder_subtree_entries_with_progress,
 };
 
@@ -72,6 +72,7 @@ pub(super) const BABOON_BUILD_COMMIT: &str = env!("BABOON_BUILD_COMMIT");
 use crate::core::document::journal::*;
 use crate::core::document::ops::*;
 use crate::core::document::TagDocument;
+use crate::core::document::disk::{DiskCheck, DiskStamp};
 #[cfg(test)]
 use crate::core::document::Dirty;
 use crate::core::keywords::*;
@@ -495,6 +496,7 @@ impl Baboon {
             },
             documents: DocumentsFeature {
                 allow_app_close_once: false,
+                window_focused: true,
             },
             shell: ShellFeature {
                 home_open: false,

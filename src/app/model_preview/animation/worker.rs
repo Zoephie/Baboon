@@ -71,15 +71,19 @@ impl Baboon {
             state.animation.requested_list = true;
         }
 
+        let reads = self.model_preview_reads(kit_index, key);
         let (key, panic_key) = (key.to_owned(), key.to_owned());
         spawn_worker(
             &self.tx,
             ctx,
-            move || WorkerMessage::ModelAnimationsListed {
-                stamp,
-                key,
-                geometry_id,
-                result: list_model_animations(&source, &entry),
+            move || {
+                let _recording = crate::core::source::reads::record_reads(&reads);
+                WorkerMessage::ModelAnimationsListed {
+                    stamp,
+                    key,
+                    geometry_id,
+                    result: list_model_animations(&source, &entry),
+                }
             },
             move |_| WorkerMessage::ModelAnimationsListed {
                 stamp,
@@ -153,16 +157,20 @@ impl Baboon {
             state.animation.error = None;
         }
 
+        let reads = self.model_preview_reads(kit_index, key);
         let (key, panic_key) = (key.to_owned(), key.to_owned());
         spawn_worker(
             &self.tx,
             ctx,
-            move || WorkerMessage::ModelAnimationDecoded {
-                stamp,
-                key,
-                geometry_id,
-                animation_index: selected,
-                result: decode_held_animation(&source, &entry, selected, &layers),
+            move || {
+                let _recording = crate::core::source::reads::record_reads(&reads);
+                WorkerMessage::ModelAnimationDecoded {
+                    stamp,
+                    key,
+                    geometry_id,
+                    animation_index: selected,
+                    result: decode_held_animation(&source, &entry, selected, &layers),
+                }
             },
             move |_| WorkerMessage::ModelAnimationDecoded {
                 stamp,

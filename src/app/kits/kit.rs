@@ -57,6 +57,9 @@ pub(in crate::app) struct Kit {
     pub(in crate::app) parsed_tags: HashMap<String, TagDocument>,
     /// Keys with an outstanding background load, preventing duplicate jobs.
     pub(in crate::app) loading_tags: HashSet<String>,
+    /// Open tags whose files changed on disk: reads in flight because of it,
+    /// and banners asking what to do about unsaved edits.
+    pub(in crate::app) disk: DiskWatch,
     /// Invalidates reads started before a filesystem refactor.
     pub(in crate::app) tag_load_epoch: u64,
     /// Active document key. Selection may temporarily precede parsing while a
@@ -133,6 +136,7 @@ impl Kit {
             names,
             parsed_tags: HashMap::new(),
             loading_tags: HashSet::new(),
+            disk: DiskWatch::default(),
             tag_load_epoch: 0,
             selected_key: None,
             current_pane: None,
@@ -455,6 +459,7 @@ impl Baboon {
             },
             ..Kit::empty(id, self.model.default_names.clone())
         };
+        self.start_folder_watch(index);
     }
 }
 
@@ -552,11 +557,16 @@ impl Kit {
     /// from elsewhere.
     pub(in crate::app) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
         let source = self.source.as_ref()?;
-        source.entry_for_key(key).or_else(|| {
-            self.active_favorite_entries
-                .iter()
-                .find(|entry| entry.key == key)
-        })
+        source
+            .entry_for_key(key)
+            .or_else(|| {
+                self.active_favorite_entries
+                    .iter()
+                    .find(|entry| entry.key == key)
+            })
+            // An open tag whose file was deleted: gone from the source once
+            // the index refreshes, still open and saveable.
+            .or_else(|| self.disk.missing_entry(key))
     }
 }
 
@@ -569,6 +579,13 @@ pub(in crate::app) struct IndexJobs {
     pub(in crate::app) refresh_browser: bool,
     /// When the next periodic refresh is due, in egui time.
     pub(in crate::app) next_refresh_at: f64,
+    /// The folder watch saw changes while a refresh was already running,
+    /// which may have listed the folder before them: run another once it
+    /// ends.
+    pub(in crate::app) refresh_again: bool,
+    /// When the last refresh ended. Refreshes the folder watch asks for
+    /// leave a gap after it (`WATCHED_REFRESH_GAP`).
+    pub(in crate::app) last_refresh_ended: Option<std::time::Instant>,
     /// A reference-index build is running.
     pub(in crate::app) building_references: bool,
     /// That build was started by a tag-index build, which reports them as one.

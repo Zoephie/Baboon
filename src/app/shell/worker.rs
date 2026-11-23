@@ -146,7 +146,13 @@ pub(in crate::app) enum WorkerMessage {
         kit: KitId,
         epoch: u64,
         key: String,
-        result: Result<TagFile, String>,
+        /// The tag, and its loose file as it was read.
+        result: Result<(TagFile, Option<DiskStamp>), String>,
+    },
+    /// Open loose tags checked against their files on disk.
+    OpenTagsChecked {
+        kit: KitId,
+        checks: Vec<OpenTagCheck>,
     },
     /// Where one unopened referrer points at the "References to" target, read
     /// and walked off the UI thread.

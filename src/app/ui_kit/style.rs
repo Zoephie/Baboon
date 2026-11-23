@@ -1605,6 +1605,62 @@ pub(in crate::app) fn bitmap_error_text() -> Color32 {
     invalid_value_text()
 }
 
+/// The banner across a tag whose file changed on disk while it had unsaved
+/// edits: an amber wash behind the pane's own text colour.
+pub(in crate::app) fn disk_banner_fill() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(72, 56, 22)
+    } else {
+        Color32::from_rgb(252, 240, 204)
+    }
+}
+
+/// The changed-on-disk banner's border.
+pub(in crate::app) fn disk_banner_edge() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(140, 104, 32)
+    } else {
+        Color32::from_rgb(222, 176, 72)
+    }
+}
+
+/// The changed-on-disk banner's warning icon.
+pub(in crate::app) fn disk_banner_icon() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(242, 196, 48)
+    } else {
+        Color32::from_rgb(176, 120, 0)
+    }
+}
+
+/// The banner across a tag whose file was deleted: a red wash behind the
+/// pane's own text colour.
+pub(in crate::app) fn disk_missing_fill() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(78, 32, 30)
+    } else {
+        Color32::from_rgb(252, 226, 223)
+    }
+}
+
+/// The deleted-file banner's border.
+pub(in crate::app) fn disk_missing_edge() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(158, 62, 56)
+    } else {
+        Color32::from_rgb(224, 128, 118)
+    }
+}
+
+/// The deleted-file banner's warning icon, and the dot on its tag's tab.
+pub(in crate::app) fn disk_missing_icon() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(240, 92, 80)
+    } else {
+        Color32::from_rgb(200, 48, 38)
+    }
+}
+
 /// Read-only and missing notes in Chimp's headers and the New Tag window.
 pub(in crate::app) fn header_notice_text() -> Color32 {
     unapplied_value_text()

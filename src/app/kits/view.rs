@@ -227,6 +227,11 @@ impl KitView {
         self.tag_tree.root().and_then(|root| self.front_of(root))
     }
 
+    /// Whether a tab for `key` is open, shown or not.
+    pub(in crate::app) fn has_pane(&self, key: &str) -> bool {
+        self.tile_for_key(key).is_some()
+    }
+
     fn tile_for_key(&self, key: &str) -> Option<egui_tiles::TileId> {
         self.tag_tree
             .tiles
@@ -271,6 +276,7 @@ impl<'a> KitMut<'a> {
     pub(in crate::app) fn drop_document(&mut self, key: &str) {
         self.kit.parsed_tags.remove(key);
         self.kit.loading_tags.remove(key);
+        self.kit.disk.forget(key);
         self.view.caches.bitmap_previews.remove(key);
         self.view.caches.model_previews.remove(key);
         self.view.find_filter_applied.remove(key);

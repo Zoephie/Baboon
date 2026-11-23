@@ -868,6 +868,8 @@ mod editing_kit;
 mod index;
 mod loading;
 mod tree;
+pub(crate) mod reads;
+pub(crate) mod watch;
 
 pub(crate) use editing_kit::*;
 #[cfg(test)]
