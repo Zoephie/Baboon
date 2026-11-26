@@ -91,6 +91,14 @@ fn offending_lines(source: &str) -> Vec<usize> {
     found
 }
 
+/// Whether `relative` (a path under `src/app`) is held to the rule: every
+/// file but the style module, the theme registry, and the scanner itself.
+fn gated(relative: &str) -> bool {
+    !(relative == "ui_kit/style.rs"
+        || relative.starts_with("ui_kit/themes/")
+        || relative == "ui_kit/palette_gate.rs")
+}
+
 #[test]
 fn colours_and_theme_branches_live_in_the_style_module() {
     let app = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("app");
@@ -101,7 +109,7 @@ fn colours_and_theme_branches_live_in_the_style_module() {
             continue;
         }
         let relative = path.strip_prefix(&app).unwrap().to_string_lossy().replace('\\', "/");
-        if relative.starts_with("ui_kit/")
+        if !gated(&relative)
             || relative.ends_with("tests.rs")
             || relative.contains("tests/")
             || ALLOWED_FOLDERS.iter().any(|(folder, _)| relative.starts_with(folder))
@@ -148,4 +156,15 @@ mod tests {
 }
 ";
     assert_eq!(offending_lines(source), vec![1, 2, 5, 6, 13, 14, 17]);
+}
+
+/// The rest of `ui_kit` is held to the rule too: only the style module and
+/// the theme registry may write colours.
+#[test]
+fn only_the_style_module_and_registry_are_exempt() {
+    assert!(gated("ui_kit/slider.rs"));
+    assert!(gated("ui_kit/button_icons.rs"));
+    assert!(gated("shell/frame.rs"));
+    assert!(!gated("ui_kit/style.rs"));
+    assert!(!gated("ui_kit/themes/table.rs"));
 }

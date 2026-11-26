@@ -1,7 +1,6 @@
 //! Shared illustrated loading state for content-sized waits.
 
 use super::*;
-use std::sync::OnceLock;
 
 const LOADING_SPINNER_SIZE: f32 = 256.0;
 const LOADING_TEXT_SPACE: f32 = 64.0;
@@ -11,70 +10,88 @@ const LOADING_REVOLUTION_SECONDS: f32 = 4.0;
 /// move, especially on fractional Windows display scales such as 150%.
 const LOADING_RASTER_SCALE: f32 = 2.0;
 
-struct LoadingPalette {
-    primary: &'static str,
-    secondary: &'static str,
-    background_opacity: &'static str,
-    lines: &'static str,
-}
+/// The colours written in the artwork, which are the dark built-in theme's
+/// `loading.*` colours, so the files preview as they draw. Each is replaced
+/// by its token's colour in the installed theme.
+const SOURCE_PRIMARY: &str = "#BFBFBF";
+const SOURCE_SECONDARY: &str = "#808080";
+const SOURCE_LINES: &str = "#404040";
 
-const DARK_LOADING_PALETTE: LoadingPalette = LoadingPalette {
-    primary: "#BFBFBF",
-    secondary: "#808080",
-    background_opacity: "0.4",
-    lines: "#404040",
-};
-
-const LIGHT_LOADING_PALETTE: LoadingPalette = LoadingPalette {
-    primary: "#333333",
-    secondary: "#4D4D4D",
-    background_opacity: "0.25",
-    lines: "#999999",
-};
+/// The backdrop disc's opacity in the artwork, and in light themes, where
+/// the same disc over a pale page reads heavier.
+const SOURCE_BACKGROUND_OPACITY: &str = "0.4";
+const LIGHT_BACKGROUND_OPACITY: &str = "0.25";
 
 const LOADING_BACKGROUND_SVG: &str = include_root_str!("assets/loading/loading-background.svg");
 const LOADING_INNER_SVG: &str = include_root_str!("assets/loading/loading-inner.svg");
 const LOADING_OUTER_SVG: &str = include_root_str!("assets/loading/loading-outer.svg");
 
-static LIGHT_BACKGROUND_SVG: OnceLock<String> = OnceLock::new();
-static LIGHT_INNER_SVG: OnceLock<String> = OnceLock::new();
-static LIGHT_OUTER_SVG: OnceLock<String> = OnceLock::new();
-
-/// Replaces the dark palette stored in the source artwork with its light-theme
-/// counterparts. The semantic classes in the SVGs document which artwork uses
-/// each token; the literal values keep the files previewable outside Baboon.
-fn light_loading_svg(source: &str) -> String {
-    source
-        .replace(DARK_LOADING_PALETTE.primary, LIGHT_LOADING_PALETTE.primary)
-        .replace(
-            DARK_LOADING_PALETTE.secondary,
-            LIGHT_LOADING_PALETTE.secondary,
-        )
-        .replace(
-            &format!(
-                "fill-opacity=\"{}\"",
-                DARK_LOADING_PALETTE.background_opacity
-            ),
-            &format!(
-                "fill-opacity=\"{}\"",
-                LIGHT_LOADING_PALETTE.background_opacity
-            ),
-        )
-        .replace(DARK_LOADING_PALETTE.lines, LIGHT_LOADING_PALETTE.lines)
+/// The artwork's colours in the installed theme, and its backdrop's
+/// opacity: what the recoloured SVGs and their URIs are keyed by.
+struct LoadingColors {
+    primary: String,
+    secondary: String,
+    lines: String,
+    background_opacity: &'static str,
 }
 
-fn themed_svg(
-    dark_mode: bool,
-    source: &'static str,
-    light_source: &'static OnceLock<String>,
-) -> &'static [u8] {
-    if dark_mode {
-        source.as_bytes()
-    } else {
-        light_source
-            .get_or_init(|| light_loading_svg(source))
-            .as_bytes()
+impl LoadingColors {
+    fn installed() -> Self {
+        let hex = |color: Color32| format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b());
+        Self {
+            primary: hex(loading_primary()),
+            secondary: hex(loading_secondary()),
+            lines: hex(loading_lines()),
+            // fixed: the backdrop's opacity follows the appearance; it is not a colour
+            background_opacity: if is_dark_mode() {
+                SOURCE_BACKGROUND_OPACITY
+            } else {
+                LIGHT_BACKGROUND_OPACITY
+            },
+        }
     }
+
+    /// Names the colours in an image URI, so artwork in other colours is
+    /// another image.
+    fn key(&self) -> String {
+        format!(
+            "{}{}{}-{}",
+            &self.primary[1..],
+            &self.secondary[1..],
+            &self.lines[1..],
+            self.background_opacity
+        )
+    }
+}
+
+/// `source` drawn in `colors`. The semantic classes in the SVGs document
+/// which artwork uses each colour.
+fn recoloured_loading_svg(source: &str, colors: &LoadingColors) -> String {
+    source
+        .replace(SOURCE_PRIMARY, &colors.primary)
+        .replace(SOURCE_SECONDARY, &colors.secondary)
+        .replace(
+            &format!("fill-opacity=\"{SOURCE_BACKGROUND_OPACITY}\""),
+            &format!("fill-opacity=\"{}\"", colors.background_opacity),
+        )
+        .replace(SOURCE_LINES, &colors.lines)
+}
+
+/// `source` in the installed theme, made once per theme and part.
+fn themed_svg(source: &'static str, colors: &LoadingColors) -> std::sync::Arc<[u8]> {
+    std::thread_local! {
+        static MADE: std::cell::RefCell<std::collections::HashMap<(usize, String), std::sync::Arc<[u8]>>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    let key = (source.as_ptr() as usize, colors.key());
+    MADE.with(|made| {
+        let mut made = made.borrow_mut();
+        // One theme's artwork at a time.
+        made.retain(|(_, theme), _| *theme == key.1);
+        made.entry(key)
+            .or_insert_with(|| recoloured_loading_svg(source, colors).into_bytes().into())
+            .clone()
+    })
 }
 
 /// The pixel size to rasterize artwork drawn `size` points wide at.
@@ -97,8 +114,8 @@ fn loading_image_uri(part: &str, theme: &str, raster_pixels: u32, pixels_per_poi
 }
 
 fn paint_loading_art(ui: &Ui, rect: egui::Rect, include_background: bool) {
-    let dark_mode = visuals_are_dark(ui);
-    let theme = if dark_mode { "dark" } else { "light" };
+    let colors = LoadingColors::installed();
+    let theme = &colors.key();
     let size = rect.width().min(rect.height());
     let pixels_per_point = ui.ctx().pixels_per_point();
     let raster_pixels = loading_raster_pixels(size, pixels_per_point);
@@ -107,7 +124,7 @@ fn paint_loading_art(ui: &Ui, rect: egui::Rect, include_background: bool) {
     if include_background {
         egui::Image::from_bytes(
             loading_image_uri("background", theme, raster_pixels, pixels_per_point),
-            themed_svg(dark_mode, LOADING_BACKGROUND_SVG, &LIGHT_BACKGROUND_SVG),
+            egui::load::Bytes::Shared(themed_svg(LOADING_BACKGROUND_SVG, &colors)),
         )
         .fit_to_exact_size(raster_size)
         .paint_at(ui, rect);
@@ -120,7 +137,7 @@ fn paint_loading_art(ui: &Ui, rect: egui::Rect, include_background: bool) {
 
     egui::Image::from_bytes(
         loading_image_uri("outer", theme, raster_pixels, pixels_per_point),
-        themed_svg(dark_mode, LOADING_OUTER_SVG, &LIGHT_OUTER_SVG),
+        egui::load::Bytes::Shared(themed_svg(LOADING_OUTER_SVG, &colors)),
     )
     .fit_to_exact_size(raster_size)
     .rotate(angle, center)
@@ -128,7 +145,7 @@ fn paint_loading_art(ui: &Ui, rect: egui::Rect, include_background: bool) {
 
     egui::Image::from_bytes(
         loading_image_uri("inner", theme, raster_pixels, pixels_per_point),
-        themed_svg(dark_mode, LOADING_INNER_SVG, &LIGHT_INNER_SVG),
+        egui::load::Bytes::Shared(themed_svg(LOADING_INNER_SVG, &colors)),
     )
     .fit_to_exact_size(raster_size)
     .rotate(-angle, center)
@@ -199,7 +216,12 @@ mod tests {
             assert!(dark.contains(class), "missing semantic class {class}");
         }
 
-        let combined = light_loading_svg(&dark);
+        let light = crate::app::ui_kit::with_theme(
+            false,
+            crate::app::ui_kit::LightTheme::Warm,
+            LoadingColors::installed,
+        );
+        let combined = recoloured_loading_svg(&dark, &light);
 
         for expected in ["#333333", "#4D4D4D", "#999999", "fill-opacity=\"0.25\""] {
             assert!(combined.contains(expected), "missing {expected}");
@@ -207,6 +229,13 @@ mod tests {
         for dark in ["#BFBFBF", "#808080", "#404040", "fill-opacity=\"0.4\""] {
             assert!(!combined.contains(dark), "left dark token {dark}");
         }
+        // The dark built-in's colours are the artwork's own: it draws as drawn.
+        let dark_colors = crate::app::ui_kit::with_theme(
+            true,
+            crate::app::ui_kit::LightTheme::Warm,
+            LoadingColors::installed,
+        );
+        assert_eq!(recoloured_loading_svg(&dark, &dark_colors), dark);
     }
 
     #[test]

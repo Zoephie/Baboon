@@ -323,10 +323,7 @@ pub(in crate::app) fn tag_icon_image_in(
 ) -> egui::Image<'static> {
     let uri = tag_icon_uri_for_pixels_per_point_and_size(icon.name, ctx.pixels_per_point(), size);
     let [r, g, b, _] = color.to_array();
-    thread_local! {
-        static SVGS: ColoredIconBytes = Default::default();
-    }
-    let bytes = SVGS.with(|cache| {
+    let bytes = COLORED_SVGS.with(|cache| {
         cache
             .borrow_mut()
             .entry((icon.name, [r, g, b]))
@@ -365,19 +362,24 @@ fn themed_tag_icon_bytes(
     rgb: [u8; 3],
     backdrop: Option<[u8; 3]>,
 ) -> std::sync::Arc<[u8]> {
-    thread_local! {
-        static SVGS: ThemedIconBytes = Default::default();
-    }
-    SVGS.with(|cache| cache.borrow_mut().entry((icon.name, rgb, backdrop)).or_insert_with(|| {
-        let [r, g, b] = rgb;
-        let svg = icon.svg.replace("currentColor", &format!("#{r:02x}{g:02x}{b:02x}"));
-        match backdrop {
-            Some(backdrop) => darken_hex_colors(&svg, backdrop),
-            None => svg,
-        }
-        .into_bytes()
-        .into()
-    }).clone())
+    THEMED_SVGS.with(|cache| {
+        cache
+            .borrow_mut()
+            .entry((icon.name, rgb, backdrop))
+            .or_insert_with(|| {
+                let [r, g, b] = rgb;
+                let svg = icon
+                    .svg
+                    .replace("currentColor", &format!("#{r:02x}{g:02x}{b:02x}"));
+                match backdrop {
+                    Some(backdrop) => darken_hex_colors(&svg, backdrop),
+                    None => svg,
+                }
+                .into_bytes()
+                .into()
+            })
+            .clone()
+    })
 }
 
 /// The contrast an icon's colour needs against its panel: WCAG's minimum
@@ -824,4 +826,16 @@ mod tests {
         assert!(low.contains("dpi100"));
         assert!(high.contains("dpi200"));
     }
+}
+
+std::thread_local! {
+    static COLORED_SVGS: ColoredIconBytes = Default::default();
+    static THEMED_SVGS: ThemedIconBytes = Default::default();
+}
+
+/// Empties the recoloured tag icons, for a theme that changed colours. Their
+/// URIs carry their colours, so none needs forgetting.
+pub(super) fn forget_tag_icon_svgs() {
+    COLORED_SVGS.with(|cache| cache.borrow_mut().clear());
+    THEMED_SVGS.with(|cache| cache.borrow_mut().clear());
 }

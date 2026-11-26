@@ -16,7 +16,8 @@ pub(in crate::app) enum SelectionState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct Palette {
     state: SelectionState,
-    dark: bool,
+    /// The well a checked box is filled with.
+    well: Color32,
     hovered: bool,
     foreground: Color32,
     accent: Color32,
@@ -50,9 +51,10 @@ fn svg(palette: Palette) -> String {
     let mut source = source
         .replace("currentColor", &colour(palette.foreground))
         .replace("#47AEEB", &colour(palette.accent));
-    if !palette.dark {
-        source = source.replace("fill=\"black\"", "fill=\"white\"");
-    }
+    source = source.replace(
+        "fill=\"black\"",
+        &format!("fill=\"{}\"", colour(palette.well)),
+    );
     if palette.hovered {
         source = source
             .replace(
@@ -79,10 +81,7 @@ fn svg(palette: Palette) -> String {
 }
 
 fn image(palette: Palette) -> egui::Image<'static> {
-    thread_local! {
-        static SVGS: RefCell<HashMap<Palette, (String, Arc<[u8]>)>> = RefCell::new(HashMap::new());
-    }
-    let (uri, bytes) = SVGS.with(|cache| {
+    let (uri, bytes) = SELECTION_SVGS.with(|cache| {
         cache
             .borrow_mut()
             .entry(palette)
@@ -91,7 +90,7 @@ fn image(palette: Palette) -> egui::Image<'static> {
                     format!(
                         "bytes://baboon_selection_controls/{:?}-{}-{}-{:08x}-{:08x}.svg",
                         palette.state,
-                        palette.dark,
+                        u32::from_le_bytes(palette.well.to_array()),
                         palette.hovered,
                         u32::from_le_bytes(palette.foreground.to_array()),
                         u32::from_le_bytes(palette.accent.to_array())
@@ -114,7 +113,7 @@ pub(in crate::app) fn paint_selection_control(
 ) {
     image(Palette {
         state,
-        dark: ui.visuals().dark_mode,
+        well: control_well(),
         hovered,
         foreground: ui.ctx().global_style().visuals.text_color(),
         accent: ui.ctx().global_style().visuals.selection.bg_fill,
@@ -158,7 +157,7 @@ mod tests {
     fn palette(state: SelectionState, dark: bool, hovered: bool) -> Palette {
         Palette {
             state,
-            dark,
+            well: if dark { Color32::BLACK } else { Color32::WHITE },
             hovered,
             foreground: if dark { Color32::WHITE } else { Color32::BLACK },
             accent: Color32::from_rgb(64, 108, 134),
@@ -230,4 +229,20 @@ mod tests {
             assert!(svg.contains("opacity=\"0.1\""));
         }
     }
+}
+
+std::thread_local! {
+    static SELECTION_SVGS: RefCell<HashMap<Palette, (String, Arc<[u8]>)>> = RefCell::new(HashMap::new());
+}
+
+/// Empties the recoloured-icon cache, for a theme that changed colours,
+/// and gives back the image URIs it registered.
+pub(super) fn forget_selection_svgs() -> Vec<String> {
+    SELECTION_SVGS.with(|cache| {
+        cache
+            .borrow_mut()
+            .drain()
+            .map(|(_, (uri, _))| uri)
+            .collect()
+    })
 }

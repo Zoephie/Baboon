@@ -624,12 +624,8 @@ fn draw_chimp_texture_preview(
     *view_settings = preview.preview.view_settings();
 }
 
-fn chimp_json_layout_job(
-    text: &str,
-    font_id: egui::FontId,
-    dark_mode: bool,
-) -> egui::text::LayoutJob {
-    let palette = json_syntax_colors(dark_mode);
+fn chimp_json_layout_job(text: &str, font_id: egui::FontId) -> egui::text::LayoutJob {
+    let palette = json_syntax_colors();
     let mut job = egui::text::LayoutJob::default();
     job.wrap.max_width = f32::INFINITY;
     let bytes = text.as_bytes();
@@ -735,21 +731,16 @@ fn chimp_json_layout_job(
 /// build, spent hashing, copying and laying out text nobody could see.
 #[derive(Default)]
 pub(super) struct ChimpJsonLines {
-    key: Option<(bool, egui::FontId)>,
+    /// The theme generation and font the lines were laid out for.
+    key: Option<(u64, egui::FontId)>,
     lines: Vec<egui::text::LayoutJob>,
 }
 
 impl ChimpJsonLines {
-    pub(super) fn lines(
-        &mut self,
-        text: &str,
-        font_id: &egui::FontId,
-        dark_mode: bool,
-    ) -> &[egui::text::LayoutJob] {
-        let key = (dark_mode, font_id.clone());
+    pub(super) fn lines(&mut self, text: &str, font_id: &egui::FontId) -> &[egui::text::LayoutJob] {
+        let key = (crate::app::ui_kit::themes::generation(), font_id.clone());
         if self.key.as_ref() != Some(&key) {
-            self.lines =
-                split_layout_job_lines(&chimp_json_layout_job(text, font_id.clone(), dark_mode));
+            self.lines = split_layout_job_lines(&chimp_json_layout_job(text, font_id.clone()));
             self.key = Some(key);
         }
         &self.lines
@@ -800,7 +791,7 @@ fn draw_chimp_json_document(
     lines: &mut ChimpJsonLines,
 ) {
     let font_id = TextStyle::Monospace.resolve(ui.style());
-    let lines = lines.lines(text, &font_id, visuals_are_dark(ui));
+    let lines = lines.lines(text, &font_id);
     ui.horizontal(|ui| {
         ui.label(RichText::new(title).strong().color(subtle_dark()));
         if ui.small_button(copy_label).clicked() {
@@ -1164,7 +1155,7 @@ mod tests {
     #[test]
     fn json_documents_have_line_numbers_and_semantic_colours() {
         let text = "{\n  \"Name\": \"Probe\",\n  \"ObjectPath\": \"/Game/Probe.0\",\n  \"Count\": 3,\n  \"Enabled\": true,\n  \"Missing\": null\n}";
-        let job = chimp_json_layout_job(text, egui::FontId::monospace(12.0), true);
+        let job = chimp_json_layout_job(text, egui::FontId::monospace(12.0));
         let lines = split_layout_job_lines(&job);
         assert_eq!(lines.len(), 7);
         for (line, expected) in lines.iter().zip(text.lines()) {
@@ -1279,13 +1270,8 @@ mod tests {
         assert!(export.get("Name").is_some());
         assert!(export.get("Properties").is_some());
         assert_eq!(
-            pane
-                .document_lines
-                .lines(
-                    &pane.document_text,
-                    &egui::FontId::monospace(12.0),
-                    true
-                )
+            pane.document_lines
+                .lines(&pane.document_text, &egui::FontId::monospace(12.0))
                 .len(),
             pane.document_text.lines().count()
         );
@@ -1306,13 +1292,8 @@ mod tests {
                 .is_some_and(|providers| !providers.is_empty())
         );
         assert_eq!(
-            pane
-                .metadata_lines
-                .lines(
-                    &pane.metadata_text,
-                    &egui::FontId::monospace(12.0),
-                    true
-                )
+            pane.metadata_lines
+                .lines(&pane.metadata_text, &egui::FontId::monospace(12.0))
                 .len(),
             pane.metadata_text.lines().count()
         );

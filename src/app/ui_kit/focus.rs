@@ -77,10 +77,19 @@ fn paint_window_focus(ctx: &egui::Context) {
         // one must not transfer focus to the workspace behind it.
         else if layer.order == egui::Order::Background { state.focused = None; }
     }
-    if modal.is_some_and(contains) { state.focused = modal; }
-    if let Some((layer, rect, corners)) = windows.iter().find(|(layer, _, _)| Some(*layer) == state.focused) {
-        ctx.layer_painter(*layer).rect_stroke(*rect, *corners,
-            Stroke::new(1.0, focused_tab_border(ctx.global_style().visuals.dark_mode)), egui::StrokeKind::Inside);
+    if modal.is_some_and(contains) {
+        state.focused = modal;
+    }
+    if let Some((layer, rect, corners)) = windows
+        .iter()
+        .find(|(layer, _, _)| Some(*layer) == state.focused)
+    {
+        ctx.layer_painter(*layer).rect_stroke(
+            *rect,
+            *corners,
+            Stroke::new(1.0, focused_tab_border()),
+            egui::StrokeKind::Inside,
+        );
     }
     state.windows = windows.iter().map(|(layer, _, _)| *layer).collect();
     state.return_focus.retain(|layer, _| contains(*layer));
@@ -125,7 +134,7 @@ mod tests {
             let mut output = frame(&ctx, vec![], false);
             for _ in 0..3 { output = frame(&ctx, vec![], false); }
             assert_eq!(focused(&ctx), Some(egui::Id::unique("Compare Tags")));
-            let border = focused_tab_border(theme == egui::Theme::Dark);
+            let border = focused_tab_border();
             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                 egui::Shape::Rect(rect) if rect.stroke.color == border)), "the focused window has an emphasized border");
             let find_center = ctx.read_response(egui::Id::unique("Find")).unwrap().rect.center();

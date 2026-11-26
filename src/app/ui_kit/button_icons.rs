@@ -245,6 +245,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::View => include_root_str!("assets/Button Icons/View.svg"),
         ButtonIcon::Shading => include_root_str!("assets/Button Icons/shading.svg"),
         ButtonIcon::Bitmap => {
+            // fixed: light themes draw a different picture, chosen by appearance
             if is_dark_mode() {
                 include_root_str!("assets/tag icons/bitmap.svg")
             } else {
@@ -387,8 +388,7 @@ pub(in crate::app) enum ButtonAccent {
 impl ButtonAccent {
     pub(in crate::app) fn color(self) -> Color32 {
         match self {
-            // The Garbage and Close Tab icons' red.
-            ButtonAccent::Destructive => Color32::from_rgb(0xEB, 0x47, 0x47),
+            ButtonAccent::Destructive => button_destructive_accent(),
         }
     }
 
@@ -454,10 +454,6 @@ type ThemedIconSvgCache = std::cell::RefCell<HashMap<(ButtonIcon, Color32, Optio
 
 /// `icon` entirely in `color`, its own accent colors included.
 fn mono_icon_bytes(icon: ButtonIcon, color: Color32) -> egui::load::Bytes {
-    thread_local! {
-        static MONO: IconSvgCache =
-            std::cell::RefCell::new(HashMap::new());
-    }
     let bytes = MONO.with(|mono| {
         mono.borrow_mut()
             .entry((icon, color))
@@ -566,10 +562,6 @@ fn icon_color(icon: ButtonIcon, fallback: Color32) -> Color32 {
 /// so rebuilding the SVG each time (five passes over its text) was all waste:
 /// a sixth of a frame with one weapon tag open.
 fn colorized_icon_bytes(icon: ButtonIcon, color: Color32) -> egui::load::Bytes {
-    thread_local! {
-        static COLORIZED: ThemedIconSvgCache =
-            std::cell::RefCell::new(HashMap::new());
-    }
     let bytes = COLORIZED.with(|colorized| {
         colorized
             .borrow_mut()
@@ -1602,4 +1594,16 @@ mod tests {
         assert!(!freed.contains(&painted[0]), "the cached icon's texture was freed: {freed:?}");
         assert!(ctx.tex_manager().read().meta(painted[0]).is_some());
     }
+}
+
+std::thread_local! {
+    static MONO: IconSvgCache = std::cell::RefCell::new(HashMap::new());
+    static COLORIZED: ThemedIconSvgCache = std::cell::RefCell::new(HashMap::new());
+}
+
+/// Empties the recoloured button-icon SVGs, for a theme that changed colours.
+/// The textures made from them keep their own handles and sweep.
+pub(super) fn forget_button_icon_svgs() {
+    MONO.with(|cache| cache.borrow_mut().clear());
+    COLORIZED.with(|cache| cache.borrow_mut().clear());
 }

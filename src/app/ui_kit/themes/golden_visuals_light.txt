@@ -1,0 +1,195 @@
+Visuals {
+    dark_mode: false,
+    text_options: TextOptions {
+        max_texture_side: 2048,
+        color_transfer_function: Off,
+        font_hinting: true,
+        subpixel_binning: true,
+    },
+    override_text_color: Some(
+        #1C_18_15_FF,
+    ),
+    weak_text_alpha: 0.6,
+    weak_text_color: None,
+    widgets: Widgets {
+        noninteractive: WidgetVisuals {
+            bg_fill: #EC_E8_E4_FF,
+            weak_bg_fill: #F8_F8_F8_FF,
+            bg_stroke: Stroke {
+                width: 1.0,
+                color: #DE_D6_CF_FF,
+            },
+            corner_radius: CornerRadius {
+                nw: 4,
+                ne: 4,
+                sw: 4,
+                se: 4,
+            },
+            fg_stroke: Stroke {
+                width: 1.0,
+                color: #50_50_50_FF,
+            },
+            expansion: 0.0,
+        },
+        inactive: WidgetVisuals {
+            bg_fill: #F9_F8_F8_FF,
+            weak_bg_fill: #80_80_80_80,
+            bg_stroke: Stroke {
+                width: 1.0,
+                color: #D6_CD_C5_FF,
+            },
+            corner_radius: CornerRadius {
+                nw: 6,
+                ne: 6,
+                sw: 6,
+                se: 6,
+            },
+            fg_stroke: Stroke {
+                width: 1.0,
+                color: #3C_3C_3C_FF,
+            },
+            expansion: 0.0,
+        },
+        hovered: WidgetVisuals {
+            bg_fill: #FC_FB_FB_FF,
+            weak_bg_fill: #BF_BF_BF_BF,
+            bg_stroke: Stroke {
+                width: 1.0,
+                color: #BE_B2_A8_FF,
+            },
+            corner_radius: CornerRadius {
+                nw: 6,
+                ne: 6,
+                sw: 6,
+                se: 6,
+            },
+            fg_stroke: Stroke {
+                width: 1.5,
+                color: #00_00_00_FF,
+            },
+            expansion: 1.0,
+        },
+        active: WidgetVisuals {
+            bg_fill: #F5_F5_F4_FF,
+            weak_bg_fill: #40_40_40_40,
+            bg_stroke: Stroke {
+                width: 1.0,
+                color: #B0_A2_97_FF,
+            },
+            corner_radius: CornerRadius {
+                nw: 6,
+                ne: 6,
+                sw: 6,
+                se: 6,
+            },
+            fg_stroke: Stroke {
+                width: 2.0,
+                color: #00_00_00_FF,
+            },
+            expansion: 1.0,
+        },
+        open: WidgetVisuals {
+            bg_fill: #DC_DC_DC_FF,
+            weak_bg_fill: #BF_BF_BF_BF,
+            bg_stroke: Stroke {
+                width: 1.0,
+                color: #BE_B2_A8_FF,
+            },
+            corner_radius: CornerRadius {
+                nw: 6,
+                ne: 6,
+                sw: 6,
+                se: 6,
+            },
+            fg_stroke: Stroke {
+                width: 1.0,
+                color: #00_00_00_FF,
+            },
+            expansion: 0.0,
+        },
+    },
+    selection: Selection {
+        bg_fill: #92_C0_E2_FF,
+        stroke: Stroke {
+            width: 1.0,
+            color: #26_3F_4E_FF,
+        },
+    },
+    ime_composition: ImeComposition {
+        active_underline_stroke: Stroke {
+            width: 2.0,
+            color: #00_53_7D_FF,
+        },
+        inactive_underline_stroke: Stroke {
+            width: 2.0,
+            color: #00_2A_3F_80,
+        },
+        legacy_visuals: false,
+    },
+    hyperlink_color: #00_9B_FF_FF,
+    faint_bg_color: #EC_E8_E4_FF,
+    extreme_bg_color: #77_6A_5D_80,
+    text_edit_bg_color: None,
+    code_bg_color: #EC_E8_E4_FF,
+    warn_fg_color: #7A_50_00_FF,
+    error_fg_color: #A6_23_2D_FF,
+    window_corner_radius: CornerRadius {
+        nw: 6,
+        ne: 6,
+        sw: 6,
+        se: 6,
+    },
+    window_shadow: Shadow {
+        offset: [
+            10,
+            20,
+        ],
+        blur: 15,
+        spread: 0,
+        color: #00_00_00_19,
+    },
+    window_fill: #F2_F1_F0_FF,
+    window_stroke: Stroke {
+        width: 1.0,
+        color: #D8_CF_C7_FF,
+    },
+    window_highlight_topmost: true,
+    menu_corner_radius: CornerRadius {
+        nw: 5,
+        ne: 5,
+        sw: 5,
+        se: 5,
+    },
+    panel_fill: #F2_F1_F0_FF,
+    popup_shadow: Shadow {
+        offset: [
+            6,
+            10,
+        ],
+        blur: 8,
+        spread: 0,
+        color: #00_00_00_19,
+    },
+    resize_corner_size: 12.0,
+    text_cursor: TextCursorStyle {
+        stroke: Stroke {
+            width: 2.0,
+            color: #00_53_7D_FF,
+        },
+        preview: false,
+        blink: true,
+        on_duration: 0.5,
+        off_duration: 0.5,
+    },
+    clip_rect_margin: 0.0,
+    button_frame: true,
+    collapsing_header_frame: false,
+    indent_has_left_vline: true,
+    striped: false,
+    slider_trailing_fill: false,
+    handle_shape: Circle,
+    interact_cursor: None,
+    image_loading_spinners: true,
+    numeric_color_space: GammaByte,
+    disabled_alpha: 0.5,
+}

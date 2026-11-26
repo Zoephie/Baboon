@@ -284,7 +284,7 @@ pub(in crate::app) fn draw_material_resource(
             ui,
             "inline bytes",
             &hex_bytes(resource.inline_bytes()),
-            MATERIAL_DATA_ROW,
+            material_editor_data_row(),
             "value",
             depth + 1,
             None,
@@ -295,7 +295,7 @@ pub(in crate::app) fn draw_material_resource(
                 ui,
                 "exploded payload",
                 &format!("{} bytes", payload.len()),
-                MATERIAL_DATA_ROW,
+                material_editor_data_row(),
                 "value",
                 depth + 1,
                 None,
@@ -307,7 +307,7 @@ pub(in crate::app) fn draw_material_resource(
                 ui,
                 "xsync payload",
                 &format!("{} bytes", payload.len()),
-                MATERIAL_DATA_ROW,
+                material_editor_data_row(),
                 "value",
                 depth + 1,
                 None,
@@ -346,7 +346,7 @@ pub(in crate::app) fn draw_material_value_row(
     ui.painter().rect_filled(rect, 0.0, fill);
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0_f32, MATERIAL_GRID),
+        Stroke::new(1.0_f32, material_editor_grid()),
     );
 
     let label_rect = egui::Rect::from_min_size(
@@ -358,7 +358,7 @@ pub(in crate::app) fn draw_material_value_row(
         Align2::LEFT_CENTER,
         clean_field_name(name),
         FontId::proportional(13.0),
-        MATERIAL_TEXT,
+        material_editor_text(),
     );
 
     let value_rect = egui::Rect::from_min_size(
@@ -366,18 +366,17 @@ pub(in crate::app) fn draw_material_value_row(
         Vec2::new(value_width.min(560.0), height - 8.0),
     );
     let (value_fill, value_text) = if value_kind == "default" {
-        (MATERIAL_DEFAULT_BOX, MATERIAL_MUTED_TEXT)
+        (material_editor_box(), material_editor_muted_text())
     } else {
-        (Color32::WHITE, MATERIAL_TEXT)
+        (Color32::WHITE, material_editor_text())
     };
     ui.painter().rect_filled(value_rect, 0.0, value_fill);
-    ui.painter()
-        .rect_stroke(
-            value_rect,
-            0.0,
-            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
-            egui::StrokeKind::Inside,
-        );
+    ui.painter().rect_stroke(
+        value_rect,
+        0.0,
+        Stroke::new(1.0_f32, material_editor_input_edge()),
+        egui::StrokeKind::Inside,
+    );
     let text_offset = if let Some(color) = color {
         let swatch_size = (value_rect.height() - 4.0).max(12.0);
         let swatch_rect = egui::Rect::from_min_size(
@@ -385,13 +384,12 @@ pub(in crate::app) fn draw_material_value_row(
             Vec2::splat(swatch_size),
         );
         ui.painter().rect_filled(swatch_rect, 0.0, color.color32());
-        ui.painter()
-            .rect_stroke(
-                swatch_rect,
-                0.0,
-                Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
-                egui::StrokeKind::Middle,
-            );
+        ui.painter().rect_stroke(
+            swatch_rect,
+            0.0,
+            Stroke::new(1.0_f32, material_editor_input_edge()),
+            egui::StrokeKind::Middle,
+        );
         let swatch_response = ui
             .interact(
                 swatch_rect,
@@ -430,10 +428,11 @@ pub(in crate::app) fn draw_material_function_value_row(
     let label_width = (210.0 - (depth as f32 * 10.0)).clamp(150.0, 210.0);
     let height = 34.0;
     let (rect, response) = ui.allocate_exact_size(Vec2::new(available, height), Sense::click());
-    ui.painter().rect_filled(rect, 0.0, MATERIAL_FUNCTION_ROW);
+    ui.painter()
+        .rect_filled(rect, 0.0, material_editor_function_row());
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0_f32, MATERIAL_GRID),
+        Stroke::new(1.0_f32, material_editor_grid()),
     );
 
     let label_rect = egui::Rect::from_min_size(
@@ -445,7 +444,7 @@ pub(in crate::app) fn draw_material_function_value_row(
         Align2::LEFT_CENTER,
         clean_field_name(name),
         FontId::proportional(13.0),
-        MATERIAL_TEXT,
+        material_editor_text(),
     );
 
     let function_rect = egui::Rect::from_min_max(
@@ -453,13 +452,12 @@ pub(in crate::app) fn draw_material_function_value_row(
         rect.right_bottom() - Vec2::new(44.0, 5.0),
     );
     ui.painter().rect_filled(function_rect, 0.0, Color32::WHITE);
-    ui.painter()
-        .rect_stroke(
-            function_rect,
-            0.0,
-            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
-            egui::StrokeKind::Middle,
-        );
+    ui.painter().rect_stroke(
+        function_rect,
+        0.0,
+        Stroke::new(1.0_f32, material_editor_input_edge()),
+        egui::StrokeKind::Middle,
+    );
     ui.painter().text(
         function_rect.left_center() + Vec2::new(6.0, 0.0),
         Align2::LEFT_CENTER,
@@ -468,7 +466,7 @@ pub(in crate::app) fn draw_material_function_value_row(
             function_rect.width() - 12.0,
         ),
         FontId::monospace(12.5),
-        MATERIAL_TEXT,
+        material_editor_text(),
     );
 
     let button_rect = egui::Rect::from_min_size(
@@ -476,19 +474,18 @@ pub(in crate::app) fn draw_material_function_value_row(
         Vec2::new(30.0, height - 10.0),
     );
     ui.painter().rect_filled(button_rect, 0.0, Color32::WHITE);
-    ui.painter()
-        .rect_stroke(
-            button_rect,
-            0.0,
-            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
-            egui::StrokeKind::Middle,
-        );
+    ui.painter().rect_stroke(
+        button_rect,
+        0.0,
+        Stroke::new(1.0_f32, material_editor_input_edge()),
+        egui::StrokeKind::Middle,
+    );
     ui.painter().text(
         button_rect.center(),
         Align2::CENTER_CENTER,
         "f()",
         FontId::proportional(12.0),
-        MATERIAL_TEXT,
+        material_editor_text(),
     );
 
     if response.hovered() {
@@ -507,7 +504,7 @@ pub(in crate::app) fn draw_material_function_value_row(
 }
 
 pub(in crate::app) fn material_section_text(text: String) -> RichText {
-    RichText::new(text).color(MATERIAL_TEXT).strong()
+    RichText::new(text).color(material_editor_text()).strong()
 }
 
 pub(in crate::app) fn clean_field_name(name: &str) -> String {
