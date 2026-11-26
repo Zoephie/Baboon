@@ -113,6 +113,7 @@ impl Baboon {
         // the preview into a waiting state that has to be drawn.
         changed |= self.maybe_request_model_preview(kit_index, &key, ctx);
         changed |= self.maybe_request_model_textures(kit_index, &key, ctx);
+        changed |= self.maybe_request_material_resolve(kit_index, &key, ctx);
         changed |= self.maybe_request_model_overlays(kit_index, &key, ctx);
         changed |= self.maybe_request_unit_weapons(kit_index, &key, ctx);
         changed |= self.maybe_request_model_animations(kit_index, &key, ctx);

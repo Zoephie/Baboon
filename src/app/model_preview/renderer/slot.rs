@@ -134,6 +134,10 @@ pub(in crate::app::model_preview) struct ModelGpuSlot {
     /// model, or another model given this slot, re-uploads rather than drawing
     /// the wrong textures.
     pub(super) uploaded_textures: Option<u64>,
+    /// The GL textures `materials` bind, by the image each was made from:
+    /// the slots' maps, and the DX9 passes'.
+    slot_pool: TexturePool<(usize, bool, bool), Arc<Vec<u8>>>,
+    pass_pool: TexturePool<usize, Arc<super::super::common::image::Image>>,
     /// Halo 3's and Halo 4's lens flares: per flare, then per image, of
     /// `flare_geometry`.
     pub(in crate::app::model_preview) flare_textures: Vec<Vec<Option<glow::NativeTexture>>>,
@@ -189,6 +193,8 @@ impl ModelGpuSlot {
                 grid_built: false,
                 materials: Vec::new(),
                 uploaded_textures: None,
+                slot_pool: TexturePool::default(),
+                pass_pool: TexturePool::default(),
                 flare_textures: Vec::new(),
                 gen3_textures: Default::default(),
                 flare_geometry: None,
@@ -406,16 +412,18 @@ impl ModelGpuSlot {
         if self.uploaded_textures == wanted {
             return;
         }
-        unsafe { self.release_textures(gl) };
         self.uploaded_textures = wanted;
         let Some(textures) = frame.textures.as_ref() else {
             return;
         };
         // One texture per decoded image, however many materials bind it: the
         // resolve hands each the same decode of a map. A slot's wrap is part
-        // of its texture; its scale is a uniform.
-        let mut slots = HashMap::new();
-        let mut passes_shared = HashMap::new();
+        // of its texture; its scale is a uniform. Kept across uploads, so new
+        // textures (one material re-resolved by the Material Editor) upload
+        // only the images they did not have.
+        self.slot_pool.begin();
+        self.pass_pool.begin();
+        let (slots, passes_shared) = (&mut self.slot_pool, &mut self.pass_pool);
         self.materials = textures
             .iter()
             .map(|material| {
@@ -426,10 +434,9 @@ impl ModelGpuSlot {
                         continue;
                     };
                     uploaded.uv_scales[index] = image.scale;
-                    let key = (Arc::as_ptr(&image.rgba), image.repeat_x, image.repeat_y);
-                    uploaded.textures[index] = *slots
-                        .entry(key)
-                        .or_insert_with(|| unsafe { upload_texture(gl, image) });
+                    let key = (Arc::as_ptr(&image.rgba) as usize, image.repeat_x, image.repeat_y);
+                    uploaded.textures[index] =
+                        slots.get(key, || Arc::clone(&image.rgba), || unsafe { upload_texture(gl, image) });
                 }
                 uploaded.detail = material.detail;
                 let mut upload = |passes: &[Dx9DrawPass]| -> Vec<Vec<Option<glow::NativeTexture>>> {
@@ -440,9 +447,11 @@ impl ModelGpuSlot {
                                 .iter()
                                 .map(|texture| {
                                     let image = texture.image.as_ref()?;
-                                    *passes_shared
-                                        .entry(Arc::as_ptr(image))
-                                        .or_insert_with(|| unsafe { upload_image(gl, image) })
+                                    passes_shared.get(
+                                        Arc::as_ptr(image) as usize,
+                                        || Arc::clone(image),
+                                        || unsafe { upload_image(gl, image) },
+                                    )
                                 })
                                 .collect()
                         })
@@ -453,23 +462,73 @@ impl ModelGpuSlot {
                 uploaded
             })
             .collect();
+        unsafe {
+            self.slot_pool.finish(gl);
+            self.pass_pool.finish(gl);
+        }
+    }
+}
+
+/// GL textures by the decoded image each was made from, kept from one upload
+/// to the next: an upload takes what it can from here and makes the rest,
+/// and what it no longer binds is deleted.
+///
+/// Keyed by the image's address, with the image kept alive beside its
+/// texture (`A`), so the address can't be taken by another image while the
+/// texture stands for it.
+pub(in crate::app::model_preview) struct TexturePool<K, A> {
+    entries: HashMap<K, (A, glow::NativeTexture)>,
+    used: std::collections::HashSet<K>,
+}
+
+impl<K, A> Default for TexturePool<K, A> {
+    fn default() -> Self {
+        Self { entries: HashMap::new(), used: std::collections::HashSet::new() }
+    }
+}
+
+impl<K: std::hash::Hash + Eq + Clone, A> TexturePool<K, A> {
+    /// Start an upload: nothing is used by it yet.
+    pub(in crate::app::model_preview) fn begin(&mut self) {
+        self.used.clear();
     }
 
-    pub(super) unsafe fn release_textures(&mut self, gl: &glow::Context) {
-        // Materials share their textures (`sync_textures`): each goes once.
-        let mut shared = std::collections::HashSet::new();
-        for material in self.materials.drain(..) {
-            let passes = material
-                .dx9_textures
-                .into_iter()
-                .flatten()
-                .flatten()
-                .flatten();
-            shared.extend(material.textures.into_iter().flatten().chain(passes));
-        }
-        for texture in shared {
-            unsafe { gl.delete_texture(texture) };
-        }
+    /// The texture of the image `key`, made by `upload` (with `keep` kept
+    /// beside it) the first time it is asked for.
+    pub(in crate::app::model_preview) fn get(
+        &mut self,
+        key: K,
+        keep: impl FnOnce() -> A,
+        upload: impl FnOnce() -> Option<glow::NativeTexture>,
+    ) -> Option<glow::NativeTexture> {
+        let texture = match self.entries.get(&key) {
+            Some((_, texture)) => *texture,
+            None => {
+                let texture = upload()?;
+                self.entries.insert(key.clone(), (keep(), texture));
+                texture
+            }
+        };
+        self.used.insert(key);
+        Some(texture)
+    }
+
+    /// End an upload: delete what it did not use.
+    pub(in crate::app::model_preview) unsafe fn finish(&mut self, gl: &glow::Context) {
+        let used = &self.used;
+        self.entries.retain(|key, (_, texture)| {
+            let keep = used.contains(key);
+            if !keep {
+                unsafe { gl.delete_texture(*texture) };
+            }
+            keep
+        });
+    }
+
+    /// How many textures it holds.
+    #[cfg(test)]
+    pub(in crate::app::model_preview) fn len(&self) -> usize {
+        self.entries.len()
     }
 }
 
@@ -497,6 +556,37 @@ impl Default for MaterialGlTextures {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An image already uploaded is not uploaded again, and an upload that
+    /// no longer binds one deletes its texture: the Material Editor's edit
+    /// of one material uploads that material's new maps alone.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn a_texture_pool_uploads_each_image_once_and_keeps_only_what_is_bound() {
+        let gl = crate::app::model_preview::headless_gl();
+        let mut pool: TexturePool<usize, ()> = TexturePool::default();
+        let mut uploads = 0;
+        let mut take = |pool: &mut TexturePool<usize, ()>, image: usize, uploads: &mut usize| {
+            pool.get(image, || (), || {
+                *uploads += 1;
+                unsafe { gl.create_texture().ok() }
+            })
+        };
+        pool.begin();
+        let first = take(&mut pool, 1, &mut uploads);
+        assert_eq!(take(&mut pool, 1, &mut uploads), first, "a second binding shares the texture");
+        take(&mut pool, 2, &mut uploads);
+        unsafe { pool.finish(&gl) };
+        assert_eq!((uploads, pool.len()), (2, 2));
+
+        // The next upload binds the first image and a new one.
+        pool.begin();
+        assert_eq!(take(&mut pool, 1, &mut uploads), first, "kept from the upload before");
+        take(&mut pool, 3, &mut uploads);
+        unsafe { pool.finish(&gl) };
+        assert_eq!(uploads, 3, "only the new image went up");
+        assert_eq!(pool.len(), 2, "the image no longer bound went");
+    }
 
     /// Two previews on screen draw alternately. Each model is uploaded once
     /// and then stays; with one slot, every draw replaced the other model.

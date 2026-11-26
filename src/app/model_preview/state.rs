@@ -168,6 +168,8 @@ pub(in crate::app) struct ModelPreviewState {
     /// The Material Editor, while it is open: what it shows and what the
     /// pointer is over, which the viewport lights.
     pub(in crate::app) material_editor: Option<super::material_editor::MaterialEditorState>,
+    /// What keeps the materials as the Material Editor's shaders have them.
+    pub(in crate::app) material_live: super::material_editor::MaterialLive,
 }
 
 /// The last loaded model and how its player stood, drawn while the same
@@ -257,6 +259,7 @@ impl Default for ModelPreviewState {
             pitch: 0.25,
             focus: [0.0; 3],
             material_editor: None,
+            material_live: Default::default(),
         }
     }
 }

@@ -88,6 +88,14 @@ impl TagReader {
         )
     }
 
+    /// Take `tag` as `reference`'s, read in place of its file: a document's
+    /// unsaved edits, as the Material Editor holds them.
+    pub(in crate::app::model_preview) fn seed(&self, reference: &str, extension: &str, group: &[u8; 4], tag: Arc<TagFile>) {
+        self.read
+            .borrow_mut()
+            .insert((reference.to_owned(), extension.to_owned(), *group), Ok(tag));
+    }
+
     /// `reference`'s tag, read the first time it is asked for. A failure is
     /// kept too: asked again, it fails with the same message.
     pub(in crate::app::model_preview) fn load(

@@ -6061,6 +6061,63 @@ mod tests {
         assert!(!h.app.model.kits[0].open_tabs.contains(&material_key), "still no tab");
     }
 
+    /// An edit in the Material Editor redraws the preview with that
+    /// material resolved again from the edited document, without loading
+    /// the model again.
+    #[test]
+    fn an_edit_in_the_material_editor_redraws_its_material_without_a_load() {
+        let kit_tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        let material = "objects\\multi\\darth_shader.material";
+        let shader = "shaders\\material_shaders\\materials\\srf_lambert.material_shader";
+        if !kit_tags.join(material.replace('\\', "/")).exists() {
+            eprintln!("skipping: set BLAM_TEST_H4EK");
+            return;
+        }
+        let mut h = Harness::new();
+        let kit = crate::app::loose_fixture::LooseKit::new("material_editor_live", "halo4_mcc");
+        for tag in [material, shader] {
+            let to = kit.path(tag);
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::copy(kit_tags.join(tag.replace('\\', "/")), to).unwrap();
+        }
+        kit.write_mcc("objects\\smoke", "render_model", |_| {});
+        kit.install(&mut h.app);
+        let model = kit.open(&mut h.app, "objects\\smoke.render_model");
+        let material_key = kit.key(material);
+        let id = h.app.model.kits[h.app.model.active].id;
+        let mut state = crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(
+            &model,
+            &[(b"mat ", "objects\\multi\\darth_shader")],
+        );
+        state.material_editor = Some(Default::default());
+        // Drawn with its material as a load resolved it.
+        if let Some(Ok(data)) = state.data.as_mut() {
+            data.set_textures(vec![Default::default()], false);
+        }
+        h.app.views[id].caches.model_previews.insert(model.clone(), state);
+        frames_until(&mut h, "the material's grid", |h| h.painted_contains("Diffuse Intensity"));
+        let loaded = |h: &Harness| {
+            let state = &h.app.views[id].caches.model_previews[&model];
+            let Some(Ok(data)) = state.data.as_ref() else { panic!("the preview is loaded") };
+            (data.geometry_id, data.textures_id)
+        };
+        let (geometry, textures) = loaded(&h);
+
+        h.click_at(rightmost_on_row(&h, "Diffuse Intensity", "Override Default"));
+        let edited = h.app.model.kits[0].parsed_tags[&material_key].content_stamp();
+        frames_until(&mut h, "the material to be resolved from the edit", |h| {
+            h.app.views[id].caches.model_previews[&model].material_live.drawn.get(&material_key) == Some(&Some(edited))
+        });
+        let (geometry_after, textures_after) = loaded(&h);
+        assert_eq!(geometry_after, geometry, "the model was not loaded again");
+        assert_ne!(textures_after, textures, "its materials were replaced");
+        let state = &h.app.views[id].caches.model_previews[&model];
+        assert!(state.preview_load_id.is_none() && !state.needs_preview_load(&model));
+        let Some(Ok(data)) = state.data.as_ref() else { unreachable!() };
+        let resolved = &data.textures.as_ref().expect("textures")[0];
+        assert!(resolved.error.is_none(), "the edited material resolved: {:?}", resolved.error);
+    }
+
     /// Refresh Model sits in the viewport's header, left of the Camera
     /// menu, not in the sidebar, and pressing it loads the preview again.
     #[test]

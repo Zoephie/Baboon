@@ -32,7 +32,19 @@ pub(crate) fn resolve_model_textures(
 ) -> Vec<MaterialTextures> {
     // The materials' own reads, once each for this resolve.
     let reader = &TagReader::with_game_shaders(source, game_shaders);
-    let mut caches = ResolveCaches {
+    let mut caches = resolve_caches(source);
+    let mut textures: Vec<MaterialTextures> = materials
+        .iter()
+        .map(|material| guarded_resolve(reader, material, &mut caches))
+        .collect();
+    finish_materials(materials, &mut textures);
+    textures
+}
+
+/// The caches one model's resolve shares across its materials, with the
+/// kit's own group names.
+pub(in crate::app::model_preview) fn resolve_caches(source: &TagSource) -> ResolveCaches {
+    ResolveCaches {
         kit_names: match source {
             TagSource::LooseFolder {
                 game: Some(game),
@@ -42,31 +54,88 @@ pub(crate) fn resolve_model_textures(
             _ => None,
         },
         ..Default::default()
-    };
-    let mut textures: Vec<MaterialTextures> = materials
-        .iter()
-        .map(|material| {
-            // Guarded per material: blam-tags' enum resolver panics on names
-            // a custom kit's recompiled shader tags can carry, and a panic
-            // here kills the worker before it sends its message — leaving the
-            // viewport on "Loading shaders…" forever.
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                resolve_one_material(reader, material, &mut caches)
-            }))
-            .unwrap_or_else(|_| {
-                MaterialTextures::failed(
-                    "this shader crashed the reader — its tags likely use names \
-                     this build of blam-tags does not know",
-                )
-            })
+    }
+}
+
+/// [`resolve_one_material`], guarded: blam-tags' enum resolver panics on
+/// names a custom kit's recompiled shader tags can carry, and a panic here
+/// kills the worker before it sends its message, leaving the viewport on
+/// "Loading shaders…" forever.
+fn guarded_resolve(reader: &TagReader, material: &RenderModelPreviewMaterial, caches: &mut ResolveCaches) -> MaterialTextures {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| resolve_one_material(reader, material, caches)))
+        .unwrap_or_else(|_| {
+            MaterialTextures::failed(
+                "this shader crashed the reader — its tags likely use names \
+                 this build of blam-tags does not know",
+            )
         })
-        .collect();
+}
+
+/// What follows every material's resolve: each keeps its own DX9 passes,
+/// then an object's overlay and damage passes are shared among its
+/// materials, with the preview's shadow passes.
+fn finish_materials(materials: &[RenderModelPreviewMaterial], textures: &mut [MaterialTextures]) {
+    for texture in textures.iter_mut() {
+        texture.own_dx9_layers = texture.dx9_layers.clone();
+    }
     super::super::dx9::resolved::finish_dx9_layers(
-        materials,
-        &mut textures,
+        &materials[..textures.len().min(materials.len())],
+        textures,
         &super::super::load::shadow_passes(),
     );
+}
+
+/// The materials at `indices` resolved again, the rest as `previous` has
+/// them: the Material Editor's edit of one shader, which every material
+/// naming it draws. `shader`, when given, is that shader's document, read in
+/// place of its file. An object's shared passes are shared again from every
+/// material's own, so an overlay shader edited hands its passes out anew,
+/// and a plain one keeps those it was given.
+///
+/// `caches` live across the editor's resolves of one load: the shader's
+/// own entries are dropped first, the rest (decoded maps, translated
+/// includes, definitions) are what makes one material quick.
+pub(in crate::app::model_preview) fn resolve_model_materials(
+    source: &TagSource,
+    materials: &[RenderModelPreviewMaterial],
+    previous: &[MaterialTextures],
+    indices: &[u16],
+    shader: Option<Arc<blam_tags::TagFile>>,
+    game_shaders: bool,
+    caches: &mut ResolveCaches,
+) -> Vec<MaterialTextures> {
+    let reader = &TagReader::with_game_shaders(source, game_shaders);
+    let mut textures = previous.to_vec();
+    for &index in indices {
+        let index = usize::from(index);
+        let (Some(material), true) = (materials.get(index), index < textures.len()) else {
+            continue;
+        };
+        caches.references.remove(&material.shader_path.to_ascii_lowercase());
+        if let (Some(shader), Some(extension)) = (&shader, material_extension(material, caches)) {
+            reader.seed(&material.shader_path, &extension, &material.shader_group.to_be_bytes(), Arc::clone(shader));
+        }
+        let mut resolved = guarded_resolve(reader, material, caches);
+        resolved.own_dx9_layers = resolved.dx9_layers.clone();
+        textures[index] = resolved;
+    }
+    // Shared again from every material's own passes, the new ones' too.
+    for texture in textures.iter_mut() {
+        texture.dx9_layers = texture.own_dx9_layers.clone();
+    }
+    finish_materials(materials, &mut textures);
     textures
+}
+
+/// The extension `material`'s shader reference resolves with: the kit's own
+/// name for its group, else the cross-game table's.
+fn material_extension(material: &RenderModelPreviewMaterial, caches: &ResolveCaches) -> Option<String> {
+    caches
+        .kit_names
+        .as_ref()
+        .and_then(|names| names.name_for(material.shader_group))
+        .map(str::to_owned)
+        .or_else(|| blam_tags::paths::group_tag_to_extension(material.shader_group).map(str::to_owned))
 }
 
 fn resolve_one_material(
@@ -77,15 +146,7 @@ fn resolve_one_material(
     if material.shader_path.is_empty() {
         return MaterialTextures::failed("no shader assigned");
     }
-    let extension = caches
-        .kit_names
-        .as_ref()
-        .and_then(|names| names.name_for(material.shader_group))
-        .map(str::to_owned)
-        .or_else(|| {
-            blam_tags::paths::group_tag_to_extension(material.shader_group).map(str::to_owned)
-        });
-    let Some(extension) = extension else {
+    let Some(extension) = material_extension(material, caches) else {
         return MaterialTextures::failed(format!(
             "unknown shader group {:?}",
             material.shader_group.to_be_bytes()

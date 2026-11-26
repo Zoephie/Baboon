@@ -48,18 +48,44 @@ impl Baboon {
                     self.model.kits[index].hold_document(key, &preview);
                     self.load_tag_in(index, key.clone(), ctx.clone(), false);
                 }
-                if let Some(editor) = self.views[kit]
-                    .caches
-                    .model_previews
-                    .get_mut(&preview)
-                    .and_then(|state| state.material_editor.as_mut())
-                {
-                    editor.documents.insert(material, result);
+                let file = result.as_ref().ok().and_then(|key| match &self.model.entry_for_key_in(index, key)?.location {
+                    TagEntryLocation::LooseFile(path) => Some(path.clone()),
+                    _ => None,
+                });
+                if let Some(state) = self.views[kit].caches.model_previews.get_mut(&preview) {
+                    // The preview keeps it up to date itself from now on:
+                    // saving it, or editing it, needs no load.
+                    if let Some(file) = &file {
+                        state.reads.mark_live(file);
+                    }
+                    state.material_live.documents.insert(material, result);
                 }
             }
             MaterialEditorCommand::Release { kit, preview } => {
-                if let Some(index) = self.model.kit_index(kit) {
-                    self.kit_and_view(index).release_clean_documents_held_by(&preview, None);
+                let Some(index) = self.model.kit_index(kit) else {
+                    return;
+                };
+                let held: Vec<String> = self.model.kits[index]
+                    .held_documents
+                    .iter()
+                    .filter(|(_, holders)| holders.contains(&preview))
+                    .map(|(key, _)| key.clone())
+                    .collect();
+                self.kit_and_view(index).release_clean_documents_held_by(&preview, None);
+                // What it let go of, the preview watches as files again.
+                let kit_state = &self.model.kits[index];
+                let released: Vec<PathBuf> = held
+                    .iter()
+                    .filter(|key| !kit_state.held_documents.get(*key).is_some_and(|holders| holders.contains(&preview)))
+                    .filter_map(|key| match &kit_state.entry_for_key(key)?.location {
+                        TagEntryLocation::LooseFile(path) => Some(path.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                if let Some(state) = self.views[kit].caches.model_previews.get_mut(&preview) {
+                    for path in &released {
+                        state.reads.unmark_live(path);
+                    }
                 }
             }
         }
@@ -91,6 +117,7 @@ pub(in crate::app) fn draw_material_editor_window(
     let Some(state) = view.caches.model_previews.get_mut(&model.key) else {
         return;
     };
+    let documents = state.material_live.documents.clone();
     let Some(mut editor_state) = state.material_editor.clone() else {
         // Closed: what it held and left clean goes.
         if kit.held_documents.values().any(|holders| holders.contains(&model.key)) {
@@ -142,7 +169,7 @@ pub(in crate::app) fn draw_material_editor_window(
                 );
             }
             ui.separator();
-            draw_material_body(cx, ui, kit_index, model, scope, inputs, view, editor, &mut editor_state, &material);
+            draw_material_body(cx, ui, kit_index, model, scope, inputs, view, editor, &documents, &material);
         });
 
     // Pressing in the window makes its kit the one actions land in, and its
@@ -162,7 +189,7 @@ pub(in crate::app) fn draw_material_editor_window(
     }
     let active = ctx.data(|data| data.get_temp::<bool>(active_id)).unwrap_or(false);
     if active
-        && let Some(Ok(key)) = editor_state.selected.as_ref().and_then(|selected| editor_state.documents.get(selected))
+        && let Some(Ok(key)) = editor_state.selected.as_ref().and_then(|selected| documents.get(selected))
     {
         crate::app::documents::claim_history_target(ctx, kit_id, key);
     }
@@ -278,7 +305,7 @@ fn draw_material_body(
     inputs: PaneInputs,
     view: &mut KitView,
     editor: &mut EditorFeature,
-    state: &mut crate::app::model_preview::material_editor::MaterialEditorState,
+    documents: &std::collections::BTreeMap<MaterialKey, Result<String, String>>,
     material: &EditorMaterial,
 ) {
     let kit = &cx.model.kits[kit_index];
@@ -291,7 +318,7 @@ fn draw_material_body(
             path: material.path.clone(),
         }))
     };
-    let key = match state.documents.get(&material.key) {
+    let key = match documents.get(&material.key) {
         None => {
             hold();
             ui.label(RichText::new("Opening the shader…").color(subtle_dark()));

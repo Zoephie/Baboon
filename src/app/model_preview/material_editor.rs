@@ -40,9 +40,36 @@ pub(in crate::app) struct MaterialEditorState {
     /// The material the pointer is over in its lists, this pass: the
     /// viewport lights its parts.
     pub(in crate::app) hovered: Option<MaterialKey>,
+}
+
+/// What keeps a preview's materials as the shader documents its Material
+/// Editor holds have them, resolving the materials of one again when it
+/// changes rather than loading the model again. Kept while the editor is
+/// closed: a shader left with unsaved edits stays held, and drawn so.
+#[derive(Default)]
+pub(in crate::app) struct MaterialLive {
     /// The key of each material's shader tag in the kit, once looked up,
     /// or why it has none.
     pub(in crate::app) documents: std::collections::BTreeMap<MaterialKey, Result<String, String>>,
+    /// Each held document as the drawn materials were resolved from it: its
+    /// content stamp, or `None` for its file (the document gone, its edits
+    /// discarded). A document missing here is drawn as its file, which a
+    /// clean one is.
+    pub(in crate::app) drawn: std::collections::HashMap<String, Option<(u64, u64)>>,
+    /// A resolve is running: one at a time, so they land in order.
+    pub(in crate::app) in_flight: bool,
+    /// The caches the editor's resolves of this load share, with the
+    /// `geometry_id` of the load they belong to.
+    pub(in crate::app::model_preview) caches: Option<(u64, std::sync::Arc<std::sync::Mutex<super::materials::ResolveCaches>>)>,
+}
+
+impl MaterialLive {
+    /// A load has begun: what was resolved belonged to the one before, and
+    /// the held documents are drawn as the load reads them, at `stamps`.
+    pub(in crate::app) fn restart(&mut self, stamps: std::collections::HashMap<String, Option<(u64, u64)>>) {
+        self.drawn = stamps;
+        self.caches = None;
+    }
 }
 
 /// A shader as the Material Editor lists it.

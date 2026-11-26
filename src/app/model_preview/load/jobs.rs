@@ -428,6 +428,21 @@ impl Baboon {
         // The preview's own Material Editor's shaders, whatever that says:
         // a load (Refresh Model, a weapon, Game Shaders) never drops them.
         unsaved.extend(held_tag_edits(kit, key));
+        // Which the load draws as they are now, and which the preview keeps
+        // up to date itself from then on.
+        let held: Vec<(String, Option<(u64, u64)>, Option<std::path::PathBuf>)> = kit
+            .held_documents
+            .iter()
+            .filter(|(_, holders)| holders.contains(key))
+            .map(|(document, _)| {
+                let stamp = kit.parsed_tags.get(document).map(|document| document.content_stamp());
+                let file = match kit.entry_for_key(document).map(|entry| &entry.location) {
+                    Some(TagEntryLocation::LooseFile(path)) => Some(path.clone()),
+                    _ => None,
+                };
+                (document.clone(), stamp, file)
+            })
+            .collect();
         let names = kit.names.clone();
         let stamp = KitStamp {
             kit: kit.id,
@@ -457,6 +472,14 @@ impl Baboon {
         // What this load reads, from scratch: the last one's list described
         // the model being replaced.
         state.reads = crate::core::source::reads::ReadFiles::with_edits(unsaved);
+        for (_, _, file) in &held {
+            if let Some(file) = file {
+                state.reads.mark_live(file);
+            }
+        }
+        state
+            .material_live
+            .restart(held.into_iter().map(|(document, stamp, _)| (document, stamp)).collect());
         state.reads_changed = false;
         state.edits_seen = None;
         state.edits_checked = None;

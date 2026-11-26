@@ -23,6 +23,9 @@ use std::sync::Arc;
 pub(in crate::app::model_preview) struct Gen3SlotTextures {
     id: Option<u64>,
     pub(super) materials: Vec<HashMap<String, glow::NativeTexture>>,
+    /// The textures `materials` bind, by the image, mips, texels and sampler
+    /// each was made from, kept across uploads (see `TexturePool`).
+    pool: crate::app::model_preview::renderer::TexturePool<(usize, usize, ImageTexels, Option<crate::app::model_preview::common::image::Sampler>), Arc<Image>>,
     /// The shield's noise, by uniform.
     pub(super) shield: HashMap<String, glow::NativeTexture>,
     /// Each of the game's own object lights' gels, of `id`.
@@ -227,15 +230,9 @@ impl Gen3State {
             return;
         }
         unsafe {
-            // Materials share their textures (see below): each goes once.
-            let shared: std::collections::HashSet<_> = uploaded
-                .materials
-                .drain(..)
-                .flat_map(|map| map.into_values())
-                .collect();
-            for texture in shared {
-                gl.delete_texture(texture);
-            }
+            // The materials' textures are the pool's, which keeps those the
+            // new materials still bind (see below).
+            uploaded.materials.clear();
             for texture in uploaded.gels.drain(..).flatten() {
                 gl.delete_texture(texture);
             }
@@ -285,12 +282,11 @@ impl Gen3State {
             // image of a map, and a Reach Spartan's 199 materials bound 390
             // images 1,744 times. Its stored mips are part of what it is: a
             // frame of an animated map goes up without them.
-            let mut shared = HashMap::new();
+            let pool = &mut uploaded.pool;
+            pool.begin();
             let mut upload = |image: &Arc<Image>, texels, mips: &[Image], sampler| {
-                let key = (Arc::as_ptr(image), mips.len(), texels, sampler);
-                *shared
-                    .entry(key)
-                    .or_insert_with(|| upload_image_linear(gl, image, texels, mips, sampler))
+                let key = (Arc::as_ptr(image) as usize, mips.len(), texels, sampler);
+                pool.get(key, || Arc::clone(image), || upload_image_linear(gl, image, texels, mips, sampler))
             };
             for textures in frame.textures.iter().flat_map(|textures| textures.iter()) {
                 let mut map = HashMap::new();
@@ -312,6 +308,7 @@ impl Gen3State {
                 }
                 uploaded.materials.push(map);
             }
+            uploaded.pool.finish(gl);
         }
         uploaded.id = Some(frame.textures_id);
     }
