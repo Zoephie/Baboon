@@ -9196,19 +9196,27 @@ mod tests {
         // BABOON_SHOT_GAME names the kit's game ("halo3_mcc"; Halo 2 by default).
         let game = std::env::var("BABOON_SHOT_GAME")
             .map_or(GameId::Halo2, |id| id.parse().expect("a game id"));
-        use crate::app::ui_kit::themes::BuiltIn;
-        for (built_in, name) in [
-            (BuiltIn::Light, "theme_light.png"),
-            (BuiltIn::ClassicLight, "theme_classic_light.png"),
-            (BuiltIn::Dark, "theme_dark.png"),
+        // The built-ins, then the example themes in docs/theme-examples.
+        crate::app::ui_kit::themes::state::use_folder(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("docs")
+                .join("theme-examples"),
+        );
+        for (theme, dark, name) in [
+            ("baboon-light", false, "theme_light.png"),
+            ("baboon-light-classic", false, "theme_classic_light.png"),
+            ("baboon-dark", true, "theme_dark.png"),
+            ("ember", true, "theme_ember.png"),
+            ("harbor", false, "theme_harbor.png"),
+            ("nightfall", true, "theme_nightfall.png"),
         ] {
             let mut h = Harness::recording();
             h.app.model.prefs.follow_system_theme = false;
-            h.app.model.prefs.dark_mode = built_in.appearance().is_dark();
-            if built_in.appearance().is_dark() {
-                h.app.model.prefs.dark_theme = built_in.id().to_owned();
+            h.app.model.prefs.dark_mode = dark;
+            if dark {
+                h.app.model.prefs.dark_theme = theme.to_owned();
             } else {
-                h.app.model.prefs.light_theme = built_in.id().to_owned();
+                h.app.model.prefs.light_theme = theme.to_owned();
             }
             // The status bar's one coloured message, to judge it on the bar.
             h.app.shell.available_update = Some(UpdateCheckResult {

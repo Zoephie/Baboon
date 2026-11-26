@@ -60,8 +60,11 @@ pub(in crate::app) struct Resolved {
     pub(in crate::app) reports: Vec<Report>,
     /// The files it was read from, child first, for the reload check.
     pub(in crate::app) files: Vec<PathBuf>,
-    /// The tokens its files set; the rest come from a built-in.
+    /// The tokens its files set; the rest come from a built-in, or follow
+    /// what it set.
     pub(in crate::app) explicit: std::collections::BTreeSet<Token>,
+    /// The tokens it left unset that follow tokens it set (step 6).
+    pub(in crate::app) following: std::collections::BTreeSet<Token>,
     /// The built-in its chain ends at, if it ends at one.
     pub(in crate::app) root_built_in: Option<BuiltIn>,
     /// Its display name.
@@ -229,6 +232,7 @@ impl ThemeLibrary {
                 reports: Vec::new(),
                 files: Vec::new(),
                 explicit: Token::ALL.iter().copied().collect(),
+                following: Default::default(),
                 root_built_in: None,
                 name: built_in.name().to_owned(),
             });
@@ -395,7 +399,7 @@ impl ThemeLibrary {
                     &file_name(self, root),
                     Some("colors"),
                     format!(
-                        "leaves {} token(s) unset, taken from {}: {}",
+                        "leaves {} token(s) unset, taken from {} or following what it sets: {}",
                         unset.len(),
                         fallback.id(),
                         unset.join(", ")
@@ -408,6 +412,24 @@ impl ThemeLibrary {
         for (token, color) in &explicit {
             colors.set(*token, *color);
         }
+        // 6. Dependents follow: a token left unset whose rule reads a token
+        // the theme set, directly or through another, takes its rule's colour
+        // rather than the built-in's.
+        let mut moved: std::collections::BTreeSet<Token> = explicit.keys().copied().collect();
+        let mut following = std::collections::BTreeSet::new();
+        for token in Token::ALL {
+            if explicit.contains_key(token) {
+                continue;
+            }
+            if let Some(rule) = token.rules().of(appearance)
+                && rule.inputs().iter().any(|input| moved.contains(input))
+            {
+                let color = rule.evaluate(|input| colors.get(input));
+                colors.set(*token, color);
+                moved.insert(*token);
+                following.insert(*token);
+            }
+        }
         Ok(Resolved {
             colors,
             reports,
@@ -416,6 +438,7 @@ impl ThemeLibrary {
                 .map(|(_, listed, _)| listed.path.clone())
                 .collect(),
             explicit: explicit.keys().copied().collect(),
+            following,
             root_built_in,
             name: chain
                 .first()

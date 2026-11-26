@@ -246,3 +246,10 @@ pub(in crate::app) fn with_state<R>(f: impl FnOnce(&mut ThemeState) -> R) -> R {
         f(state)
     })
 }
+
+/// Points the UI thread's theme state at `folder`, for a test that applies
+/// themes from it.
+#[cfg(test)]
+pub(in crate::app) fn use_folder(folder: PathBuf) {
+    STATE.with(|state| *state.borrow_mut() = Some(ThemeState::new(Some(folder))));
+}

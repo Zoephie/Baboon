@@ -170,17 +170,39 @@ pub(in crate::app) fn token_reference_markdown() -> String {
     for token in Token::ALL {
         if token.group() != group {
             group = token.group();
-            out.push_str(&format!("\n### {group}\n\n| Token | Where it appears | Dark | Light | Classic Light |\n|---|---|---|---|---|\n"));
+            out.push_str(&format!("\n### {group}\n\n| Token | Where it appears | Dark | Light | Classic Light | Follows (dark; light) |\n|---|---|---|---|---|---|\n"));
         }
         let value = |built_in: BuiltIn| straight_hex(built_in.color(*token));
+        let rule = |rule: Option<super::rules::Rule>| {
+            rule.map_or_else(|| "nothing".to_owned(), |rule| rule.to_string())
+        };
+        let rules = token.rules();
         out.push_str(&format!(
-            "| `{}` | {} | `{}` | `{}` | `{}` |\n",
+            "| `{}` | {} | `{}` | `{}` | `{}` | {}; {} |\n",
             token.id(),
             token.description(),
             value(BuiltIn::Dark),
             value(BuiltIn::Light),
             value(BuiltIn::ClassicLight),
+            rule(rules.dark),
+            rule(rules.light),
         ));
     }
     out
+}
+
+/// A complete theme written from scratch: `colors` with every token set and
+/// nothing extended, as `docs/theme-examples/nightfall.json` is.
+#[cfg(test)]
+pub(in crate::app) fn complete_theme_text(name: &str, colors: &super::ThemeColors) -> String {
+    let resolved = Resolved {
+        colors: colors.clone(),
+        reports: Vec::new(),
+        files: Vec::new(),
+        explicit: Token::ALL.iter().copied().collect(),
+        following: Default::default(),
+        root_built_in: None,
+        name: name.to_owned(),
+    };
+    theme_file_text(&resolved, false)
 }

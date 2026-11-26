@@ -401,3 +401,57 @@ fn the_authoring_guide_lists_every_token() {
     .unwrap();
     assert_ne!(missing, expected);
 }
+
+/// The example themes in `docs/theme-examples` read with no problems: two
+/// that extend a built-in, and Nightfall, written from scratch with every
+/// token. Set `BABOON_WRITE_THEME_DOCS` to write Nightfall from its roots.
+#[test]
+fn the_example_themes_read_cleanly() {
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("docs")
+        .join("theme-examples");
+    if std::env::var_os("BABOON_WRITE_THEME_DOCS").is_some() {
+        // A dark theme from five colours, the rest following them by rule
+        // where a rule fits and the dark built-in's elsewhere.
+        let roots = r##"{ "name": "Nightfall", "extends": "baboon-dark", "colors": {
+            "background": "#1B1D2A", "text": "#E4E6F0", "accent": "#4B4F8A",
+            "status.warning": "#E8C068", "status.success": "#86D19A" } }"##;
+        let colors = ThemeLibrary::from_texts(&[("roots", roots)])
+            .resolve("roots")
+            .unwrap()
+            .colors;
+        std::fs::write(
+            folder.join("nightfall.json"),
+            super::export::complete_theme_text("Nightfall", &colors),
+        )
+        .unwrap();
+        std::fs::write(
+            folder.join("baboon-theme.schema.json"),
+            super::export::schema(),
+        )
+        .unwrap();
+    }
+    let library = ThemeLibrary::scan(&folder);
+    assert!(library.reports.is_empty(), "{:?}", library.reports);
+    for id in ["ember", "harbor", "nightfall"] {
+        let resolved = library
+            .resolve(id)
+            .unwrap_or_else(|report| panic!("{report}"));
+        assert!(resolved.reports.is_empty(), "{id}: {:?}", resolved.reports);
+    }
+    let nightfall = library.resolve("nightfall").unwrap();
+    assert!(
+        nightfall.root_built_in.is_none(),
+        "Nightfall extends nothing"
+    );
+    assert_eq!(
+        nightfall.explicit.len(),
+        Token::ALL.len(),
+        "Nightfall sets every token"
+    );
+    let ember = library.resolve("ember").unwrap();
+    assert!(
+        !ember.following.is_empty(),
+        "Ember's accent carries its dependents"
+    );
+}

@@ -14,11 +14,21 @@ mod golden;
 #[cfg(test)]
 mod tests_files;
 
+/// A row's rules, or none.
+macro_rules! rules_or_none {
+    () => {
+        super::rules::Rules::NONE
+    };
+    ($rules:expr) => {
+        $rules
+    };
+}
+
 /// Declares the tokens: the [`Token`] enum, its ids and descriptions, the
 /// built-in columns, and the installed theme's storage, which starts as the
 /// light built-in, as Baboon did before it read its preferences.
 macro_rules! tokens {
-    ($( group $group:literal { $( $variant:ident $id:literal [$dark:literal, $light:literal, $classic:literal] $description:literal; )* } )*) => {
+    ($( group $group:literal { $( $variant:ident $id:literal [$dark:literal, $light:literal, $classic:literal] $description:literal $(=> $rules:expr)?; )* } )*) => {
         /// A named colour the UI asks for.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub(in crate::app) enum Token {
@@ -40,6 +50,16 @@ macro_rules! tokens {
             pub(in crate::app) const fn description(self) -> &'static str {
                 match self {
                     $($(Token::$variant => $description,)*)*
+                }
+            }
+
+            /// How it follows the tokens it is derived from, per appearance.
+            pub(in crate::app) fn rules(self) -> super::rules::Rules {
+                #[allow(unused_imports)]
+                use super::rules::*;
+                use Token::*;
+                match self {
+                    $($($variant => rules_or_none!($($rules)?),)*)*
                 }
             }
 
@@ -78,6 +98,7 @@ pub(in crate::app) use table::{TOKEN_COUNT, Token};
 pub(in crate::app) mod export;
 pub(in crate::app) mod file;
 pub(in crate::app) mod library;
+pub(in crate::app) mod rules;
 pub(in crate::app) mod state;
 
 /// A colour written as `#RRGGBB` or `#RRGGBBAA`, with straight alpha as in

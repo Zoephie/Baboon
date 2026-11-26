@@ -1,0 +1,10 @@
+// Baboon Dark with an orange accent: one line. The selection, progress bars,
+// badges and the browser toolbar's toggles follow the accent.
+{
+  "$schema": "./baboon-theme.schema.json",
+  "name": "Ember",
+  "extends": "baboon-dark",
+  "colors": {
+    "accent": "#B4561E"
+  }
+}

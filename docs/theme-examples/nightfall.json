@@ -1,0 +1,297 @@
+{
+  "$schema": "./baboon-theme.schema.json",
+  "name": "Nightfall",
+  "appearance": "dark",
+  "colors": {
+
+    // Core
+    // Editor panes, windows and the page behind tag fields.
+    "background": "#1B1D2A",
+    // Body text and labels.
+    "text": "#E4E6F0",
+    // Selection fill and other emphasis.
+    "accent": "#4B4F8A",
+    // Side panels: the tag browser, tile bars and import panes.
+    "panel.background": "#151621",
+    // Striped and faint rows, and the background of non-interactive widgets.
+    "row.background": "#2B2D39",
+    // Separators and borders between panes.
+    "border": "#474954",
+    // egui's separator lines and the outline of non-interactive widgets.
+    "separator": "#30323E",
+    // Secondary text: hints, counts and disabled labels.
+    "text.muted": "#9698A4",
+    // Text that must stand out at full contrast: white on dark, black on light.
+    "text.strong": "#FFFFFF",
+    // Outline of selected items and text selection.
+    "accent.border": "#78AAC6",
+    // Accent text and marks: highlighted names, links in tables, the animation playhead.
+    "accent.text": "#86B8D5",
+    // Border of the focused tab or pane.
+    "focus.border": "#9A9BA1",
+    // Hyperlinks.
+    "link.text": "#5AAAFF",
+    // Dimming laid over the app behind a modal dialog.
+    "modal.backdrop": "#0000008C",
+
+    // Chrome
+    // The menu bar and status bar.
+    "menu_bar.background": "#262834",
+    // Fill of a hovered menu bar item.
+    "menu_bar.item.hover": "#FFFFFF1A",
+    // Window chrome strips: tile title bars and menu panels.
+    "chrome.background": "#2B2D39",
+    // Edge of the window chrome strips.
+    "chrome.border": "#474954",
+    // The active document tab.
+    "tab.active.background": "#3D3F4A",
+    // Tint mixed into a tab whose document has unsaved changes.
+    "tab.modified.tint": "#B8860B",
+    // The tag browser's toolbar.
+    "browser.toolbar.background": "#393A46",
+    // A toggled-on button in the tag browser toolbar.
+    "browser.toolbar.active.background": "#50548E",
+    // The tag browser's search box.
+    "browser.search.background": "#00000066",
+    // Disclosure triangle and icon of an open folder.
+    "tree.folder.open.icon": "#22CD54",
+    // Disclosure triangle of a closed folder.
+    "tree.folder.closed.icon": "#186FCD",
+    // Fill of the tag-group badge beside a tag in the tree.
+    "badge.background": "#292C46",
+    // Outline of the tag-group badge.
+    "badge.border": "#4C5962",
+    // Text of the tag-group badge.
+    "badge.text": "#E6E7EF",
+    // The read-only badge on a tag or layout.
+    "badge.read_only.background": "#D2913C",
+    // The mark drawn on the read-only badge.
+    "badge.read_only.icon": "#1E1E1E",
+    // A favourite's filled star.
+    "favourite.icon": "#F2C430",
+    // Outline of rows cut to the clipboard.
+    "clipboard.cut.border": "#FFD138",
+    // Outline of rows copied to the clipboard.
+    "clipboard.copy.border": "#47AEEB",
+    // The question mark beside a field that has help.
+    "field.help.text": "#3DA1CC",
+    // The welcome screen's side column.
+    "welcome.panel.background": "#00000033",
+    // Track of a progress bar.
+    "progress.background": "#151620",
+    // Filled part of a progress bar.
+    "progress.bar": "#4D518B",
+    // Brightest strokes of the loading animation.
+    "loading.primary": "#BBBCC0",
+    // Middle strokes of the loading animation.
+    "loading.secondary": "#787981",
+    // Faint lines of the loading animation.
+    "loading.lines": "#353642",
+
+    // Controls
+    // Fill of a button or combo box at rest.
+    "button.background": "#FFFFFF1A",
+    // Fill of a hovered or open button.
+    "button.hover": "#FFFFFF33",
+    // Fill of a pressed button.
+    "button.active": "#FFFFFF40",
+    // Outline of a button at rest.
+    "button.border": "#00000000",
+    // Outline of a hovered button.
+    "button.border.hover": "#909197",
+    // Outline of a pressed button.
+    "button.border.active": "#FFFFFF",
+    // Outline of a button whose menu is open.
+    "button.border.open": "#30323E",
+    // Accent fill of a button for an action to take with care.
+    "button.destructive": "#EB4747",
+    // Fill of a primary, confirming button.
+    "button.primary.background": "#287A3E",
+    // Fill of a hovered menu item or icon button.
+    "menu.hover": "#FFFFFF1A",
+    // Fill of a control such as a slider or checkbox at rest.
+    "control.background": "#393A46",
+    // Fill of a hovered control.
+    "control.hover": "#474954",
+    // Fill of a pressed control.
+    "control.active": "#52545E",
+    // Inside of a text input.
+    "input.background": "#0000004D",
+    // Outline of a text input.
+    "input.border": "#4A4B56",
+    // Documentation and note boxes.
+    "card.background": "#FFFFFF0D",
+    // Cards in the Settings window.
+    "settings.card.background": "#FFFFFF0D",
+    // Rail of a slider.
+    "slider.rail.background": "#0000005A",
+    // Outline of a slider's rail.
+    "slider.rail.border": "#00000000",
+    // The well inside a checked checkbox or radio button.
+    "control.well": "#000000",
+    // Background of inline code.
+    "code.inline.background": "#353642",
+
+    // Field editor
+    // Background of a group of fields.
+    "group.background": "#1B1D2A",
+    // Outline of a group of fields, and of windows.
+    "group.border": "#474954",
+    // Header bar of a section of fields.
+    "section.header.background": "#393A46",
+    // Header bar of a tag block, and of popup footers.
+    "block.header.background": "#3D3F4A",
+    // Text on a tag block header.
+    "block.header.text": "#E4E6F0",
+    // Outline of a tag block.
+    "block.border": "#54565F",
+    // Icon of the button that jumps to a block.
+    "block.jump.icon": "#4DD0E1",
+    // Highlight on the block a jump landed on.
+    "block.jump.highlight": "#FFD70026",
+    // Fill of a hovered flag row.
+    "flags.hover": "#2D2F3B",
+
+    // Status
+    // Error text and icons, and warnings that something will be lost or overwritten.
+    "status.error": "#FF7C7C",
+    // Fill of a field holding an invalid value.
+    "status.error.background": "#301E20",
+    // Outline of a field holding an invalid value.
+    "status.error.border": "#AB464C",
+    // Warning text and icons.
+    "status.warning": "#E8C068",
+    // Fill of a field holding a value that was not applied.
+    "status.warning.background": "#372E19",
+    // Success text and icons: matches, accepted changes, add buttons.
+    "status.success": "#86D19A",
+    // Destructive actions and removals: delete buttons, decreased or unused values.
+    "action.destructive": "#E25C5C",
+    // A Settings card holding an invalid value.
+    "settings.card.error.background": "#622824",
+    // Fill of a warning banner, such as a tag changed on disk.
+    "banner.warning.background": "#483816",
+    // Outline of a warning banner.
+    "banner.warning.border": "#8C6820",
+    // Icon on a warning banner.
+    "banner.warning.icon": "#F2C430",
+    // Fill of an error banner, such as a tag deleted on disk.
+    "banner.error.background": "#4E201E",
+    // Outline of an error banner.
+    "banner.error.border": "#9E3E38",
+    // Icon on an error banner.
+    "banner.error.icon": "#F05C50",
+
+    // Diff
+    // Text of something added.
+    "diff.added": "#7EBA6C",
+    // Text of something removed.
+    "diff.removed": "#D66A6A",
+    // Text of something modified.
+    "diff.modified": "#D6A82E",
+    // Text of something unchanged.
+    "diff.unchanged": "#828282",
+    // Wash behind an added line.
+    "diff.added.background": "#1C2E20",
+    // Wash behind a removed line.
+    "diff.removed.background": "#341E1E",
+
+    // Shader editor and graphs
+    // The shader editor's panels.
+    "shader.panel.background": "#2E303C",
+    // Outline of the shader editor's panels.
+    "shader.panel.border": "#3D3F4A",
+    // The shader editor's grid lines and hovered drag handles.
+    "shader.grid": "#2A2C38",
+    // A shader row holding a tag reference.
+    "shader.row.reference.background": "#1E3A28",
+    // A shader row holding a number.
+    "shader.row.numeric.background": "#3E2D27",
+    // A shader row holding other data.
+    "shader.row.data.background": "#1B1D2A",
+    // A shader row holding a function.
+    "shader.row.function.background": "#3A2F20",
+    // Stripe at the edge of a modified shader row.
+    "shader.row.modified.marker": "#E09E3E",
+    // Outline of an input in the shader editor.
+    "shader.input.border": "#474954",
+    // Text in the shader editor.
+    "shader.text": "#D8DAE4",
+    // Secondary text in the shader editor.
+    "shader.text.muted": "#8D8F9A",
+    // A function graph's plot.
+    "graph.background": "#343641",
+    // A function graph's grid lines.
+    "graph.grid": "#7B7C83",
+    // The frame around a function graph.
+    "graph.container.background": "#00000040",
+    // The band between a function's two curves.
+    "graph.band.background": "#FFFFFF1C",
+    // Edges of the band between two curves.
+    "graph.band.border": "#FFFFFF78",
+    // A function graph's first curve.
+    "graph.curve.primary": "#2ABE48",
+    // A function graph's second curve.
+    "graph.curve.secondary": "#DC3737",
+    // Fill under the first curve.
+    "graph.curve.primary.fill": "#27BA451A",
+    // Fill under the second curve.
+    "graph.curve.secondary.fill": "#D83B3B1A",
+
+    // Material editor
+    // A data row in the material editor.
+    "material.row.data.background": "#D8D8D8",
+    // A function row in the material editor.
+    "material.row.function.background": "#EFCD89",
+    // A value box at its default in the material editor.
+    "material.box.background": "#E0E0E0",
+    // The material editor's grid lines.
+    "material.grid": "#5C5C5C",
+    // Outline of an input in the material editor and colour picker.
+    "material.input.border": "#707070",
+    // Text in the material editor.
+    "material.text": "#141414",
+    // Secondary text in the material editor.
+    "material.text.muted": "#606060",
+
+    // Terminal, code and syntax
+    // The terminal.
+    "terminal.background": "#181817",
+    // Terminal text.
+    "terminal.text": "#E8E8E4",
+    // Warnings in the terminal.
+    "terminal.warning": "#EEC45B",
+    // Errors in the terminal.
+    "terminal.error": "#F46969",
+    // Successes in the terminal.
+    "terminal.success": "#7BB889",
+    // Code blocks in the help.
+    "code.background": "#181B1D",
+    // Plain text in a JSON view.
+    "syntax.plain": "#D2D6DE",
+    // Keys in a JSON view.
+    "syntax.key": "#F4BF5C",
+    // Strings in a JSON view.
+    "syntax.string": "#BEEB7D",
+    // Tag paths in a JSON view.
+    "syntax.path": "#E89DDE",
+    // Numbers in a JSON view.
+    "syntax.number": "#F28B82",
+    // true, false and null in a JSON view.
+    "syntax.literal": "#69BEFF",
+    // Punctuation in a JSON view.
+    "syntax.punctuation": "#69D2E1",
+    // Markup tags in field names and help.
+    "syntax.markup.tag": "#C592E6",
+    // Markup the game will not read as written.
+    "syntax.markup.warning": "#F0B446",
+    // Entries inside an archive in Chimp's browser.
+    "chimp.archive.text": "#D29646",
+    // Highlight behind a search match.
+    "search.match.background": "#FFDC46",
+    // Highlight behind the current search match.
+    "search.match.active.background": "#FFA826",
+    // Text of a highlighted search match.
+    "search.match.text": "#000000"
+  }
+}
