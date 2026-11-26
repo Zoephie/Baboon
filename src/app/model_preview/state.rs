@@ -165,6 +165,9 @@ pub(in crate::app) struct ModelPreviewState {
     /// around what the user framed — screen-space panning made orbiting a
     /// BSP's far corner swing it offscreen.
     pub(in crate::app) focus: [f32; 3],
+    /// The Material Editor, while it is open: what it shows and what the
+    /// pointer is over, which the viewport lights.
+    pub(in crate::app) material_editor: Option<super::material_editor::MaterialEditorState>,
 }
 
 /// The last loaded model and how its player stood, drawn while the same
@@ -253,6 +256,7 @@ impl Default for ModelPreviewState {
             yaw: -0.45,
             pitch: 0.25,
             focus: [0.0; 3],
+            material_editor: None,
         }
     }
 }
@@ -379,6 +383,30 @@ impl ModelPreviewState {
             ..Self::default()
         };
         state.campaign_evolved.loaded_high_detail = state.campaign_evolved.high_detail;
+        state
+    }
+
+    /// [`Self::loaded_empty_for_test`], drawing a part with each of
+    /// `shaders`, `(group, path)`, under its own region.
+    #[cfg(test)]
+    pub(in crate::app) fn loaded_with_shaders_for_test(entry_key: &str, shaders: &[(&[u8; 4], &str)]) -> Self {
+        let mut state = Self::loaded_empty_for_test(entry_key);
+        let Some(Ok(data)) = state.data.as_mut() else { unreachable!() };
+        let mut preview = (*data.preview).clone();
+        for (index, (group, path)) in shaders.iter().enumerate() {
+            preview.materials.push(super::RenderModelPreviewMaterial {
+                shader_path: (*path).to_owned(),
+                shader_group: u32::from_be_bytes(**group),
+                ..Default::default()
+            });
+            preview.batches.push(super::RenderModelPreviewBatch {
+                region_name: "body".to_owned(),
+                permutation_name: "base".to_owned(),
+                material_index: index as u16,
+                ..Default::default()
+            });
+        }
+        data.preview = std::sync::Arc::new(preview);
         state
     }
 }

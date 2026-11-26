@@ -32,6 +32,19 @@ impl MaterialKey {
     }
 }
 
+/// The Material Editor of one preview, while it is open.
+#[derive(Clone, Debug, Default)]
+pub(in crate::app) struct MaterialEditorState {
+    /// The material it shows.
+    pub(in crate::app) selected: Option<MaterialKey>,
+    /// The material the pointer is over in its lists, this pass: the
+    /// viewport lights its parts.
+    pub(in crate::app) hovered: Option<MaterialKey>,
+    /// The key of each material's shader tag in the kit, once looked up,
+    /// or why it has none.
+    pub(in crate::app) documents: std::collections::BTreeMap<MaterialKey, Result<String, String>>,
+}
+
 /// A shader as the Material Editor lists it.
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::app) struct EditorMaterial {

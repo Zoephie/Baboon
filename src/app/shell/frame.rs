@@ -4056,6 +4056,27 @@ mod tests {
                 &["smoke.render_model", "Model Preview"],
             ),
             case(
+                "material_editor",
+                &[],
+                &["editor/material_editor.rs"],
+                |h| {
+                    let model = render_model_tag();
+                    pane_kit(h, fixture::GAME, "objects\\smoke.render_model", &model);
+                },
+                |h| {
+                    let model = render_model_tag();
+                    let key = fixture::open_document(&mut h.app, "objects\\smoke.render_model", model);
+                    let kit = &mut h.app.model.kits[h.app.model.active];
+                    let mut state = crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(
+                        &key,
+                        &[(b"rmsh", "objects\\smoke\\shaders\\body"), (b"rmsh", "objects\\smoke\\shaders\\visor")],
+                    );
+                    state.material_editor = Some(Default::default());
+                    h.app.views[kit.id].caches.model_previews.insert(key, state);
+                },
+                &["Material Editor — smoke.render_model", "body"],
+            ),
+            case(
                 "pane_function_rows",
                 &[],
                 &[],
@@ -5913,6 +5934,63 @@ mod tests {
         }
         h.frame(vec![button(from + by, false)]);
         idle(h);
+    }
+
+    /// Frames until `done`, letting background work land, or panic naming
+    /// `what` after a few seconds.
+    fn frames_until(h: &mut Harness, what: &str, done: impl Fn(&Harness) -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !done(h) {
+            assert!(std::time::Instant::now() < deadline, "timed out waiting for {what}");
+            h.frame(Vec::new());
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    /// The Material Editor opens from the preview's header, right of Refresh
+    /// Model. It opens the shader the model draws with as a document of its
+    /// own, with no tab, held for the preview, and draws it; closed, it lets
+    /// go of it.
+    #[test]
+    fn the_material_editor_holds_the_shader_it_shows_and_lets_it_go() {
+        let mut h = Harness::new();
+        let kit = crate::app::loose_fixture::LooseKit::new("material_editor_pane", "halo3_mcc");
+        kit.write_mcc("objects\\smoke", "render_model", |_| {});
+        kit.write_mcc("shaders\\smoke", "shader", |_| {});
+        kit.install(&mut h.app);
+        let model = kit.open(&mut h.app, "objects\\smoke.render_model");
+        let shader = kit.key("shaders\\smoke.shader");
+        let id = h.app.model.kits[h.app.model.active].id;
+        h.app.views[id].caches.model_previews.insert(
+            model.clone(),
+            crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(
+                &model,
+                &[(b"rmsh", "shaders\\smoke")],
+            ),
+        );
+        idle(&mut h);
+        let rect = |h: &Harness, needle: &str| {
+            h.painted_rects.iter().find(|(text, _)| text.trim() == needle).map(|(_, rect)| *rect)
+        };
+        let button = rect(&h, "Material Editor").expect("the header's button");
+        let refresh = rect(&h, "Refresh Model").expect("Refresh Model");
+        assert!(button.left() > refresh.right(), "right of Refresh Model: {button:?} {refresh:?}");
+
+        h.click("Material Editor", 0);
+        frames_until(&mut h, "the shader to open", |h| {
+            h.app.model.kits[0].parsed_tags.contains_key(&shader) && h.painted_contains("Material Editor — smoke.render_model")
+        });
+        let kit_state = &h.app.model.kits[0];
+        assert!(!kit_state.open_tabs.contains(&shader), "no tab of its own");
+        assert!(kit_state.held_documents[&shader].contains(&model), "held for the preview");
+        idle(&mut h);
+        assert!(h.painted_contains("objects\\smoke\\shaders\\smoke") || h.painted_contains("shaders\\smoke"), "{:?}", h.painted);
+
+        // Closed from the header, its clean shader goes.
+        h.click("Material Editor", 0);
+        idle(&mut h);
+        assert!(!h.app.model.kits[0].parsed_tags.contains_key(&shader), "let go");
+        assert!(h.app.model.kits[0].held_documents.is_empty());
     }
 
     /// Refresh Model sits in the viewport's header, left of the Camera

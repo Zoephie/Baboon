@@ -48,6 +48,7 @@ pub(in crate::app::model_preview) fn build_frame(
     // Collision and physics draw in a pass of their own, over the model.
     let overlay_batches = take_overlay_batches(&mut visible_batches, &preview);
     let shield_batches = visible_batches.clone();
+    let highlight = highlighted_material_batches(data, state, &shield_batches);
     without_shield_parts(
         &mut visible_batches,
         &preview,
@@ -70,6 +71,7 @@ pub(in crate::app::model_preview) fn build_frame(
         visible_batches,
         overlay_batches,
         shield_batches,
+        highlight,
         camera: camera.gpu_uniforms(),
         render_mode: state.render_mode,
         background,
@@ -108,6 +110,21 @@ pub(in crate::app::model_preview) fn build_frame(
     frame
 }
 
+/// The parts of `visible` the Material Editor's hovered material covers.
+fn highlighted_material_batches(data: &ModelPreviewData, state: &ModelPreviewState, visible: &[usize]) -> Vec<usize> {
+    let Some(hovered) = state.material_editor.as_ref().and_then(|editor| editor.hovered.as_ref()) else {
+        return Vec::new();
+    };
+    let materials = super::material_editor::editor_materials(&data.preview);
+    let Some(material) = materials.iter().find(|material| &material.key == hovered) else {
+        return Vec::new();
+    };
+    super::material_editor::highlighted_batches(&data.preview, material)
+        .into_iter()
+        .filter(|batch| visible.contains(batch))
+        .collect()
+}
+
 /// Moves `visible`'s collision and physics batches out, and returns them.
 fn take_overlay_batches(visible: &mut Vec<usize>, preview: &RenderModelPreview) -> Vec<usize> {
     let is_overlay = |index: &usize| {
@@ -135,6 +152,9 @@ pub(in crate::app::model_preview) struct ModelGpuFrame {
     pub(in crate::app::model_preview) overlay_batches: Vec<usize>,
     /// `visible_batches` with the parts only a shield draws.
     pub(in crate::app::model_preview) shield_batches: Vec<usize>,
+    /// The parts the Material Editor's hovered material covers, which draw
+    /// lit over the finished picture.
+    pub(in crate::app::model_preview) highlight: Vec<usize>,
     pub(in crate::app::model_preview) camera: ModelGpuCamera,
     pub(in crate::app::model_preview) render_mode: ModelRenderMode,
     pub(in crate::app::model_preview) show_backfaces: bool,
@@ -284,5 +304,46 @@ impl ModelGpuFrame {
                         })
                 })
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::material_editor::MaterialKey;
+    use super::*;
+
+    fn frame_of(state: &ModelPreviewState) -> ModelGpuFrame {
+        let Some(Ok(data)) = state.data.as_ref() else { unreachable!() };
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(64.0, 64.0));
+        build_frame(data, state, rect, 0.0, [0.0; 3], &[])
+    }
+
+    /// The Material Editor's hovered material lights the parts it draws,
+    /// shown ones only; with nothing hovered, nothing is lit.
+    #[test]
+    fn the_hovered_material_lights_its_shown_parts() {
+        let mut state = ModelPreviewState::loaded_with_shaders_for_test(
+            "objects\\smoke.render_model",
+            &[(b"rmsh", "shaders\\body"), (b"rmsh", "shaders\\visor")],
+        );
+        state.material_editor = Some(Default::default());
+        // As a load picks it.
+        state.region_selections.insert(
+            "body".to_owned(),
+            super::super::ModelRegionSelection { enabled: true, permutation: "base".to_owned() },
+        );
+        assert_eq!(frame_of(&state).visible_batches, [0, 1]);
+        assert!(frame_of(&state).highlight.is_empty(), "nothing hovered");
+
+        state.material_editor.as_mut().unwrap().hovered =
+            Some(MaterialKey::new(u32::from_be_bytes(*b"rmsh"), "shaders\\visor"));
+        assert_eq!(frame_of(&state).highlight, [1]);
+
+        // Its region hidden, it has no part to light.
+        state.region_selections.insert(
+            "body".to_owned(),
+            super::super::ModelRegionSelection { enabled: false, permutation: "base".to_owned() },
+        );
+        assert!(frame_of(&state).highlight.is_empty(), "hidden parts stay dark");
     }
 }

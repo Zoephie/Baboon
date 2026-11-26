@@ -485,6 +485,66 @@ impl RenderCore {
         }
     }
 
+    /// The Material Editor's hovered material over the finished picture:
+    /// its parts filled in see-through amber, with white edges. Drawn last,
+    /// with the shared program, so it lies over every game's passes, its
+    /// bloom and its sprites alike, and follows the skinning they do.
+    ///
+    /// As collision and physics are, only the nearest surface fills. Its own
+    /// depth is laid first, pulled a little forward, as the game's passes
+    /// round depth differently and some lay none: drawn equal to theirs it
+    /// would come and go in stripes.
+    pub(super) unsafe fn draw_material_highlight(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+    ) {
+        if frame.highlight.is_empty() {
+            return;
+        }
+        // fixed: the editor's highlight reads the same over every background.
+        let fill = Color32::from_rgb(255, 176, 32);
+        let edge = Color32::from_rgb(255, 255, 255);
+        unsafe {
+            gl.use_program(Some(self.program));
+            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            gl.enable(glow::DEPTH_TEST);
+            gl.disable(glow::CULL_FACE);
+            gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
+            gl.enable(glow::POLYGON_OFFSET_FILL);
+            gl.polygon_offset(-1.0, -1.0);
+            let draw = |core: &Self, wire: bool, color: Color32| {
+                core.draw_batches_in(gl, frame, &frame.highlight, wire, &|_, _| false, &[], Some(color));
+            };
+            gl.color_mask(false, false, false, false);
+            gl.depth_func(glow::LESS);
+            gl.depth_mask(true);
+            draw(self, false, fill);
+            gl.color_mask(true, true, true, true);
+            gl.depth_func(glow::LEQUAL);
+            gl.depth_mask(false);
+            gl.enable(glow::BLEND);
+            gl.blend_color(0.0, 0.0, 0.0, HIGHLIGHT_FILL_OPACITY);
+            gl.blend_func(glow::CONSTANT_ALPHA, glow::ONE_MINUS_CONSTANT_ALPHA);
+            gl.uniform_1_f32(Some(&self.unlit), 1.0);
+            draw(self, false, fill);
+            gl.disable(glow::BLEND);
+            // Edges are lines, which the fill offset leaves where they are:
+            // behind the depth laid above. Pulled further forward, they win.
+            gl.enable(glow::POLYGON_OFFSET_LINE);
+            gl.polygon_offset(-2.0, -2.0);
+            gl.polygon_mode(glow::FRONT_AND_BACK, glow::LINE);
+            gl.line_width(1.0);
+            draw(self, true, edge);
+            gl.disable(glow::POLYGON_OFFSET_LINE);
+            gl.disable(glow::POLYGON_OFFSET_FILL);
+            gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
+            gl.depth_mask(true);
+            gl.depth_func(glow::LESS);
+        }
+    }
+
     /// The frame's end: fill polygons again, `scene` copied to where the
     /// frame belonged, and nothing left bound.
     pub(super) unsafe fn end_frame(&mut self, gl: &glow::Context, scene: Option<PostScope>) {
@@ -681,6 +741,21 @@ impl RenderCore {
         replaced: &dyn Fn(&Self, usize) -> bool,
         materials: &[MaterialGlTextures],
     ) {
+        unsafe { self.draw_batches_in(gl, frame, batches, wire, replaced, materials, None) }
+    }
+
+    /// [`Self::draw_batches`], every batch in `fixed` when given one.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn draw_batches_in(
+        &self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        batches: &[usize],
+        wire: bool,
+        replaced: &dyn Fn(&Self, usize) -> bool,
+        materials: &[MaterialGlTextures],
+        fixed: Option<Color32>,
+    ) {
         for &batch_index in batches {
             let Some(batch) = frame.preview.batches.get(batch_index) else {
                 continue;
@@ -695,7 +770,9 @@ impl RenderCore {
             let overlay = batch.flat_color.filter(|_| {
                 matches!(batch.layer, ModelPreviewLayer::Collision | ModelPreviewLayer::Physics)
             });
-            let color = if let Some([r, g, b]) = overlay {
+            let color = if let Some(fixed) = fixed {
+                fixed
+            } else if let Some([r, g, b]) = overlay {
                 Color32::from_rgb(r, g, b)
             } else if wire && background_is_dark(frame.background) {
                 Color32::from_rgb(190, 205, 215)
@@ -747,6 +824,9 @@ impl RenderCore {
 
 /// How strongly collision and physics faces cover what is behind them.
 const OVERLAY_FACE_OPACITY: f32 = 0.5;
+
+/// How strongly the Material Editor's highlight covers the parts it lights.
+const HIGHLIGHT_FILL_OPACITY: f32 = 0.45;
 
 /// The context's version, renderer and vendor as the driver names them, and
 /// its profile: what decides which of the games' shaders it can run.

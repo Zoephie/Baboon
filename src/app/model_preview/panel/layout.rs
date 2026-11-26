@@ -430,6 +430,8 @@ pub(in crate::app::model_preview) fn draw_preview_header(
         panel.supports_textures,
         panel.own_view,
     );
+    // Right of Refresh Model, as the header lays out from the right.
+    draw_material_editor_button(ui, panel, state);
     if icon_text_button(ui, ButtonIcon::Refresh, "Refresh Model", true)
         .on_hover_text("Load the model again from its tags.")
         .clicked()
@@ -454,6 +456,33 @@ pub(in crate::app::model_preview) fn draw_preview_header(
         }
         draw_model_other_menu(ui, panel.data, state);
     });
+}
+
+/// The Material Editor's button: it opens and closes the editor's window,
+/// which the tag pane draws. Only for a game whose materials the preview
+/// resolves, and a model that names some.
+fn draw_material_editor_button(ui: &mut Ui, panel: &PreviewPanel<'_>, state: &mut ModelPreviewState) {
+    let has_materials = panel
+        .data
+        .preview
+        .materials
+        .iter()
+        .any(|material| !material.shader_path.trim().is_empty());
+    if !panel.supports_textures || !has_materials {
+        state.material_editor = None;
+        return;
+    }
+    let open = state.material_editor.is_some();
+    let response = super::super::super::ui_kit::button_icons::selectable_icon_text_button(
+        ui,
+        ButtonIcon::MaterialEditor,
+        "Material Editor",
+        open,
+    )
+    .on_hover_text("Edit the shaders the model draws with, and see each change at once.");
+    if response.clicked() {
+        state.material_editor = if open { None } else { Some(Default::default()) };
+    }
 }
 
 /// What the preview panel and its tab call themselves, by tag group. Only

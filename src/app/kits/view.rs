@@ -313,6 +313,31 @@ impl<'a> KitMut<'a> {
         self.view.browser.folder_browsers.remove(key);
     }
 
+    /// Stop holding the documents `holder` holds that have no unsaved edits,
+    /// dropping each that nothing else holds and no tab shows. Dirty ones
+    /// stay held: they are the user's work, and asked about when `holder`
+    /// closes. `keep` stays held whatever it holds.
+    pub(in crate::app) fn release_clean_documents_held_by(&mut self, holder: &str, keep: Option<&str>) {
+        let released: Vec<String> = self
+            .kit
+            .held_documents
+            .iter()
+            .filter(|(key, holders)| holders.contains(holder) && Some(key.as_str()) != keep)
+            .filter(|(key, _)| !self.kit.parsed_tags.get(key.as_str()).is_some_and(|doc| doc.dirty.is_set()))
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in released {
+            let Some(holders) = self.kit.held_documents.get_mut(&key) else { continue };
+            holders.remove(holder);
+            if holders.is_empty() {
+                self.kit.held_documents.remove(&key);
+                if !self.kit.open_tabs.contains(&key) {
+                    self.drop_document(&key);
+                }
+            }
+        }
+    }
+
     /// [`Self::drop_document`] for every document except `keep`.
     pub(in crate::app) fn drop_documents_except(&mut self, keep: Option<&str>) {
         let keys: HashSet<String> = self

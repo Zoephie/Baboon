@@ -50,6 +50,8 @@ pub(in crate::app) mod string_row_clipboard;
 use string_list::draw_string_list_tag;
 mod layout_diff;
 pub(in crate::app) use layout_diff::*;
+mod material_editor;
+pub(in crate::app) use material_editor::*;
 
 use crate::app::export::sound_extract::{
     ExtractItem, ExtractRequest, ExtractSource, reimport_base_dir_lang, sanitize_component,
@@ -531,7 +533,7 @@ pub(in crate::app) use function_editor::*;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
 pub(in crate::app) mod pane;
-pub(in crate::app) use pane::{PaneDrawn, PaneInputs, draw_tag_pane};
+pub(in crate::app) use pane::{PaneDrawn, PaneInputs, draw_tag_body, draw_tag_pane};
 pub(in crate::app) mod tsv_paste_window;
 mod block_table;
 mod block_table_window;

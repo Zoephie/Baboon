@@ -376,7 +376,7 @@ fn shader_label_width_id() -> egui::Id {
 }
 
 /// Preferred shader-column widths, compressed together in narrow panes.
-pub(super) const SHADER_GRID_MIN_WIDTH: f32 = 420.0;
+pub(in crate::app) const SHADER_GRID_MIN_WIDTH: f32 = 420.0;
 const SHADER_FUNCTION_INPUT_MIN_WIDTH: f32 = 40.0;
 
 fn shader_column_widths(ui: &Ui) -> (f32, f32) {

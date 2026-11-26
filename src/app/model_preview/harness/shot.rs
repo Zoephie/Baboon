@@ -95,6 +95,12 @@ pub(in crate::app::model_preview) struct ShotOptions {
     pub(in crate::app::model_preview) fire: Option<String>,
     /// The preview keeps no game, as one from a source that names none.
     pub(in crate::app::model_preview) no_game: bool,
+    /// The Material Editor's hover over this material of its list, counting
+    /// those with a part shown.
+    pub(in crate::app::model_preview) highlight: Option<usize>,
+    /// Leave out the parts of this material of the Material Editor's list,
+    /// counted as `highlight` counts.
+    pub(in crate::app::model_preview) without_material: Option<usize>,
 }
 
 impl ShotOptions {
@@ -131,6 +137,8 @@ impl ShotOptions {
             play: None,
             fire: None,
             no_game: false,
+            highlight: None,
+            without_material: None,
         }
     }
 
@@ -193,6 +201,8 @@ impl ShotOptions {
             play: var("H2_SHOT_PLAY"),
             fire: var("H2_SHOT_FIRE"),
             no_game: set("H2_SHOT_NO_GAME"),
+            highlight: None,
+            without_material: None,
         }
     }
 }
@@ -376,6 +386,23 @@ pub(super) fn render(
             .position(|variant| &variant.name == name)
     });
     reset_model_preview_selection(&mut state, &data, variant.or(default_variant_index(&data)));
+    // The Material Editor's list, of the materials with a part shown: what
+    // `highlight` and `without_material` count in.
+    let shown = super::super::frame::visible_batch_indices(&data.preview, &state);
+    let editor_materials: Vec<_> = super::super::material_editor::editor_materials(&data.preview)
+        .into_iter()
+        .filter(|material| {
+            shown
+                .iter()
+                .any(|&batch| material.indices.contains(&data.preview.batches[batch].material_index))
+        })
+        .collect();
+    if let Some(material) = options.highlight.and_then(|index| editor_materials.get(index)) {
+        state.material_editor = Some(super::super::material_editor::MaterialEditorState {
+            hovered: Some(material.key.clone()),
+            ..Default::default()
+        });
+    }
     state.game_shaders = shot.shaders;
     state.default_lights = shot.lights;
     state.yaw = shot.yaw;
@@ -443,6 +470,9 @@ pub(super) fn render(
         &options.forced,
     );
     let preview = Arc::clone(&frame.preview);
+    if let Some(material) = options.without_material.and_then(|index| editor_materials.get(index)) {
+        frame.visible_batches.retain(|&batch| !material.indices.contains(&preview.batches[batch].material_index));
+    }
     frame.visible_batches.retain(|&batch| {
         let material = preview.batches[batch].material_index as usize;
         !options.hidden.iter().any(|name| {

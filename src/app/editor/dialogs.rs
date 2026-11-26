@@ -211,6 +211,8 @@ pub(in crate::app) enum EditorCommand {
     },
     /// Apply what a tag pane collected while it drew.
     PaneDrawn(Box<PaneDrawn>),
+    /// What a Model Preview's Material Editor asked for.
+    MaterialEditor(MaterialEditorCommand),
     StringRows(Box<super::string_row_clipboard::RowCommand>),
     /// The pane showing `key` in `kit` took focus: it is the tag the file
     /// actions act on.
@@ -244,6 +246,7 @@ impl Baboon {
         match command {
             EditorCommand::StringRows(command) => self.apply_string_row_command(*command, ctx),
             EditorCommand::PaneDrawn(drawn) => return self.apply_pane_drawn(*drawn, ctx),
+            EditorCommand::MaterialEditor(command) => self.apply_material_editor_command(command, ctx),
             EditorCommand::SyncOpenTabs { kit } => {
                 return self
                     .model

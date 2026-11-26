@@ -245,6 +245,7 @@ impl ModelGlRenderer {
                 core: &mut self.core,
                 slot,
             });
+            self.core.draw_material_highlight(gl, frame, slot);
             self.core.end_frame(gl, scene);
         }
     }

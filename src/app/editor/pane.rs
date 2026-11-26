@@ -185,6 +185,7 @@ pub(in crate::app) fn draw_tag_body(
 ) {
     let ctx = cx.egui;
     let key = entry.key.clone();
+    let window_inputs = inputs.clone();
     let hud_message_usage = if entry.group_tag == blam_tags::string_list::HUD_GROUP {
         let kit = &cx.model.kits[kit_index];
         kit.source.as_ref().map_or(hud_messages::HudMessageUsage::Unknown, |source| hud_messages::usage(source, &key, &kit.parsed_tags))
@@ -701,6 +702,9 @@ pub(in crate::app) fn draw_tag_body(
         bitmap_hover_requests,
         row_command,
     })));
+    // Last, with the view free again: a model's Material Editor, which draws
+    // its shader with this same function.
+    draw_material_editor_window(cx, kit_index, entry, scope, window_inputs, view, editor);
 }
 
 /// The definitions a kit's tags are compared with: a loose kit's own, else
