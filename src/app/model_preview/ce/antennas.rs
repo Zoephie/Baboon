@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use blam_tags::TagFile;
 
+use super::super::TagReader;
 use super::super::antennas::{ANTENNA_TRIM, AntennaSprite, antenna_sprite};
 use super::super::common::fields::{elements, object_block};
 use super::super::common::image::Image;
@@ -12,8 +13,7 @@ use super::super::common::math::dot;
 use super::super::common::sprites::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::materials::decode_image;
-use super::super::{RenderModelPreviewMarker, TagReader};
-use super::lights::marker_or_origin;
+use super::markers::CeObjectMarkers;
 use crate::app::model_preview::common::fields::argb;
 use crate::core::h2_pixel_shader::SamplerKind;
 
@@ -97,18 +97,16 @@ impl CeAntenna {
     }
 }
 
-fn read_antenna(
-    reader: &TagReader,
-    path: &str,
-    owner: u8,
-    markers: &[RenderModelPreviewMarker],
-) -> Option<CeAntenna> {
+fn read_antenna(reader: &TagReader, path: &str, markers: &CeObjectMarkers) -> Option<CeAntenna> {
     let tag = reader.load(path, "antenna", b"ant!").ok()?;
     let root = tag.root();
     let name = root
         .read_string("attachment marker name")
         .unwrap_or_default();
-    let (node, position, forward) = marker_or_origin(markers, &name, owner)?;
+    // `antenna_update_attachment` reads the first slot, the origin when the
+    // marker is not found.
+    let at = markers.get(&name, 1).first();
+    let (node, position, forward) = (at.node, at.position, at.forward());
     let bitmap_path = root
         .read_tag_ref_path("bitmaps")
         .filter(|path| !path.is_empty())?;
@@ -153,8 +151,7 @@ fn read_antenna(
 pub(in crate::app::model_preview) fn read_ce_antennas(
     reader: &TagReader,
     object: &TagFile,
-    owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
 ) -> Vec<CeAntenna> {
     let Some(block) = object_block(object, "widgets") else {
         return Vec::new();
@@ -164,7 +161,7 @@ pub(in crate::app::model_preview) fn read_ce_antennas(
         .iter()
         .filter_map(|widget| widget.read_tag_ref_with_group("reference"))
         .filter(|(group, _)| *group == antenna_group)
-        .filter_map(|(_, path)| read_antenna(reader, &path, owner, markers))
+        .filter_map(|(_, path)| read_antenna(reader, &path, markers))
         .collect()
 }
 

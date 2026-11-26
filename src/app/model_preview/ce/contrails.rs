@@ -13,7 +13,8 @@ use super::super::common::fields::{elements, function_slot_of, has_flag, object_
 use super::super::common::image::Image;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::materials::decode_image;
-use super::super::{RenderModelPreviewMarker, TagReader, frame_steps, resume_point};
+use super::super::{TagReader, frame_steps, resume_point};
+use super::markers::CeObjectMarkers;
 use super::random::CeRandom;
 use crate::app::model_preview::ce::blend::FramebufferBlend;
 use crate::app::model_preview::common::fields::argb;
@@ -268,7 +269,7 @@ pub(in crate::app::model_preview) fn read_ce_contrails(
     reader: &TagReader,
     object: &TagFile,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
 ) -> Vec<CeContrailAt> {
     let Some(block) = object_block(object, "attachments") else {
         return Vec::new();
@@ -286,23 +287,13 @@ pub(in crate::app::model_preview) fn read_ce_contrails(
             continue;
         };
         let name = attachment.read_string("marker").unwrap_or_default();
-        // `object_get_marker_by_name`: no name is the origin.
-        let at: Vec<(usize, [f32; 3], [f32; 3])> = if name.is_empty() {
-            vec![(0, [0.0; 3], [1.0, 0.0, 0.0])]
-        } else {
-            markers
-                .iter()
-                .filter(|marker| marker.name.eq_ignore_ascii_case(&name))
-                .take(MOST_MARKERS)
-                .map(|marker| {
-                    (
-                        marker.node_index.max(0) as usize,
-                        marker.position,
-                        marker.axes[0],
-                    )
-                })
-                .collect()
-        };
+        // `contrail_add_points`: the markers found, no name the origin.
+        let at: Vec<(usize, [f32; 3], [f32; 3])> = markers
+            .get(&name, MOST_MARKERS)
+            .found()
+            .iter()
+            .map(|marker| (marker.node, marker.position, marker.forward()))
+            .collect();
         if at.is_empty() {
             continue;
         }
@@ -823,6 +814,67 @@ fn add_points(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// With `BLAM_TEST_HCEEK`: the Banshee's `wingtip` contrail hangs on the
+    /// markers of the permutation its body shows (`model_get_marker_by_name`
+    /// skips the others): two of the four, and the damaged pair once that
+    /// permutation is picked.
+    #[test]
+    fn a_contrail_hangs_on_the_shown_permutations_markers() {
+        use crate::app::model_preview::harness::kit::{kit_preview_with, kit_root};
+        use crate::app::model_preview::{ModelRegionSelection, PreviewLoadSettings};
+        use crate::core::game::GameId;
+        let Some(root) = kit_root(GameId::HaloCe) else {
+            return;
+        };
+        let wingtips = |permutation: Option<&str>| {
+            let mut settings = PreviewLoadSettings::default();
+            settings.ce.picks = permutation.map(|permutation| {
+                [(
+                    "__unnamed".to_owned(),
+                    ModelRegionSelection {
+                        enabled: true,
+                        permutation: permutation.to_owned(),
+                    },
+                )]
+                .into()
+            });
+            let data = kit_preview_with(
+                &root,
+                GameId::HaloCe,
+                "vehicles\\banshee\\banshee",
+                "vehicle",
+                b"vehi",
+                &settings,
+            );
+            let markers: Vec<[f32; 3]> = data.preview.ce.contrails[0]
+                .markers
+                .iter()
+                .map(|(_, position, _)| *position)
+                .collect();
+            let wingtip: Vec<(String, [f32; 3])> = data
+                .preview
+                .markers
+                .iter()
+                .filter(|marker| marker.name == "wingtip")
+                .map(|marker| (marker.only_under.clone().unwrap().1, marker.position))
+                .collect();
+            (markers, wingtip)
+        };
+        let (base, every) = wingtips(None);
+        assert_eq!(every.len(), 4, "the model has two pairs");
+        assert_eq!(base.len(), 2, "the shown permutation's pair alone");
+        let of = |permutation: &str| -> Vec<[f32; 3]> {
+            every
+                .iter()
+                .filter(|(at, _)| *at == permutation)
+                .map(|(_, position)| *position)
+                .collect()
+        };
+        assert_eq!(base, of("__base"));
+        let (damaged, _) = wingtips(Some("~damaged"));
+        assert_eq!(damaged, of("~damaged"));
+    }
 
     fn state(duration: f32, transition: f32) -> PointState {
         PointState {

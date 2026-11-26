@@ -3,16 +3,13 @@
 use super::super::load::{build_render_preview_at, feature, feature_into};
 use super::super::object_reference;
 use super::super::{
-    ModelPreviewData, PreviewLoadSettings, RenderModelPreview, RenderModelPreviewMarker,
+    ModelPreviewData, ModelRegionSelection, PreviewLoadSettings, RenderModelPreview,
     RenderModelPreviewMaterial, TagEntry, TagReader, model_preview_data, read_change_colors,
 };
+use super::markers::{CeMarker, CeObjectMarkers};
 use blam_tags::TagFile;
-use std::sync::Arc;
+use std::collections::HashMap;
 
-/// A Halo CE object's own lights, antennas, effects, contrails, light volumes,
-/// lightning, glows, particle systems, flags and the effects it names for its
-/// events, then those of the weapon it holds, as object 1 on its markers in
-/// the hand.
 /// What an opened Halo CE object loads beside its geometry.
 #[derive(Clone, Default)]
 pub(in crate::app) struct CeObjectData {
@@ -22,6 +19,12 @@ pub(in crate::app) struct CeObjectData {
     pub(in crate::app) attached: Vec<super::weapons::CeAttachedObject>,
     /// Bipeds: what the unit can hold.
     pub(in crate::app) weapons: Option<super::weapons::CeBipedWeapons>,
+    /// The region picks its markers were found under, given back to the
+    /// panel when the load lands.
+    pub(in crate::app) picks: Option<HashMap<String, ModelRegionSelection>>,
+    /// Those of them a pick could move a marker in: another pick there
+    /// loads it again (`markers::picks_match`).
+    pub(in crate::app) marker_picks: Option<super::markers::CeMarkerPicks>,
 }
 
 impl super::super::ModelPreviewData {
@@ -37,85 +40,80 @@ impl super::super::ModelPreviewData {
     }
 }
 
+/// A Halo CE object's own lights, antennas, effects, contrails, light volumes,
+/// lightning, glows, particle systems, flags and the effects it names for its
+/// events, then those of the weapon it holds, as object 1: each at its
+/// markers under the permutations `picks` shows, a held weapon's in the hand.
+/// A held weapon with no model hangs all it has at its origin, and its event
+/// effects go on the opened object.
 pub(in crate::app::model_preview) fn read_ce_object_features(
     reader: &TagReader,
     model_tag: &TagFile,
     attached: Option<&super::super::ce::weapons::CeAttachedObject>,
+    picks: &HashMap<String, ModelRegionSelection>,
     preview: &mut RenderModelPreview,
 ) {
-    // The held weapon, whose features hang on it as object 1.
-    let held_tag = attached.and_then(|held| {
-        reader
-            .load(&held.path, "weapon", b"weap")
-            .ok()
-            .map(|tag| (tag, held))
+    // Each object's markers as `object_get_marker_by_name` finds them under
+    // the permutations shown: the opened one's, and the held weapon's in the
+    // hand, as object 1.
+    let own =
+        CeObjectMarkers::of_markers(&preview.markers, &preview.regions, picks, CeMarker::ORIGIN);
+    let held = attached.and_then(|held| {
+        let weapon = reader.load(&held.path, "weapon", b"weap").ok()?;
+        let markers =
+            CeObjectMarkers::of_markers(&held.markers, &preview.regions, picks, held.origin);
+        Some((weapon, markers, held.hidden))
     });
+    let objects = std::iter::once((model_tag, 0, &own)).chain(
+        held.iter()
+            .map(|(weapon, markers, _)| (weapon.as_ref(), 1, markers)),
+    );
     // Without Game Shaders, the flags alone (`TagReader::game_shaders`).
     if !reader.game_shaders() {
-        read_flags(reader, model_tag, held_tag.as_ref(), preview);
+        read_flags(reader, objects, preview);
         return;
     }
-    let own = super::super::ce::lights::read_ce_lights(
-        reader,
-        model_tag,
-        0,
-        &preview.markers,
-        |marker| {
-            let frame = crate::app::model_preview::common::marker::MarkerFrame {
-                axes: marker.axes,
-                position: marker.position,
-                node: marker.node_index.max(0),
-            };
-            (frame, marker.node_index.max(0) as usize)
-        },
-    );
-    // The opened object's own lights come first, then the held weapon's
-    // that `attach_ce_weapon` added, as every other feature lists them.
-    let held_lights = std::mem::replace(&mut preview.ce.lights, own);
-    preview.ce.lights.extend(held_lights);
-    // Empty until now: only the held weapon's lights come before.
-    read_ce_features(reader, model_tag, 0, &preview.markers, &mut preview.ce);
-    // What hangs on the held weapon, as object 1, on its markers in the hand.
-    if let Some((weapon, held)) = &held_tag {
-        read_ce_features(reader, weapon, 1, &held.markers, &mut preview.ce);
+    // Whatever hangs on each, the opened object's first: `render_object_list`
+    // skips a hidden object's model alone, so a held weapon with none still
+    // lights and draws its widgets.
+    for (object, owner, markers) in objects.clone() {
+        let lights = super::super::ce::lights::read_ce_lights(reader, object, owner, markers);
+        preview.ce.lights.extend(lights);
+        read_ce_features(reader, object, owner, markers, &mut preview.ce);
     }
     // What each names for its events, which the panel plays: the weapon's on
-    // the weapon, as `weapon_effect_new` makes them.
-    let events =
-        super::super::ce::effects::read_ce_event_effects(reader, model_tag, 0, &preview.markers);
+    // the weapon, as `weapon_effect_new` makes them, or on the unit when the
+    // weapon is hidden.
+    let events = super::super::ce::effects::read_ce_event_effects(reader, model_tag, 0, &own);
     preview.ce.effects.extend(events);
-    if let Some((weapon, held)) = &held_tag {
+    if let Some((weapon, markers, hidden)) = &held {
+        let (on, at) = if *hidden { (0, &own) } else { (1, markers) };
         preview
             .ce
             .effects
             .extend(super::super::ce::effects::read_ce_event_effects(
-                reader,
-                weapon,
-                1,
-                &held.markers,
+                reader, weapon, on, at,
             ));
     }
-    let own = super::super::ce::firing::read_ce_weapon_firing(model_tag, 0, &preview.ce.effects);
-    let held = held_tag.as_ref().and_then(|(weapon, _)| {
-        super::super::ce::firing::read_ce_weapon_firing(weapon, 1, &preview.ce.effects)
+    let own_firing =
+        super::super::ce::firing::read_ce_weapon_firing(model_tag, 0, 0, &preview.ce.effects);
+    let held_firing = held.as_ref().and_then(|(weapon, _, hidden)| {
+        let effects_on = if *hidden { 0 } else { 1 };
+        super::super::ce::firing::read_ce_weapon_firing(weapon, 1, effects_on, &preview.ce.effects)
     });
-    preview.ce.firing = own.into_iter().chain(held).collect();
-    read_flags(reader, model_tag, held_tag.as_ref(), preview);
+    preview.ce.firing = own_firing.into_iter().chain(held_firing).collect();
+    read_flags(reader, objects, preview);
 }
 
-/// The object's flags, then its held weapon's, as object 1.
-fn read_flags(
+/// The flags each object hangs: the opened one's, then its held weapon's.
+fn read_flags<'a>(
     reader: &TagReader,
-    model_tag: &TagFile,
-    held: Option<&(Arc<TagFile>, &super::super::ce::weapons::CeAttachedObject)>,
+    objects: impl Iterator<Item = (&'a TagFile, u8, &'a CeObjectMarkers)>,
     preview: &mut RenderModelPreview,
 ) {
-    let markers = preview.markers.clone();
-    preview.ce.flags =
-        super::super::ce::flags::read_ce_flags(reader, model_tag, 0, &markers, preview);
-    if let Some((weapon, held)) = held {
-        let flags =
-            super::super::ce::flags::read_ce_flags(reader, weapon, 1, &held.markers, preview);
+    preview.ce.flags.clear();
+    for (object, owner, markers) in objects {
+        let flags = super::super::ce::flags::read_ce_flags(reader, object, owner, markers, preview);
         preview.ce.flags.extend(flags);
     }
 }
@@ -127,12 +125,11 @@ fn read_ce_features(
     reader: &TagReader,
     object: &TagFile,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
     ce: &mut super::super::ce::CeFeatures,
 ) {
-    ce.antennas.extend(super::antennas::read_ce_antennas(
-        reader, object, owner, markers,
-    ));
+    ce.antennas
+        .extend(super::antennas::read_ce_antennas(reader, object, markers));
     ce.effects
         .extend(super::super::ce::effects::read_ce_effects(
             reader, object, owner, markers,
@@ -235,15 +232,40 @@ pub(in crate::app::model_preview) fn load_ce_object(
         }
         attached
     });
+    // The permutations its markers are found under: the panel's, once a load
+    // gave it some, else those it starts in.
+    let mut picks = super::super::selection::base_selection(&preview);
+    if let Some(chosen) = &settings.ce.picks {
+        for (region, selection) in chosen {
+            if let Some(kept) = picks.get_mut(region) {
+                *kept = selection.clone();
+            }
+        }
+    }
+    let every_marker: Vec<_> = preview
+        .markers
+        .iter()
+        .chain(attached.iter().flat_map(|held| &held.markers))
+        .cloned()
+        .collect();
+    let marker_picks = super::markers::marker_picks(&every_marker, &preview.regions, &picks);
     feature_into(
         &mut notes,
         "its lights and effects",
         &mut preview,
         |preview| {
-            super::object::read_ce_object_features(reader, model_tag, attached.as_ref(), preview);
+            super::object::read_ce_object_features(
+                reader,
+                model_tag,
+                attached.as_ref(),
+                &picks,
+                preview,
+            );
         },
     );
     let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
+    data.ce.picks = Some(picks);
+    data.ce.marker_picks = Some(marker_picks);
     // Game Shaders' alone (`TagReader::game_shaders`).
     if reader.game_shaders() {
         data.change_colors = feature(&mut notes, "its change colors", || {

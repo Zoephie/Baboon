@@ -1,6 +1,7 @@
 //! Lightning widgets: their markers, bolts and quads.
 
-use super::super::super::{RenderModelPreviewMarker, TagReader};
+use super::super::super::TagReader;
+use super::super::markers::CeObjectMarkers;
 use super::{
     CeRandom, FramebufferBlend, Image, SamplerKind, ViewFrame, argb, cross, decode_image, elements,
     function_slot_of, has_flag, nonzero_unit, object_block, posed_on,
@@ -73,7 +74,7 @@ fn read_lightning(
     reader: &TagReader,
     path: &str,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
 ) -> Option<CeLightning> {
     let tag = reader.load(path, "lightning", b"elec").ok()?;
     let root = tag.root();
@@ -83,35 +84,16 @@ fn read_lightning(
         .first()?
         .read_string("attachment marker")
         .unwrap_or_default();
-    if !first.is_empty()
-        && !markers
-            .iter()
-            .any(|marker| marker.name.eq_ignore_ascii_case(&first))
-    {
+    if markers.get(&first, 1).found().is_empty() {
         return None;
     }
     let found = elements(root, "markers")
         .iter()
         .map(|entry| {
             let name = entry.read_string("attachment marker").unwrap_or_default();
-            // `object_get_marker_by_name`: what is not found is the origin.
-            let (node, position, axes) = markers
-                .iter()
-                .find(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(&name))
-                .map_or(
-                    (
-                        0,
-                        [0.0; 3],
-                        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-                    ),
-                    |marker| {
-                        (
-                            marker.node_index.max(0) as usize,
-                            marker.position,
-                            marker.axes,
-                        )
-                    },
-                );
+            // The rest read the first slot, the origin when not found.
+            let at = markers.get(&name, 1).first();
+            let (node, position, axes) = (at.node, at.position, at.axes);
             let bounds = match entry
                 .field("random position bounds")
                 .and_then(|field| field.value())
@@ -176,7 +158,7 @@ pub(in crate::app::model_preview) fn read_ce_lightning(
     reader: &TagReader,
     object: &TagFile,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
 ) -> Vec<CeLightning> {
     let Some(block) = object_block(object, "widgets") else {
         return Vec::new();

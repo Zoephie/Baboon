@@ -10,10 +10,10 @@ use blam_tags::{TagFile, TagStruct};
 use super::super::common::fields::{elements, object_block};
 use super::super::common::view::posed_on;
 use super::super::{
-    ModelPreviewLayer, RenderModelPreview, RenderModelPreviewBatch, RenderModelPreviewMarker,
-    RenderModelPreviewMaterial, RenderModelPreviewRegion, RenderModelPreviewVertex, TagReader,
-    frame_steps, resume_point,
+    ModelPreviewLayer, RenderModelPreview, RenderModelPreviewBatch, RenderModelPreviewMaterial,
+    RenderModelPreviewRegion, RenderModelPreviewVertex, TagReader, frame_steps, resume_point,
 };
+use super::markers::CeObjectMarkers;
 use crate::app::model_preview::common::point_physics::PointPhysics;
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 
@@ -49,7 +49,7 @@ fn read_flag(
     reader: &TagReader,
     path: &str,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
     preview: &mut RenderModelPreview,
 ) -> Option<CeFlagAt> {
     let tag = reader.load(path, "flag", b"flag").ok()?;
@@ -79,13 +79,10 @@ fn read_flag(
         .iter()
         .map(|point| {
             let name = point.read_string("marker name").unwrap_or_default();
-            // `object_get_marker_by_name`: what is not found is the origin.
-            let (node, position) = markers
-                .iter()
-                .find(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(&name))
-                .map_or((0, [0.0; 3]), |marker| {
-                    (marker.node_index.max(0) as usize, marker.position)
-                });
+            // `flag_update_attachment` reads the first slot, the origin when
+            // the marker is not found.
+            let at = markers.get(&name, 1).first();
+            let (node, position) = (at.node, at.position);
             FlagAttachment {
                 height_to_next: point.read_int_any("height_to_next_attachment").unwrap_or(0) as i32,
                 node,
@@ -265,7 +262,7 @@ pub(in crate::app::model_preview) fn read_ce_flags(
     reader: &TagReader,
     object: &TagFile,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
     preview: &mut RenderModelPreview,
 ) -> Vec<CeFlagAt> {
     let Some(block) = object_block(object, "widgets") else {

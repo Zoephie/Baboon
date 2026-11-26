@@ -1,6 +1,7 @@
 //! Reading a Halo CE particle system (`pctl`): its particle types, states and physics, and where it hangs.
 
-use super::super::super::{RenderModelPreviewMarker, TagReader};
+use super::super::super::TagReader;
+use super::super::markers::CeObjectMarkers;
 use super::sim::{CeParticleState, MOST_MARKERS, TypeState};
 use super::{
     CeSpriteSheet, FramebufferBlend, PointPhysics, elements, function_slot_of, has_flag,
@@ -287,7 +288,7 @@ pub(in crate::app::model_preview) fn read_ce_particle_systems(
     reader: &TagReader,
     object: &TagFile,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
 ) -> Vec<CeParticleSystemAt> {
     let Some(block) = object_block(object, "attachments") else {
         return Vec::new();
@@ -305,23 +306,14 @@ pub(in crate::app::model_preview) fn read_ce_particle_systems(
             continue;
         };
         let name = attachment.read_string("marker").unwrap_or_default();
-        // `object_get_marker_by_name`: no name is the origin.
-        let found: Vec<(usize, [f32; 3], [f32; 3])> = if name.is_empty() {
-            vec![(0, [0.0; 3], [1.0, 0.0, 0.0])]
-        } else {
-            markers
-                .iter()
-                .filter(|marker| marker.name.eq_ignore_ascii_case(&name))
-                .take(MOST_MARKERS)
-                .map(|marker| {
-                    (
-                        marker.node_index.max(0) as usize,
-                        marker.position,
-                        marker.axes[0],
-                    )
-                })
-                .collect()
-        };
+        // `particle_system_new_particles`: the markers found, no name the
+        // origin; none found makes no particles.
+        let found: Vec<(usize, [f32; 3], [f32; 3])> = markers
+            .get(&name, MOST_MARKERS)
+            .found()
+            .iter()
+            .map(|marker| (marker.node, marker.position, marker.forward()))
+            .collect();
         systems.push(CeParticleSystemAt {
             object: owner,
             def: Arc::new(def),

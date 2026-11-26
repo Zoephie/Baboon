@@ -1,6 +1,7 @@
 //! Where Halo CE effects hang on an object: its attachments' effects and those its events name.
 
-use super::super::super::{RenderModelPreviewMarker, TagReader};
+use super::super::super::TagReader;
+use super::super::markers::CeObjectMarkers;
 use super::read::{CeEffectCache, CeEffectDef};
 use super::{elements, function_slot_of, object_block};
 use blam_tags::TagFile;
@@ -72,7 +73,7 @@ pub(in crate::app::model_preview) fn read_ce_effects(
     reader: &TagReader,
     object: &TagFile,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
 ) -> Vec<CeEffectAt> {
     let Some(block) = object_block(object, "attachments") else {
         return Vec::new();
@@ -107,24 +108,19 @@ pub(in crate::app::model_preview) fn read_ce_effects(
 }
 
 /// `effect_build_locations` with `object_get_marker_by_name`: each of an
-/// effect's locations at every marker of its name; no name is the origin, a
-/// missing one nothing at all.
-fn locate(def: &CeEffectDef, markers: &[RenderModelPreviewMarker]) -> Vec<Vec<CeLocation>> {
+/// effect's locations at the markers of its name found, up to 16; no name is
+/// the origin, a missing one nothing at all.
+fn locate(def: &CeEffectDef, markers: &CeObjectMarkers) -> Vec<Vec<CeLocation>> {
+    const MOST_PER_LOCATION: usize = 16;
     def.locations
         .iter()
         .map(|name| {
-            if name.is_empty() {
-                return vec![CeLocation {
-                    node: 0,
-                    position: [0.0; 3],
-                    axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-                }];
-            }
             markers
+                .get(name, MOST_PER_LOCATION)
+                .found()
                 .iter()
-                .filter(|marker| marker.name.eq_ignore_ascii_case(name))
                 .map(|marker| CeLocation {
-                    node: marker.node_index.max(0) as usize,
+                    node: marker.node,
                     position: marker.position,
                     axes: marker.axes,
                 })
@@ -141,7 +137,7 @@ pub(in crate::app::model_preview) fn read_ce_event_effects(
     reader: &TagReader,
     object: &TagFile,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
 ) -> Vec<CeEffectAt> {
     let mut named = Vec::new();
     super::super::super::effects::collect_event_effects(object.root(), &mut named);

@@ -10,10 +10,8 @@ use super::super::common::image::Image;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::materials::decode_image;
 use super::shaders::periodic_evaluate;
-use crate::app::model_preview::animation::ik::weapon::attached_marker_frame;
 use crate::app::model_preview::ce::transition::transition_evaluate;
 use crate::app::model_preview::common::fields::argb;
-use crate::app::model_preview::common::marker::MarkerFrame;
 use crate::app::model_preview::common::math::{UNSET, cross, dot, lerp};
 use crate::core::h2_pixel_shader::SamplerKind;
 

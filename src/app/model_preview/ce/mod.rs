@@ -13,6 +13,7 @@ pub(super) mod flags;
 pub(in crate::app::model_preview) mod frame;
 pub(super) mod functions;
 pub(super) mod lights;
+pub(in crate::app::model_preview) mod markers;
 pub(in crate::app::model_preview) mod object;
 pub(in crate::app::model_preview) mod overlays;
 pub(super) mod panel;

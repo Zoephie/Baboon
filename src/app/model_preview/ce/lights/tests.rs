@@ -297,3 +297,50 @@ fn an_effects_light_fades_by_its_age_and_then_is_gone() {
     let light = made(0).unwrap();
     assert_eq!(light.color(0.5, &[[0.0; 3]; 4]), [0.5, 0.25, 0.0]);
 }
+
+/// With `BLAM_TEST_HCEEK`: the Warthog's chaingun has no model, so it stays
+/// hidden. Its animations hold it by a `gun` marker the Warthog lacks, so
+/// `object_attach_to_marker` hangs it at the Warthog's origin. It still
+/// fires, `weapon_effect_new` plays its firing on the Warthog (object 0), and
+/// its muzzle flash lights at its own origin, where it hangs: its own
+/// `primary trigger` finds nothing, and `light_reconnect_to_map` reads the
+/// first slot.
+#[test]
+fn a_hidden_gun_lights_where_it_is_held_and_fires_on_its_vehicle() {
+    use crate::app::model_preview::harness::kit::{kit_preview, kit_root};
+    use crate::core::game::GameId;
+    let Some(root) = kit_root(GameId::HaloCe) else {
+        return;
+    };
+    let data = kit_preview(
+        &root,
+        GameId::HaloCe,
+        "vehicles\\warthog\\warthog",
+        "vehicle",
+        b"vehi",
+    );
+    let ce = &data.preview.ce;
+    let gun = ce
+        .firing
+        .iter()
+        .find(|weapon| weapon.object == 1)
+        .expect("the hidden gun's triggers are read");
+    let mut shots = super::super::firing::CeShots::new();
+    let shot = shots
+        .entry((data.geometry_id, 1))
+        .or_default()
+        .fire(gun, 0, 1.0, 10.0)
+        .expect("its firing effect is found");
+    assert_eq!(ce.effects[shot].object, 0, "played on the Warthog");
+    assert!(
+        !data
+            .preview
+            .markers
+            .iter()
+            .any(|marker| marker.name == "gun"),
+        "the hand marker is missing, so the gun hangs at the origin"
+    );
+    let flash: Vec<&CeLight> = ce.lights.iter().filter(|light| light.object == 1).collect();
+    assert_eq!(flash.len(), 1, "the muzzle flash, once");
+    assert_eq!((flash[0].position, flash[0].node), ([0.0; 3], 0));
+}

@@ -7,16 +7,18 @@ use super::super::common::fields::{elements, object_block};
 use blam_tags::{TagFile, TagStruct};
 
 use super::super::animation::ik::weapon::{attached_marker_frame, weapon_ik};
+use super::super::common::attached::rename_region;
 use super::super::common::marker::MarkerFrame;
 use super::super::functions::{ChangeColors, read_change_colors};
 use super::super::load::build_render_preview;
 use super::super::load::merge_attached;
 use super::super::{
-    PreviewAnimationEntry, RenderModelPreview, RenderModelPreviewMarker, TagReader,
-    loose_weapon_paths, object_reference, tag_path,
+    ModelRegionSelection, PreviewAnimationEntry, RenderModelPreview, RenderModelPreviewMarker,
+    TagReader, loose_weapon_paths, object_reference, tag_path,
 };
 use super::functions::{CeObjectFunctions, read_ce_forced_permutation, read_ce_object_functions};
 use crate::core::source::TagSource;
+use std::collections::HashMap;
 
 /// The stance a unit nobody is driving stands in.
 const RESTING_SEAT: &str = "stand";
@@ -26,9 +28,15 @@ const RESTING_SEAT: &str = "stand";
 pub(crate) struct CeAttachedObject {
     pub(crate) name: String,
     /// The weapon's tag, and its markers where the hand holds them, on the
-    /// hand's node: what its attachments and widgets hang on.
+    /// hand's node, under its regions as the preview names them: what its
+    /// attachments and widgets hang on.
     pub(crate) path: String,
     pub(crate) markers: Vec<RenderModelPreviewMarker>,
+    /// Its own origin, where it is held: what a name it lacks finds.
+    pub(crate) origin: super::markers::CeMarker,
+    /// It has no model, so stays hidden (`object_set_visibility`), and
+    /// `weapon_effect_new` plays its effects on the unit.
+    pub(crate) hidden: bool,
     pub(crate) functions: Option<CeObjectFunctions>,
     pub(crate) change_colors: ChangeColors,
 }
@@ -113,17 +121,25 @@ struct WeaponHold {
 }
 
 /// What a Halo CE load reads of the last: the biped's weapons, when an
-/// earlier load found them.
+/// earlier load found them, and the permutations the panel shows, which the
+/// object's markers are found under.
 #[derive(Clone, Default)]
 pub(in crate::app::model_preview) struct CeLoadSettings {
     pub(in crate::app::model_preview) equippable: Option<Vec<CeEquippable>>,
+    /// The panel's region picks, once a load of the object gave it some.
+    pub(in crate::app::model_preview) picks: Option<HashMap<String, ModelRegionSelection>>,
 }
 
 impl CeLoadSettings {
     pub(in crate::app::model_preview) fn of(
         data: Option<&Result<crate::app::model_preview::ModelPreviewData, String>>,
+        picks: &HashMap<String, ModelRegionSelection>,
     ) -> Self {
         Self {
+            picks: match data {
+                Some(Ok(data)) if data.ce.marker_picks.is_some() => Some(picks.clone()),
+                _ => None,
+            },
             equippable: match data {
                 Some(Ok(data)) => data
                     .ce
@@ -392,7 +408,45 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
     preview: &mut RenderModelPreview,
 ) -> Option<CeAttachedObject> {
     let weapon = reader.load(path, "weapon", b"weap").ok()?;
-    let model = object_reference(&weapon, "model")?;
+    let name = tag_path::name(path).to_owned();
+    // Its functions and change colors are Game Shaders' alone
+    // (`TagReader::game_shaders`).
+    let game_shaders = reader.game_shaders();
+    let attached_object = |markers, origin, hidden| CeAttachedObject {
+        name: name.clone(),
+        path: path.to_owned(),
+        markers,
+        origin,
+        hidden,
+        functions: game_shaders
+            .then(|| read_ce_object_functions(&weapon))
+            .flatten(),
+        change_colors: if game_shaders {
+            read_change_colors(&weapon)
+        } else {
+            Default::default()
+        },
+    };
+    // `unit_ready_desired_weapon` hangs it on the unit's hand marker by its
+    // grip, the pair the unit's animations name for its label.
+    let label = weapon.root().read_string("label").unwrap_or_default();
+    let hold = object_reference(object, "animation graph")
+        .and_then(|graph| reader.load(&graph, "model_animations", b"antr").ok())
+        .and_then(|graph| weapon_hold(&graph, &label))
+        .unwrap_or_default();
+    let parent = MarkerFrame::find(preview, &hold.hand);
+    let origin = RenderModelPreviewMarker {
+        axes: MarkerFrame::ORIGIN.axes,
+        ..Default::default()
+    };
+    // One with no model, as the scorpion's cannon is (its barrel is the
+    // tank's), stays hidden: `object_set_visibility` only shows an object
+    // with a model. It has no markers, so all it hangs is at its origin,
+    // where it is held.
+    let Some(model) = object_reference(&weapon, "model") else {
+        let held = attached_marker_frame(&origin, &parent, &MarkerFrame::ORIGIN);
+        return Some(attached_object(Vec::new(), held.into(), true));
+    };
     let render = reader.load(&model, "gbxmodel", b"mod2").ok()?;
     let mut attached = build_render_preview(&render).ok()?;
     let forced = read_ce_forced_permutation(&weapon);
@@ -402,14 +456,7 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
             .iter_mut()
             .for_each(|material| material.ce.permutation = forced);
     }
-    let label = weapon.root().read_string("label").unwrap_or_default();
-    let hold = object_reference(object, "animation graph")
-        .and_then(|graph| reader.load(&graph, "model_animations", b"antr").ok())
-        .and_then(|graph| weapon_hold(&graph, &label))
-        .unwrap_or_default();
-    let parent = MarkerFrame::find(preview, &hold.hand);
     let child = MarkerFrame::find(&attached, &hold.grip);
-    let name = tag_path::name(path).to_owned();
     for (marker, attach_to) in &hold.ik_points {
         preview.weapon_ik.extend(weapon_ik(
             preview,
@@ -421,41 +468,27 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
             attach_to,
         ));
     }
-    // Its lights, functions and change colors are Game Shaders' alone
-    // (`TagReader::game_shaders`).
-    let game_shaders = reader.game_shaders();
-    if game_shaders {
-        let lights =
-            super::lights::read_attached_lights(reader, &weapon, 1, &attached, parent, child);
-        preview.ce.lights.extend(lights);
-    }
+    // Where its markers are in the hand, under its regions as
+    // `merge_attached` renames them.
     let markers = attached
         .markers
         .iter()
         .map(|marker| {
             let held = attached_marker_frame(marker, &parent, &child);
+            let mut only_under = marker.only_under.clone();
+            rename_region(&mut only_under, &name);
             RenderModelPreviewMarker {
                 position: held.position,
                 axes: held.axes,
                 node_index: held.node,
+                only_under,
                 ..marker.clone()
             }
         })
         .collect();
+    let held_origin = attached_marker_frame(&origin, &parent, &child);
     merge_attached(preview, attached, parent, child, 1, &name);
-    Some(CeAttachedObject {
-        name,
-        path: path.to_owned(),
-        markers,
-        functions: game_shaders
-            .then(|| read_ce_object_functions(&weapon))
-            .flatten(),
-        change_colors: if game_shaders {
-            read_change_colors(&weapon)
-        } else {
-            Default::default()
-        },
-    })
+    Some(attached_object(markers, held_origin.into(), false))
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 //! Light volume widgets: their frames, read and posed.
 
-use super::super::super::{RenderModelPreviewMarker, TagReader};
+use super::super::super::TagReader;
+use super::super::markers::CeObjectMarkers;
 use super::{
     AntennaQuad, Image, SamplerKind, ViewFrame, argb, decode_image, dot, elements,
     function_slot_of, has_flag, object_block, posed_on, rgb_colors_interpolate,
@@ -78,7 +79,7 @@ fn read_light_volume(
     reader: &TagReader,
     path: &str,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
 ) -> Option<CeLightVolume> {
     let tag = reader.load(path, "light_volume", b"mgs2").ok()?;
     let root = tag.root();
@@ -88,7 +89,10 @@ fn read_light_volume(
         return None;
     }
     let name = root.read_string("attachment marker").unwrap_or_default();
-    let (node, position, forward) = super::super::lights::marker_or_origin(markers, &name, owner)?;
+    // `light_volume_submit` reads the first slot, the origin when the marker
+    // is not found.
+    let at = markers.get(&name, 1).first();
+    let (node, position, forward) = (at.node, at.position, at.forward());
     // `rasterizer_widget_set_texture`: no map is the globals' `glow`.
     let image = match root
         .read_tag_ref_path("map")
@@ -134,7 +138,7 @@ pub(in crate::app::model_preview) fn read_ce_light_volumes(
     reader: &TagReader,
     object: &TagFile,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
 ) -> Vec<CeLightVolume> {
     let Some(block) = object_block(object, "widgets") else {
         return Vec::new();

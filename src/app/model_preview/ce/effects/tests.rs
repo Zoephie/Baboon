@@ -104,3 +104,93 @@ fn a_point_on_the_floor_bounces_by_its_elasticity() {
     assert!((velocity[0] - 1.0).abs() < 1e-4, "{velocity:?}");
     assert!(place[2] >= 0.0);
 }
+
+/// With `BLAM_TEST_HCEEK`: the Scorpion's cannon has no model, so it stays
+/// hidden in the tank and `weapon_effect_new` plays its firing on the tank,
+/// object 0, though the triggers are the cannon's, object 1:
+/// both triggers fire, and the shell's effect goes at the tank's own
+/// markers, `primary trigger` among them, where the barrel is. Its muzzle
+/// flash still lights: `light_reconnect_to_map` puts it at the gun's origin,
+/// on the tank where the gun is held.
+#[test]
+fn a_hidden_vehicle_gun_fires_at_the_vehicles_markers() {
+    use crate::app::model_preview::harness::kit::{kit_preview, kit_root};
+    use crate::core::game::GameId;
+    let Some(root) = kit_root(GameId::HaloCe) else {
+        return;
+    };
+    let data = kit_preview(
+        &root,
+        GameId::HaloCe,
+        "vehicles\\scorpion\\scorpion",
+        "vehicle",
+        b"vehi",
+    );
+    let firing = &data.preview.ce.firing;
+    assert_eq!(firing.len(), 1, "the cannon's triggers are read");
+    assert_eq!(firing[0].object, 1);
+    assert_eq!(firing[0].triggers.len(), 2);
+    let fire =
+        data.preview
+            .ce
+            .effects
+            .iter()
+            .find(|effect| {
+                effect.object == 0
+                    && effect.event.as_ref().is_some_and(|event| {
+                        event.path == "vehicles\\scorpion\\scorpion cannon fire"
+                    })
+            })
+            .expect("the cannon's firing effect is listed");
+    let markers = &data.preview.markers;
+    let at = |position: &[f32; 3], name: Option<&str>| {
+        markers.iter().any(|marker| {
+            marker.position == *position && name.is_none_or(|name| marker.name == name)
+        })
+    };
+    let placed: Vec<[f32; 3]> = fire
+        .locations
+        .iter()
+        .flatten()
+        .map(|location| location.position)
+        .collect();
+    assert!(
+        placed.iter().all(|position| at(position, None)),
+        "{placed:?} are not all the tank's markers"
+    );
+    assert!(
+        placed
+            .iter()
+            .any(|position| at(position, Some("primary trigger"))),
+        "{placed:?} misses the barrel"
+    );
+    assert!(
+        data.preview.ce.lights.iter().any(|light| light.object == 1),
+        "the cannon's muzzle flash is read"
+    );
+    // And a shot lights it, as the held rifle's does.
+    use super::super::firing::{CeShots, fired_input};
+    let functions = data.ce.attached[0]
+        .functions
+        .as_ref()
+        .expect("the cannon's functions");
+    let flash = functions
+        .output_named("muzzle flash")
+        .expect("the cannon's muzzle flash function");
+    let mut shots = CeShots::new();
+    let lit = |shots: &CeShots, time: f32| {
+        let fired = fired_input(firing, shots, data.geometry_id, 1, time);
+        let inputs = functions.with_fired(
+            functions.inputs_for(&Default::default(), (data.geometry_id, 1)),
+            fired,
+        );
+        functions.outputs(&inputs, time)[flash]
+    };
+    assert_eq!(lit(&shots, 10.0), 0.0, "unfired, the muzzle is dark");
+    shots
+        .entry((data.geometry_id, 1))
+        .or_default()
+        .fire(&firing[0], 0, 1.0, 10.0)
+        .expect("the main trigger has a firing effect");
+    assert!(lit(&shots, 10.01) > 0.0, "the shot lights the muzzle");
+}

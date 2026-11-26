@@ -373,7 +373,10 @@ impl PreviewLoadSettings {
                     .and_then(|weapons| weapons.equippable.clone()),
                 _ => None,
             },
-            ce: super::super::ce::weapons::CeLoadSettings::of(state.data.as_ref()),
+            ce: super::super::ce::weapons::CeLoadSettings::of(
+                state.data.as_ref(),
+                &state.region_selections,
+            ),
             game_shaders: state.game_shaders,
             detail_level: state.detail_level,
         }
@@ -597,6 +600,15 @@ impl Baboon {
                     .map(|((_, name), value)| ((data.geometry_id, name.clone()), *value))
                     .collect();
                 state.function_inputs.extend(carried);
+            }
+            // Halo CE's: the picks its markers were found under, so the
+            // panel shows what was loaded and asks for no load again.
+            if let Some(picks) = &data.ce.picks {
+                for (region, selection) in picks {
+                    if let Some(kept) = state.region_selections.get_mut(region) {
+                        *kept = selection.clone();
+                    }
+                }
             }
         }
         state.data = Some(result);

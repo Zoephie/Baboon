@@ -338,6 +338,18 @@ impl ModelPreviewState {
             && self.loaded_game_shaders == self.game_shaders
             && self.loaded_detail_level == self.detail_level
             && self.loaded_scenario_selection == self.scenario_bsp_selection
+            && self.ce_marker_picks_match()
+    }
+
+    /// Whether a Halo CE object's markers were found under the permutations
+    /// the panel shows: `object_get_marker_by_name` finds only theirs.
+    fn ce_marker_picks_match(&self) -> bool {
+        match &self.data {
+            Some(Ok(data)) => data.ce.marker_picks.as_ref().is_none_or(|loaded| {
+                super::ce::markers::picks_match(loaded, &self.region_selections)
+            }),
+            _ => true,
+        }
     }
 }
 
@@ -562,6 +574,33 @@ impl ModelPreviewState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Halo CE object's markers are found under the permutations shown,
+    /// so a pick in a region it found them under loads it again; one
+    /// elsewhere does not.
+    #[test]
+    fn a_pick_that_moves_a_ce_marker_asks_for_a_load() {
+        let mut state = ModelPreviewState::loaded_empty_for_test("x.vehicle");
+        let pick = |permutation: &str| ModelRegionSelection {
+            enabled: true,
+            permutation: permutation.to_owned(),
+        };
+        state.region_selections.insert("body".into(), pick("base"));
+        state.region_selections.insert("arm".into(), pick("base"));
+        if let Some(Ok(data)) = &mut state.data {
+            data.ce.marker_picks = Some(vec![("body".into(), Some("base".into()))]);
+        }
+        assert!(state.load_settings_match("x.vehicle"));
+        state.region_selections.insert("arm".into(), pick("other"));
+        assert!(
+            state.load_settings_match("x.vehicle"),
+            "the arm moves no marker"
+        );
+        state
+            .region_selections
+            .insert("body".into(), pick("damaged"));
+        assert!(!state.load_settings_match("x.vehicle"));
+    }
 
     #[test]
     fn shading_choices_keep_the_wireframe_overlay() {

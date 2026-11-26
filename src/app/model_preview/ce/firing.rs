@@ -64,17 +64,20 @@ fn fall_per_tick(seconds: f32) -> f32 {
     }
 }
 
-/// The triggers of `weapon`, if it is one, with each firing effect found
-/// among `effects`, the object's event effects, by its path.
+/// The triggers of `weapon`, if it is one, as object `object`, with each
+/// firing effect found among `effects` by its path, among the event effects
+/// of object `effects_on`: its own, or for a hidden weapon its unit's, which
+/// `weapon_effect_new` plays them on.
 pub(in crate::app::model_preview) fn read_ce_weapon_firing(
     weapon: &TagFile,
     object: u8,
+    effects_on: u8,
     effects: &[CeEffectAt],
 ) -> Option<CeWeaponFiring> {
     let holder = object_block(weapon, "triggers")?;
     let effect_index = |path: &str| {
         effects.iter().position(|effect| {
-            effect.object == object
+            effect.object == effects_on
                 && effect
                     .event
                     .as_ref()

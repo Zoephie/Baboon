@@ -3,8 +3,8 @@
 
 use super::super::ModelVariantRegionChoice;
 use super::{
-    ModelPreviewData, ModelPreviewLayer, ModelPreviewState, ModelRegionSelection, PHYSICS_REGION,
-    RenderModelPreviewRegion,
+    ModelPreviewData, ModelPreviewLayer, ModelPreviewState, ModelRegionSelection,
+    ModelVariantPreview, PHYSICS_REGION, RenderModelPreview, RenderModelPreviewRegion,
 };
 use std::collections::HashMap;
 
@@ -41,9 +41,26 @@ pub(super) fn compute_variant_selection(
     data: &ModelPreviewData,
     variant: Option<usize>,
 ) -> HashMap<String, ModelRegionSelection> {
+    selection_of(
+        &data.preview,
+        variant.and_then(|idx| data.variants.get(idx)),
+    )
+}
+
+/// The selection a preview starts in with no variant chosen, as Halo CE's
+/// load resolves an object's markers with before the panel has any.
+pub(super) fn base_selection(
+    preview: &RenderModelPreview,
+) -> HashMap<String, ModelRegionSelection> {
+    selection_of(preview, None)
+}
+
+fn selection_of(
+    preview: &RenderModelPreview,
+    selected_variant: Option<&ModelVariantPreview>,
+) -> HashMap<String, ModelRegionSelection> {
     let mut selections = HashMap::new();
-    let selected_variant = variant.and_then(|idx| data.variants.get(idx));
-    for region in &data.preview.regions {
+    for region in &preview.regions {
         let named = selected_variant.and_then(|variant| variant.regions.get(&region.name));
         let hidden =
             selected_variant.is_some_and(|variant| variant.hidden_regions.contains(&region.name));
@@ -52,7 +69,7 @@ pub(super) fn compute_variant_selection(
             // The game resolves a name the render model lacks to no permutation.
             Some(_) => (false, default_permutation(region)),
             None => {
-                let empty = data.preview.instances.empty_regions.contains(&region.name);
+                let empty = preview.instances.empty_regions.contains(&region.name);
                 (
                     !hidden && !empty && !region.permutations.is_empty(),
                     default_permutation(region),

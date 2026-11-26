@@ -1,36 +1,14 @@
 //! A Halo CE object's lights: their reflections, coronas and colours, read off the object and what it holds.
 
-use super::super::super::{RenderModelPreview, RenderModelPreviewMarker, TagFile, TagReader};
+use super::super::super::{TagFile, TagReader};
+use super::super::markers::{CeFound, CeMarker, CeObjectMarkers};
 use super::flare::CeFlare;
 use super::point::read_light_tag;
 use super::{
-    FlareSprite, MarkerFrame, OcclusionOffset, ViewFrame, attached_marker_frame, cross, dot,
-    elements, function_slot_of, lerp, object_block, periodic_evaluate, posed_on,
-    rgb_colors_interpolate,
+    FlareSprite, OcclusionOffset, ViewFrame, cross, dot, elements, function_slot_of, lerp,
+    object_block, periodic_evaluate, posed_on, rgb_colors_interpolate,
 };
 use std::sync::Arc;
-
-/// `object_get_marker_by_name` as a widget reads it: the marker, or, when the
-/// object has none by that name (or the name is empty), the object's origin,
-/// where the game still draws it. The origin is known only for the opened
-/// object (`owner` 0); a held object's widget without its marker is left out.
-pub(in crate::app::model_preview) fn marker_or_origin(
-    markers: &[RenderModelPreviewMarker],
-    name: &str,
-    owner: u8,
-) -> Option<(usize, [f32; 3], [f32; 3])> {
-    let found = markers
-        .iter()
-        .find(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(name));
-    match found {
-        Some(marker) => Some((
-            marker.node_index.max(0) as usize,
-            marker.position,
-            marker.axes[0],
-        )),
-        None => (owner == 0).then_some((0, [0.0; 3], [1.0, 0.0, 0.0])),
-    }
-}
 
 /// Colors of a reflection that all read zero take the light's instead.
 pub(super) const NO_COLOR: [f32; 4] = [0.0; 4];
@@ -375,15 +353,18 @@ pub(in crate::app::model_preview) fn mark_outputs_read(
     }
 }
 
-/// The lights among `object`'s attachments, one per marker of the name.
-/// `frame` turns a marker to where the preview holds it, and its node.
+/// The lights among `object`'s attachments, at its `markers`. `light_new`
+/// makes one per attachment: `light_reconnect_to_map` puts its light at the
+/// first slot of `object_get_marker_by_name`, read whatever the count (the
+/// origin when no marker is found), and `lights_preprocess_scene` draws its
+/// lens flare at every marker found, up to 8, none when none is.
 pub(in crate::app::model_preview) fn read_ce_lights(
     reader: &TagReader,
     object: &TagFile,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
-    frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
+    markers: &CeObjectMarkers,
 ) -> Vec<CeLight> {
+    const MOST_FLARES: usize = 8;
     let mut lights = Vec::new();
     let Some(block) = object_block(object, "attachments") else {
         return lights;
@@ -404,38 +385,86 @@ pub(in crate::app::model_preview) fn read_ce_lights(
             continue;
         }
         let name = attachment.read_string("marker").unwrap_or_default();
-        for marker in markers
-            .iter()
-            .filter(|marker| marker.name.eq_ignore_ascii_case(&name))
-        {
-            let (place, node) = frame(marker);
-            lights.push(CeLight {
-                object: owner,
-                node,
-                position: place.position,
-                forward: place.axes[0],
-                primary: function_slot_of(attachment, "primary scale"),
-                change_color: function_slot_of(attachment, "change color"),
-                ..template.clone()
-            });
-        }
+        let found = markers.get(&name, MOST_FLARES);
+        let placed = light_placements(&found, template.dynamic, template.flare.is_some());
+        lights.extend(placed.into_iter().map(|(at, dynamic, flare)| CeLight {
+            object: owner,
+            node: at.node,
+            position: at.position,
+            forward: at.forward(),
+            primary: function_slot_of(attachment, "primary scale"),
+            change_color: function_slot_of(attachment, "change color"),
+            dynamic,
+            flare: template.flare.clone().filter(|_| flare),
+            ..template.clone()
+        }));
     }
     lights
 }
 
-/// The same, for a weapon held on `parent`.
-pub(in crate::app::model_preview) fn read_attached_lights(
-    reader: &TagReader,
-    object: &TagFile,
-    owner: u8,
-    weapon: &RenderModelPreview,
-    parent: MarkerFrame,
-    child: MarkerFrame,
-) -> Vec<CeLight> {
-    read_ce_lights(reader, object, owner, &weapon.markers, |marker| {
-        (
-            attached_marker_frame(marker, &parent, &child),
-            parent.node.max(0) as usize,
-        )
-    })
+/// Where one light attachment draws, and what at each: its dynamic light at
+/// the first slot (`light_reconnect_to_map`), its lens flare at each marker
+/// found (`lights_preprocess_scene`). Each is a place, whether its light is
+/// there, and whether a flare is; a place with neither is left out.
+fn light_placements(found: &CeFound, dynamic: bool, flare: bool) -> Vec<(CeMarker, bool, bool)> {
+    let flared = found.found();
+    let first = (found.first(), dynamic, flare && !flared.is_empty());
+    std::iter::once(first)
+        .chain(flared.iter().skip(1).map(|at| (*at, false, flare)))
+        .filter(|(_, dynamic, flare)| *dynamic || *flare)
+        .collect()
+}
+#[cfg(test)]
+mod placement_tests {
+    use super::super::super::super::{ModelRegionSelection, RenderModelPreviewMarker};
+    use super::*;
+    use std::collections::HashMap;
+
+    fn markers(names: &[(&str, f32)]) -> CeObjectMarkers {
+        let markers: Vec<_> = names
+            .iter()
+            .map(|(name, x)| RenderModelPreviewMarker {
+                name: (*name).to_owned(),
+                position: [*x, 0.0, 0.0],
+                axes: CeMarker::ORIGIN.axes,
+                ..Default::default()
+            })
+            .collect();
+        let picks: HashMap<String, ModelRegionSelection> = HashMap::new();
+        CeObjectMarkers::of_markers(&markers, &[], &picks, CeMarker::ORIGIN)
+    }
+
+    fn placed(found: &CeFound, dynamic: bool, flare: bool) -> Vec<(f32, bool, bool)> {
+        light_placements(found, dynamic, flare)
+            .into_iter()
+            .map(|(at, dynamic, flare)| (at.position[0], dynamic, flare))
+            .collect()
+    }
+
+    /// One light per attachment, at the first marker; a flare at each.
+    #[test]
+    fn a_light_on_a_repeated_marker_lights_once_and_flares_at_each() {
+        let found = markers(&[("lamp", 1.0), ("lamp", 2.0)]).get("lamp", 8);
+        assert_eq!(
+            placed(&found, true, true),
+            [(1.0, true, true), (2.0, false, true)]
+        );
+    }
+
+    /// A marker not found: the light at the origin, no flare at all.
+    #[test]
+    fn a_light_whose_marker_is_missing_lights_the_origin_without_a_flare() {
+        let found = markers(&[("lamp", 1.0)]).get("gone", 8);
+        assert_eq!(placed(&found, true, true), [(0.0, true, false)]);
+        assert!(
+            placed(&found, false, true).is_empty(),
+            "a flare alone draws nothing"
+        );
+        let unnamed = markers(&[]).get("", 8);
+        assert_eq!(
+            placed(&unnamed, false, true),
+            [(0.0, false, true)],
+            "no name is the origin, found"
+        );
+    }
 }

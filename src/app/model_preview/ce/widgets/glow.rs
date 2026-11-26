@@ -1,6 +1,7 @@
 //! Glow widgets: their markers, particles and field.
 
-use super::super::super::{RenderModelPreviewMarker, TagReader, resume_point};
+use super::super::super::{TagReader, resume_point};
+use super::super::markers::CeObjectMarkers;
 use super::lightning::{CeLightningQuad, Lcg};
 use super::{
     CeRandom, Image, SamplerKind, ViewFrame, argb, cross, decode_image, dot, elements,
@@ -133,29 +134,26 @@ fn read_glow(
     reader: &TagReader,
     path: &str,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
 ) -> Option<CeGlow> {
     let tag = reader.load(path, "glow", b"glw!").ok()?;
     let root = tag.root();
     let name = root.read_string("attachment marker").unwrap_or_default();
-    // What is not found is the origin.
-    let mut found: Vec<GlowMarker> = markers
-        .iter()
-        .filter(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(&name))
-        .take(5)
-        .map(|marker| GlowMarker {
-            node: marker.node_index.max(0) as usize,
-            position: marker.position,
-            axes: marker.axes,
-        })
-        .collect();
-    if found.is_empty() {
-        found.push(GlowMarker {
-            node: 0,
-            position: [0.0; 3],
-            axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-        });
+    // `glow_update` asks for 5; with none found it reads the first slot,
+    // the origin.
+    let at = markers.get(&name, 5);
+    let found: Vec<GlowMarker> = if at.found().is_empty() {
+        vec![at.first()]
+    } else {
+        at.found().to_vec()
     }
+    .into_iter()
+    .map(|marker| GlowMarker {
+        node: marker.node,
+        position: marker.position,
+        axes: marker.axes,
+    })
+    .collect();
     // `glow_new`: only a bitmap of sprites makes one.
     let bitmap_path = root
         .read_tag_ref_path("texture")
@@ -263,7 +261,7 @@ pub(in crate::app::model_preview) fn read_ce_glows(
     reader: &TagReader,
     object: &TagFile,
     owner: u8,
-    markers: &[RenderModelPreviewMarker],
+    markers: &CeObjectMarkers,
 ) -> Vec<CeGlow> {
     let Some(block) = object_block(object, "widgets") else {
         return Vec::new();
