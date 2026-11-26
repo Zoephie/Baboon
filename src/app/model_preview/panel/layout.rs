@@ -436,6 +436,8 @@ pub(in crate::app::model_preview) fn draw_preview_header(
     state: &mut ModelPreviewState,
     requests: &mut SetupRequests,
 ) {
+    // Right of the View menu, as the header lays out from the right.
+    super::snapshot::draw_snapshot_controls(ui, state);
     draw_model_view_settings_menu(
         ui,
         panel.data,

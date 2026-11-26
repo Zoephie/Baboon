@@ -548,6 +548,9 @@ pub(in crate::app) struct GuiPrefs {
     /// What the model preview's viewport is cleared to. Shared by every tag
     /// pane and remembered across sessions.
     pub(in crate::app) model_preview_background: crate::app::model_preview::ModelPreviewBackground,
+    /// The model preview's snapshot size, as a scale of its viewport's.
+    /// Shared by every tag pane and remembered across sessions.
+    pub(in crate::app) model_preview_snapshot_scale: f32,
     /// The model preview draws other open tags' unsaved edits (a shader
     /// being tuned) instead of their saved files. Shared by every tag pane
     /// and remembered across sessions; off by default.
@@ -646,6 +649,7 @@ impl Default for GuiPrefs {
             model_preview_perspective: true,
             model_preview_unsaved_edits: false,
             model_preview_background: crate::app::model_preview::ModelPreviewBackground::Theme,
+            model_preview_snapshot_scale: 1.0,
             bitmap_preview_view: BitmapPreviewViewSettings::default(),
             blender_path: None,
             editing_kit_paths: HashMap::new(),

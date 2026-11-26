@@ -5,7 +5,7 @@ use eframe::glow::{self, HasContext};
 
 /// How a target texture stores its texels: the internal format, and the
 /// format and type `tex_image_2d` is handed with no data.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::app::model_preview) struct Texels {
     pub(in crate::app::model_preview) internal: u32,
     pub(in crate::app::model_preview) format: u32,
@@ -201,6 +201,7 @@ impl<'a> Made<'a> {
                 framebuffer,
                 texture,
                 size,
+                texels,
             })
         }
     }
@@ -272,6 +273,7 @@ pub(in crate::app::model_preview) struct ColorTarget {
     pub(in crate::app::model_preview) framebuffer: glow::NativeFramebuffer,
     pub(in crate::app::model_preview) texture: glow::NativeTexture,
     pub(in crate::app::model_preview) size: [i32; 2],
+    pub(in crate::app::model_preview) texels: Texels,
 }
 
 impl ColorTarget {
@@ -318,6 +320,7 @@ pub(in crate::app::model_preview) struct SceneTarget {
     pub(in crate::app::model_preview) color: glow::NativeTexture,
     pub(in crate::app::model_preview) depth: glow::NativeRenderbuffer,
     pub(in crate::app::model_preview) size: [i32; 2],
+    pub(in crate::app::model_preview) texels: Texels,
 }
 
 impl SceneTarget {
@@ -325,12 +328,13 @@ impl SceneTarget {
         gl: &glow::Context,
         width: i32,
         height: i32,
+        texels: Texels,
     ) -> Result<Self, String> {
         let size = [width, height];
         let mut made = Made::new(gl);
         unsafe {
             let color = made
-                .texture(size, Texels::RGBA8, Sampling::NEAREST_CLAMPED)
+                .texture(size, texels, Sampling::NEAREST_CLAMPED)
                 .ok_or("no color texture")?;
             let depth = made
                 .renderbuffer(size, glow::DEPTH24_STENCIL8)
@@ -356,6 +360,7 @@ impl SceneTarget {
                 color,
                 depth,
                 size,
+                texels,
             })
         }
     }
@@ -369,8 +374,30 @@ impl SceneTarget {
     }
 }
 
+/// How the framebuffer `framebuffer` stores its colour: half floats if its
+/// first colour attachment holds floats (a snapshot's frame, which must not
+/// clamp), else bytes. The window's own framebuffer is bytes.
+pub(in crate::app::model_preview) unsafe fn framebuffer_texels(
+    gl: &glow::Context,
+    framebuffer: Option<glow::NativeFramebuffer>,
+) -> Texels {
+    if framebuffer.is_none() {
+        return Texels::RGBA8;
+    }
+    let kind = unsafe {
+        gl.bind_framebuffer(glow::READ_FRAMEBUFFER, framebuffer);
+        gl.get_framebuffer_attachment_parameter_i32(
+            glow::READ_FRAMEBUFFER,
+            glow::COLOR_ATTACHMENT0,
+            glow::FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE,
+        )
+    };
+    if kind as u32 == glow::FLOAT { Texels::RGBA16F } else { Texels::RGBA8 }
+}
+
 /// The viewport of the framebuffer being drawn, copied into a texture of its
-/// size. A blit, as what is drawn to may be multisampled.
+/// size and its colour format. A blit, as what is drawn to may be
+/// multisampled.
 pub(in crate::app::model_preview) unsafe fn copy_frame(
     gl: &glow::Context,
     copy: &mut Option<ColorTarget>,
@@ -382,19 +409,20 @@ pub(in crate::app::model_preview) unsafe fn copy_frame(
         if width <= 0 || height <= 0 {
             return None;
         }
+        let drawn_to = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
+        let texels = framebuffer_texels(gl, drawn_to);
         if copy
             .as_ref()
-            .is_some_and(|copy| copy.size != [width, height])
+            .is_some_and(|copy| copy.size != [width, height] || copy.texels != texels)
             && let Some(old) = copy.take()
         {
             old.delete(gl);
         }
-        let drawn_to = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
         if copy.is_none() {
             *copy = Some(ColorTarget::new(
                 gl,
                 [width, height],
-                Texels::RGBA8,
+                texels,
                 Sampling::LINEAR_CLAMPED,
             )?);
         }

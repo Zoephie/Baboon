@@ -64,7 +64,8 @@ impl H2Bloom {
     }
 
     /// Add the glow of `scene`, whose alpha holds the mask, to the framebuffer
-    /// bound for it. Leaves that framebuffer bound.
+    /// bound for it; with `held`, the glow the last frame built, at the same
+    /// size (`RenderCore::held_bloom`). Leaves that framebuffer bound.
     pub(in crate::app::model_preview) unsafe fn apply(
         &mut self,
         gl: &glow::Context,
@@ -72,6 +73,7 @@ impl H2Bloom {
         scene_color: glow::NativeTexture,
         size: [i32; 2],
         show_backfaces: bool,
+        held: bool,
     ) {
         let small = [(size[0] / DOWNSAMPLE).max(1), (size[1] / DOWNSAMPLE).max(1)];
         unsafe {
@@ -107,18 +109,20 @@ impl H2Bloom {
                 gl.draw_arrays(glow::TRIANGLES, 0, 3);
             };
 
-            gl.viewport(0, 0, small[0], small[1]);
-            gl.uniform_1_f32(uniform("u_scale").as_ref(), MASK_SCALE);
-            gl.uniform_1_f32(uniform("u_threshold").as_ref(), THRESHOLD);
             gl.uniform_1_f32(uniform("u_brightness").as_ref(), BRIGHTNESS);
-            draw(first.framebuffer, scene_color, 0);
-            // The nine taps reach four texels, as far as the game's blur.
-            let reach = BLUR_RADIUS / 4.0;
-            for _ in 0..BLUR_PASSES {
-                gl.uniform_2_f32(uniform("u_step").as_ref(), reach / small[0] as f32, 0.0);
-                draw(second.framebuffer, first.texture, 1);
-                gl.uniform_2_f32(uniform("u_step").as_ref(), 0.0, reach / small[1] as f32);
-                draw(first.framebuffer, second.texture, 1);
+            if !held {
+                gl.viewport(0, 0, small[0], small[1]);
+                gl.uniform_1_f32(uniform("u_scale").as_ref(), MASK_SCALE);
+                gl.uniform_1_f32(uniform("u_threshold").as_ref(), THRESHOLD);
+                draw(first.framebuffer, scene_color, 0);
+                // The nine taps reach four texels, as far as the game's blur.
+                let reach = BLUR_RADIUS / 4.0;
+                for _ in 0..BLUR_PASSES {
+                    gl.uniform_2_f32(uniform("u_step").as_ref(), reach / small[0] as f32, 0.0);
+                    draw(second.framebuffer, first.texture, 1);
+                    gl.uniform_2_f32(uniform("u_step").as_ref(), 0.0, reach / small[1] as f32);
+                    draw(first.framebuffer, second.texture, 1);
+                }
             }
 
             gl.viewport(0, 0, size[0], size[1]);
@@ -215,7 +219,7 @@ pub(in crate::app::model_preview) unsafe fn draw_h2_bloom(
             );
         }
         if let Some(bloom) = made.get_or_insert_with(|| H2Bloom::new(gl, PASS_GLSL_VERSION)) {
-            bloom.apply(gl, framebuffer, color, size, frame.show_backfaces);
+            bloom.apply(gl, framebuffer, color, size, frame.show_backfaces, core.held_bloom);
         }
     }
 }

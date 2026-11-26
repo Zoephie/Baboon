@@ -249,6 +249,15 @@ pub(super) struct Rendered {
     pub(super) gl_state: String,
 }
 
+/// A shot's model loaded and posed, and the frame the viewport would draw of
+/// it: what [`render`] paints, and what a snapshot test draws again.
+pub(in crate::app::model_preview) struct ShotFrame {
+    pub(in crate::app::model_preview) data: ModelPreviewData,
+    pub(in crate::app::model_preview) state: ModelPreviewState,
+    pub(in crate::app::model_preview) frame: ModelGpuFrame,
+    pub(in crate::app::model_preview) rect: egui::Rect,
+}
+
 /// Takes `shot` with `renderer`.
 pub(super) fn render(
     gl: &Arc<glow::Context>,
@@ -257,6 +266,13 @@ pub(super) fn render(
     shot: &Shot,
     options: &ShotOptions,
 ) -> Rendered {
+    let ShotFrame { data, mut state, mut frame, rect } = shot_frame(source, shot, options);
+    let (width, height) = (rect.width() as i32, rect.height() as i32);
+    paint_shot(gl, renderer, options, data, &mut state, &mut frame, rect, width, height)
+}
+
+/// `shot`'s model loaded, posed and set as `options` say, and its frame.
+pub(in crate::app::model_preview) fn shot_frame(source: &TagSource, shot: &Shot, options: &ShotOptions) -> ShotFrame {
     let names = match source {
         TagSource::LooseFolder {
             definitions_root, ..
@@ -491,32 +507,26 @@ pub(super) fn render(
                 .ends_with(name.as_str())
         })
     });
+    ShotFrame { data, state, frame, rect }
+}
+
+/// [`render`]'s painting of a shot's frame, played or fired up to its time
+/// as `options` say, and read back.
+#[allow(clippy::too_many_arguments)]
+fn paint_shot(
+    gl: &Arc<glow::Context>,
+    renderer: &mut ModelGlRenderer,
+    options: &ShotOptions,
+    data: ModelPreviewData,
+    state: &mut ModelPreviewState,
+    frame: &mut ModelGpuFrame,
+    rect: egui::Rect,
+    width: i32,
+    height: i32,
+) -> Rendered {
     eprintln!("NOTE moves {}", frame.moves());
     unsafe {
-        let color = gl.create_renderbuffer().unwrap();
-        gl.bind_renderbuffer(glow::RENDERBUFFER, Some(color));
-        gl.renderbuffer_storage(glow::RENDERBUFFER, glow::RGBA8, width, height);
-        let depth = gl.create_renderbuffer().unwrap();
-        gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
-        gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH_COMPONENT24, width, height);
-        let framebuffer = gl.create_framebuffer().unwrap();
-        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-        gl.framebuffer_renderbuffer(
-            glow::FRAMEBUFFER,
-            glow::COLOR_ATTACHMENT0,
-            glow::RENDERBUFFER,
-            Some(color),
-        );
-        gl.framebuffer_renderbuffer(
-            glow::FRAMEBUFFER,
-            glow::DEPTH_ATTACHMENT,
-            glow::RENDERBUFFER,
-            Some(depth),
-        );
-        assert_eq!(
-            gl.check_framebuffer_status(glow::FRAMEBUFFER),
-            glow::FRAMEBUFFER_COMPLETE
-        );
+        let framebuffer = shot_framebuffer(gl, width, height);
         // As the renderer's own targets leave it, so no shot's state says
         // whether the renderer made its targets in it.
         gl.bind_renderbuffer(glow::RENDERBUFFER, None);
@@ -623,6 +633,52 @@ pub(super) fn render(
             geometry_id: data.geometry_id,
             gl_state,
         }
+    }
+}
+
+/// An RGBA8 colour and depth framebuffer of `width` by `height`, bound, as
+/// the window's is to the viewport.
+unsafe fn shot_framebuffer(gl: &glow::Context, width: i32, height: i32) -> glow::NativeFramebuffer {
+    unsafe {
+        let color = gl.create_renderbuffer().unwrap();
+        gl.bind_renderbuffer(glow::RENDERBUFFER, Some(color));
+        gl.renderbuffer_storage(glow::RENDERBUFFER, glow::RGBA8, width, height);
+        let depth = gl.create_renderbuffer().unwrap();
+        gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
+        gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH_COMPONENT24, width, height);
+        let framebuffer = gl.create_framebuffer().unwrap();
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+        gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::RENDERBUFFER, Some(color));
+        gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::RENDERBUFFER, Some(depth));
+        assert_eq!(gl.check_framebuffer_status(glow::FRAMEBUFFER), glow::FRAMEBUFFER_COMPLETE);
+        framebuffer
+    }
+}
+
+/// `frame` painted as the viewport paints it, into a byte framebuffer of
+/// `size` cleared to its background: RGBA, bottom row first.
+pub(in crate::app::model_preview) unsafe fn paint_frame(
+    gl: &glow::Context,
+    renderer: &mut ModelGlRenderer,
+    frame: &ModelGpuFrame,
+    size: [i32; 2],
+) -> Vec<u8> {
+    let [width, height] = size;
+    unsafe {
+        let framebuffer = shot_framebuffer(gl, width, height);
+        gl.bind_renderbuffer(glow::RENDERBUFFER, None);
+        gl.viewport(0, 0, width, height);
+        gl.color_mask(true, true, true, true);
+        gl.depth_mask(true);
+        let [r, g, b] = frame.background;
+        gl.clear_color(r, g, b, 1.0);
+        gl.clear_depth_f32(1.0);
+        gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+        renderer.paint(gl, frame);
+        let mut pixels = vec![0u8; (width * height * 4) as usize];
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+        gl.read_pixels(0, 0, width, height, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelPackData::Slice(Some(&mut pixels)));
+        pixels
     }
 }
 

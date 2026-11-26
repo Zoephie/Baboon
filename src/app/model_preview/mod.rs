@@ -54,6 +54,7 @@ pub(crate) mod particles;
 mod reach;
 mod renderer;
 mod selection;
+pub(in crate::app) mod snapshot;
 #[cfg(test)]
 mod tests;
 mod viewport;

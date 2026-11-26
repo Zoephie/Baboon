@@ -6203,6 +6203,89 @@ mod tests {
         assert!(h.painted.iter().any(|text| text.trim() == "Open"), "still opens in a tab");
     }
 
+    /// The preview's snapshot: a camera right of the View menu, then its
+    /// scale menu. Pressed, it asks for the frame on screen at the scale's
+    /// size; once drawn, the image goes to the clipboard and the status bar
+    /// says so.
+    #[test]
+    fn the_camera_copies_the_frame_on_screen_at_its_scale() {
+        use crate::app::model_preview::snapshot::{SnapshotImage, SnapshotPhase, TEST_CLIPBOARD};
+        let mut h = Harness::new();
+        let _kit = model_preview_pane(&mut h);
+        idle(&mut h);
+        let rect = |h: &Harness, needle: &str| {
+            h.painted_rects.iter().find(|(text, _)| text.trim() == needle).map(|(_, rect)| *rect)
+        };
+        let view = rect(&h, "View").expect("the View menu");
+        let scale = rect(&h, "1×").expect("the scale menu");
+        assert!(scale.left() > view.right() + 24.0, "room for the camera between: {view:?} {scale:?}");
+        let id = h.app.model.kits[0].id;
+        let key = h.app.views[id].caches.model_previews.keys().next().unwrap().clone();
+        fn preview<'a>(h: &'a Harness, id: crate::app::kits::KitId, key: &str) -> &'a crate::app::model_preview::state::ModelPreviewState {
+            &h.app.views[id].caches.model_previews[key]
+        }
+        let points = preview(&h, id, &key).snapshot_source.as_ref().expect("the frame on screen kept").points;
+
+        // The camera, between the View menu and the scale menu.
+        h.click_at(egui::pos2(scale.left() - 18.0, scale.center().y));
+        let SnapshotPhase::Drawing(request) = &preview(&h, id, &key).snapshot else {
+            panic!("asked for a snapshot")
+        };
+        let ppp = h.ctx.pixels_per_point();
+        assert_eq!(request.size, [points.x, points.y].map(|edge| (edge * ppp).round() as i32), "the viewport's size at 1×");
+        // The paint draws it (no GL here): as it leaves its result.
+        request.set_result(Ok(SnapshotImage { width: 2, height: 1, rgba: vec![255, 0, 0, 255, 0, 0, 0, 0] }));
+        frames_until(&mut h, "the copy", |h| matches!(preview(h, id, &key).snapshot, SnapshotPhase::Idle));
+        idle(&mut h);
+        let copied = TEST_CLIPBOARD.lock().unwrap().take().expect("written to the clipboard");
+        assert_eq!((copied.width, copied.height), (2, 1));
+        assert!(h.painted_contains("Copied the preview to the clipboard (2 × 1)"), "{:?}", h.painted);
+    }
+
+    /// The scale menu: a typed scale past the slider's reach is taken and
+    /// kept in the preferences, the size it gives shown; 0, a negative and
+    /// text are refused, the scale kept as it was.
+    #[test]
+    fn the_snapshot_scale_menu_takes_any_scale_above_zero() {
+        let mut h = Harness::new();
+        let _kit = model_preview_pane(&mut h);
+        idle(&mut h);
+        let id = h.app.model.kits[0].id;
+        let key = h.app.views[id].caches.model_previews.keys().next().unwrap().clone();
+        let points = h.app.views[id].caches.model_previews[&key].snapshot_source.as_ref().unwrap().points;
+        let ppp = h.ctx.pixels_per_point();
+        h.click("1×", 0);
+        idle(&mut h);
+        assert!(h.painted_contains("Snapshot scale"), "{:?}", h.painted);
+        let size = |scale: f32| [points.x, points.y].map(|edge| (edge * ppp * scale).round() as i32);
+        let [width, height] = size(1.0);
+        assert!(h.painted_contains(&format!("{width} × {height}")), "the size at 1×: {:?}", h.painted);
+        let typed = |h: &mut Harness, text: &str| {
+            let label = h.painted_rects.iter().find(|(painted, _)| painted.trim() == "Scale").map(|(_, rect)| *rect).unwrap();
+            h.click_at(egui::pos2(label.right() + 40.0, label.center().y));
+            press_key(h, egui::Key::A, egui::Modifiers::COMMAND);
+            h.frame(vec![egui::Event::Text(text.to_owned())]);
+            press_key(h, egui::Key::Enter, egui::Modifiers::NONE);
+            idle(h);
+        };
+        typed(&mut h, "25");
+        assert_eq!(h.app.model.prefs.model_preview_snapshot_scale, 25.0, "past the slider, kept");
+        let [width, height] = size(25.0);
+        if !h.painted_contains("Snapshot scale") {
+            h.click("25×", 0);
+            idle(&mut h);
+        }
+        assert!(h.painted.iter().any(|text| text.starts_with(&format!("{width} × {height}"))), "the size at 25×: {:?}", h.painted);
+        for refused in ["0", "-2", "abc"] {
+            if !h.painted_contains("Snapshot scale") {
+                h.click("25×", 0);
+                idle(&mut h);
+            }
+            typed(&mut h, refused);
+            assert_eq!(h.app.model.prefs.model_preview_snapshot_scale, 25.0, "{refused:?} refused");
+        }
+    }
+
     /// The centre of the rightmost `text` painted on `label`'s row.
     fn rightmost_on_row(h: &Harness, label: &str, text: &str) -> egui::Pos2 {
         let row = h

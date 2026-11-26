@@ -6,6 +6,7 @@ pub(in crate::app) use layout::*;
 mod animation;
 mod section;
 mod setup;
+mod snapshot;
 pub(in crate::app) use section::*;
 mod functions;
 mod rows;

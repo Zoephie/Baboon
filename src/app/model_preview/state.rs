@@ -177,6 +177,15 @@ pub(in crate::app) struct ModelPreviewState {
     /// How tall the Material Editor drew last pass: the room the Materials
     /// card leaves it.
     pub(in crate::app) material_content_height: Option<f32>,
+    /// The snapshot's scale over the viewport's size, as the preferences
+    /// keep it.
+    pub(in crate::app) snapshot_scale: f32,
+    /// What the viewport drew last pass, for a snapshot of the frame on
+    /// screen.
+    pub(in crate::app) snapshot_source: Option<super::snapshot::SnapshotSource>,
+    pub(in crate::app) snapshot: super::snapshot::SnapshotPhase,
+    /// What a snapshot has to say, for the status bar.
+    pub(in crate::app) snapshot_message: Option<String>,
     /// What keeps the materials as the Material Editor's shaders have them.
     pub(in crate::app) material_live: super::material_editor::MaterialLive,
 }
@@ -271,6 +280,10 @@ impl Default for ModelPreviewState {
             material_editor_closed: None,
             material_slot: None,
             material_content_height: None,
+            snapshot_scale: 1.0,
+            snapshot_source: None,
+            snapshot: Default::default(),
+            snapshot_message: None,
             material_live: Default::default(),
         }
     }

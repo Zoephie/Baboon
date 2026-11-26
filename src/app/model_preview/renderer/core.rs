@@ -59,6 +59,15 @@ pub(in crate::app::model_preview) struct RenderCore {
     pub(in crate::app::model_preview) black_volume: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) white_volume: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) scene: Option<SceneTarget>,
+    /// How the frame-sized targets that hold the background store colour:
+    /// bytes for the viewport, half floats for a snapshot, whose render on a
+    /// white background must not clamp where light is added to it.
+    pub(in crate::app::model_preview) frame_texels: crate::app::model_preview::gl::target::Texels,
+    /// Draw bloom from what the last frame left rather than from this one:
+    /// a snapshot's render on white adds the bloom its render on black built,
+    /// which is the model's alone. Halo 2's bright pass reads the whole scene,
+    /// so on white the background itself would bloom.
+    pub(in crate::app::model_preview) held_bloom: bool,
     pub(in crate::app::model_preview) program: glow::NativeProgram,
     pub(in crate::app::model_preview) slots: Vec<ModelGpuSlot>,
     pub(super) lru: ModelSlotLru,
@@ -183,6 +192,8 @@ impl RenderCore {
                 white_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [255; 4]),
                 dx9: Dx9Gl::new(gl),
                 scene: None,
+                frame_texels: crate::app::model_preview::gl::target::Texels::RGBA8,
+                held_bloom: false,
                 program,
                 slots: Vec::new(),
                 lru: ModelSlotLru::default(),
@@ -626,11 +637,12 @@ impl RenderCore {
         unsafe {
             let state = PostScope::capture(gl);
             let size = state.size();
-            if self.scene.as_ref().is_none_or(|scene| scene.size != size) {
+            let texels = self.frame_texels;
+            if self.scene.as_ref().is_none_or(|scene| scene.size != size || scene.texels != texels) {
                 if let Some(old) = self.scene.take() {
                     old.delete(gl);
                 }
-                match SceneTarget::new(gl, size[0], size[1]) {
+                match SceneTarget::new(gl, size[0], size[1], texels) {
                     Ok(scene) => self.scene = Some(scene),
                     Err(error) => self.note(format!("the scene target was not made: {error}")),
                 }

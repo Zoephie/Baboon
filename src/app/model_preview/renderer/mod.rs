@@ -19,6 +19,10 @@ mod program;
 pub(in crate::app::model_preview) use program::*;
 mod grid;
 pub(in crate::app::model_preview) use grid::*;
+mod snapshot;
+pub(in crate::app::model_preview) use snapshot::{paint_snapshot, snapshot_size_limit};
+#[cfg(test)]
+pub(in crate::app::model_preview) use snapshot::{draw_floats, draw_snapshot};
 
 thread_local! {
     static MODEL_GL_RENDERER: RefCell<Option<CachedModelGlRenderer>> = const { RefCell::new(None) };
@@ -101,23 +105,8 @@ pub(in crate::app::model_preview) fn paint_model_gl(
     }
 
     MODEL_GL_RENDERER.with(|cell| {
-        let context_id = Arc::as_ptr(gl) as usize;
         let mut cached = cell.borrow_mut();
-        if cached
-            .as_ref()
-            .is_none_or(|cached| cached.context_id != context_id)
-        {
-            let created = ModelGlRenderer::new(gl);
-            if let Err(error) = &created {
-                eprintln!("{error}");
-            }
-            *cached = Some(CachedModelGlRenderer {
-                context_id,
-                renderer: created,
-                failed: HashMap::new(),
-                notes: HashMap::new(),
-            });
-        }
+        cached_renderer(&mut cached, gl);
         let Some(CachedModelGlRenderer {
             renderer: Ok(renderer),
             failed,
@@ -163,6 +152,26 @@ pub(in crate::app::model_preview) fn paint_model_gl(
             failed.insert(frame.geometry_id, message);
         }
     });
+}
+
+/// The renderer cached for `gl`'s context, made the first time it is drawn
+/// in (and again if the context is another): the viewport and the snapshot
+/// draw with the same one, its uploads and simulations.
+fn cached_renderer(cached: &mut Option<CachedModelGlRenderer>, gl: &Arc<glow::Context>) {
+    let context_id = Arc::as_ptr(gl) as usize;
+    if cached.as_ref().is_none_or(|cached| cached.context_id != context_id) {
+        let created = ModelGlRenderer::new(gl);
+        if let Err(error) = &created {
+            eprintln!("{error}");
+        }
+        snapshot::note_size_limit(gl);
+        *cached = Some(CachedModelGlRenderer {
+            context_id,
+            renderer: created,
+            failed: HashMap::new(),
+            notes: HashMap::new(),
+        });
+    }
 }
 
 /// The preview's renderer: what every game draws with ([`RenderCore`]),

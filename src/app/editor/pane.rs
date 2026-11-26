@@ -221,6 +221,7 @@ pub(in crate::app) fn draw_tag_body(
     let model_preview_perspective = cx.model.prefs.model_preview_perspective;
     let model_preview_unsaved_edits = cx.model.prefs.model_preview_unsaved_edits;
     let model_preview_background = cx.model.prefs.model_preview_background;
+    let model_preview_snapshot_scale = cx.model.prefs.model_preview_snapshot_scale;
 
     let Some(doc) = cx.model.kits[kit_index].parsed_tags.get(&key) else {
         if cx.model.kits[kit_index].loading_tags.contains(&key) {
@@ -526,6 +527,7 @@ pub(in crate::app) fn draw_tag_body(
         // applied going in, and a toggle in this pane written back.
         model_preview.perspective = model_preview_perspective;
         model_preview.background = model_preview_background;
+        model_preview.snapshot_scale = model_preview_snapshot_scale;
         // Turned on or off (here or in another pane): draw again from the
         // edits, or from the files.
         if model_preview.show_unsaved_edits != model_preview_unsaved_edits {
@@ -593,6 +595,13 @@ pub(in crate::app) fn draw_tag_body(
         if model_preview.background != model_preview_background {
             let background = model_preview.background;
             cx.edit_prefs(move |prefs| prefs.model_preview_background = background);
+        }
+        if model_preview.snapshot_scale != model_preview_snapshot_scale {
+            let scale = model_preview.snapshot_scale;
+            cx.edit_prefs(move |prefs| prefs.model_preview_snapshot_scale = scale);
+        }
+        if let Some(message) = model_preview.snapshot_message.take() {
+            cx.set_status(message);
         }
     }
 
