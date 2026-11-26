@@ -2125,4 +2125,70 @@ mod tests {
         assert!(built > 6000, "{built} grids");
         assert!(failures.is_empty(), "{} failures, first: {:?}", failures.len(), &failures[..failures.len().min(10)]);
     }
+
+    /// Halo 2 Anniversary's materials take the same grid as Halo 4's: its
+    /// definitions lay a material's parameters out alike. No H2A kit is at
+    /// hand, so its tags are built from its definitions: a material shader
+    /// declaring a colour, and a material naming it. The grid lists the
+    /// colour, and overriding it makes a parameter with a colour function,
+    /// in the material's own block. (Halo 5 tags can't be built this way:
+    /// they are edited only from extracted files.)
+    #[test]
+    fn halo_2_anniversary_materials_take_the_grid() {
+        use crate::app::loose_fixture::{definition, group_tag, set_reference};
+        for (game, game_id) in [("halo2amp_mcc", Some(GameId::Halo2Amp))] {
+            let root = crate::core::test_kits::unique_temp_dir(&format!("material-grid-{game}"));
+            let write = |rel: &str, group: &str, edit: &dyn Fn(&mut TagFile)| {
+                let mut tag = TagFile::new(definition(game, group)).unwrap_or_else(|error| panic!("{game} {group}: {error}"));
+                edit(&mut tag);
+                let path = root.join(format!("{rel}.{group}"));
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                tag.write(&path).unwrap();
+                path
+            };
+            write("shaders/tint", "material_shader", &|tag| {
+                apply_one_shader_param_op(
+                    tag,
+                    &ShaderParamOp {
+                        parameters_block_path: "material parameters".to_owned(),
+                        parameter_name: "tint".to_owned(),
+                        // `material_shader_parameter_type_enum`: colour.
+                        initial_fields: vec![shader_parameter_type_initial_field(4)],
+                        animated_parameters: Vec::new(),
+                    },
+                )
+                .unwrap();
+            });
+            let material = write("objects/thing", "material", &|tag| {
+                set_reference(tag, "material shader", group_tag(game, "material_shader"), "shaders\\tint");
+            });
+            let source = TagSource::LooseFolder { root: root.clone(), game: game_id, definitions_root: locate_definitions_root() };
+            let tag = TagFile::read(&material).unwrap();
+            let model = build_material_tag_editor_model(&tag, u32::from_be_bytes(*b"mat "), Some(&source), &mut H2TemplateCache::default())
+                .unwrap_or_else(|| panic!("{game}: a grid"));
+            let row = model
+                .sections
+                .iter()
+                .flat_map(|section| section.rows.iter())
+                .find(|row| row.label == "tint")
+                .unwrap_or_else(|| panic!("{game}: the shader's colour is listed"));
+            let Some(ShaderRowEdit { kind: ShaderRowEditKind::CreateFunctionColor { target }, .. }) = row.edit.as_ref() else {
+                panic!("{game}: an inherited colour is overridden with a function");
+            };
+            let mut document = TagDocument::clean(tag);
+            apply_deferred_ops(
+                &mut document,
+                shader_context_action_ops(&shader_function_action(target, constant_color_function_hex(1.0, 0.0, 0.0, 1.0))),
+                "test",
+            );
+            let root_struct = document.tag.root();
+            let parameters = root_struct.field("material parameters").and_then(|field| field.as_block()).unwrap();
+            let added = parameters.iter().next().unwrap_or_else(|| panic!("{game}: the override"));
+            assert_eq!(added.read_string_id("parameter name").as_deref(), Some("tint"), "{game}");
+            assert_eq!(added.read_int_any("parameter type"), Some(4), "{game}");
+            let functions = added.field("function parameters").and_then(|field| field.as_block()).unwrap();
+            assert_eq!(functions.len(), 1, "{game}: its colour function");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
 }

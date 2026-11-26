@@ -6327,6 +6327,26 @@ mod tests {
         assert!(parameter_names(&h.app.model.kits[0].parsed_tags[&key].tag).contains(&"diffuse_intensity".to_owned()));
     }
 
+    /// A material that can't be saved says why, in the window and on its
+    /// Save, which writes nothing.
+    #[test]
+    fn an_unsaveable_material_says_why_and_its_save_writes_nothing() {
+        let mut h = Harness::new();
+        let Some((kit, _model, material)) = material_editor_on_darth(&mut h, "material_editor_unsaveable") else { return };
+        // As a big-endian (Xbox 360) tag is: the MCC writer has no round trip.
+        h.app.model.kits[0].parsed_tags.get_mut(&material).unwrap().tag.endian = blam_tags::Endian::Be;
+        override_diffuse_intensity(&mut h, &material);
+        idle(&mut h);
+        assert!(h.painted_contains("Cannot be saved: Only little-endian MCC tags can be saved"), "{:?}", h.painted);
+        let file = kit.path("objects\\multi\\darth_shader.material");
+        let before = std::fs::read(&file).unwrap();
+        h.click("Save", 0);
+        h.click("Save All", 0);
+        idle(&mut h);
+        assert!(h.app.model.kits[0].parsed_tags[&material].dirty.is_set(), "still unsaved");
+        assert_eq!(std::fs::read(&file).unwrap(), before, "nothing written");
+    }
+
     /// OK on a live picker writes what it drew.
     #[test]
     fn ok_on_a_live_picker_writes_what_it_drew() {
