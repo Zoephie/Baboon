@@ -336,6 +336,10 @@ pub(in crate::app::model_preview) struct PreviewLoadSettings {
     pub(in crate::app::model_preview) equippable: Option<Vec<super::super::weapons::Equippable>>,
     /// What the load reads for: [`super::TagReader::game_shaders`].
     pub(in crate::app::model_preview) game_shaders: bool,
+    /// The editing kit's root folder, as the kit names it: where Halo CE's
+    /// Game Shaders find the kit's shader source. `None`: its tags folder's
+    /// parent ([`super::TagReader::kit_root`]).
+    pub(in crate::app::model_preview) kit_root: Option<std::path::PathBuf>,
     /// Halo CE's and Halo 2's level of detail, lowest first; `None` for the
     /// highest.
     pub(in crate::app::model_preview) detail_level: Option<usize>,
@@ -352,6 +356,7 @@ impl Default for PreviewLoadSettings {
             secondary_weapon: None,
             equippable: None,
             game_shaders: true,
+            kit_root: None,
             detail_level: None,
         }
     }
@@ -378,6 +383,7 @@ impl PreviewLoadSettings {
                 &state.region_selections,
             ),
             game_shaders: state.game_shaders,
+            kit_root: None,
             detail_level: state.detail_level,
         }
     }
@@ -430,7 +436,10 @@ impl Baboon {
             kit: kit.id,
             generation: kit.generation,
         };
-        let settings = PreviewLoadSettings::of(state);
+        let settings = PreviewLoadSettings {
+            kit_root: kit.source.as_ref().and_then(|source| source.kit_layout()).map(|layout| layout.root),
+            ..PreviewLoadSettings::of(state)
+        };
         let request_id =
             NEXT_MODEL_PREVIEW_LOAD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 

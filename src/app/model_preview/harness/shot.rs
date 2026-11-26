@@ -285,7 +285,7 @@ pub(super) fn render(
     if options.no_game {
         Arc::make_mut(&mut data.preview).game = None;
     }
-    let textures = materials::resolve_model_textures(source, &data.preview.materials, shot.shaders);
+    let textures = materials::resolve_model_textures(source, None, &data.preview.materials, shot.shaders);
     let with_passes = textures
         .iter()
         .filter(|t| t.dx9_layers.iter().any(|l| !l.is_empty()))
@@ -894,7 +894,7 @@ fn without_game_shaders_no_game_pass_draws() {
             unreachable!()
         };
         let data = super::kit::kit_preview(root, game, model, "vehicle", b"vehi");
-        let textures = materials::resolve_model_textures(&source, &data.preview.materials, true);
+        let textures = materials::resolve_model_textures(&source, None, &data.preview.materials, true);
         assert!(
             textures.iter().any(|texture| {
                 !texture.dx9_layers[crate::app::model_preview::dx9::passes::Dx9Layer::Transparent

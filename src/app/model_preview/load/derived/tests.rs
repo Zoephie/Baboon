@@ -942,7 +942,7 @@ fn a_real_bsps_render_layer_keeps_uvs_tangents_and_shader_paths() {
 
         let sample: Vec<RenderModelPreviewMaterial> =
             preview.materials.iter().take(12).cloned().collect();
-        let resolved = resolve_model_textures(&source, &sample, true);
+        let resolved = resolve_model_textures(&source, None, &sample, true);
         let base = resolved
             .iter()
             .filter(|material| material.get(TextureSlot::Base).is_some())

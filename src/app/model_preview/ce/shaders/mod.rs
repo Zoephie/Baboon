@@ -20,7 +20,6 @@ use crate::app::model_preview::ce::blend::{FADE_MODES, FramebufferBlend};
 use crate::app::model_preview::common::random::{high16_times_inverse_65535, lcg_step};
 use crate::core::ce_pixel_shader::{TranslatedFxShader, translate_fx};
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 
 mod base;
 pub(in crate::app::model_preview) mod resolve;

@@ -27,11 +27,13 @@ use std::sync::Arc;
 /// says of it drawn without them.
 pub(crate) fn resolve_model_textures(
     source: &TagSource,
+    // The editing kit's root folder, as the kit names it ([`TagReader::kit_root`]).
+    kit_root: Option<std::path::PathBuf>,
     materials: &[RenderModelPreviewMaterial],
     game_shaders: bool,
 ) -> Vec<MaterialTextures> {
     // The materials' own reads, once each for this resolve.
-    let reader = &TagReader::with_game_shaders(source, game_shaders);
+    let reader = &TagReader::with_game_shaders(source, game_shaders).with_kit_root(kit_root);
     let mut caches = ResolveCaches {
         kit_names: match source {
             TagSource::LooseFolder {
