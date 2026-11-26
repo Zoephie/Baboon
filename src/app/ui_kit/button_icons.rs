@@ -62,6 +62,9 @@ pub(in crate::app) enum ButtonIcon {
     Undo,
     Redo,
     Reset,
+    /// Reset, stacked: every one of a list put back (the Materials card's
+    /// Reset All).
+    ResetAll,
     Compare,
     Swap,
     Container,
@@ -123,6 +126,9 @@ pub(in crate::app) enum ButtonIcon {
     Rename,
     Right,
     Save,
+    /// Save, stacked: every one of a list saved (the Materials card's Save
+    /// All).
+    SaveAll,
     Settings,
     Sort,
     Stop,
@@ -170,6 +176,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::SelectAll => include_root_str!("assets/Button Icons/Select All.svg"),
         ButtonIcon::Undo => include_root_str!("assets/Button Icons/Undo.svg"),
         ButtonIcon::Reset => include_root_str!("assets/Button Icons/Reset.svg"),
+        ButtonIcon::ResetAll => include_root_str!("assets/Button Icons/Reset All.svg"),
         ButtonIcon::Recent => include_root_str!("assets/Button Icons/Recent.svg"),
         ButtonIcon::Home => include_root_str!("assets/Button Icons/Home.svg"),
         ButtonIcon::Redo => include_root_str!("assets/Button Icons/Redo.svg"),
@@ -236,6 +243,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Rename => include_root_str!("assets/Button Icons/Rename.svg"),
         ButtonIcon::Right => include_root_str!("assets/Button Icons/Right.svg"),
         ButtonIcon::Save => include_root_str!("assets/Button Icons/Save.svg"),
+        ButtonIcon::SaveAll => include_root_str!("assets/Button Icons/Save All.svg"),
         ButtonIcon::Settings => include_root_str!("assets/Button Icons/Settings.svg"),
         ButtonIcon::Sort => include_root_str!("assets/Button Icons/Sort.svg"),
         ButtonIcon::Stop => include_root_str!("assets/Button Icons/Stop.svg"),
@@ -1292,6 +1300,7 @@ mod tests {
             ButtonIcon::Undo,
             ButtonIcon::Redo,
             ButtonIcon::Reset,
+            ButtonIcon::ResetAll,
             ButtonIcon::Compare,
             ButtonIcon::Swap,
             ButtonIcon::Container,
@@ -1345,6 +1354,7 @@ mod tests {
             ButtonIcon::Rename,
             ButtonIcon::Right,
             ButtonIcon::Save,
+            ButtonIcon::SaveAll,
             ButtonIcon::SearchBar,
             ButtonIcon::Search,
             ButtonIcon::Settings,

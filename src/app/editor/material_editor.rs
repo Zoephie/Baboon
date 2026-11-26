@@ -334,7 +334,11 @@ pub(in crate::app) fn draw_material_editor_section(
         child.disable();
     }
     let contents = |ui: &mut Ui| {
-        let picked = draw_material_header(ui, section_id, &materials, &mut editor_state);
+        let modified = modified_materials(cx, kit_index, &materials, &documents);
+        let picked = draw_material_header(ui, section_id, &materials, &modified, &mut editor_state, |ui, state, picked| {
+            draw_material_actions(cx, ui, kit_id, picked, &modified, state);
+        });
+        draw_reset_confirmation(cx, ui, kit_id, &modified, &mut editor_state);
         if let Some(material) = &picked {
             draw_shader_reference_row(cx, ui, kit_index, model, scope, view, material, &render_model_path, render_model.as_ref());
         }
@@ -357,9 +361,7 @@ pub(in crate::app) fn draw_material_editor_section(
             );
         }
         ui.separator();
-        let modified = modified_materials(cx, kit_index, &materials, &documents);
         draw_material_body(cx, ui, kit_index, model, scope, inputs, view, editor, &documents, &material);
-        draw_modified_list(cx, ui, kit_id, &modified, &mut editor_state);
     };
     // At the card's width, never scrolling sideways: the sidebar widens for
     // a shader's grid while one is picked, as far as the page allows.
@@ -404,14 +406,22 @@ pub(in crate::app) fn draw_material_editor_section(
 }
 
 /// The dropdown of materials, "None" first, with arrows stepping through
-/// them. Returns the picked material; `None` for "None", which shows the
+/// them, and `actions` (Save and Reset, each for all too) right of it. A
+/// material whose shader has unsaved edits is marked, in the list and on the
+/// dropdown itself: a dot before its name, on the theme's modified colour. Returns the picked material; `None` for "None", which shows the
 /// dropdown alone.
 fn draw_material_header(
     ui: &mut Ui,
     section_id: egui::Id,
     materials: &[EditorMaterial],
+    modified: &[ModifiedMaterial],
     state: &mut crate::app::model_preview::material_editor::MaterialEditorState,
+    actions: impl FnOnce(&mut Ui, &mut crate::app::model_preview::material_editor::MaterialEditorState, Option<&EditorMaterial>),
 ) -> Option<EditorMaterial> {
+    let is_modified = |key: &MaterialKey| modified.iter().any(|item| &item.material.key == key);
+    let marked = |material: &EditorMaterial| {
+        if is_modified(&material.key) { format!("● {}", material.display_name()) } else { material.display_name() }
+    };
     // Positions in the list: 0 is "None", then each material.
     let current = state
         .selected
@@ -424,11 +434,16 @@ fn draw_material_header(
         if icon_button(ui, ButtonIcon::ListDropdownLeft, "Previous material", current > 0, text_dark()).clicked() {
             state.selected = step(current - 1);
         }
-        let width = (ui.available_width() - BUTTON_HEIGHT - 8.0).max(160.0);
+        // Room for the next arrow and the four actions after it.
+        let buttons = 5.0 * (BUTTON_HEIGHT + ui.spacing().item_spacing.x);
+        let width = (ui.available_width() - buttons - 8.0).max(120.0);
         let popup_id = section_id.with("material_picker");
         let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
-        let label = step(current).map_or_else(|| "None".to_owned(), |_| materials[current - 1].display_name());
+        let label = step(current).map_or_else(|| "None".to_owned(), |_| marked(&materials[current - 1]));
         let response = picker_button(ui, popup_id, &label, Some(materials.len()), width, text_dark(), true);
+        if current > 0 && is_modified(&materials[current - 1].key) {
+            paint_modified_tint(ui, response.rect);
+        }
         let just_opened = response.clicked() && !open;
         if response.clicked() {
             egui::Popup::toggle_id(ui.ctx(), popup_id);
@@ -467,7 +482,10 @@ fn draw_material_header(
                             continue;
                         }
                         shown += 1;
-                        let row = ui.selectable_label(at + 1 == current, &name).on_hover_text(&material.path);
+                        let row = ui.selectable_label(at + 1 == current, marked(material)).on_hover_text(&material.path);
+                        if is_modified(&material.key) {
+                            paint_modified_tint(ui, row.rect);
+                        }
                         if just_opened && query.is_empty() && at + 1 == current {
                             row.scroll_to_me(Some(egui::Align::Center));
                         }
@@ -492,6 +510,8 @@ fn draw_material_header(
         if icon_button(ui, ButtonIcon::ListDropdownRight, "Next material", current + 1 < count, text_dark()).clicked() {
             state.selected = step(current + 1);
         }
+        let picked = step(current).map(|_| &materials[current - 1]);
+        actions(ui, state, picked);
     });
     let picked = state
         .selected
@@ -710,7 +730,15 @@ fn draw_shader_reference_row(
     });
 }
 
-/// A material whose shader has unsaved edits, as the modified list shows it.
+/// The theme's modified colour (`diff.modified`, as the browser marks a
+/// tag with edits), washed over a modified material's row or the dropdown
+/// showing one.
+fn paint_modified_tint(ui: &Ui, rect: egui::Rect) {
+    let corner = ui.visuals().widgets.inactive.corner_radius;
+    ui.painter().rect_filled(rect, corner, crate::app::browser::modified_text().gamma_multiply(0.3));
+}
+
+/// A material whose shader has unsaved edits, as the dropdown marks it.
 struct ModifiedMaterial {
     material: EditorMaterial,
     /// Its shader document's key.
@@ -745,72 +773,79 @@ fn modified_materials(
         .collect()
 }
 
-/// What has unsaved edits, each with Save and Reset, and both for all.
-/// Reset asks a second click first: it can't be undone.
-fn draw_modified_list(
+/// Save and Reset for the picked material, and Save All and Reset All for
+/// every modified one, as icons right of the dropdown. Reset asks a second
+/// click first: it can't be undone.
+fn draw_material_actions(
+    cx: &Ctx,
+    ui: &mut Ui,
+    kit: KitId,
+    picked: Option<&EditorMaterial>,
+    modified: &[ModifiedMaterial],
+    state: &mut crate::app::model_preview::material_editor::MaterialEditorState,
+) {
+    let this = picked.and_then(|picked| modified.iter().find(|item| item.material.key == picked.key));
+    let saveable: Vec<String> =
+        modified.iter().filter(|item| item.unsaveable.is_none()).map(|item| item.document.clone()).collect();
+    let save = icon_button(ui, ButtonIcon::Save, "Save this material's shader", this.is_some_and(|item| item.unsaveable.is_none()), text_dark());
+    let save = match this.and_then(|item| item.unsaveable) {
+        Some(reason) => save.on_disabled_hover_text(format!("Cannot be saved: {reason}")),
+        None => save,
+    };
+    if save.clicked()
+        && let Some(item) = this
+    {
+        cx.send(EditorCommand::MaterialEditor(MaterialEditorCommand::Save { kit, keys: vec![item.document.clone()] }));
+    }
+    let reset = icon_button(ui, ButtonIcon::Reset, "Discard this material's unsaved changes", this.is_some(), text_dark());
+    if reset.clicked()
+        && let Some(item) = this
+    {
+        state.confirm_reset = Some(vec![item.document.clone()]);
+    }
+    let save_all = icon_button(ui, ButtonIcon::SaveAll, "Save every modified material", !saveable.is_empty(), text_dark());
+    if save_all.clicked() {
+        cx.send(EditorCommand::MaterialEditor(MaterialEditorCommand::Save { kit, keys: saveable }));
+    }
+    let reset_all =
+        icon_button(ui, ButtonIcon::ResetAll, "Discard the unsaved changes to every modified material", !modified.is_empty(), text_dark());
+    if reset_all.clicked() {
+        state.confirm_reset = Some(modified.iter().map(|item| item.document.clone()).collect());
+    }
+    // Icons paint no text for a test to find them by.
+    #[cfg(test)]
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(material_actions_id(), [save.rect, reset.rect, save_all.rect, reset_all.rect])
+    });
+}
+
+/// Where the Materials card's Save, Reset, Save All and Reset All were last
+/// drawn, for a test to press them.
+#[cfg(test)]
+pub(in crate::app) fn material_actions_id() -> egui::Id {
+    egui::Id::unique("material_editor_actions")
+}
+
+/// A Reset waiting on its second click: what it discards, said under the
+/// dropdown, with Discard and Keep.
+fn draw_reset_confirmation(
     cx: &Ctx,
     ui: &mut Ui,
     kit: KitId,
     modified: &[ModifiedMaterial],
     state: &mut crate::app::model_preview::material_editor::MaterialEditorState,
 ) {
-    if modified.is_empty() {
-        state.confirm_reset = None;
-        return;
-    }
-    ui.separator();
-    let saveable: Vec<String> =
-        modified.iter().filter(|item| item.unsaveable.is_none()).map(|item| item.document.clone()).collect();
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("Modified ({})", modified.len())).strong());
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if icon_text_button(ui, ButtonIcon::Clear, "Reset All", true)
-                .on_hover_text("Discard the unsaved changes to every material listed.")
-                .clicked()
-            {
-                state.confirm_reset = Some(modified.iter().map(|item| item.document.clone()).collect());
-            }
-            if icon_text_button(ui, ButtonIcon::Save, "Save All", !saveable.is_empty())
-                .on_hover_text("Save every material listed.")
-                .clicked()
-            {
-                cx.send(EditorCommand::MaterialEditor(MaterialEditorCommand::Save { kit, keys: saveable.clone() }));
-            }
-        });
-    });
-    for item in modified {
-        ui.horizontal(|ui| {
-            let name = ui.label(format!("● {}", item.material.display_name())).on_hover_text(&item.material.path);
-            if name.hovered() {
-                state.hovered = Some(item.material.key.clone());
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if icon_text_button(ui, ButtonIcon::Clear, "Reset", true)
-                    .on_hover_text("Discard this material's unsaved changes.")
-                    .clicked()
-                {
-                    state.confirm_reset = Some(vec![item.document.clone()]);
-                }
-                let save = icon_text_button(ui, ButtonIcon::Save, "Save", item.unsaveable.is_none());
-                let save = match item.unsaveable {
-                    Some(reason) => save.on_disabled_hover_text(format!("Cannot be saved: {reason}")),
-                    None => save.on_hover_text("Save this material's shader."),
-                };
-                if save.clicked() {
-                    cx.send(EditorCommand::MaterialEditor(MaterialEditorCommand::Save {
-                        kit,
-                        keys: vec![item.document.clone()],
-                    }));
-                }
-            });
-        });
-    }
     let Some(keys) = state.confirm_reset.clone() else { return };
     let names: Vec<String> = modified
         .iter()
         .filter(|item| keys.contains(&item.document))
         .map(|item| item.material.label.clone())
         .collect();
+    // Saved or discarded meanwhile: nothing is left to ask about.
+    if names.is_empty() {
+        state.confirm_reset = None;
+        return;
+    }
     let in_tab = modified.iter().any(|item| keys.contains(&item.document) && item.in_tab);
     let mut text = format!("Discard the unsaved changes to {}? This can't be undone.", names.join(", "));
     if in_tab {

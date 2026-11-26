@@ -6031,6 +6031,17 @@ mod tests {
         assert!(count.right() < sidebar_right, "inside the sidebar: {count:?} {sidebar_right}");
     }
 
+    /// Press the Materials card's action `which`: 0 Save, 1 Reset, 2 Save
+    /// All, 3 Reset All.
+    fn press_material_action(h: &mut Harness, which: usize) {
+        let rects: [egui::Rect; 4] = h
+            .ctx
+            .data(|data| data.get_temp(crate::app::editor::material_actions_id()))
+            .expect("the card's actions drawn");
+        h.click_at(rects[which].center());
+        idle(h);
+    }
+
     /// The centre of the rightmost `text` painted on `label`'s row.
     fn rightmost_on_row(h: &Harness, label: &str, text: &str) -> egui::Pos2 {
         let row = h
@@ -6278,15 +6289,17 @@ mod tests {
             .unwrap_or_default()
     }
 
-    /// The modified list's Save writes the material's file, and the preview,
+    /// A modified material is marked in the card's dropdown, and its Save
+    /// (the first icon right of the dropdown) writes its file; the preview,
     /// which already draws it, is not loaded again.
     #[test]
-    fn the_modified_lists_save_writes_the_material_without_a_load() {
+    fn the_cards_save_writes_the_material_without_a_load() {
         let mut h = Harness::new();
         let Some((kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_save") else { return };
         override_diffuse_intensity(&mut h, &material);
         idle(&mut h);
-        assert!(h.painted_contains("Modified (1)"), "{:?}", h.painted);
+        assert!(h.painted.iter().any(|text| text.trim() == "● darth_shader"), "marked: {:?}", h.painted);
+        assert!(!h.painted_contains("Modified ("), "no list at the foot");
         let id = h.app.model.kits[0].id;
         let geometry = |h: &Harness| match &h.app.views[id].caches.model_previews[&model].data {
             Some(Ok(data)) => data.geometry_id,
@@ -6294,27 +6307,25 @@ mod tests {
         };
         let before = geometry(&h);
 
-        h.click("Save", 0);
-        idle(&mut h);
+        press_material_action(&mut h, 0);
         assert!(!h.app.model.kits[0].parsed_tags[&material].dirty.is_set(), "saved");
         let on_disk = TagFile::read(kit.path("objects\\multi\\darth_shader.material")).unwrap();
         assert!(parameter_names(&on_disk).contains(&"diffuse_intensity".to_owned()));
         let state = &h.app.views[id].caches.model_previews[&model];
         assert!(!state.reads_changed && !state.needs_preview_load(&model), "no load for a save it already draws");
         assert_eq!(geometry(&h), before);
-        assert!(!h.painted_contains("Modified ("), "nothing left modified");
+        assert!(h.painted.iter().any(|text| text.trim() == "darth_shader"), "no longer marked: {:?}", h.painted);
     }
 
-    /// The modified list's Reset asks first, then discards: the material
-    /// opens again from its file, its preview drawn so.
+    /// The card's Reset asks first, then discards: the material opens again
+    /// from its file, its preview drawn so.
     #[test]
-    fn the_modified_lists_reset_asks_then_puts_the_material_back() {
+    fn the_cards_reset_asks_then_puts_the_material_back() {
         let mut h = Harness::new();
         let Some((_kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_reset") else { return };
         override_diffuse_intensity(&mut h, &material);
         idle(&mut h);
-        h.click("Reset", 0);
-        idle(&mut h);
+        press_material_action(&mut h, 1);
         assert!(h.app.model.kits[0].parsed_tags[&material].dirty.is_set(), "one click discards nothing");
         assert!(h.painted_contains("Discard the unsaved changes to darth_shader"), "{:?}", h.painted);
         assert!(!h.painted_contains("its tab"), "it has no tab");
@@ -6354,9 +6365,8 @@ mod tests {
         let model = h.app.model.kits[0].open_tabs.iter().find(|key| key.ends_with("smoke.render_model")).unwrap().clone();
         h.app.kit_and_view(0).open_tag_pane(&model);
         h.app.kit_and_view(0).focus_pane(model);
-        frames_until(&mut h, "the model's editor", |h| h.painted_contains("Modified (1)"));
-        h.click("Reset", 0);
-        idle(&mut h);
+        frames_until(&mut h, "the model's editor", |h| h.painted.iter().any(|text| text.trim() == "● darth_shader"));
+        press_material_action(&mut h, 1);
         assert!(h.painted_contains("its tab"), "{:?}", h.painted);
         h.click("Discard", 0);
         frames_until(&mut h, "the tab's material read again", |h| {
@@ -6408,8 +6418,8 @@ mod tests {
         assert!(h.painted_contains("Cannot be saved: Only little-endian MCC tags can be saved"), "{:?}", h.painted);
         let file = kit.path("objects\\multi\\darth_shader.material");
         let before = std::fs::read(&file).unwrap();
-        h.click("Save", 0);
-        h.click("Save All", 0);
+        press_material_action(&mut h, 0);
+        press_material_action(&mut h, 2);
         idle(&mut h);
         assert!(h.app.model.kits[0].parsed_tags[&material].dirty.is_set(), "still unsaved");
         assert_eq!(std::fs::read(&file).unwrap(), before, "nothing written");
