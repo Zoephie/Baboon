@@ -145,7 +145,7 @@ fn draw_editor(
         ui.label("Search");
         ui.add(
             egui::TextEdit::singleline(search)
-                .hint_text("id or description")
+                .hint_text("id, description or alias")
                 .desired_width(260.0),
         );
     });
@@ -196,11 +196,7 @@ fn draw_editor(
             let needle = search.trim().to_lowercase();
             let mut group = "";
             for token in Token::ALL {
-                let matches = needle.is_empty()
-                    || token.id().contains(&needle)
-                    || token.description().to_lowercase().contains(&needle)
-                    || token.group().to_lowercase().contains(&needle);
-                if !matches {
+                if !token_matches(*token, &needle) {
                     continue;
                 }
                 if token.group() != group {
@@ -348,12 +344,18 @@ fn draw_row(ui: &mut Ui, draft: &mut ThemeDraft, token: Token, picking: &mut Opt
                 },
             });
         }
+        let aliases: Vec<&str> = themes::aliases::of(token).collect();
+        let hover = if aliases.is_empty() {
+            token.description().to_owned()
+        } else {
+            format!("{}\nUsed as: {}", token.description(), aliases.join(", "))
+        };
         cell(
             ui,
             250.0,
             egui::Label::new(RichText::new(token.id()).monospace()).truncate(),
         )
-        .on_hover_text(token.description());
+        .on_hover_text(hover);
         let (where_from, value) = match &state {
             RowState::Set(value) => ("set".to_owned(), value.clone()),
             RowState::Following(rule) => (
@@ -378,6 +380,32 @@ fn draw_row(ui: &mut Ui, draft: &mut ThemeDraft, token: Token, picking: &mut Opt
             draft.reset(token);
         }
     });
+}
+
+/// Whether `token` matches the lowercased search `needle`: by id,
+/// description, group or alias. An empty search matches everything.
+fn token_matches(token: Token, needle: &str) -> bool {
+    needle.is_empty()
+        || token.id().contains(needle)
+        || token.description().to_lowercase().contains(needle)
+        || token.group().to_lowercase().contains(needle)
+        || themes::aliases::of(token).any(|alias| alias.contains(needle))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_finds_a_token_by_its_alias() {
+        let found: Vec<Token> = Token::ALL
+            .iter()
+            .copied()
+            .filter(|token| token_matches(*token, "save_error"))
+            .collect();
+        assert_eq!(found, [Token::StatusError]);
+        assert!(!token_matches(Token::Text, "save_error"));
+    }
 }
 
 #[cfg(test)]

@@ -28,7 +28,8 @@ correctly keeps the colours it last gave, and Settings says why.
 ## The Theme Editor
 
 The editor lists every token of the theme in use, grouped as in the token
-list below, and searches them by id, description or group. Each row shows its
+list below, and searches them by id, description, group or alias (the name a feature
+uses for its colour, such as `save_error_text`). Each row shows its
 colour, its value and where the colour comes from: **set** by the theme,
 **inherited** from the theme it extends (or the built-in), or **follows**
 another token by its rule. Click a swatch to pick a colour; Baboon draws the

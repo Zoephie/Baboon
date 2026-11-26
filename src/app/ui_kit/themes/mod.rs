@@ -95,6 +95,7 @@ macro_rules! tokens {
 mod table;
 pub(in crate::app) use table::{TOKEN_COUNT, Token};
 
+pub(in crate::app) mod aliases;
 pub(in crate::app) mod contrast;
 pub(in crate::app) mod draft;
 pub(in crate::app) mod export;

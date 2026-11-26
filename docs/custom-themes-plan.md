@@ -623,8 +623,10 @@ them. It needs your eye on the example themes in the running app.
 
 ### Phase 4 — Theme editor: DONE (`317f54b6`)
 
-**As built.** Search is by id, description and group, not alias: aliases are
-accessor names in `style.rs`, which the registry does not record. The window
+**As built.** Search is by id, description, group and alias. Aliases are the
+`style.rs` accessors that return one token; `ui_kit/themes/aliases.rs` lists
+all 134 and a test keeps it equal to `style.rs`. A row's tooltip names its
+aliases. The window
 is `shell/theme_editor.rs`, the draft and its saves `ui_kit/themes/draft.rs`.
 Save edits the colour entries in place and writes the file whole only when its
 layout does not allow that, then checks the result reads back as the draft.
