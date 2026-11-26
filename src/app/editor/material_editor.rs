@@ -444,6 +444,11 @@ fn draw_material_header(
         if current > 0 && is_modified(&materials[current - 1].key) {
             paint_modified_tint(ui, response.rect);
         }
+        // The pointer over the dropdown itself lights the material it shows,
+        // as over its row in the list.
+        if response.hovered() && current > 0 {
+            state.hovered = Some(materials[current - 1].key.clone());
+        }
         let just_opened = response.clicked() && !open;
         if response.clicked() {
             egui::Popup::toggle_id(ui.ctx(), popup_id);

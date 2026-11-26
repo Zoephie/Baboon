@@ -5985,6 +5985,19 @@ mod tests {
         assert!(!kit_state.open_tabs.contains(&shader), "no tab of its own");
         assert!(kit_state.held_documents[&shader].contains(&model), "held for the preview");
 
+        // The pointer over the dropdown lights the material it shows; away
+        // from it, nothing is lit.
+        let hovered = |h: &Harness| {
+            h.app.views[id].caches.model_previews[&model].material_editor.as_ref().and_then(|editor| editor.hovered.clone())
+        };
+        let dropdown = h.painted_rects.iter().find(|(text, _)| text.trim() == "smoke").map(|(_, rect)| rect.center()).unwrap();
+        h.frame(vec![pointer_at(dropdown)]);
+        idle(&mut h);
+        assert_eq!(hovered(&h).map(|key| key.path), Some("shaders\\smoke".to_owned()), "lit while over the dropdown");
+        h.frame(vec![pointer_at(egui::pos2(5.0, 5.0))]);
+        idle(&mut h);
+        assert_eq!(hovered(&h), None, "unlit away from it");
+
         // Closed from its header, its clean shader goes.
         h.click("Materials", 0);
         idle(&mut h);
