@@ -745,9 +745,9 @@ mod tests {
     /// theme's darker page. Each is darkened for the darkest of them.
     #[test]
     fn light_mode_icons_read_on_every_surface_they_sit_on() {
-        use crate::app::ui_kit::{LightTheme, icon_backdrop, icon_backdrops, with_theme};
-        for theme in [LightTheme::Warm, LightTheme::Classic] {
-            with_theme(false, theme, || {
+        use crate::app::ui_kit::{icon_backdrop, icon_backdrops, themes::BuiltIn, with_built_in};
+        for theme in [BuiltIn::Light, BuiltIn::ClassicLight] {
+            with_built_in(theme, || {
                 let rgb = |colour: egui::Color32| [colour.r(), colour.g(), colour.b()];
                 let darkest = rgb(icon_backdrop().unwrap());
                 for (icon, _) in GROUP_ICONS {

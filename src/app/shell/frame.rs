@@ -4337,7 +4337,8 @@ mod tests {
                 |h| {
                     h.app.open_settings(Some(SettingsTab::Interface));
                 },
-                &["Settings", "Display Angles as"],
+                // The tab's first page; its theme rows push the rest below.
+                &["Settings", "Theme files"],
             ),
             case(
                 "settings_custom_kit_draft",
@@ -9195,16 +9196,20 @@ mod tests {
         // BABOON_SHOT_GAME names the kit's game ("halo3_mcc"; Halo 2 by default).
         let game = std::env::var("BABOON_SHOT_GAME")
             .map_or(GameId::Halo2, |id| id.parse().expect("a game id"));
-        use crate::app::ui_kit::LightTheme;
-        for (dark, light, name) in [
-            (false, LightTheme::Warm, "theme_light.png"),
-            (false, LightTheme::Classic, "theme_classic_light.png"),
-            (true, LightTheme::Warm, "theme_dark.png"),
+        use crate::app::ui_kit::themes::BuiltIn;
+        for (built_in, name) in [
+            (BuiltIn::Light, "theme_light.png"),
+            (BuiltIn::ClassicLight, "theme_classic_light.png"),
+            (BuiltIn::Dark, "theme_dark.png"),
         ] {
             let mut h = Harness::recording();
             h.app.model.prefs.follow_system_theme = false;
-            h.app.model.prefs.dark_mode = dark;
-            h.app.model.prefs.light_theme = light;
+            h.app.model.prefs.dark_mode = built_in.appearance().is_dark();
+            if built_in.appearance().is_dark() {
+                h.app.model.prefs.dark_theme = built_in.id().to_owned();
+            } else {
+                h.app.model.prefs.light_theme = built_in.id().to_owned();
+            }
             // The status bar's one coloured message, to judge it on the bar.
             h.app.shell.available_update = Some(UpdateCheckResult {
                 channel: UpdateChannel::Stable,
@@ -9257,16 +9262,20 @@ mod tests {
             return;
         };
         let dir = std::path::PathBuf::from(dir);
-        use crate::app::ui_kit::LightTheme;
-        for (dark, light, name) in [
-            (false, LightTheme::Warm, "settings_light.png"),
-            (false, LightTheme::Classic, "settings_classic_light.png"),
-            (true, LightTheme::Warm, "settings_dark.png"),
+        use crate::app::ui_kit::themes::BuiltIn;
+        for (built_in, name) in [
+            (BuiltIn::Light, "settings_light.png"),
+            (BuiltIn::ClassicLight, "settings_classic_light.png"),
+            (BuiltIn::Dark, "settings_dark.png"),
         ] {
             let mut h = Harness::recording();
             h.app.model.prefs.follow_system_theme = false;
-            h.app.model.prefs.dark_mode = dark;
-            h.app.model.prefs.light_theme = light;
+            h.app.model.prefs.dark_mode = built_in.appearance().is_dark();
+            if built_in.appearance().is_dark() {
+                h.app.model.prefs.dark_theme = built_in.id().to_owned();
+            } else {
+                h.app.model.prefs.light_theme = built_in.id().to_owned();
+            }
             h.app.open_settings(Some(SettingsTab::Interface));
             for _ in 0..30 {
                 h.frame(Vec::new());

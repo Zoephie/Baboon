@@ -18,9 +18,7 @@ impl Baboon {
         if self.dialogs.get::<FirstRunWizardState>().is_some() {
             // Setup draws alone, over an empty window.
             ctx.set_zoom_factor(self.model.prefs.ui_scale);
-            set_dark_mode(self.model.prefs.effective_dark_mode(ctx.system_theme()));
-            crate::app::ui_kit::set_light_theme(self.model.prefs.effective_light_theme());
-            crate::app::ui_kit::forget_icon_images(ctx);
+            self.apply_theme(ctx);
             ctx.set_theme(egui_theme());
             ctx.set_visuals(foundation_visuals());
             egui::CentralPanel::default().show(ui, |_ui| {});
@@ -264,13 +262,21 @@ impl Baboon {
         ctx.request_repaint();
     }
 
+    /// Installs the theme the preferences choose for the appearance in use,
+    /// and forgets the icon images a theme change left behind.
+    fn apply_theme(&mut self, ctx: &egui::Context) {
+        let (id, slot) = self.model.prefs.active_theme(ctx.system_theme());
+        if let Some(status) = crate::app::ui_kit::apply_theme(id, slot) {
+            self.model.status = status;
+        }
+        crate::app::ui_kit::forget_icon_images(ctx);
+    }
+
     fn prepare_root_frame(&mut self, ctx: &egui::Context) {
         ctx.set_zoom_factor(self.model.prefs.ui_scale);
         self.handle_pixels_per_point_change(ctx);
         self.maybe_refresh_entry_index(ctx.clone());
-        set_dark_mode(self.model.prefs.effective_dark_mode(ctx.system_theme()));
-        crate::app::ui_kit::set_light_theme(self.model.prefs.effective_light_theme());
-        crate::app::ui_kit::forget_icon_images(ctx);
+        self.apply_theme(ctx);
         ctx.set_theme(egui_theme());
         // Pushed the same way and for the same reason as the theme: the two
         // halves of the angle conversion are free functions on opposite sides

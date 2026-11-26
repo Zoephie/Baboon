@@ -216,9 +216,8 @@ mod tests {
             assert!(dark.contains(class), "missing semantic class {class}");
         }
 
-        let light = crate::app::ui_kit::with_theme(
-            false,
-            crate::app::ui_kit::LightTheme::Warm,
+        let light = crate::app::ui_kit::with_built_in(
+            crate::app::ui_kit::themes::BuiltIn::Light,
             LoadingColors::installed,
         );
         let combined = recoloured_loading_svg(&dark, &light);
@@ -230,9 +229,8 @@ mod tests {
             assert!(!combined.contains(dark), "left dark token {dark}");
         }
         // The dark built-in's colours are the artwork's own: it draws as drawn.
-        let dark_colors = crate::app::ui_kit::with_theme(
-            true,
-            crate::app::ui_kit::LightTheme::Warm,
+        let dark_colors = crate::app::ui_kit::with_built_in(
+            crate::app::ui_kit::themes::BuiltIn::Dark,
             LoadingColors::installed,
         );
         assert_eq!(recoloured_loading_svg(&dark, &dark_colors), dark);

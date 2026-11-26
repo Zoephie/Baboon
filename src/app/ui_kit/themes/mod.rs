@@ -11,60 +11,74 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 #[cfg(test)]
 mod golden;
+#[cfg(test)]
+mod tests_files;
 
 /// Declares the tokens: the [`Token`] enum, its ids and descriptions, the
 /// built-in columns, and the installed theme's storage, which starts as the
 /// light built-in, as Baboon did before it read its preferences.
 macro_rules! tokens {
-    ($( $variant:ident $id:literal [$dark:literal, $light:literal, $classic:literal] $description:literal; )*) => {
+    ($( group $group:literal { $( $variant:ident $id:literal [$dark:literal, $light:literal, $classic:literal] $description:literal; )* } )*) => {
         /// A named colour the UI asks for.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub(in crate::app) enum Token {
-            $($variant,)*
+            $($($variant,)*)*
         }
 
         impl Token {
             /// Every token, in the order the table declares them.
-            pub(in crate::app) const ALL: &'static [Token] = &[$(Token::$variant,)*];
+            pub(in crate::app) const ALL: &'static [Token] = &[$($(Token::$variant,)*)*];
 
             /// The id a theme file names it by.
             pub(in crate::app) const fn id(self) -> &'static str {
                 match self {
-                    $(Token::$variant => $id,)*
+                    $($(Token::$variant => $id,)*)*
                 }
             }
 
             /// One sentence saying where it appears.
             pub(in crate::app) const fn description(self) -> &'static str {
                 match self {
-                    $(Token::$variant => $description,)*
+                    $($(Token::$variant => $description,)*)*
+                }
+            }
+
+            /// The group the table and the authoring guide list it under.
+            pub(in crate::app) const fn group(self) -> &'static str {
+                match self {
+                    $($(Token::$variant => $group,)*)*
                 }
             }
 
             /// The token a theme file's id names, if any.
             pub(in crate::app) fn from_id(id: &str) -> Option<Token> {
                 match id {
-                    $($id => Some(Token::$variant),)*
+                    $($($id => Some(Token::$variant),)*)*
                     _ => None,
                 }
             }
         }
 
         /// How many tokens there are.
-        pub(in crate::app) const TOKEN_COUNT: usize = [$($id,)*].len();
+        pub(in crate::app) const TOKEN_COUNT: usize = [$($($id,)*)*].len();
 
-        pub(super) const DARK: [::eframe::egui::Color32; TOKEN_COUNT] = [$(super::hex($dark),)*];
-        pub(super) const LIGHT: [::eframe::egui::Color32; TOKEN_COUNT] = [$(super::hex($light),)*];
-        pub(super) const CLASSIC_LIGHT: [::eframe::egui::Color32; TOKEN_COUNT] = [$(super::hex($classic),)*];
+        pub(super) const DARK: [::eframe::egui::Color32; TOKEN_COUNT] = [$($(super::hex($dark),)*)*];
+        pub(super) const LIGHT: [::eframe::egui::Color32; TOKEN_COUNT] = [$($(super::hex($light),)*)*];
+        pub(super) const CLASSIC_LIGHT: [::eframe::egui::Color32; TOKEN_COUNT] = [$($(super::hex($classic),)*)*];
 
         /// The installed theme, one packed colour per token.
         pub(super) static INSTALLED: [::std::sync::atomic::AtomicU32; TOKEN_COUNT] =
-            [$(::std::sync::atomic::AtomicU32::new(super::pack(super::hex($light))),)*];
+            [$($(::std::sync::atomic::AtomicU32::new(super::pack(super::hex($light))),)*)*];
     };
 }
 
 mod table;
 pub(in crate::app) use table::{TOKEN_COUNT, Token};
+
+pub(in crate::app) mod export;
+pub(in crate::app) mod file;
+pub(in crate::app) mod library;
+pub(in crate::app) mod state;
 
 /// A colour written as `#RRGGBB` or `#RRGGBBAA`, with straight alpha as in
 /// CSS and in theme files, at compile time.
@@ -200,6 +214,7 @@ impl BuiltIn {
     }
 
     /// Its value for `token`.
+    #[cfg(test)]
     pub(in crate::app) fn color(self, token: Token) -> Color32 {
         self.column()[token as usize]
     }
@@ -259,6 +274,7 @@ pub(in crate::app) fn appearance() -> Appearance {
 }
 
 /// The installed theme, read back.
+#[cfg(test)]
 pub(in crate::app) fn installed() -> ThemeColors {
     let mut colors = [Color32::TRANSPARENT; TOKEN_COUNT];
     for token in Token::ALL {

@@ -2,7 +2,6 @@
 //! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
 
 use super::*;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Match the content inset of neighboring menu buttons without shifting tables.
 pub(in crate::app) fn menu_control_margin(ui: &Ui) -> egui::Margin {
@@ -511,77 +510,28 @@ pub(in crate::app) fn window_work_area(ctx: &egui::Context) -> egui::Rect {
         .unwrap_or_else(|| ctx.content_rect())
 }
 
-// Choosing the theme. The frame pushes the preferences' choice every pass;
-// [`themes::install`] does nothing unless that changes a colour.
-
-static WANT_DARK: AtomicBool = AtomicBool::new(false);
-static WANT_CLASSIC_LIGHT: AtomicBool = AtomicBool::new(false);
-
-/// Draws in the dark built-in theme, or in the light one [`set_light_theme`]
-/// chose.
-pub(in crate::app) fn set_dark_mode(enabled: bool) {
-    WANT_DARK.store(enabled, Ordering::Relaxed);
-    install_chosen_built_in();
-}
-
 /// Whether the installed theme is dark.
 pub(in crate::app) fn is_dark_mode() -> bool {
     themes::appearance().is_dark()
 }
 
-/// Runs `f` with this thread drawing in a built-in theme, whatever the app's
-/// frames on other threads install meanwhile.
+/// Applies the theme `id`, the preferences' choice for an appearance whose
+/// built-in is `slot`, before anything draws. The frame calls this every
+/// pass; it does work only when the choice or one of the theme's files
+/// changed. Gives back a status line to show, when the theme could not be
+/// applied or reloaded.
+pub(in crate::app) fn apply_theme(id: &str, slot: themes::BuiltIn) -> Option<String> {
+    themes::state::with_state(|state| {
+        state.apply(id, slot, std::time::Instant::now());
+        state.take_status()
+    })
+}
+
+/// Runs `f` with this thread drawing in the built-in theme `built_in`,
+/// whatever the app's frames on other threads install meanwhile.
 #[cfg(test)]
-pub(in crate::app) fn with_theme<R>(dark: bool, light: LightTheme, f: impl FnOnce() -> R) -> R {
-    themes::with_colors(&built_in_for(dark, light).colors(), f)
-}
-
-/// Which look light mode takes: Baboon's warm one, or the classic grey one
-/// with blue highlights.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(in crate::app) enum LightTheme {
-    #[default]
-    Warm,
-    Classic,
-}
-
-impl LightTheme {
-    pub(in crate::app) const ALL: [LightTheme; 2] = [LightTheme::Warm, LightTheme::Classic];
-
-    /// The name kept in the preferences file.
-    pub(in crate::app) fn key(self) -> &'static str {
-        match self {
-            LightTheme::Warm => "warm",
-            LightTheme::Classic => "classic",
-        }
-    }
-
-    pub(in crate::app) fn from_key(key: &str) -> Option<LightTheme> {
-        LightTheme::ALL.into_iter().find(|theme| theme.key() == key)
-    }
-}
-
-/// Draws light mode in `theme`.
-pub(in crate::app) fn set_light_theme(theme: LightTheme) {
-    WANT_CLASSIC_LIGHT.store(theme == LightTheme::Classic, Ordering::Relaxed);
-    install_chosen_built_in();
-}
-
-fn built_in_for(dark: bool, light: LightTheme) -> themes::BuiltIn {
-    match (dark, light) {
-        (true, _) => themes::BuiltIn::Dark,
-        (false, LightTheme::Warm) => themes::BuiltIn::Light,
-        (false, LightTheme::Classic) => themes::BuiltIn::ClassicLight,
-    }
-}
-
-fn install_chosen_built_in() {
-    let light = if WANT_CLASSIC_LIGHT.load(Ordering::Relaxed) {
-        LightTheme::Classic
-    } else {
-        LightTheme::Warm
-    };
-    themes::install(&built_in_for(WANT_DARK.load(Ordering::Relaxed), light).colors());
+pub(in crate::app) fn with_built_in<R>(built_in: themes::BuiltIn, f: impl FnOnce() -> R) -> R {
+    themes::with_colors(&built_in.colors(), f)
 }
 
 /// What light mode draws icons over, for caches of icons darkened to read on
@@ -1603,20 +1553,20 @@ mod tests {
 
     #[test]
     fn neutral_button_fills_use_literal_ten_and_twenty_percent_channels() {
-        with_theme(true, LightTheme::Warm, || {
+        with_built_in(themes::BuiltIn::Dark, || {
             let widgets = foundation_visuals().widgets;
             assert_eq!(widgets.inactive.weak_bg_fill.to_array(), [26, 26, 26, 26]);
             assert_eq!(widgets.hovered.weak_bg_fill.to_array(), [51, 51, 51, 51]);
         });
         // The classic light theme: black at the same opacity.
-        with_theme(false, LightTheme::Classic, || {
+        with_built_in(themes::BuiltIn::ClassicLight, || {
             assert_eq!(
                 foundation_visuals().widgets.inactive.weak_bg_fill,
                 Color32::from_black_alpha(26)
             );
         });
         // The warm light theme's menus hover in a warm brown, not black.
-        with_theme(false, LightTheme::Warm, || {
+        with_built_in(themes::BuiltIn::Light, || {
             let hover = context_menu_hover();
             assert_eq!(hover.a(), 26);
             assert!(hover.r() > hover.g() && hover.g() > hover.b(), "{hover:?}");
@@ -1636,14 +1586,13 @@ mod tests {
         x.max(y) / x.min(y)
     }
 
-    const THEMES: [(bool, LightTheme); 3] =
-        [(false, LightTheme::Warm), (false, LightTheme::Classic), (true, LightTheme::Warm)];
+    const THEMES: [themes::BuiltIn; 3] = themes::BuiltIn::ALL;
 
     /// The classic light theme is main's grey look: its panels, pages and
     /// navy accent are the ones Baboon had before the warm theme.
     #[test]
     fn the_classic_light_theme_keeps_the_grey_look() {
-        with_theme(false, LightTheme::Classic, || {
+        with_built_in(themes::BuiltIn::ClassicLight, || {
             assert_eq!(editor_bg(), Color32::from_rgb(224, 224, 220));
             assert_eq!(left_panel(), Color32::from_rgb(238, 238, 234));
             assert_eq!(row_type(), Color32::from_rgb(219, 219, 216));
@@ -1658,7 +1607,7 @@ mod tests {
             let border = focused_tab_border();
             assert!(border.b() > border.r(), "{border:?}");
         });
-        with_theme(false, LightTheme::Warm, || {
+        with_built_in(themes::BuiltIn::Light, || {
             assert_eq!(editor_bg(), Color32::from_rgb(242, 241, 240));
             assert_eq!(chrome_bar(), menu_bar());
         });
@@ -1668,13 +1617,13 @@ mod tests {
     /// theme's old #4B7D9B selection held dark text at about 4:1.
     #[test]
     fn selected_text_reads_on_the_selection_in_every_theme() {
-        for (dark, light) in THEMES {
-            with_theme(dark, light, || {
+        for built_in in THEMES {
+            with_built_in(built_in, || {
                 let ratio = contrast(text_dark(), foundation_visuals().selection.bg_fill);
-                assert!(ratio >= 4.5, "{light:?}, dark {dark}: {ratio:.2}");
+                assert!(ratio >= 4.5, "{built_in:?}: {ratio:.2}");
             });
         }
-        let classic_text = with_theme(false, LightTheme::Classic, text_dark);
+        let classic_text = with_built_in(themes::BuiltIn::ClassicLight, text_dark);
         assert!(contrast(classic_text, Color32::from_rgb(75, 125, 155)) < 4.5);
     }
 
@@ -1683,8 +1632,8 @@ mod tests {
     /// bar held the success green at 3.8:1.
     #[test]
     fn status_colours_read_on_every_theme_background() {
-        for (dark, light) in THEMES {
-            with_theme(dark, light, || {
+        for built_in in THEMES {
+            with_built_in(built_in, || {
                 for (name, colour) in [
                     ("error", invalid_value_text()),
                     ("warning", unapplied_value_text()),
@@ -1697,7 +1646,10 @@ mod tests {
                         ("status bar", menu_bar()),
                     ] {
                         let ratio = contrast(colour, backdrop);
-                        assert!(ratio >= 4.5, "{name} on the {place}, {light:?}, dark {dark}: {ratio:.2}");
+                        assert!(
+                            ratio >= 4.5,
+                            "{name} on the {place}, {built_in:?}: {ratio:.2}"
+                        );
                     }
                 }
             });
@@ -1709,22 +1661,22 @@ mod tests {
     /// dark theme's light text read at about 1.2:1.
     #[test]
     fn invalid_values_stay_readable_in_both_themes() {
-        for (dark, light) in THEMES {
-            with_theme(dark, light, || {
+        for built_in in THEMES {
+            with_built_in(built_in, || {
                 let fill = invalid_value_fill();
                 assert!(
                     contrast(text_dark(), fill) >= 7.0,
-                    "text on the fill, dark {dark}"
+                    "text on the fill, {built_in:?}"
                 );
                 assert!(
                     contrast(invalid_value_text(), fill) >= 4.5,
-                    "marked text on the fill, dark {dark}"
+                    "marked text on the fill, {built_in:?}"
                 );
             });
         }
-        let dark_text = with_theme(true, LightTheme::Warm, text_dark);
+        let dark_text = with_built_in(themes::BuiltIn::Dark, text_dark);
         assert!(contrast(dark_text, Color32::from_rgb(0xFF, 0xC0, 0xCB)) < 1.5);
-        let light_fill = with_theme(false, LightTheme::Warm, invalid_value_fill);
+        let light_fill = with_built_in(themes::BuiltIn::Light, invalid_value_fill);
         assert_eq!(
             light_fill,
             Color32::from_rgb(255, 240, 240),
@@ -1734,13 +1686,13 @@ mod tests {
 
     #[test]
     fn selection_colors_are_lighter_with_a_dark_border_in_light_mode() {
-        with_theme(true, LightTheme::Warm, || {
+        with_built_in(themes::BuiltIn::Dark, || {
             assert_eq!(
                 foundation_visuals().selection.bg_fill,
                 Color32::from_rgb(64, 108, 134)
             );
         });
-        with_theme(false, LightTheme::Warm, || {
+        with_built_in(themes::BuiltIn::Light, || {
             let selection = foundation_visuals().selection;
             assert_eq!(selection.bg_fill, Color32::from_rgb(146, 192, 226));
             assert_eq!(selection.stroke.color, Color32::from_rgb(38, 63, 78));
@@ -1764,7 +1716,7 @@ mod tests {
 
     #[test]
     fn dark_active_tab_is_lighter_than_every_tab_rack_background() {
-        let active = with_theme(true, LightTheme::Warm, active_tab);
+        let active = with_built_in(themes::BuiltIn::Dark, active_tab);
         assert_eq!(active, Color32::from_rgb(72, 72, 72));
         assert!(active.r() > 55, "document/Chimp inactive gray");
         assert!(active.r() > 31, "workspace inactive gray");
@@ -1772,7 +1724,7 @@ mod tests {
 
     #[test]
     fn light_active_tab_keeps_the_existing_menu_bar_color() {
-        with_theme(false, LightTheme::Warm, || {
+        with_built_in(themes::BuiltIn::Light, || {
             assert_eq!(active_tab(), Color32::from_rgb(229, 204, 178));
         });
     }
