@@ -2,7 +2,7 @@
 //! the handle's own colour, which in light mode is the panel's, so the rail
 //! vanished.
 
-use super::style::{foundation_group_bg, foundation_input, foundation_input_edge, is_dark_mode, slider_rail_dark};
+use super::style::{foundation_group_bg, slider_rail_edge, slider_rail_fill};
 use eframe::egui;
 use eframe::egui::{Color32, Ui};
 
@@ -79,10 +79,10 @@ fn railed_slider_over(
         }
         let rail_height = ui.spacing().slider_rail_height;
         let rail_length = ui.spacing().slider_width;
-        let (fill, edge) = if is_dark_mode() {
-            (slider_rail_dark(), egui::Stroke::NONE)
-        } else {
-            (foundation_input(), egui::Stroke::new(1.0, foundation_input_edge()))
+        let fill = slider_rail_fill();
+        let edge = match slider_rail_edge() {
+            edge if edge.a() == 0 => egui::Stroke::NONE,
+            edge => egui::Stroke::new(1.0, edge),
         };
         let corner = ui.visuals().widgets.inactive.corner_radius;
         // Reserved before the slider, so what goes here lies under its handle.

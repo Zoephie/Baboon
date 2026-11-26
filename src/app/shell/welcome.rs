@@ -630,9 +630,9 @@ mod tests {
 
     #[test]
     fn welcome_left_background_reaches_taller_column_bottom() {
-        use crate::app::ui_kit::{LightTheme, with_theme};
+        use crate::app::ui_kit::{themes::BuiltIn, with_built_in};
         for taller_left in [false, true] {
-            with_theme(false, LightTheme::Warm, || {
+            with_built_in(BuiltIn::Light, || {
                 let panel = welcome_side_panel();
                 let ctx = egui::Context::default();
                 let mut bottom = 0.0;

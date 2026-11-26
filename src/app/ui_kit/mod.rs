@@ -41,3 +41,8 @@ pub(in crate::app) use radio::*;
 
 mod selection_art;
 pub(in crate::app) use selection_art::{SelectionState, native_selection_response, paint_selection_control};
+/// The theme registry and the installed theme. (Not `theme`: egui has one.)
+pub(in crate::app) mod themes;
+
+mod recoloured_icons;
+pub(in crate::app) use recoloured_icons::{forget_icon_images, forget_recoloured_icons};

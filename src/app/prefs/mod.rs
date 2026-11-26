@@ -90,6 +90,23 @@ fn editing_kit_migration(value: &Value, prefs: &GuiPrefs) -> Option<Value> {
 /// Decodes stored preferences, falling back to the default for anything the
 /// file does not carry — which is how a file written before a preference
 /// existed keeps working.
+/// A theme slot's id as the preferences file holds it: lowercase. Before
+/// theme files there were two light looks, kept as `"warm"` and
+/// `"classic"`; they read as the built-ins they became. A missing value is
+/// the slot's built-in.
+fn theme_id(value: Option<&Value>, slot: crate::app::ui_kit::themes::BuiltIn) -> String {
+    use crate::app::ui_kit::themes::BuiltIn;
+    match value
+        .and_then(Value::as_str)
+        .map(|id| id.trim().to_lowercase())
+    {
+        Some(id) if id == "warm" => BuiltIn::Light.id().to_owned(),
+        Some(id) if id == "classic" => BuiltIn::ClassicLight.id().to_owned(),
+        Some(id) if !id.is_empty() => id,
+        _ => slot.id().to_owned(),
+    }
+}
+
 fn prefs_from_value(value: &Value) -> GuiPrefs {
     let saved_scope = value.get("browser_search_scope");
     let mut browser_search_scope = BrowserSearchScope {
@@ -207,11 +224,14 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             .get("follow_system_theme")
             .and_then(Value::as_bool)
             .unwrap_or_else(|| value.get("dark_mode").and_then(Value::as_bool).is_none()),
-        light_theme: value
-            .get("light_theme")
-            .and_then(Value::as_str)
-            .and_then(crate::app::ui_kit::LightTheme::from_key)
-            .unwrap_or_default(),
+        light_theme: theme_id(
+            value.get("light_theme"),
+            crate::app::ui_kit::themes::BuiltIn::Light,
+        ),
+        dark_theme: theme_id(
+            value.get("dark_theme"),
+            crate::app::ui_kit::themes::BuiltIn::Dark,
+        ),
         ui_scale: value
             .get("ui_scale")
             .and_then(Value::as_f64)
@@ -916,7 +936,8 @@ fn prefs_to_value(
     value["hidden_shortcuts"] = json!(prefs.hidden_shortcuts);
     value["blender_shortcut_migrated"] = json!(prefs.blender_shortcut_migrated);
     value["follow_system_theme"] = Value::Bool(prefs.follow_system_theme);
-    value["light_theme"] = json!(prefs.light_theme.key());
+    value["light_theme"] = json!(prefs.light_theme);
+    value["dark_theme"] = json!(prefs.dark_theme);
     value["string_list_checkboxes"] = Value::Bool(prefs.string_list_checkboxes);
     value["string_list_wrap_text"] = Value::Bool(prefs.string_list_wrap_text);
     value["reveal_active_tab_in_browser"] = Value::Bool(prefs.reveal_active_tab_in_browser);
@@ -1695,18 +1716,49 @@ mod tests {
     }
 
     #[test]
-    fn the_light_theme_is_warm_by_default_and_round_trips() {
-        use crate::app::ui_kit::LightTheme;
-        assert_eq!(prefs_from_value(&json!({})).light_theme, LightTheme::Warm);
-        assert_eq!(prefs_from_value(&json!({ "light_theme": "bogus" })).light_theme, LightTheme::Warm);
+    fn theme_slots_default_to_the_built_ins_and_round_trip() {
+        use crate::app::ui_kit::themes::BuiltIn;
+        let fresh = prefs_from_value(&json!({}));
+        assert_eq!(fresh.light_theme, BuiltIn::Light.id());
+        assert_eq!(fresh.dark_theme, BuiltIn::Dark.id());
         let mut prefs = prefs_from_value(&json!({}));
-        prefs.light_theme = LightTheme::Classic;
-        assert_eq!(stored(&prefs).light_theme, LightTheme::Classic);
-        // The system setting takes the warm theme; Classic is picked alone.
-        prefs.follow_system_theme = false;
-        assert_eq!(prefs.effective_light_theme(), LightTheme::Classic);
+        prefs.light_theme = "forerunner".to_owned();
+        prefs.dark_theme = BuiltIn::Dark.id().to_owned();
+        let restored = stored(&prefs);
+        assert_eq!(restored.light_theme, "forerunner");
+        assert_eq!(restored.dark_theme, BuiltIn::Dark.id());
+    }
+
+    /// Preferences from before theme files select what they selected:
+    /// `"warm"` and `"classic"` are the two light built-ins, an id no theme
+    /// has is kept as written (it shows the slot's built-in until a file
+    /// takes it), and the system setting now uses the light slot.
+    #[test]
+    fn legacy_light_theme_preferences_select_the_built_ins_they_became() {
+        use crate::app::ui_kit::themes::BuiltIn;
+        let read = |light: &str| prefs_from_value(&json!({ "light_theme": light })).light_theme;
+        assert_eq!(read("warm"), BuiltIn::Light.id());
+        assert_eq!(read("classic"), BuiltIn::ClassicLight.id());
+        assert_eq!(read("Forerunner"), "forerunner", "ids are lowercase");
+        let mut prefs = prefs_from_value(&json!({ "dark_mode": false, "light_theme": "classic" }));
+        assert_eq!(
+            prefs.active_theme(None),
+            (BuiltIn::ClassicLight.id(), BuiltIn::Light)
+        );
         prefs.follow_system_theme = true;
-        assert_eq!(prefs.effective_light_theme(), LightTheme::Warm);
+        assert_eq!(
+            prefs.active_theme(Some(egui::Theme::Light)).0,
+            BuiltIn::ClassicLight.id()
+        );
+        assert_eq!(
+            prefs.active_theme(Some(egui::Theme::Dark)),
+            (BuiltIn::Dark.id(), BuiltIn::Dark)
+        );
+        assert_ne!(
+            read("warm"),
+            BuiltIn::ClassicLight.id(),
+            "the check tells the two apart"
+        );
     }
 
     #[test]

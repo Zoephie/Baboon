@@ -857,10 +857,11 @@ importer takes the folder's only JMS, or the one named after the asset.
 
 ### Preferences
 
-Browser mode, prefix display, expert mode, angle units, dark/light theme, the Blender path,
+Browser mode, prefix display, expert mode, angle units, the theme for each appearance, the Blender path,
 custom editing-kit folder names, recent folders, keyword and palette sidecars,
 and per-kit terminal state are persisted to `%APPDATA%\Baboon` and restored on
-launch.
+launch. Themes of your own are JSON files in its `themes` folder: see
+[docs/themes.md](docs/themes.md).
 
 On launch Baboon can reopen the windows from your previous session. **Every
 workspace** is restored, each with its own tags and its own project, and the

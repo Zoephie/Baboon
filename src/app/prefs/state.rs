@@ -528,9 +528,11 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) dark_mode: bool,
     /// Follow the OS appearance; dark_mode remains the fallback if unavailable.
     pub(in crate::app) follow_system_theme: bool,
-    /// The look a picked Light theme takes. Following the OS always takes
-    /// the warm one: see [`GuiPrefs::effective_light_theme`].
-    pub(in crate::app) light_theme: crate::app::ui_kit::LightTheme,
+    /// The theme used when the appearance is light: a built-in's id or a user
+    /// theme file's.
+    pub(in crate::app) light_theme: String,
+    /// The theme used when the appearance is dark.
+    pub(in crate::app) dark_theme: String,
     pub(in crate::app) ui_scale: f32,
     /// Multiplier on mouse-wheel and trackpad scrolling in scroll areas.
     /// 1.0 is egui's own speed, which is what Baboon always scrolled at.
@@ -580,13 +582,17 @@ pub(in crate::app) struct UnusableKitEntries {
 }
 
 impl GuiPrefs {
-    /// The light theme in use: Classic only when picked; the system
-    /// setting takes the warm one.
-    pub(in crate::app) fn effective_light_theme(&self) -> crate::app::ui_kit::LightTheme {
-        if self.follow_system_theme {
-            crate::app::ui_kit::LightTheme::Warm
+    /// The theme to draw in, and the built-in shown if it cannot be: the
+    /// dark slot's or the light slot's, by the appearance in use.
+    pub(in crate::app) fn active_theme(
+        &self,
+        system_theme: Option<egui::Theme>,
+    ) -> (&str, crate::app::ui_kit::themes::BuiltIn) {
+        use crate::app::ui_kit::themes::BuiltIn;
+        if self.effective_dark_mode(system_theme) {
+            (&self.dark_theme, BuiltIn::Dark)
         } else {
-            self.light_theme
+            (&self.light_theme, BuiltIn::Light)
         }
     }
 
@@ -631,7 +637,8 @@ impl Default for GuiPrefs {
             expert_mode: false,
             dark_mode: false,
             follow_system_theme: true,
-            light_theme: crate::app::ui_kit::LightTheme::Warm,
+            light_theme: crate::app::ui_kit::themes::BuiltIn::Light.id().to_owned(),
+            dark_theme: crate::app::ui_kit::themes::BuiltIn::Dark.id().to_owned(),
             ui_scale: DEFAULT_UI_SCALE,
             scroll_speed: DEFAULT_SCROLL_SPEED,
             zoom_speed: DEFAULT_ZOOM_SPEED,

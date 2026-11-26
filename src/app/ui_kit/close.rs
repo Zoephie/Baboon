@@ -27,17 +27,11 @@ fn close_svg(color: Color32, hovered: bool) -> String {
 
 /// Paint within the existing hitbox, preserving its input and accessibility.
 pub(in crate::app) fn paint_close_control(ui: &Ui, response: &egui::Response) {
-    thread_local! {
-        static SVGS: RefCell<HashMap<(Color32, bool), (String, Arc<[u8]>)>> = RefCell::new(HashMap::new());
-    }
-    let color = if ui.visuals().dark_mode {
-        Color32::WHITE
-    } else {
-        Color32::BLACK
-    };
+    let _ = ui;
+    let color = text_strong();
     let hovered = response.enabled()
         && (response.hovered() || response.has_focus() || response.is_pointer_button_down_on());
-    let (uri, bytes) = SVGS.with(|cache| {
+    let (uri, bytes) = CLOSE_SVGS.with(|cache| {
         cache
             .borrow_mut()
             .entry((color, hovered))
@@ -61,6 +55,7 @@ pub(in crate::app) fn paint_close_control(ui: &Ui, response: &egui::Response) {
         .tint(if response.enabled() {
             Color32::WHITE
         } else {
+            // fixed: a disabled control's half-opacity tint, not a colour
             Color32::from_white_alpha(128)
         })
         .paint_at(ui, rect);
@@ -95,4 +90,20 @@ mod tests {
             assert!(hover_peak > 220);
         }
     }
+}
+
+std::thread_local! {
+    static CLOSE_SVGS: RefCell<HashMap<(Color32, bool), (String, Arc<[u8]>)>> = RefCell::new(HashMap::new());
+}
+
+/// Empties the recoloured-icon cache, for a theme that changed colours,
+/// and gives back the image URIs it registered.
+pub(super) fn forget_close_svgs() -> Vec<String> {
+    CLOSE_SVGS.with(|cache| {
+        cache
+            .borrow_mut()
+            .drain()
+            .map(|(_, (uri, _))| uri)
+            .collect()
+    })
 }

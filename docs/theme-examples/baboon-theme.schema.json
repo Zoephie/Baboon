@@ -1,0 +1,770 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Baboon theme",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "description": "The name Settings shows. The theme's id is its file name."
+    },
+    "appearance": {
+      "enum": [
+        "dark",
+        "light"
+      ],
+      "description": "Picks egui's base visuals and the fallback colours."
+    },
+    "extends": {
+      "type": "string",
+      "description": "Another theme's id: a built-in (baboon-dark, baboon-light, baboon-light-classic) or a file in this folder."
+    },
+    "palette": {
+      "type": "object",
+      "description": "Names for colours, used below as $name.",
+      "propertyNames": {
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+        "description": "#RGB, #RGBA, #RRGGBB or #RRGGBBAA (straight alpha, as in CSS), or $name from the palette."
+      }
+    },
+    "colors": {
+      "type": "object",
+      "description": "Token id to colour.",
+      "properties": {
+        "background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Editor panes, windows and the page behind tag fields. (Core)"
+        },
+        "text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Body text and labels. (Core)"
+        },
+        "accent": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Selection fill and other emphasis. (Core)"
+        },
+        "panel.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Side panels: the tag browser, tile bars and import panes. (Core)"
+        },
+        "row.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Striped and faint rows, and the background of non-interactive widgets. (Core)"
+        },
+        "border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Separators and borders between panes. (Core)"
+        },
+        "separator": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "egui's separator lines and the outline of non-interactive widgets. (Core)"
+        },
+        "text.muted": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Secondary text: hints, counts and disabled labels. (Core)"
+        },
+        "text.strong": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text that must stand out at full contrast: white on dark, black on light. (Core)"
+        },
+        "accent.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of selected items and text selection. (Core)"
+        },
+        "accent.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Accent text and marks: highlighted names, links in tables, the animation playhead. (Core)"
+        },
+        "focus.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Border of the focused tab or pane. (Core)"
+        },
+        "link.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Hyperlinks. (Core)"
+        },
+        "modal.backdrop": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Dimming laid over the app behind a modal dialog. (Core)"
+        },
+        "menu_bar.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The menu bar, and bars across a pane such as Chimp's. (Chrome)"
+        },
+        "status_bar.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The status bar along the bottom of the window. (Chrome)"
+        },
+        "status_bar.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text on the status bar. (Chrome)"
+        },
+        "menu_bar.item.hover": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of a hovered menu bar item. (Chrome)"
+        },
+        "chrome.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Window chrome strips: tile title bars and menu panels. (Chrome)"
+        },
+        "chrome.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Edge of the window chrome strips. (Chrome)"
+        },
+        "tab.active.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The active document tab in Chimp. (Chrome)"
+        },
+        "tab.tag.active.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The active tag tab, joined to the page below it. (Chrome)"
+        },
+        "tab.kit.active.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The chosen kit tab, joined to the tag browser below it. (Chrome)"
+        },
+        "tab.active.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text of an active tag or kit tab. (Chrome)"
+        },
+        "tab.modified.tint": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Tint mixed into a tab whose document has unsaved changes. (Chrome)"
+        },
+        "browser.toolbar.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The tag browser's toolbar. (Chrome)"
+        },
+        "browser.toolbar.active.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A toggled-on button in the tag browser toolbar. (Chrome)"
+        },
+        "browser.search.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The tag browser's search box. (Chrome)"
+        },
+        "tree.folder.open.icon": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Disclosure triangle and icon of an open folder. (Chrome)"
+        },
+        "tree.folder.closed.icon": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Disclosure triangle of a closed folder. (Chrome)"
+        },
+        "badge.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of the tag-group badge beside a tag in the tree. (Chrome)"
+        },
+        "badge.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of the tag-group badge. (Chrome)"
+        },
+        "badge.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text of the tag-group badge. (Chrome)"
+        },
+        "badge.read_only.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The read-only badge on a tag or layout. (Chrome)"
+        },
+        "badge.read_only.icon": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The mark drawn on the read-only badge. (Chrome)"
+        },
+        "favourite.icon": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A favourite's filled star. (Chrome)"
+        },
+        "clipboard.cut.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of rows cut to the clipboard. (Chrome)"
+        },
+        "clipboard.copy.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of rows copied to the clipboard. (Chrome)"
+        },
+        "field.help.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The question mark beside a field that has help. (Chrome)"
+        },
+        "welcome.panel.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The welcome screen's side column. (Chrome)"
+        },
+        "progress.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Track of a progress bar. (Chrome)"
+        },
+        "progress.bar": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Filled part of a progress bar. (Chrome)"
+        },
+        "loading.primary": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Brightest strokes of the loading animation. (Chrome)"
+        },
+        "loading.secondary": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Middle strokes of the loading animation. (Chrome)"
+        },
+        "loading.lines": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Faint lines of the loading animation. (Chrome)"
+        },
+        "button.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of a button or combo box at rest. (Controls)"
+        },
+        "button.hover": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of a hovered or open button. (Controls)"
+        },
+        "button.active": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of a pressed button. (Controls)"
+        },
+        "button.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of a button at rest. (Controls)"
+        },
+        "button.border.hover": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of a hovered button. (Controls)"
+        },
+        "button.border.active": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of a pressed button. (Controls)"
+        },
+        "button.border.open": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of a button whose menu is open. (Controls)"
+        },
+        "button.destructive": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Accent fill of a button for an action to take with care. (Controls)"
+        },
+        "button.primary.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of a primary, confirming button. (Controls)"
+        },
+        "menu.hover": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of a hovered menu item or icon button. (Controls)"
+        },
+        "control.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of a control such as a slider or checkbox at rest. (Controls)"
+        },
+        "control.hover": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of a hovered control. (Controls)"
+        },
+        "control.active": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of a pressed control. (Controls)"
+        },
+        "input.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Inside of a text input. (Controls)"
+        },
+        "input.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of a text input. (Controls)"
+        },
+        "card.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Documentation and note boxes. (Controls)"
+        },
+        "settings.card.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Cards in the Settings window. (Controls)"
+        },
+        "slider.rail.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Rail of a slider. (Controls)"
+        },
+        "slider.rail.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of a slider's rail. (Controls)"
+        },
+        "control.well": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The well inside a checked checkbox or radio button. (Controls)"
+        },
+        "code.inline.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Background of inline code. (Controls)"
+        },
+        "group.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Background of a group of fields. (Field editor)"
+        },
+        "group.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of a group of fields, and of windows. (Field editor)"
+        },
+        "section.header.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Header bar of a section of fields. (Field editor)"
+        },
+        "block.header.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Header bar of a tag block, and of popup footers. (Field editor)"
+        },
+        "block.header.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text on a tag block header. (Field editor)"
+        },
+        "block.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of a tag block. (Field editor)"
+        },
+        "block.jump.icon": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Icon of the button that jumps to a block. (Field editor)"
+        },
+        "block.jump.highlight": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Highlight on the block a jump landed on. (Field editor)"
+        },
+        "field.label.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Names of tag fields, left of their values. (Field editor)"
+        },
+        "flags.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Inside of a list of flags. (Field editor)"
+        },
+        "flags.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of a list of flags. (Field editor)"
+        },
+        "flags.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Names of the flags in a list of flags. (Field editor)"
+        },
+        "flags.hover": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of a hovered flag row. (Field editor)"
+        },
+        "status.error": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Error text and icons, and warnings that something will be lost or overwritten. (Status)"
+        },
+        "status.error.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of a field holding an invalid value. (Status)"
+        },
+        "status.error.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of a field holding an invalid value. (Status)"
+        },
+        "status.warning": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Warning text and icons. (Status)"
+        },
+        "status.warning.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of a field holding a value that was not applied. (Status)"
+        },
+        "status.success": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Success text and icons: matches, accepted changes, add buttons. (Status)"
+        },
+        "action.destructive": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Destructive actions and removals: delete buttons, decreased or unused values. (Status)"
+        },
+        "settings.card.error.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A Settings card holding an invalid value. (Status)"
+        },
+        "banner.warning.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of a warning banner, such as a tag changed on disk. (Status)"
+        },
+        "banner.warning.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of a warning banner. (Status)"
+        },
+        "banner.warning.icon": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Icon on a warning banner. (Status)"
+        },
+        "banner.error.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill of an error banner, such as a tag deleted on disk. (Status)"
+        },
+        "banner.error.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of an error banner. (Status)"
+        },
+        "banner.error.icon": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Icon on an error banner. (Status)"
+        },
+        "diff.added": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text of something added. (Diff)"
+        },
+        "diff.removed": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text of something removed. (Diff)"
+        },
+        "diff.modified": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text of something modified. (Diff)"
+        },
+        "diff.unchanged": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text of something unchanged. (Diff)"
+        },
+        "diff.added.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Wash behind an added line. (Diff)"
+        },
+        "diff.removed.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Wash behind a removed line. (Diff)"
+        },
+        "shader.panel.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The shader editor's panels. (Shader editor and graphs)"
+        },
+        "shader.panel.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of the shader editor's panels. (Shader editor and graphs)"
+        },
+        "shader.grid": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The shader editor's grid lines and hovered drag handles. (Shader editor and graphs)"
+        },
+        "shader.row.reference.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A shader row holding a tag reference. (Shader editor and graphs)"
+        },
+        "shader.row.numeric.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A shader row holding a number. (Shader editor and graphs)"
+        },
+        "shader.row.data.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A shader row holding other data. (Shader editor and graphs)"
+        },
+        "shader.row.function.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A shader row holding a function. (Shader editor and graphs)"
+        },
+        "shader.row.modified.marker": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Stripe at the edge of a modified shader row. (Shader editor and graphs)"
+        },
+        "shader.input.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of an input in the shader editor. (Shader editor and graphs)"
+        },
+        "shader.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text in the shader editor. (Shader editor and graphs)"
+        },
+        "shader.text.muted": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Secondary text in the shader editor. (Shader editor and graphs)"
+        },
+        "graph.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A function graph's plot. (Shader editor and graphs)"
+        },
+        "graph.grid": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A function graph's grid lines. (Shader editor and graphs)"
+        },
+        "graph.container.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The frame around a function graph. (Shader editor and graphs)"
+        },
+        "graph.band.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The band between a function's two curves. (Shader editor and graphs)"
+        },
+        "graph.band.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Edges of the band between two curves. (Shader editor and graphs)"
+        },
+        "graph.curve.primary": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A function graph's first curve. (Shader editor and graphs)"
+        },
+        "graph.curve.secondary": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A function graph's second curve. (Shader editor and graphs)"
+        },
+        "graph.curve.primary.fill": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill under the first curve. (Shader editor and graphs)"
+        },
+        "graph.curve.secondary.fill": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Fill under the second curve. (Shader editor and graphs)"
+        },
+        "material.row.data.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A data row in the material editor. (Material editor)"
+        },
+        "material.row.function.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A function row in the material editor. (Material editor)"
+        },
+        "material.box.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "A value box at its default in the material editor. (Material editor)"
+        },
+        "material.grid": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The material editor's grid lines. (Material editor)"
+        },
+        "material.input.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of an input in the material editor and colour picker. (Material editor)"
+        },
+        "material.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text in the material editor. (Material editor)"
+        },
+        "material.text.muted": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Secondary text in the material editor. (Material editor)"
+        },
+        "terminal.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The terminal. (Terminal, code and syntax)"
+        },
+        "terminal.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Terminal text. (Terminal, code and syntax)"
+        },
+        "terminal.warning": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Warnings in the terminal. (Terminal, code and syntax)"
+        },
+        "terminal.error": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Errors in the terminal. (Terminal, code and syntax)"
+        },
+        "terminal.success": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Successes in the terminal. (Terminal, code and syntax)"
+        },
+        "code.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Code blocks in the help. (Terminal, code and syntax)"
+        },
+        "syntax.plain": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Plain text in a JSON view. (Terminal, code and syntax)"
+        },
+        "syntax.key": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Keys in a JSON view. (Terminal, code and syntax)"
+        },
+        "syntax.string": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Strings in a JSON view. (Terminal, code and syntax)"
+        },
+        "syntax.path": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Tag paths in a JSON view. (Terminal, code and syntax)"
+        },
+        "syntax.number": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Numbers in a JSON view. (Terminal, code and syntax)"
+        },
+        "syntax.literal": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "true, false and null in a JSON view. (Terminal, code and syntax)"
+        },
+        "syntax.punctuation": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Punctuation in a JSON view. (Terminal, code and syntax)"
+        },
+        "syntax.markup.tag": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Markup tags in field names and help. (Terminal, code and syntax)"
+        },
+        "syntax.markup.warning": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Markup the game will not read as written. (Terminal, code and syntax)"
+        },
+        "chimp.archive.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Entries inside an archive in Chimp's browser. (Terminal, code and syntax)"
+        },
+        "search.match.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Highlight behind a search match. (Terminal, code and syntax)"
+        },
+        "search.match.active.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Highlight behind the current search match. (Terminal, code and syntax)"
+        },
+        "search.match.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text of a highlighted search match. (Terminal, code and syntax)"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

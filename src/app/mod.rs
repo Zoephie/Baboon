@@ -269,8 +269,8 @@ impl Baboon {
         let suppress_startup_popups = startup_arguments.suppresses_startup_popups();
         let first_run_wizard = (!suppress_startup_popups && !load_first_run_complete())
             .then(|| FirstRunWizardState::new(storage.mode, &prefs));
-        set_dark_mode(prefs.effective_dark_mode(cc.egui_ctx.system_theme()));
-        crate::app::ui_kit::set_light_theme(prefs.effective_light_theme());
+        let (theme, slot) = prefs.active_theme(cc.egui_ctx.system_theme());
+        crate::app::ui_kit::apply_theme(theme, slot);
         cc.egui_ctx.set_theme(crate::app::ui_kit::style::egui_theme());
         cc.egui_ctx.set_visuals(foundation_visuals());
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());

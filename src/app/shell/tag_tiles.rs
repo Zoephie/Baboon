@@ -539,13 +539,13 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
 
     fn tab_bg_color(
         &self,
-        visuals: &egui::Visuals,
+        _visuals: &egui::Visuals,
         _tiles: &egui_tiles::Tiles<String>,
         _tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> Color32 {
         if state.active {
-            visuals.panel_fill
+            tag_tab_active()
         } else {
             Color32::TRANSPARENT
         }
@@ -567,9 +567,13 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         _visuals: &egui::Visuals,
         _tiles: &egui_tiles::Tiles<String>,
         _tile_id: egui_tiles::TileId,
-        _state: &egui_tiles::TabState,
+        state: &egui_tiles::TabState,
     ) -> Color32 {
-        text_dark()
+        if state.active {
+            active_tab_text()
+        } else {
+            text_dark()
+        }
     }
 }
 

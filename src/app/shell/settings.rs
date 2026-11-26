@@ -970,7 +970,7 @@ fn settings_window_body(
 }
 
 /// Cards always consume the available width, including after a window resize.
-fn settings_card<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> R {
+pub(in crate::app) fn settings_card<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> R {
     Frame::NONE
         .fill(settings_card_fill())
         .stroke(Stroke::new(1.0, foundation_group_edge()))
@@ -1593,6 +1593,8 @@ pub(in crate::app) struct SettingsWindow {
     pub(in crate::app) pending_ui_scale: f32,
     /// The Chimp USMAP path as typed, applied on Enter.
     pub(in crate::app) usmap_input: String,
+    /// The theme's problems are listed in full.
+    pub(in crate::app) show_theme_problems: bool,
 }
 
 impl SettingsWindow {
@@ -1606,6 +1608,7 @@ impl SettingsWindow {
                 .as_ref()
                 .map(|path| path.display().to_string())
                 .unwrap_or_default(),
+            show_theme_problems: false,
         }
     }
 }
@@ -2195,8 +2198,7 @@ impl Dialog for CustomEditingKitRemoval {
     }
 }
 
-/// The Theme menu's choices. Following the system takes the warm light
-/// theme in light mode; Classic Light is picked on its own.
+/// First run's Theme menu: the system, or one of the built-in themes.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ThemeChoice {
     System,
@@ -2219,12 +2221,12 @@ impl ThemeChoice {
     }
 
     fn of(prefs: &GuiPrefs) -> ThemeChoice {
-        use crate::app::ui_kit::LightTheme;
+        use crate::app::ui_kit::themes::BuiltIn;
         if prefs.follow_system_theme {
             ThemeChoice::System
         } else if prefs.dark_mode {
             ThemeChoice::Dark
-        } else if prefs.light_theme == LightTheme::Classic {
+        } else if prefs.light_theme == BuiltIn::ClassicLight.id() {
             ThemeChoice::ClassicLight
         } else {
             ThemeChoice::Light
@@ -2232,16 +2234,27 @@ impl ThemeChoice {
     }
 
     fn apply(self, prefs: &mut GuiPrefs) {
-        use crate::app::ui_kit::LightTheme;
+        use crate::app::ui_kit::themes::BuiltIn;
         prefs.follow_system_theme = self == ThemeChoice::System;
-        if self != ThemeChoice::System {
-            prefs.dark_mode = self == ThemeChoice::Dark;
+        match self {
+            ThemeChoice::System => {}
+            ThemeChoice::Light => {
+                prefs.dark_mode = false;
+                prefs.light_theme = BuiltIn::Light.id().to_owned();
+            }
+            ThemeChoice::ClassicLight => {
+                prefs.dark_mode = false;
+                prefs.light_theme = BuiltIn::ClassicLight.id().to_owned();
+            }
+            ThemeChoice::Dark => {
+                prefs.dark_mode = true;
+                prefs.dark_theme = BuiltIn::Dark.id().to_owned();
+            }
         }
-        prefs.light_theme =
-            if self == ThemeChoice::ClassicLight { LightTheme::Classic } else { LightTheme::Warm };
     }
 }
 
+/// First run's Theme menu.
 pub(in crate::app) fn draw_theme_picker(ui: &mut Ui, prefs: &mut GuiPrefs) {
     let mut theme = ThemeChoice::of(prefs);
     crate::app::ui_kit::ValueComboBox::from_id_salt("settings_theme")
@@ -2257,10 +2270,246 @@ pub(in crate::app) fn draw_theme_picker(ui: &mut Ui, prefs: &mut GuiPrefs) {
     }
 }
 
-fn draw_settings_interface_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
-    settings_row(ui, "Theme", "", 170.0, |ui| {
-        draw_theme_picker(ui, &mut s.prefs)
+/// Chooses `entry` as the theme in use, as picking it from Settings' Theme
+/// menu does: it stops following the system and sets the slot of its own
+/// appearance.
+pub(in crate::app) fn choose_theme(
+    prefs: &mut GuiPrefs,
+    entry: &crate::app::ui_kit::themes::library::ThemeEntry,
+) {
+    let dark = entry
+        .appearance
+        .is_some_and(crate::app::ui_kit::themes::Appearance::is_dark);
+    prefs.follow_system_theme = false;
+    prefs.dark_mode = dark;
+    if dark {
+        prefs.dark_theme = entry.id.clone();
+    } else {
+        prefs.light_theme = entry.id.clone();
+    }
+}
+
+/// A theme as a menu shows it: its name and appearance.
+pub(in crate::app) fn theme_label(entry: &crate::app::ui_kit::themes::library::ThemeEntry) -> String {
+    // The built-ins' names already say.
+    if entry.built_in {
+        return entry.name.clone();
+    }
+    match (entry.broken, entry.appearance) {
+        (true, _) => format!("{} (cannot be applied)", entry.name),
+        (false, Some(appearance)) if appearance.is_dark() => format!("{} (Dark)", entry.name),
+        (false, Some(_)) => format!("{} (Light)", entry.name),
+        (false, None) => entry.name.clone(),
+    }
+}
+
+/// The label of the theme `id`, or the id when no theme has it.
+pub(in crate::app) fn theme_label_of(entries: &[crate::app::ui_kit::themes::library::ThemeEntry], id: &str) -> String {
+    entries
+        .iter()
+        .find(|entry| entry.id == id)
+        .map_or_else(|| format!("{id} (missing)"), theme_label)
+}
+
+/// A menu of every theme that can be applied, choosing `id`.
+fn draw_theme_menu(
+    ui: &mut Ui,
+    salt: &str,
+    entries: &[crate::app::ui_kit::themes::library::ThemeEntry],
+    id: &mut String,
+    hovered: &mut Option<String>,
+) {
+    crate::app::ui_kit::ValueComboBox::from_id_salt(salt)
+        .width(160.0)
+        .selected_text(theme_label_of(entries, id))
+        .show_ui(ui, |ui| {
+            for entry in entries {
+                ui.add_enabled_ui(!entry.broken, |ui| {
+                    let response = ui.selectable_label(*id == entry.id, theme_label(entry));
+                    if response.hovered() {
+                        *hovered = Some(entry.id.clone());
+                    }
+                    if response.clicked() {
+                        *id = entry.id.clone();
+                    }
+                });
+            }
+        });
+}
+
+/// The Theme settings: one menu of the system and every theme, the light and
+/// dark themes the system switches between, the themes folder's buttons, and
+/// what the theme in use reported.
+fn draw_theme_settings(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
+    use crate::app::ui_kit::themes::{self, state::with_state};
+    let now = std::time::Instant::now();
+    // The folder is read again each second while Settings is open, and the
+    // theme in use checked for edits.
+    ui.ctx().request_repaint_after(themes::state::RELOAD_CHECK);
+    let entries = with_state(|state| state.entries(now));
+    // The theme under the pointer in an open menu, drawn until the menu
+    // closes or the pointer leaves it.
+    let mut hovered: Option<String> = None;
+    let prefs = &mut s.prefs;
+    settings_row(
+        ui,
+        "Theme",
+        "Themes are JSON files in the themes folder.",
+        220.0,
+        |ui| {
+            let current = if prefs.dark_mode {
+                prefs.dark_theme.clone()
+            } else {
+                prefs.light_theme.clone()
+            };
+            let selected = if prefs.follow_system_theme {
+                "Use system setting".to_owned()
+            } else {
+                theme_label_of(&entries, &current)
+            };
+            crate::app::ui_kit::ValueComboBox::from_id_salt("settings_theme")
+                .width(220.0)
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(prefs.follow_system_theme, "Use system setting")
+                        .clicked()
+                    {
+                        prefs.follow_system_theme = true;
+                    }
+                    for entry in &entries {
+                        ui.add_enabled_ui(!entry.broken, |ui| {
+                            let chosen = !prefs.follow_system_theme && current == entry.id;
+                            let response = ui.selectable_label(chosen, theme_label(entry));
+                            if response.hovered() {
+                                hovered = Some(entry.id.clone());
+                            }
+                            if response.clicked() {
+                                choose_theme(prefs, entry);
+                            }
+                        });
+                    }
+                });
+        },
+    );
+    if prefs.follow_system_theme {
+        // The light theme, then the dark one, that the system switches
+        // between.
+        settings_row(ui, "System themes", "Light, then dark.", 330.0, |ui| {
+            ui.horizontal(|ui| {
+                draw_theme_menu(
+                    ui,
+                    "settings_light_theme",
+                    &entries,
+                    &mut prefs.light_theme,
+                    &mut hovered,
+                );
+                draw_theme_menu(
+                    ui,
+                    "settings_dark_theme",
+                    &entries,
+                    &mut prefs.dark_theme,
+                    &mut hovered,
+                );
+            });
+        });
+    }
+    with_state(|state| state.preview(hovered.as_deref()));
+    let folder = themes::state::themes_folder();
+    settings_row(ui, "Theme files", "", 360.0, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Open Themes Folder").clicked() {
+                match themes::export::write_schema(&folder) {
+                    Ok(()) => cx.open_folder(folder.clone(), "themes folder"),
+                    Err(error) => {
+                        cx.set_status(format!("Could not make the themes folder: {error}"))
+                    }
+                }
+            }
+            if ui.button("Edit Theme...").clicked() {
+                s.opened
+                    .push(Box::new(super::ThemeEditorWindow::for_active_theme()));
+            }
+            if ui.button("Export Current Theme").clicked() {
+                cx.set_status(export_current_theme(&folder));
+            }
+            if ui.button("Reload").clicked() {
+                with_state(|state| state.reload(now));
+                cx.set_status("Themes reloaded");
+            }
+        });
     });
+    let warnings = themes::contrast::warnings(&themes::installed());
+    if !warnings.is_empty() {
+        settings_card(ui, |ui| {
+            ui.label(
+                RichText::new(format!(
+                    "{} colour pair{} in the theme in use {} hard to read:",
+                    warnings.len(),
+                    if warnings.len() == 1 { "" } else { "s" },
+                    if warnings.len() == 1 { "is" } else { "are" },
+                ))
+                .color(settings_warning_text()),
+            );
+            for warning in &warnings {
+                ui.label(RichText::new(warning.to_string()).color(subtle_dark()));
+            }
+        });
+    }
+    let problems = with_state(|state| state.problems());
+    if !problems.is_empty() {
+        settings_card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "The theme in use reported {} problem{}.",
+                        problems.len(),
+                        if problems.len() == 1 { "" } else { "s" }
+                    ))
+                    .color(unapplied_value_text()),
+                );
+                let label = if s.window.show_theme_problems {
+                    "Hide"
+                } else {
+                    "Show"
+                };
+                if ui.button(label).clicked() {
+                    s.window.show_theme_problems = !s.window.show_theme_problems;
+                }
+            });
+            if s.window.show_theme_problems {
+                for problem in &problems {
+                    ui.label(RichText::new(problem.to_string()).color(subtle_dark()));
+                }
+            }
+        });
+    }
+}
+
+/// Writes the theme in use into `folder` as a complete theme file, and says
+/// where, or why it could not.
+fn export_current_theme(folder: &std::path::Path) -> String {
+    use crate::app::ui_kit::themes::{self, state::with_state};
+    let written = with_state(|state| {
+        let id = state
+            .applied_id()
+            .unwrap_or(themes::BuiltIn::Light.id())
+            .to_owned();
+        let text = themes::export::export_theme(state.current_library(), &id)
+            .map_err(|report| report.to_string())?;
+        themes::export::write_schema(folder).map_err(|error| error.to_string())?;
+        let path = themes::export::export_path(folder, &id);
+        std::fs::write(&path, text).map_err(|error| error.to_string())?;
+        Ok::<_, String>(path)
+    });
+    match written {
+        Ok(path) => format!("Exported the theme in use to {}", path.display()),
+        Err(error) => format!("Could not export the theme in use: {error}"),
+    }
+}
+
+fn draw_settings_interface_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
+    draw_theme_settings(cx, ui, s);
     if draw_settings_ui_scale(ui, &mut s.window.pending_ui_scale, &mut s.prefs.ui_scale) {
         cx.set_status("UI scale applied");
     }

@@ -4337,7 +4337,32 @@ mod tests {
                 |h| {
                     h.app.open_settings(Some(SettingsTab::Interface));
                 },
-                &["Settings", "Display Angles as"],
+                // The tab's first page; its theme rows push the rest below.
+                &["Settings", "Theme files"],
+            ),
+            case(
+                "theme_editor",
+                &["dialog:ThemeEditorWindow"],
+                &["shell/theme_editor.rs"],
+                welcome,
+                |h| {
+                    h.app
+                        .dialogs
+                        .open(super::super::ThemeEditorWindow::for_active_theme());
+                },
+                &["Theme Editor - Light", "background", "inherited"],
+            ),
+            case(
+                "theme_editor_gallery",
+                &["dialog:ThemeEditorWindow"],
+                &["shell/theme_editor.rs"],
+                welcome,
+                |h| {
+                    h.app.dialogs.open(
+                        super::super::ThemeEditorWindow::for_active_theme().with_gallery(),
+                    );
+                },
+                &["Theme Editor - Light", "Widgets", "Collapsing header", "inherited"],
             ),
             case(
                 "settings_custom_kit_draft",
@@ -9195,16 +9220,29 @@ mod tests {
         // BABOON_SHOT_GAME names the kit's game ("halo3_mcc"; Halo 2 by default).
         let game = std::env::var("BABOON_SHOT_GAME")
             .map_or(GameId::Halo2, |id| id.parse().expect("a game id"));
-        use crate::app::ui_kit::LightTheme;
-        for (dark, light, name) in [
-            (false, LightTheme::Warm, "theme_light.png"),
-            (false, LightTheme::Classic, "theme_classic_light.png"),
-            (true, LightTheme::Warm, "theme_dark.png"),
+        // The built-ins, then the example themes in docs/theme-examples.
+        crate::app::ui_kit::themes::state::use_folder(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("docs")
+                .join("theme-examples"),
+        );
+        for (theme, dark, name) in [
+            ("baboon-light", false, "theme_light.png"),
+            ("baboon-light-classic", false, "theme_classic_light.png"),
+            ("baboon-dark", true, "theme_dark.png"),
+            ("ember", true, "theme_ember.png"),
+            ("harbor", false, "theme_harbor.png"),
+            ("nightfall", true, "theme_nightfall.png"),
+            ("assembly", true, "theme_assembly.png"),
         ] {
             let mut h = Harness::recording();
             h.app.model.prefs.follow_system_theme = false;
             h.app.model.prefs.dark_mode = dark;
-            h.app.model.prefs.light_theme = light;
+            if dark {
+                h.app.model.prefs.dark_theme = theme.to_owned();
+            } else {
+                h.app.model.prefs.light_theme = theme.to_owned();
+            }
             // The status bar's one coloured message, to judge it on the bar.
             h.app.shell.available_update = Some(UpdateCheckResult {
                 channel: UpdateChannel::Stable,
@@ -9257,22 +9295,180 @@ mod tests {
             return;
         };
         let dir = std::path::PathBuf::from(dir);
-        use crate::app::ui_kit::LightTheme;
-        for (dark, light, name) in [
-            (false, LightTheme::Warm, "settings_light.png"),
-            (false, LightTheme::Classic, "settings_classic_light.png"),
-            (true, LightTheme::Warm, "settings_dark.png"),
+        use crate::app::ui_kit::themes::BuiltIn;
+        for (built_in, name) in [
+            (BuiltIn::Light, "settings_light.png"),
+            (BuiltIn::ClassicLight, "settings_classic_light.png"),
+            (BuiltIn::Dark, "settings_dark.png"),
         ] {
             let mut h = Harness::recording();
             h.app.model.prefs.follow_system_theme = false;
-            h.app.model.prefs.dark_mode = dark;
-            h.app.model.prefs.light_theme = light;
+            h.app.model.prefs.dark_mode = built_in.appearance().is_dark();
+            if built_in.appearance().is_dark() {
+                h.app.model.prefs.dark_theme = built_in.id().to_owned();
+            } else {
+                h.app.model.prefs.light_theme = built_in.id().to_owned();
+            }
             h.app.open_settings(Some(SettingsTab::Interface));
             for _ in 0..30 {
                 h.frame(Vec::new());
             }
             h.shoot(&dir.join(name));
         }
+    }
+
+    /// `BABOON_APP_SHOTS` shots of the Theme Editor in a light and a dark
+    /// built-in, with the accent edited live and the picker open on it.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
+    fn app_shots_of_the_theme_editor() {
+        let Some(dir) = std::env::var_os("BABOON_APP_SHOTS") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        use crate::app::shell::ThemeEditorWindow;
+        use crate::app::ui_kit::themes::{BuiltIn, Token};
+        for (built_in, name) in [
+            (BuiltIn::Light, "theme_editor_light.png"),
+            (BuiltIn::Dark, "theme_editor_dark.png"),
+        ] {
+            let mut h = Harness::recording();
+            h.app.model.prefs.follow_system_theme = false;
+            h.app.model.prefs.dark_mode = built_in.appearance().is_dark();
+            for _ in 0..5 {
+                h.frame(Vec::new());
+            }
+            let mut editor = ThemeEditorWindow::for_active_theme();
+            // fixed: a sample edit for the shot
+            editor.edit_for_shot(
+                Token::Accent,
+                egui::Color32::from_rgb(0xE8, 0x86, 0x2A),
+                Token::Accent,
+            );
+            h.app.dialogs.open(editor);
+            for _ in 0..30 {
+                h.frame(Vec::new());
+            }
+            h.shoot(&dir.join(name));
+            h.app.dialogs.open(ThemeEditorWindow::for_active_theme().with_gallery());
+            for _ in 0..30 {
+                h.frame(Vec::new());
+            }
+            h.shoot(&dir.join(name.replace("editor", "gallery")));
+            // Cancel puts the built-in back for the next shot.
+            crate::app::ui_kit::themes::install(&built_in.colors());
+        }
+    }
+
+    /// The eye in the Theme Editor's header shows the gallery beside the
+    /// rows, widening the window by the gallery's width, and hides it again,
+    /// giving the width back.
+    #[test]
+    fn the_theme_editor_shows_and_hides_its_gallery() {
+        use crate::app::shell::ThemeEditorWindow;
+        let mut h = Harness::new();
+        h.app.dialogs.open(ThemeEditorWindow::for_active_theme());
+        h.idle(5);
+        let window = |h: &Harness| {
+            h.ctx
+                .memory(|memory| memory.area_rect(egui::Id::unique("theme_editor")))
+                .expect("the editor's window")
+        };
+        // The toggle sits beside Close, in the header's band.
+        let toggle = |h: &mut Harness| {
+            let rect = window(h);
+            let margin = h.ctx.global_style().spacing.window_margin;
+            let target = egui::pos2(
+                rect.right() - f32::from(margin.right) - 34.0,
+                rect.top() + f32::from(margin.top) + 10.0,
+            );
+            for step in 1..=3 {
+                h.frame(vec![pointer_at(target - egui::vec2(9.0 - 3.0 * step as f32, 0.0))]);
+            }
+            for pressed in [true, false] {
+                h.frame(vec![egui::Event::PointerButton {
+                    pos: target,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            h.idle(6);
+        };
+        let narrow = window(&h).width();
+        assert!(!h.painted_contains("Collapsing header"), "the gallery starts hidden");
+
+        toggle(&mut h);
+        assert!(h.painted_contains("Collapsing header"), "the gallery is shown");
+        assert!(h.painted_contains("inherited"), "beside the rows");
+        let wide = window(&h).width();
+        assert!(
+            (wide - narrow - 440.0).abs() < 4.0,
+            "the window widens by the gallery: {narrow} to {wide}"
+        );
+
+        toggle(&mut h);
+        assert!(!h.painted_contains("Collapsing header"), "the gallery is hidden");
+        let back = window(&h).width();
+        assert!((back - narrow).abs() < 4.0, "the width is given back: {narrow} to {back}");
+    }
+
+    /// The Theme Editor's Theme menu chooses the theme to use and edit: with
+    /// edits it asks first, and Keep Editing keeps them; without, it switches.
+    #[test]
+    fn the_theme_editor_switches_themes() {
+        use crate::app::shell::ThemeEditorWindow;
+        use crate::app::ui_kit::themes::{self, BuiltIn, Token};
+        // What the editor shows is read, not the installed theme, which other
+        // tests' frames install over meanwhile.
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("docs")
+            .join("theme-examples");
+        themes::state::use_folder(folder.clone());
+        let mut h = Harness::new();
+        h.app.model.prefs.follow_system_theme = false;
+        h.app.model.prefs.dark_mode = false;
+        h.app.model.prefs.light_theme = BuiltIn::Light.id().to_owned();
+        h.idle(5);
+        let mut editor = ThemeEditorWindow::for_active_theme();
+        // fixed: an edit to lose
+        let edited = egui::Color32::from_rgb(0xE8, 0x86, 0x2A);
+        editor.edit_for_shot(Token::Accent, edited, Token::Accent);
+        h.app.dialogs.open(editor);
+        h.idle(5);
+        assert!(h.painted_contains("#E8862A"), "the accent row shows the edit");
+
+        let pick = |h: &mut Harness, current: &str, theme: &str| {
+            h.click(current, 0);
+            h.idle(3);
+            h.click(theme, 0);
+            h.idle(5);
+        };
+        let prompt = "Switching to Ember drops your unsaved edits.";
+        pick(&mut h, "Light", "Ember (Dark)");
+        assert!(h.painted_contains(prompt), "edits are asked about first");
+        assert!(!h.app.model.prefs.dark_mode, "nothing is chosen yet");
+        h.click("Keep Editing", 0);
+        h.idle(5);
+        assert!(!h.painted_contains(prompt));
+        assert!(h.painted_contains("#E8862A"), "the edit is kept");
+        assert!(!h.app.model.prefs.dark_mode);
+
+        pick(&mut h, "Light", "Ember (Dark)");
+        h.click("Drop Edits and Switch", 0);
+        h.idle(5);
+        assert!(h.app.model.prefs.dark_mode);
+        assert_eq!(h.app.model.prefs.dark_theme, "ember");
+        assert!(h.painted_contains("Theme Editor - Ember"));
+        assert!(!h.painted_contains("#E8862A"), "the edit is dropped");
+        assert!(h.painted_contains("#B4561E"), "Ember's own accent is shown");
+
+        // Unedited, a theme picked is switched to at once.
+        pick(&mut h, "Ember (Dark)", "Harbor (Light)");
+        assert!(!h.app.model.prefs.dark_mode);
+        assert_eq!(h.app.model.prefs.light_theme, "harbor");
+        assert!(h.painted_contains("Theme Editor - Harbor"));
     }
 
     /// A tag in a scratch kit, with the keywords that tests below give it.

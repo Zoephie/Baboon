@@ -693,15 +693,14 @@ fn draw_color_comparison(ui: &mut Ui, color: &MaterialColorPopup) {
             egui::pos2(rect.left(), rect.center().y),
             egui::pos2(rect.right(), rect.center().y),
         ],
-        Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+        Stroke::new(1.0_f32, material_editor_input_edge()),
     );
-    ui.painter()
-        .rect_stroke(
-            rect,
-            0.0,
-            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
-            egui::StrokeKind::Middle,
-        );
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(1.0_f32, material_editor_input_edge()),
+        egui::StrokeKind::Middle,
+    );
     ui.painter().galley(
         egui::pos2(
             container.center().x - new_label.size().x * 0.5,
@@ -830,7 +829,7 @@ fn draw_color_sv_square_with_editable(ui: &mut Ui, color: &mut MaterialColorPopu
     ui.painter().rect_stroke(
         rect,
         0.0,
-        Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+        Stroke::new(1.0_f32, material_editor_input_edge()),
         egui::StrokeKind::Middle,
     );
     let cursor = egui::pos2(
@@ -864,13 +863,12 @@ pub(in crate::app) fn draw_color_hue_strip(ui: &mut Ui, color: &mut MaterialColo
         Sense::click_and_drag(),
     );
     paint_hue_gradient(ui.painter(), rect);
-    ui.painter()
-        .rect_stroke(
-            rect,
-            0.0,
-            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
-            egui::StrokeKind::Middle,
-        );
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(1.0_f32, material_editor_input_edge()),
+        egui::StrokeKind::Middle,
+    );
     let marker_y = egui::lerp(rect.bottom()..=rect.top(), color.hue as f32 / 255.0);
     let (red, green, blue) = hsb_to_rgb(color.hue as f32 / 255.0, 1.0, 1.0);
     paint_color_slider_marker(
@@ -899,13 +897,12 @@ pub(in crate::app) fn draw_color_alpha_strip(ui: &mut Ui, color: &mut MaterialCo
     );
     paint_alpha_checkerboard(ui.painter(), rect);
     paint_alpha_gradient(ui.painter(), rect);
-    ui.painter()
-        .rect_stroke(
-            rect,
-            0.0,
-            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
-            egui::StrokeKind::Middle,
-        );
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(1.0_f32, material_editor_input_edge()),
+        egui::StrokeKind::Middle,
+    );
     let marker_y = egui::lerp(rect.bottom()..=rect.top(), color.alpha);
     let alpha = float_channel_to_u8(color.alpha);
     paint_color_slider_marker(ui.painter(), rect, marker_y, Color32::from_gray(alpha));
@@ -1077,13 +1074,12 @@ pub(in crate::app) fn draw_custom_color_swatches(
             }
             None => draw_empty_custom_swatch(ui, rect),
         }
-        ui.painter()
-            .rect_stroke(
-                rect,
-                0.0,
-                Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
-                egui::StrokeKind::Middle,
-            );
+        ui.painter().rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0_f32, material_editor_input_edge()),
+            egui::StrokeKind::Middle,
+        );
         if response.secondary_clicked() {
             custom_swatches[index] = Some(ColorPaletteSwatch::unnamed([
                 float_channel_to_u8(color.red),

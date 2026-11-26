@@ -271,7 +271,7 @@ fn foundation_label_cell_inner(ui: &mut Ui, text: &str, help: Option<&str>, stac
         Align2::LEFT_CENTER,
         &shown,
         FontId::proportional(12.5),
-        text_dark(),
+        field_label(),
         FindTargetKind::Label,
     );
     // Hovering the name (or the cue) shows the field documentation (prefixed with
@@ -1954,9 +1954,9 @@ pub(in crate::app) fn flag_panel_height(options: usize, show_raw: bool) -> f32 {
 }
 
 pub(in crate::app) fn paint_flag_panel(ui: &Ui, rect: egui::Rect) {
-    ui.painter().rect_filled(rect, INPUT_CORNER_RADIUS, foundation_input());
+    ui.painter().rect_filled(rect, INPUT_CORNER_RADIUS, flag_panel());
     ui.painter().rect_stroke(rect, INPUT_CORNER_RADIUS,
-        Stroke::new(1.0, foundation_input_edge()), egui::StrokeKind::Inside);
+        Stroke::new(1.0, flag_panel_edge()), egui::StrokeKind::Inside);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1983,6 +1983,6 @@ pub(in crate::app) fn draw_flag_option(
     if !enabled { checkbox_ui.disable(); }
     paint_checkbox_at(&checkbox_ui, checkbox, checked, response.hovered() || response.has_focus());
     paint_findable_text(ui, row.left_center() + Vec2::new(20.0, 0.0), Align2::LEFT_CENTER,
-        &truncate_for_cell(label, row.width() - 24.0), FontId::proportional(12.5), text_dark(), FindTargetKind::Value);
+        &truncate_for_cell(label, row.width() - 24.0), FontId::proportional(12.5), flag_text(), FindTargetKind::Value);
     response
 }

@@ -130,7 +130,13 @@ mod tests {
 
     #[test]
     fn string_examples_render_editor_colours_in_both_themes() {
-        for visuals in [egui::Visuals::dark(), egui::Visuals::light()] {
+        // In a theme of this thread's own, so a test installing another
+        // meanwhile cannot change the colours between rendering and reading.
+        for (visuals, built_in) in [
+            (egui::Visuals::dark(), crate::app::ui_kit::themes::BuiltIn::Dark),
+            (egui::Visuals::light(), crate::app::ui_kit::themes::BuiltIn::Light),
+        ] {
+          crate::app::ui_kit::style::with_built_in(built_in, || {
             let jobs = rendered("```strings-halo3\n&a_button &U+E453\\r\\n\n```", visuals, 520.0);
             let job = jobs.iter().find(|job| job.text.contains("&a_button")).unwrap();
             let colour = |token: &str| {
@@ -141,6 +147,7 @@ mod tests {
             assert_eq!(colour("&U+E453"), good_news());
             assert_eq!(colour("\\r"), markup_warning_text());
             assert_eq!(colour("\\n"), markup_warning_text());
+          });
         }
     }
 

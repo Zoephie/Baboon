@@ -1,0 +1,21 @@
+// Classic Light, cooled toward blue-grey, through a palette: change "sea" or
+// "foam" and every colour painted with it changes.
+{
+  "$schema": "./baboon-theme.schema.json",
+  "name": "Harbor",
+  "extends": "baboon-light-classic",
+  "palette": {
+    "sea": "#2F6F8F",
+    "foam": "#E3E8EC",
+    "deep": "#16232B"
+  },
+  "colors": {
+    "background": "$foam",
+    "text": "$deep",
+    "accent": "#A9CBDD",
+    "accent.text": "$sea",
+    "focus.border": "$sea",
+    "progress.bar": "$sea",
+    "browser.toolbar.active.background": "$sea"
+  }
+}
