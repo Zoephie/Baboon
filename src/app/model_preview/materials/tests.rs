@@ -97,7 +97,7 @@ fn a_shipped_character_resolves_to_real_textures_in_both_games() {
             case.model
         );
 
-        let resolved = resolve_model_textures(&source, &materials, true);
+        let resolved = resolve_model_textures(&source, None, &materials, true);
         assert_eq!(resolved.len(), materials.len(), "one result per material");
 
         // Every material must resolve to *something*. A character whose parts
@@ -177,7 +177,7 @@ fn masterchiefs_body_shader_carries_diffuse_detail_and_normal() {
         eprintln!("skipping: could not read masterchief.render_model");
         return;
     };
-    let resolved = resolve_model_textures(&source, &materials, true);
+    let resolved = resolve_model_textures(&source, None, &materials, true);
 
     // The body material is the one that has all three; the visor and light
     // shaders legitimately do not.
@@ -202,7 +202,7 @@ fn masterchiefs_body_shader_carries_diffuse_detail_and_normal() {
 fn a_material_with_no_shader_reports_why() {
     let source = loose_source(PathBuf::from("C:/nonexistent/tags"), "halo3_mcc");
     let resolved = resolve_model_textures(
-        &source,
+        &source, None,
         &[RenderModelPreviewMaterial {
             shader_path: String::new(),
             shader_group: 0,
@@ -242,7 +242,7 @@ fn dervish_resolves_a_detail_normal_on_top_of_his_bump_map() {
         eprintln!("skipping: could not read dervish.render_model");
         return;
     };
-    let resolved = resolve_model_textures(&source, &materials, true);
+    let resolved = resolve_model_textures(&source, None, &materials, true);
 
     assert!(
         resolved
@@ -274,7 +274,7 @@ fn a_gen3_material_translates_its_passes_only_for_game_shaders() {
         object: 0,
     };
     let resolve = |game_shaders| {
-        resolve_model_textures(&source, std::slice::from_ref(&material), game_shaders).remove(0)
+        resolve_model_textures(&source, None, std::slice::from_ref(&material), game_shaders).remove(0)
     };
     let (off, on) = (resolve(false), resolve(true));
     assert!(on.gen3.is_some(), "{:?}", on.game_shaders_error);
@@ -296,7 +296,7 @@ fn detail_tiling_comes_from_the_shaders_animator() {
     };
     let source = loose_source(root, "halo3_mcc");
     let resolved = resolve_model_textures(
-        &source,
+        &source, None,
         &[RenderModelPreviewMaterial {
             shader_path: r"objects\characters\dervish\shaders\dervish_armor".to_owned(),
             shader_group: u32::from_be_bytes(*b"rmsh"),
@@ -333,8 +333,13 @@ fn detail_tiling_comes_from_the_shaders_animator() {
 
 /// One classic shader, resolved the way the preview resolves a material.
 fn resolve_classic(source: &TagSource, path: &str, group: &[u8; 4]) -> MaterialTextures {
+    resolve_classic_in(source, None, path, group)
+}
+
+/// [`resolve_classic`], in a kit whose root the kit names as `kit_root`.
+fn resolve_classic_in(source: &TagSource, kit_root: Option<PathBuf>, path: &str, group: &[u8; 4]) -> MaterialTextures {
     resolve_model_textures(
-        source,
+        source, kit_root,
         &[RenderModelPreviewMaterial {
             shader_path: path.to_owned(),
             shader_group: u32::from_be_bytes(*group),
@@ -387,7 +392,7 @@ fn halo_ce_game_shaders_say_when_the_kits_shader_source_is_missing() {
     let error = missing.game_shaders_error.clone().expect("the reason is kept");
     assert!(
         error.contains(&bare.join("shaders").join("fx").display().to_string())
-            && error.contains("beside its tags folder"),
+            && error.contains("in the editing kit's root folder"),
         "{error}"
     );
     let (summary, detail) = crate::app::model_preview::panel::game_shaders_note(
@@ -401,6 +406,32 @@ fn halo_ce_game_shaders_say_when_the_kits_shader_source_is_missing() {
     .expect("the footer says so");
     assert_eq!(summary, "Game Shaders incomplete — hover for why");
     assert!(detail.contains(&error), "{detail}");
+}
+
+/// A kit whose tags folder isn't its root's own `tags` (`<root>\monaco\tags`,
+/// as aLTis's is) finds its shader source in the root the kit names, not
+/// beside its tags folder; with no root named, it looks beside its tags.
+#[cfg(unix)]
+#[test]
+fn halo_ce_game_shaders_read_the_shader_source_from_the_kits_root() {
+    let Some(tags) = kit_root(GameId::HaloCe) else {
+        return;
+    };
+    let root = tags.parent().unwrap().to_path_buf();
+    let elsewhere = std::env::temp_dir().join(format!("baboon-ce-kit-root-{}", std::process::id()));
+    std::fs::create_dir_all(elsewhere.join("monaco")).unwrap();
+    let link = elsewhere.join("monaco").join("tags");
+    if !link.exists() {
+        std::os::unix::fs::symlink(&tags, &link).unwrap();
+    }
+    let source = loose_source(link, "haloce_mcc");
+    let tread = r"vehicles\scorpion\shaders\tread_left";
+    let named = resolve_classic_in(&source, Some(root), tread, b"soso");
+    let beside = resolve_classic(&source, tread, b"soso");
+    std::fs::remove_dir_all(&elsewhere).unwrap();
+    assert_eq!(named.game_shaders_error, None, "found in the kit's root");
+    let error = beside.game_shaders_error.expect("not beside its tags folder");
+    assert!(error.contains(&elsewhere.join("monaco").join("shaders").join("fx").display().to_string()), "{error}");
 }
 
 /// Halo CE model shading, against `BLAM_TEST_HCEEK` (the kit's `tags`).
@@ -492,7 +523,7 @@ fn a_halo_ce_permutation_picks_the_image_and_wraps() {
             h2: Default::default(),
             object: 0,
         };
-        resolve_model_textures(&source, &[material], true).remove(0)
+        resolve_model_textures(&source, None, &[material], true).remove(0)
     };
     let shader = load_referenced_tag_from_source(&source, path, "shader_model", b"soso").unwrap();
     let base = shader.root().read_tag_ref_path("base map").unwrap();
@@ -690,7 +721,7 @@ fn every_h2_shader_takes_the_global_active_camo() {
         object: 0,
     };
     let camo = |path: &str| {
-        let textures = resolve_model_textures(&source, &[material(path)], true);
+        let textures = resolve_model_textures(&source, None, &[material(path)], true);
         textures[0].dx9_layers[Dx9Layer::ActiveCamo as usize].clone()
     };
     let chief = camo("objects\\characters\\masterchief\\shaders\\masterchief");
@@ -874,10 +905,10 @@ fn resolving_one_material_again_gives_what_the_whole_model_did() {
         let Some(root) = kit_root(game) else { continue };
         let data = crate::app::model_preview::harness::kit::kit_preview(&root, game, path, extension, group);
         let materials = &data.preview.materials;
-        let whole = resolve_model_textures(&source, materials, true);
+        let whole = resolve_model_textures(&source, None, materials, true);
         let mut caches = resolve_caches(&source);
         for index in (0..whole.len()).filter(|&index| !materials[index].shader_path.is_empty()).take(limit) {
-            let again = resolve_model_materials(&source, materials, &whole, &[index as u16], None, true, &mut caches);
+            let again = resolve_model_materials(&source, None, materials, &whole, &[index as u16], None, true, &mut caches);
             for (at, (before, after)) in whole.iter().zip(&again).enumerate() {
                 if let Some(folder) = std::env::var_os("BABOON_RESOLVE_DUMP")
                     && fingerprint(before) != fingerprint(after)

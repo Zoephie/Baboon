@@ -27,11 +27,13 @@ use std::sync::Arc;
 /// says of it drawn without them.
 pub(crate) fn resolve_model_textures(
     source: &TagSource,
+    // The editing kit's root folder, as the kit names it ([`TagReader::kit_root`]).
+    kit_root: Option<std::path::PathBuf>,
     materials: &[RenderModelPreviewMaterial],
     game_shaders: bool,
 ) -> Vec<MaterialTextures> {
     // The materials' own reads, once each for this resolve.
-    let reader = &TagReader::with_game_shaders(source, game_shaders);
+    let reader = &TagReader::with_game_shaders(source, game_shaders).with_kit_root(kit_root);
     let mut caches = resolve_caches(source);
     let mut textures: Vec<MaterialTextures> = materials
         .iter()
@@ -97,6 +99,8 @@ fn finish_materials(materials: &[RenderModelPreviewMaterial], textures: &mut [Ma
 /// includes, definitions) are what makes one material quick.
 pub(in crate::app::model_preview) fn resolve_model_materials(
     source: &TagSource,
+    // As [`resolve_model_textures`]'s.
+    kit_root: Option<std::path::PathBuf>,
     materials: &[RenderModelPreviewMaterial],
     previous: &[MaterialTextures],
     indices: &[u16],
@@ -104,7 +108,7 @@ pub(in crate::app::model_preview) fn resolve_model_materials(
     game_shaders: bool,
     caches: &mut ResolveCaches,
 ) -> Vec<MaterialTextures> {
-    let reader = &TagReader::with_game_shaders(source, game_shaders);
+    let reader = &TagReader::with_game_shaders(source, game_shaders).with_kit_root(kit_root);
     let mut textures = previous.to_vec();
     for &index in indices {
         let index = usize::from(index);

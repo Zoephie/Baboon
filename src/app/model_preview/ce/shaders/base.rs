@@ -2,7 +2,7 @@
 
 use super::{
     DX9_TEXTURE_ROWS, Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth,
-    Dx9DrawPass, Dx9DrawTexture, Dx9VertexStage, Image, SamplerKind, TagReader, TagSource,
+    Dx9DrawPass, Dx9DrawTexture, Dx9VertexStage, Image, SamplerKind, TagReader,
     has_flag_in_any,
 };
 use blam_tags::TagStruct;
@@ -107,18 +107,18 @@ pub(super) fn source_error(directory: &std::path::Path, error: &str) -> String {
         format!("the kit's shader source in {} could not be translated: {error}", directory.display())
     } else {
         format!(
-            "the kit's shader source is not in {}: Game Shaders need the editing kit's shaders \
-             folder beside its tags folder",
+            "the kit's shader source is not in {}: Game Shaders need the shaders folder in the \
+             editing kit's root folder",
             directory.display()
         )
     }
 }
 
+/// Where the editing kit keeps the shader source Game Shaders translate:
+/// `shaders\fx` in the kit's root folder, the one the kit names when its
+/// tags folder is elsewhere (`monaco\tags`, say).
 pub(super) fn shader_directory(reader: &TagReader) -> Option<std::path::PathBuf> {
-    let TagSource::LooseFolder { root, .. } = &reader.source else {
-        return None;
-    };
-    Some(root.parent()?.join("shaders").join("fx"))
+    Some(reader.kit_root()?.join("shaders").join("fx"))
 }
 
 /// A Halo CE shader's flags by name. Its root holds a `flags` field per

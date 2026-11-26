@@ -85,6 +85,7 @@ impl Baboon {
         let Some(source) = kit.source.as_ref().map(|source| source.source.clone()) else {
             return false;
         };
+        let kit_root = kit.source.as_ref().and_then(|source| source.kit_layout()).map(|layout| layout.root);
         // A clean document is its file; edits go to the worker as bytes, and
         // a picker's draft as the edits to make over them.
         let bytes = kit
@@ -131,6 +132,7 @@ impl Baboon {
                 let mut caches = caches.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 let textures = resolve_model_materials(
                     &source,
+                    kit_root,
                     &preview.materials,
                     &textures,
                     &indices,

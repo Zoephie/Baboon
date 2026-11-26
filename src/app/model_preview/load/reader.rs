@@ -28,6 +28,8 @@ pub(in crate::app) struct TagReader {
     options: RefCell<HashMap<String, Option<Arc<RenderMethodOption>>>>,
     /// See [`TagReader::game_shaders`].
     game_shaders: bool,
+    /// See [`TagReader::kit_root`].
+    kit_root: Option<std::path::PathBuf>,
 }
 
 impl TagReader {
@@ -47,7 +49,26 @@ impl TagReader {
             definitions: RefCell::new(HashMap::new()),
             options: RefCell::new(HashMap::new()),
             game_shaders,
+            kit_root: None,
         }
+    }
+
+    /// The reader, for a source whose editing kit's root is `kit_root`: the
+    /// folder its tools and source files live in, which the kit names when
+    /// its tags folder isn't the root's own `tags`.
+    pub(in crate::app::model_preview) fn with_kit_root(mut self, kit_root: Option<std::path::PathBuf>) -> Self {
+        self.kit_root = kit_root;
+        self
+    }
+
+    /// The editing kit's root folder: the one the kit names, or else its tags
+    /// folder's parent, as a kit is laid out by default. `None` for a source
+    /// that isn't a loose folder.
+    pub(in crate::app::model_preview) fn kit_root(&self) -> Option<std::path::PathBuf> {
+        let TagSource::LooseFolder { root, .. } = &self.source else {
+            return None;
+        };
+        self.kit_root.clone().or_else(|| root.parent().map(std::path::Path::to_path_buf))
     }
 
     /// Whether the preview reads for Game Shaders. Off, the readers leave out

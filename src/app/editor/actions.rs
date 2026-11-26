@@ -231,6 +231,7 @@ impl Baboon {
             return false;
         };
         let materials = data.preview.materials.clone();
+        let kit_root = self.model.kits[kit_index].source.as_ref().and_then(|source| source.kit_layout()).map(|layout| layout.root);
         let textures_id = data.textures_id;
         let stamp = KitStamp {
             kit: self.model.kits[kit_index].id,
@@ -252,7 +253,7 @@ impl Baboon {
                     key,
                     textures_id,
                     game_shaders,
-                    textures: resolve_model_textures(&source, &materials, game_shaders),
+                    textures: resolve_model_textures(&source, kit_root, &materials, game_shaders),
                 }
             },
             // No textures: the preview draws untextured, and stops waiting.
