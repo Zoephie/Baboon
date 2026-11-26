@@ -95,12 +95,13 @@ pub(in crate::app::model_preview) struct ShotOptions {
     pub(in crate::app::model_preview) fire: Option<String>,
     /// The preview keeps no game, as one from a source that names none.
     pub(in crate::app::model_preview) no_game: bool,
-    /// The Material Editor's hover over this material of its list, counting
-    /// those with a part shown.
-    pub(in crate::app::model_preview) highlight: Option<usize>,
-    /// Leave out the parts of this material of the Material Editor's list,
-    /// counted as `highlight` counts.
-    pub(in crate::app::model_preview) without_material: Option<usize>,
+    /// The Material Editor's hover over the material of its list whose shader
+    /// path ends in this (empty: the first), counting those with a part shown.
+    pub(in crate::app::model_preview) highlight: Option<String>,
+    /// Leave out the parts of the material `highlight` would name by this.
+    pub(in crate::app::model_preview) without_material: Option<String>,
+    /// Draw the parts of the material `highlight` would name by this alone.
+    pub(in crate::app::model_preview) only_material: Option<String>,
 }
 
 impl ShotOptions {
@@ -139,6 +140,7 @@ impl ShotOptions {
             no_game: false,
             highlight: None,
             without_material: None,
+            only_material: None,
         }
     }
 
@@ -203,6 +205,7 @@ impl ShotOptions {
             no_game: set("H2_SHOT_NO_GAME"),
             highlight: None,
             without_material: None,
+            only_material: None,
         }
     }
 }
@@ -397,7 +400,11 @@ pub(super) fn render(
                 .any(|&batch| material.indices.contains(&data.preview.batches[batch].material_index))
         })
         .collect();
-    if let Some(material) = options.highlight.and_then(|index| editor_materials.get(index)) {
+    let pick = |name: &Option<String>| {
+        let name = name.as_deref()?.to_ascii_lowercase();
+        editor_materials.iter().find(|material| material.key.path.ends_with(&name))
+    };
+    if let Some(material) = pick(&options.highlight) {
         state.material_editor = Some(super::super::material_editor::MaterialEditorState {
             hovered: Some(material.key.clone()),
             ..Default::default()
@@ -470,8 +477,11 @@ pub(super) fn render(
         &options.forced,
     );
     let preview = Arc::clone(&frame.preview);
-    if let Some(material) = options.without_material.and_then(|index| editor_materials.get(index)) {
+    if let Some(material) = pick(&options.without_material) {
         frame.visible_batches.retain(|&batch| !material.indices.contains(&preview.batches[batch].material_index));
+    }
+    if let Some(material) = pick(&options.only_material) {
+        frame.visible_batches.retain(|&batch| material.indices.contains(&preview.batches[batch].material_index));
     }
     frame.visible_batches.retain(|&batch| {
         let material = preview.batches[batch].material_index as usize;

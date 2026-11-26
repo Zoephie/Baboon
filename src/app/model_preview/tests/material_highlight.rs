@@ -5,13 +5,18 @@ use super::super::harness::shot::{SHOT_SIZE, Shot, ShotOptions, shoot};
 use crate::core::game::GameId;
 use crate::core::source::TagSource;
 
-/// A biped of each game whose kit is set.
-const MODELS: &[(&str, GameId, &str)] = &[
-    ("BLAM_TEST_HCEEK", GameId::HaloCe, "characters\\cyborg\\cyborg"),
-    ("BLAM_TEST_H2EK", GameId::Halo2, "objects\\characters\\masterchief\\masterchief"),
-    ("BLAM_TEST_H3EK", GameId::Halo3, "objects\\characters\\masterchief\\masterchief"),
-    ("BLAM_TEST_HREK", GameId::HaloReach, "objects\\characters\\spartans\\spartans"),
-    ("BLAM_TEST_H4EK", GameId::Halo4, "objects\\characters\\storm_masterchief\\storm_masterchief"),
+/// An object of each game whose kit is set, its kind, and the material lit
+/// (by the end of its shader's path; empty for the first shown). The Reach
+/// Warthog's tyre core sits inside its rubber: lit through the picture's own
+/// depth, it showed whole under Game Shaders and only at its treads under
+/// Textured.
+const MODELS: &[(&str, GameId, &str, &str, &str)] = &[
+    ("BLAM_TEST_HCEEK", GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", ""),
+    ("BLAM_TEST_H2EK", GameId::Halo2, "objects\\characters\\masterchief\\masterchief", "biped", ""),
+    ("BLAM_TEST_H3EK", GameId::Halo3, "objects\\characters\\masterchief\\masterchief", "biped", ""),
+    ("BLAM_TEST_HREK", GameId::HaloReach, "objects\\characters\\spartans\\spartans", "biped", ""),
+    ("BLAM_TEST_HREK", GameId::HaloReach, "objects\\vehicles\\human\\warthog\\warthog", "vehicle", "warthog_tire"),
+    ("BLAM_TEST_H4EK", GameId::Halo4, "objects\\characters\\storm_masterchief\\storm_masterchief", "biped", ""),
 ];
 
 /// Pixels that differ between two shots, as a mask.
@@ -46,12 +51,14 @@ fn keep(name: &str, pixels: &[u8]) {
 
 /// Lighting a material changes the picture where that material draws, and
 /// nowhere else, in amber; under Game Shaders and without, on the dark
-/// background and the light one. Where it draws is where hiding it changes
-/// the picture.
+/// background and the light one. The highlight shows the material whole,
+/// the rest of the model hiding none of it, so where it draws is where it
+/// draws alone; and what it lights is the same under either shading.
 #[test]
 fn the_highlight_lights_its_material_and_nothing_else() {
     let mut ran = 0;
-    for (variable, game, model) in MODELS {
+    for (variable, game, model, kind, material) in MODELS {
+        let mut lit_by_shading = Vec::new();
         let Ok(root) = std::env::var(variable) else {
             eprintln!("skipping {game:?}: {variable} is not set");
             continue;
@@ -69,33 +76,43 @@ fn the_highlight_lights_its_material_and_nothing_else() {
                     lights: true,
                     yaw: 0.6,
                     pitch: 0.25,
-                    kind: Some("biped".to_owned()),
+                    kind: Some((*kind).to_owned()),
                 };
-                let options = |highlight: Option<usize>, without: Option<usize>| {
+                let options = |highlight: Option<&str>, alone: Option<&str>| {
                     let mut options = ShotOptions::new(*game);
                     options.light_theme = light_theme;
-                    options.highlight = highlight;
-                    options.without_material = without;
+                    options.highlight = highlight.map(str::to_owned);
+                    options.only_material = alone.map(str::to_owned);
+                    // Alone, it is drawn flat: its own shading can match the
+                    // backdrop (an additive light adds little), where Solid
+                    // colours every pixel it covers.
+                    if alone.is_some() {
+                        options.mode = Some("solid".to_owned());
+                    }
                     options
                 };
                 let shown = shoot(
                     &source,
                     &[
                         (shot.clone(), options(None, None)),
-                        (shot.clone(), options(Some(0), None)),
-                        (shot, options(None, Some(0))),
+                        (shot.clone(), options(Some(material), None)),
+                        (shot, options(None, Some(material))),
                     ],
                 );
-                let (plain, lit, without) = (&shown[0].pixels, &shown[1].pixels, &shown[2].pixels);
+                let (plain, lit, alone) = (&shown[0].pixels, &shown[1].pixels, &shown[2].pixels);
                 let lit_changed = differs(plain, lit);
-                let footprint = grown(&differs(plain, without));
+                // Where it draws alone: what differs from the empty backdrop,
+                // as its corner shows it.
+                let backdrop = alone[..4].to_vec();
+                let footprint = grown(&alone.chunks_exact(4).map(|pixel| pixel[..3] != backdrop[..3]).collect::<Vec<_>>());
                 let changed = lit_changed.iter().filter(|&&changed| changed).count();
                 let outside = lit_changed.iter().zip(&footprint).filter(|(lit, inside)| **lit && !**inside).count();
                 let label = format!("{game:?} {model} shaders {shaders} light {light_theme}");
                 eprintln!("{label}: {changed} lit, {outside} outside its material");
-                let name = format!("{game:?}_{}_{}", if shaders { "shaders" } else { "textured" }, if light_theme { "light" } else { "dark" });
+                let name = format!("{game:?}_{}_{}_{}", model.rsplit('\\').next().unwrap_or(model), if shaders { "shaders" } else { "textured" }, if light_theme { "light" } else { "dark" });
                 keep(&format!("{name}_plain"), plain);
                 keep(&format!("{name}_lit"), lit);
+                keep(&format!("{name}_alone"), alone);
                 assert!(changed > 200, "{label}: the highlight changed {changed} pixels");
                 assert!(outside * 50 < changed, "{label}: {outside} of {changed} lit pixels are not its material's");
                 let amber = lit
@@ -105,7 +122,23 @@ fn the_highlight_lights_its_material_and_nothing_else() {
                     .count();
                 // Amber fill, or its white edges, which are most of a small part.
                 assert!(amber * 10 > changed * 9, "{label}: {amber} of {changed} lit pixels are amber or its edges");
+                // The fill, not only edges: some of what it lights is amber.
+                let fill = lit
+                    .chunks_exact(4)
+                    .zip(&lit_changed)
+                    .filter(|(pixel, changed)| **changed && pixel[0] > pixel[2] && pixel[..3].iter().any(|&channel| channel < 240))
+                    .count();
+                assert!(fill * 5 > changed, "{label}: only {fill} of {changed} lit pixels are fill");
+                lit_by_shading.push((shaders, light_theme, changed));
                 ran += 1;
+            }
+        }
+        // What it lights doesn't hang on the shading.
+        for light_theme in [false, true] {
+            let count = |shaders| lit_by_shading.iter().find(|(s, l, _)| *s == shaders && *l == light_theme).map(|(_, _, n)| *n);
+            if let (Some(textured), Some(shaded)) = (count(false), count(true)) {
+                let (low, high) = (textured.min(shaded), textured.max(shaded));
+                assert!(low * 10 >= high * 9, "{game:?}: lit {textured} textured, {shaded} under Game Shaders");
             }
         }
     }

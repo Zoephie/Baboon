@@ -490,10 +490,15 @@ impl RenderCore {
     /// with the shared program, so it lies over every game's passes, its
     /// bloom and its sprites alike, and follows the skinning they do.
     ///
-    /// As collision and physics are, only the nearest surface fills. Its own
-    /// depth is laid first, pulled a little forward, as the game's passes
-    /// round depth differently and some lay none: drawn equal to theirs it
-    /// would come and go in stripes.
+    /// It shows the material whole, wherever its parts are, as the rest of
+    /// the model doesn't hide them: the depth it tests against is its own
+    /// alone, laid afresh. Against the picture's, what showed would hang on
+    /// the shading: the game's passes lay depth for some materials and not
+    /// others (a gen3 frame keeps none for one its passes don't draw), so a
+    /// Warthog's tyre core lit whole under Game Shaders and only at its
+    /// treads, through its motion-blur shell, under Textured. Only its own
+    /// nearest surface facing the camera fills, so its far side doesn't
+    /// double up.
     pub(super) unsafe fn draw_material_highlight(
         &mut self,
         gl: &glow::Context,
@@ -510,8 +515,19 @@ impl RenderCore {
             gl.use_program(Some(self.program));
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
-            gl.disable(glow::CULL_FACE);
+            // Faces turned away stay dark, as the model draws them: lit,
+            // a part on the far side of the body would show through it.
+            if frame.show_backfaces {
+                gl.disable(glow::CULL_FACE);
+            } else {
+                gl.enable(glow::CULL_FACE);
+                gl.cull_face(glow::BACK);
+            }
             gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
+            // Its own depth alone: the frame's is finished with, and the
+            // paint's scissor keeps the clear to the viewport.
+            gl.depth_mask(true);
+            gl.clear(glow::DEPTH_BUFFER_BIT);
             gl.enable(glow::POLYGON_OFFSET_FILL);
             gl.polygon_offset(-1.0, -1.0);
             let draw = |core: &Self, wire: bool, color: Color32| {
