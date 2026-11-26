@@ -434,9 +434,11 @@ fn draw_material_header(
         if icon_button(ui, ButtonIcon::ListDropdownLeft, "Previous material", current > 0, text_dark()).clicked() {
             state.selected = step(current - 1);
         }
-        // Room for the next arrow and the four actions after it.
-        let buttons = 5.0 * (BUTTON_HEIGHT + ui.spacing().item_spacing.x);
-        let width = (ui.available_width() - buttons - 8.0).max(120.0);
+        // Room for the next arrow and the four actions after it, left as the
+        // shader reference row under it leaves room for its four buttons, so
+        // the two rows' buttons line up.
+        let buttons = 5.0 * (ICON_BUTTON_SIZE.x + ui.spacing().item_spacing.x);
+        let width = (ui.available_width() - buttons - 2.0).max(120.0);
         let popup_id = section_id.with("material_picker");
         let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
         let label = step(current).map_or_else(|| "None".to_owned(), |_| marked(&materials[current - 1]));
@@ -689,6 +691,11 @@ fn draw_shader_reference_row(
                     );
                     // Unlabelled, the row sizes its box to what it has.
                     draw_foundation_tag_reference_row(ui, &meta, &value, reference.clone(), None, 0, &target.paths[0], &mut edit, 0.0);
+                    #[cfg(test)]
+                    {
+                        let right = ui.min_rect().right();
+                        ui.ctx().data_mut(|data| data.insert_temp(material_actions_id().with("reference_row_right"), right));
+                    }
                     (std::mem::take(edit.pending), edit.tag_reference_picker.take(), edit.open_request.take())
                 };
                 // The row's last edit stands for every slot naming the shader.

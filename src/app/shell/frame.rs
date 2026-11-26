@@ -6055,6 +6055,154 @@ mod tests {
         idle(h);
     }
 
+    /// A Materials card on the shaders `shaders`, its editor open on the
+    /// first, over a loose Halo 3 kit whose `objects\smoke` render model
+    /// names `shaders\smoke` in slot 0, with `shaders\smoke` and
+    /// `shaders\other` beside it; opened from its `opened` tag (the render
+    /// model itself, or a `.model` naming it).
+    fn switch_card(h: &mut Harness, name: &str, opened: &str, shaders: &[(&[u8; 4], &str)]) -> (crate::app::loose_fixture::LooseKit, String) {
+        let rmsh = u32::from_be_bytes(*b"rmsh");
+        let kit = crate::app::loose_fixture::LooseKit::new(name, "halo3_mcc");
+        kit.write_mcc("shaders\\smoke", "shader", |_| {});
+        kit.write_mcc("shaders\\other", "shader", |_| {});
+        kit.write_mcc("shaders\\held", "shader", |_| {});
+        kit.write_mcc("objects\\smoke", "model", |_| {});
+        kit.write_mcc("objects\\smoke", "render_model", |tag| {
+            let mut root = tag.root_mut();
+            let mut materials = root.field_mut("materials").unwrap();
+            let mut block = materials.as_block_mut().unwrap();
+            block.add_element();
+            block.element_mut(0).unwrap().field_mut("render method").unwrap()
+                .set(blam_tags::TagFieldData::TagReference(blam_tags::TagReferenceData {
+                    group_tag_and_name: Some((rmsh, "shaders\\smoke".to_owned())),
+                }))
+                .unwrap();
+        });
+        kit.install(&mut h.app);
+        let model = kit.open(&mut h.app, opened);
+        let id = h.app.model.kits[h.app.model.active].id;
+        let mut state = crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(&model, shaders);
+        if let Some(Ok(data)) = state.data.as_mut() {
+            data.render_model_path = "objects\\smoke".to_owned();
+        }
+        state.open_material_editor_for_test();
+        h.app.model.prefs.model_setup_width = 760.0;
+        h.screen = egui::vec2(SCREEN.x, 2400.0);
+        h.app.views[id].caches.model_previews.insert(model.clone(), state);
+        (kit, model)
+    }
+
+    /// Type `input` into the Materials card's shader reference, showing
+    /// `current`, and commit it.
+    fn type_shader_reference(h: &mut Harness, current: &str, input: &str) {
+        let field = h.painted_rects.iter().find(|(text, _)| text.trim() == current).map(|(_, rect)| *rect).unwrap();
+        h.click_at(field.center());
+        press_key(h, egui::Key::A, egui::Modifiers::COMMAND);
+        h.frame(vec![egui::Event::Text(input.to_owned())]);
+        press_key(h, egui::Key::Enter, egui::Modifiers::NONE);
+        idle(h);
+    }
+
+    /// The Materials card's shader reference is the render model's own
+    /// field, with no label or type caption and its own Open, under the
+    /// dropdown, its buttons in line with the dropdown row's; no header line
+    /// of group, version and endian shows over the shader. Switching it
+    /// rewrites the render model's slot, unsaved, as switching it in the
+    /// render model's tab would, and the preview loads again, to show the
+    /// slot's new material.
+    #[test]
+    fn switching_the_cards_shader_rewrites_the_render_models_slot() {
+        let rmsh = u32::from_be_bytes(*b"rmsh");
+        let mut h = Harness::new();
+        h.app.model.prefs.expert_mode = true;
+        let (kit, model) = switch_card(&mut h, "material_editor_switch", "objects\\smoke.render_model", &[(b"rmsh", "shaders\\smoke"), (b"rmsh", "shaders\\held")]);
+        let id = h.app.model.kits[0].id;
+        let shader = kit.key("shaders\\smoke.shader");
+        frames_until(&mut h, "the shader and its reference", |h| {
+            h.app.model.kits[0].parsed_tags.contains_key(&shader) && h.painted_contains("shaders\\smoke.shader")
+        });
+        idle(&mut h);
+        assert!(!h.painted_contains("Open in Tab"), "the field's own Open");
+        let headers = h.painted_rects.iter().filter(|(text, _)| text.trim() == "Header group:").count();
+        assert_eq!(headers, 1, "only the tab's: {:?}", h.painted);
+        let field = h.painted_rects.iter().find(|(text, _)| text.trim() == "shaders\\smoke.shader").map(|(_, rect)| *rect).unwrap();
+        let caption = h.painted_rects.iter().any(|(text, rect)| text.trim() == "tag reference" && (rect.center().y - field.center().y).abs() < 8.0);
+        assert!(!caption, "no type caption on the row");
+        // The dropdown row's four buttons line up with the reference row's.
+        let actions: [egui::Rect; 4] = h.ctx.data(|data| data.get_temp(crate::app::editor::material_actions_id())).unwrap();
+        let reference_right: f32 = h
+            .ctx
+            .data(|data| data.get_temp(crate::app::editor::material_actions_id().with("reference_row_right")))
+            .unwrap();
+        assert!((actions[3].right() - reference_right).abs() < 0.5, "aligned: {:?} {reference_right}", actions[3]);
+
+        let before = h.app.views[id].caches.model_previews[&model].data.as_ref().unwrap().as_ref().unwrap().geometry_id;
+        type_shader_reference(&mut h, "shaders\\smoke.shader", "shaders\\other.shader");
+        let document = &h.app.model.kits[0].parsed_tags[&model];
+        assert!(document.dirty.is_set(), "the render model has unsaved edits");
+        let switched = document
+            .tag
+            .root()
+            .field("materials")
+            .and_then(|field| field.as_block())
+            .and_then(|block| block.element(0))
+            .and_then(|element| element.read_tag_ref_with_group("render method"));
+        assert_eq!(switched, Some((rmsh, "shaders\\other".to_owned())));
+        // Loaded again: this test's model has no geometry, so the load that
+        // replaced the page drawn says so.
+        let state = &h.app.views[id].caches.model_previews[&model];
+        let geometry = state.data.as_ref().and_then(|data| data.as_ref().ok()).map(|data| data.geometry_id);
+        assert!(geometry != Some(before), "the preview loaded again");
+        let follow = state.material_editor.as_ref().and_then(|editor| editor.follow_slot);
+        assert_eq!(follow, Some((0, before)), "shows slot 0's material once loaded");
+    }
+
+    /// Opened from its `.model`, the render model the switch rewrites is held
+    /// for the preview with no tab, as the shaders are: its edit loads the
+    /// preview again, and it stays held while it has unsaved edits.
+    #[test]
+    fn switching_a_models_shader_holds_its_render_model_without_a_tab() {
+        let mut h = Harness::new();
+        let (kit, model) = switch_card(&mut h, "material_editor_switch_hlmt", "objects\\smoke.model", &[(b"rmsh", "shaders\\smoke")]);
+        let id = h.app.model.kits[0].id;
+        let render_model = kit.key("objects\\smoke.render_model");
+        frames_until(&mut h, "the render model's slot", |h| h.painted_contains("shaders\\smoke.shader"));
+        idle(&mut h);
+        let kit_state = &h.app.model.kits[0];
+        assert!(kit_state.held_documents[&render_model].contains(&model), "held for the preview");
+        assert!(!kit_state.open_tabs.contains(&render_model), "no tab of its own");
+
+        let before = h.app.views[id].caches.model_previews[&model].data.as_ref().unwrap().as_ref().unwrap().geometry_id;
+        type_shader_reference(&mut h, "shaders\\smoke.shader", "shaders\\other.shader");
+        assert!(h.app.model.kits[0].parsed_tags[&render_model].dirty.is_set(), "the render model has unsaved edits");
+        assert!(!h.app.model.kits[0].parsed_tags[&model].dirty.is_set(), "the model itself is untouched");
+        let state = &h.app.views[id].caches.model_previews[&model];
+        let geometry = state.data.as_ref().and_then(|data| data.as_ref().ok()).map(|data| data.geometry_id);
+        assert!(geometry != Some(before), "the preview loaded again");
+
+        // Closed with the switch unsaved, the render model stays held. (The
+        // test's model has no geometry, so its reload shows no sidebar.)
+        if let Some(state) = h.app.views[id].caches.model_previews.get_mut(&model) {
+            state.material_editor = None;
+        }
+        idle(&mut h);
+        assert!(h.app.model.kits[0].held_documents.get(&render_model).is_some_and(|holders| holders.contains(&model)), "kept: it has unsaved edits");
+    }
+
+    /// A shader no slot of the render model names (a held object's) shows
+    /// its path, with an Open, not a field to switch.
+    #[test]
+    fn a_shader_the_render_model_doesnt_name_isnt_offered_to_switch() {
+        let mut h = Harness::new();
+        let (kit, _model) = switch_card(&mut h, "material_editor_unswitchable", "objects\\smoke.render_model", &[(b"rmsh", "shaders\\held")]);
+        let shader = kit.key("shaders\\held.shader");
+        frames_until(&mut h, "the shader", |h| h.app.model.kits[0].parsed_tags.contains_key(&shader));
+        idle(&mut h);
+        assert!(h.painted_contains("shaders\\held"), "its path: {:?}", h.painted);
+        assert!(!h.painted_contains("shaders\\held.shader"), "not a field: {:?}", h.painted);
+        assert!(h.painted.iter().any(|text| text.trim() == "Open"), "still opens in a tab");
+    }
+
     /// The centre of the rightmost `text` painted on `label`'s row.
     fn rightmost_on_row(h: &Harness, label: &str, text: &str) -> egui::Pos2 {
         let row = h
