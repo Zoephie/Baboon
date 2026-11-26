@@ -43,6 +43,24 @@ change at once. **Reset** unsets a token, so it inherits or follows again.
 - **Cancel**, or closing the window, puts back the colours drawn when the
   editor opened, as far back as the last save.
 
+### Contrast
+
+The editor, and Settings for the theme in use, list colour pairs that are
+hard to read: text and status colours under 4.5:1 on the backgrounds they are
+drawn on, muted text under 3:1. They are warnings; the theme still applies.
+
+### Gallery
+
+*View → Theme Gallery...*, or **Gallery** in the editor, draws one of every
+kind of widget, the text colours and a swatch of every token, in the theme
+drawn now, edits included.
+
+### Previewing
+
+Resting the pointer on a theme in the Theme menu, or in either menu under Use
+system setting, draws Baboon in it until the pointer leaves or the menu
+closes.
+
 ## Where themes live
 
 In the `themes` folder of Baboon's data directory: `%APPDATA%\Baboon\themes`

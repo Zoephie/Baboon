@@ -175,7 +175,8 @@ installed theme (`ui_kit/themes`): `table.rs` declares every token's id,
 description and value in each built-in theme, `library.rs` reads and resolves
 theme files, `rules.rs` says how unset tokens follow set ones, `state.rs`
 applies the preferences' choice and reloads it, `draft.rs` is the Theme
-Editor's draft and its saves (the window is `shell/theme_editor.rs`), and
+Editor's draft and its saves (the window is `shell/theme_editor.rs`, beside
+`shell/theme_gallery.rs`), `contrast.rs` lists the pairs to keep readable, and
 `golden.rs` checks the built-ins against the colours captured before the
 registry. Only `style.rs` asks whether the theme is dark. A test
 (`ui_kit/palette_gate.rs`) fails on a colour written as numbers, or a theme

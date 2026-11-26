@@ -4353,6 +4353,18 @@ mod tests {
                 &["Theme Editor - Light", "background", "inherited"],
             ),
             case(
+                "theme_gallery",
+                &["dialog:ThemeGalleryWindow"],
+                &["shell/theme_gallery.rs"],
+                welcome,
+                |h| {
+                    h.app
+                        .dialogs
+                        .open(super::super::ThemeGalleryWindow::default());
+                },
+                &["Theme Gallery", "Widgets", "Collapsing header", "accent"],
+            ),
+            case(
                 "settings_custom_kit_draft",
                 &["dialog:CustomEditingKitDraft"],
                 &["shell/settings.rs"],
@@ -9338,6 +9350,13 @@ mod tests {
                 h.frame(Vec::new());
             }
             h.shoot(&dir.join(name));
+            h.app
+                .dialogs
+                .open(crate::app::shell::ThemeGalleryWindow::default());
+            for _ in 0..30 {
+                h.frame(Vec::new());
+            }
+            h.shoot(&dir.join(name.replace("editor", "gallery")));
             // Cancel puts the built-in back for the next shot.
             crate::app::ui_kit::themes::install(&built_in.colors());
         }

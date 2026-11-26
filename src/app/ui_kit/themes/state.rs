@@ -4,7 +4,7 @@
 
 use super::file::Report;
 use super::library::{Fingerprint, ThemeEntry, ThemeLibrary};
-use super::{BuiltIn, install};
+use super::{BuiltIn, ThemeColors, install};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -30,6 +30,8 @@ struct Applied {
     /// Why the theme is not what is drawn: it could not be applied, or its
     /// last reload failed and the colours before it are kept.
     failed: Option<Report>,
+    /// What applying it installed, for a preview to give back.
+    colors: ThemeColors,
 }
 
 /// The theme chosen and what came of it.
@@ -40,6 +42,8 @@ pub(in crate::app) struct ThemeState {
     applied: Option<Applied>,
     last_check: Option<Instant>,
     status: Option<String>,
+    /// The theme a menu is previewing, drawn in place of the applied one.
+    previewing: Option<String>,
 }
 
 impl ThemeState {
@@ -103,6 +107,7 @@ impl ThemeState {
                     reports: resolved.reports,
                     files: fingerprinted(resolved.files),
                     failed: None,
+                    colors: resolved.colors,
                 });
             }
             Err(report) => {
@@ -121,6 +126,7 @@ impl ThemeState {
                         .map(|listed| fingerprinted(vec![listed.path.clone()]))
                         .unwrap_or_default(),
                     failed: Some(report),
+                    colors: slot.colors(),
                 });
             }
         }
@@ -160,6 +166,7 @@ impl ThemeState {
                     reports: resolved.reports,
                     files: fingerprinted(resolved.files),
                     failed: None,
+                    colors: resolved.colors,
                     ..applied
                 });
             }
@@ -194,6 +201,33 @@ impl ThemeState {
             self.library = Some((self.scan(), now));
         }
         self.library().entries()
+    }
+
+    /// Draws the theme `id` while a menu's pointer rests on it, or, given
+    /// `None`, gives back the applied theme's colours if a preview had
+    /// replaced them. A theme that cannot be resolved is not previewed.
+    pub(in crate::app) fn preview(&mut self, id: Option<&str>) {
+        match id {
+            Some(id) if self.previewing.as_deref() != Some(id) => {
+                let resolved = if BuiltIn::from_id(id).is_some() {
+                    ThemeLibrary::default().resolve(id)
+                } else {
+                    self.library().resolve(id)
+                };
+                if let Ok(resolved) = resolved {
+                    install(&resolved.colors);
+                }
+                self.previewing = Some(id.to_owned());
+            }
+            Some(_) => {}
+            None => {
+                if self.previewing.take().is_some()
+                    && let Some(applied) = &self.applied
+                {
+                    install(&applied.colors);
+                }
+            }
+        }
     }
 
     /// What the active theme reported, and the folder's own problems.

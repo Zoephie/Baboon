@@ -1,11 +1,13 @@
 # Custom themes — implementation plan
 
-**Status (2026-11-25, `main` at `750178f3`).** Phase 0 is done: Paddy built it
-in PR #131 and finished it in PR #133, which also added a second light look,
-Classic Light. Phases 1 to 4, the custom-theme feature itself, are not
-started. Phase 5 is optional. Every decision was made on 2026-11-25
-([Decisions](#decisions)), and the token naming pass was signed off the same
-day, so the plan is complete and Phase 1 can start.
+**Status (2026-11-25, branch `custom-themes`).** Every phase is built, one
+local commit each, not yet pushed or in a pull request. Phase 0 is Paddy's
+(#131, #133); Phase 1 is `269ce20e`, Phase 2 `e03b44bb`, Phase 3 `b8d6ad19`,
+Phase 4 `317f54b6`, and Phase 5 the commit after it. Where the build differs
+from the plan, the phase says so under **As built**. The running app has not
+been tried: live reload with an outside editor, the editor's feel, preview on
+hover, and everything on Windows are owed a check
+([section 5](#5-verification-outside-the-test-suite)).
 
 **Goal.** Let a user change Baboon's colours with a theme file, in the spirit
 of VS Code's theme engine: named colours with documented defaults, themes
@@ -478,7 +480,15 @@ Two things Phase 0 did beyond the plan: #131 restyled the light look (the
 warm Light, peach chrome and orange accents), and #133 kept the old grey look
 as Classic Light. Both are now built-ins.
 
-### Phase 1 — Registry behind the accessors
+### Phase 1 — Registry behind the accessors: DONE (`269ce20e`)
+
+**As built.** The module is `ui_kit/themes` (egui exports a `theme`). The
+registry has 136 tokens, not 113: Phase 1 found 24 colours the measurement
+missed (`separator`, `loading.*`, `button.border.open`, `button.destructive`,
+`slider.rail.border`, `control.well`, `code.inline.background`,
+`status.error.border`, `material.*` and `syntax.*`), and merged
+`tab.focus.border` into `focus.border`. The golden gate compares every
+built-in's colours and its whole `Visuals` against the values captured before.
 
 **Purpose.** Replace the two flags and the `LightTheme` enum with resolved
 colours while all three built-ins stay pixel-identical.
@@ -521,7 +531,7 @@ colours while all three built-ins stay pixel-identical.
 **Risk.** Low. No user-visible change is intended, and the golden table says
 whether there is one. The loading art is the one piece checked by eye.
 
-### Phase 2 — Theme files
+### Phase 2 — Theme files: DONE (`e03b44bb`)
 
 **Purpose.** The feature a user sees: drop a file in a folder, pick it, edit it
 live.
@@ -568,7 +578,16 @@ through the rename table.
 handling and the Open Folder button need a Windows check that cannot be done
 on this machine; they reuse the code paths prefs already use.
 
-### Phase 3 — Rules
+### Phase 3 — Rules: DONE (`b8d6ad19`)
+
+**As built.** 43 tokens carry a rule; rules may only read tokens declared
+before them, so they resolve in one pass. The rule forms are reference, tint,
+shade, mix and alpha (alpha is unused by the table so far). The material
+editor, diff, terminal and syntax groups were left without rules on purpose:
+their built-in values are hand-picked per surface and a fitted rule would move
+them when a theme changes the page. `opaque_widget_fills` needed no decision:
+it already keys on the appearance, so every light theme gets it. The examples
+are in `docs/theme-examples`.
 
 **Purpose.** An override carries its dependents with it: "Baboon Dark with an
 orange accent" is one line.
@@ -602,7 +621,15 @@ orange accent" is one line.
 **Risk.** Medium. Which tokens follow an override is a matter of looking at
 them. It needs your eye on the example themes in the running app.
 
-### Phase 4 — Theme editor
+### Phase 4 — Theme editor: DONE (`317f54b6`)
+
+**As built.** Search is by id, description and group, not alias: aliases are
+accessor names in `style.rs`, which the registry does not record. The window
+is `shell/theme_editor.rs`, the draft and its saves `ui_kit/themes/draft.rs`.
+Save edits the colour entries in place and writes the file whole only when its
+layout does not allow that, then checks the result reads back as the draft.
+Save As chooses the new theme. The editor opens on the theme in use; to edit
+another, choose it first.
 
 **Purpose.** Edit a theme inside Baboon and see it live (decision 4).
 
@@ -635,7 +662,14 @@ them. It needs your eye on the example themes in the running app.
 is the part tests can cover, the editing feel is the part only the running app
 shows.
 
-### Phase 5 — Optional
+### Phase 5 — Optional: DONE
+
+**As built.** All three. The gallery is `shell/theme_gallery.rs` (View menu
+and the editor's Gallery button). Contrast pairs are `ui_kit/themes/contrast.rs`:
+text and status colours at 4.5:1, muted text at 3:1, shown in the editor and
+in Settings. `link.text` and `field.help.text` are left out, because the light
+built-ins draw them at 2.2 to 2.6:1 on the page; that is worth a look on its
+own. Preview on hover covers the Theme menu and the two system menus.
 
 Each item is independent and none is needed for the feature to be useful.
 
@@ -698,6 +732,10 @@ All made on 2026-11-25 unless dated otherwise.
 ---
 
 ## Appendix A — Token table
+
+*This is the table as planned. The registry as built, with 136 tokens, their
+values and their rules, is generated into [docs/themes.md](themes.md); Phase 1
+says what changed.*
 
 Every colour source in the code, measured at `750178f3` by calling each
 accessor and reading `foundation_visuals()` under each built-in. The built-ins

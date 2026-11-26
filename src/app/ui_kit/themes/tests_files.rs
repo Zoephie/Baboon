@@ -455,3 +455,30 @@ fn the_example_themes_read_cleanly() {
         "Ember's accent carries its dependents"
     );
 }
+
+/// A previewed theme is drawn until the preview ends, then the applied
+/// theme's colours come back; a theme that cannot be resolved is not drawn.
+#[test]
+fn a_preview_gives_back_the_applied_colours() {
+    let _lock = super::tests::INSTALL_LOCK.lock().unwrap();
+    let before = installed();
+    let mut state = ThemeState::new(None);
+    let now = std::time::Instant::now();
+    state.reload_with(ThemeLibrary::from_texts(&[("broken", "{ nope")]), now);
+    state.apply("baboon-dark", BuiltIn::Dark, now);
+    state.preview(Some("baboon-light"));
+    assert_eq!(installed(), BuiltIn::Light.colors());
+    state.preview(Some("broken"));
+    assert_eq!(
+        installed(),
+        BuiltIn::Light.colors(),
+        "a broken theme draws nothing"
+    );
+    state.preview(None);
+    assert_eq!(installed(), BuiltIn::Dark.colors());
+    // Ending no preview installs nothing: the Theme Editor's draft stays.
+    install(&BuiltIn::ClassicLight.colors());
+    state.preview(None);
+    assert_eq!(installed(), BuiltIn::ClassicLight.colors());
+    install(&before);
+}

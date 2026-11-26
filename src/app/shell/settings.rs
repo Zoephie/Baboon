@@ -2298,6 +2298,7 @@ fn draw_theme_menu(
     salt: &str,
     entries: &[crate::app::ui_kit::themes::library::ThemeEntry],
     id: &mut String,
+    hovered: &mut Option<String>,
 ) {
     crate::app::ui_kit::ValueComboBox::from_id_salt(salt)
         .width(160.0)
@@ -2305,10 +2306,11 @@ fn draw_theme_menu(
         .show_ui(ui, |ui| {
             for entry in entries {
                 ui.add_enabled_ui(!entry.broken, |ui| {
-                    if ui
-                        .selectable_label(*id == entry.id, theme_label(entry))
-                        .clicked()
-                    {
+                    let response = ui.selectable_label(*id == entry.id, theme_label(entry));
+                    if response.hovered() {
+                        *hovered = Some(entry.id.clone());
+                    }
+                    if response.clicked() {
                         *id = entry.id.clone();
                     }
                 });
@@ -2326,6 +2328,9 @@ fn draw_theme_settings(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
     // theme in use checked for edits.
     ui.ctx().request_repaint_after(themes::state::RELOAD_CHECK);
     let entries = with_state(|state| state.entries(now));
+    // The theme under the pointer in an open menu, drawn until the menu
+    // closes or the pointer leaves it.
+    let mut hovered: Option<String> = None;
     let prefs = &mut s.prefs;
     settings_row(
         ui,
@@ -2356,7 +2361,11 @@ fn draw_theme_settings(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
                     for entry in &entries {
                         ui.add_enabled_ui(!entry.broken, |ui| {
                             let chosen = !prefs.follow_system_theme && current == entry.id;
-                            if ui.selectable_label(chosen, theme_label(entry)).clicked() {
+                            let response = ui.selectable_label(chosen, theme_label(entry));
+                            if response.hovered() {
+                                hovered = Some(entry.id.clone());
+                            }
+                            if response.clicked() {
                                 // A theme sets the slot of its own appearance.
                                 let dark =
                                     entry.appearance.is_some_and(themes::Appearance::is_dark);
@@ -2378,11 +2387,24 @@ fn draw_theme_settings(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
         // between.
         settings_row(ui, "System themes", "Light, then dark.", 330.0, |ui| {
             ui.horizontal(|ui| {
-                draw_theme_menu(ui, "settings_light_theme", &entries, &mut prefs.light_theme);
-                draw_theme_menu(ui, "settings_dark_theme", &entries, &mut prefs.dark_theme);
+                draw_theme_menu(
+                    ui,
+                    "settings_light_theme",
+                    &entries,
+                    &mut prefs.light_theme,
+                    &mut hovered,
+                );
+                draw_theme_menu(
+                    ui,
+                    "settings_dark_theme",
+                    &entries,
+                    &mut prefs.dark_theme,
+                    &mut hovered,
+                );
             });
         });
     }
+    with_state(|state| state.preview(hovered.as_deref()));
     let folder = themes::state::themes_folder();
     settings_row(ui, "Theme files", "", 360.0, |ui| {
         ui.horizontal(|ui| {
@@ -2407,6 +2429,23 @@ fn draw_theme_settings(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
             }
         });
     });
+    let warnings = themes::contrast::warnings(&themes::installed());
+    if !warnings.is_empty() {
+        settings_card(ui, |ui| {
+            ui.label(
+                RichText::new(format!(
+                    "{} colour pair{} in the theme in use {} hard to read:",
+                    warnings.len(),
+                    if warnings.len() == 1 { "" } else { "s" },
+                    if warnings.len() == 1 { "is" } else { "are" },
+                ))
+                .color(settings_warning_text()),
+            );
+            for warning in &warnings {
+                ui.label(RichText::new(warning.to_string()).color(subtle_dark()));
+            }
+        });
+    }
     let problems = with_state(|state| state.problems());
     if !problems.is_empty() {
         settings_card(ui, |ui| {

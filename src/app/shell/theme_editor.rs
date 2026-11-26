@@ -149,6 +149,13 @@ fn draw_editor(
                 .desired_width(260.0),
         );
     });
+    let warnings = themes::contrast::warnings(draft.colors());
+    if !warnings.is_empty() {
+        ui.label(RichText::new("Hard to read:").color(settings_warning_text()));
+        for warning in &warnings {
+            ui.label(RichText::new(format!("  {warning}")).color(settings_warning_text()));
+        }
+    }
     ui.add_space(4.0);
 
     if let Some(pick) = picking {
@@ -278,6 +285,15 @@ fn draw_editor(
             }
             if ui.button("Save As...").clicked() {
                 *save_as = Some(format!("{} (custom)", draft.name()));
+            }
+            if ui
+                .button("Gallery")
+                .on_hover_text("One of everything, in the theme as edited")
+                .clicked()
+            {
+                cx.send(crate::app::context::Command::OpenDialog(Box::new(
+                    super::ThemeGalleryWindow::default(),
+                )));
             }
             let label = if draft.is_dirty() { "Cancel" } else { "Close" };
             if ui.button(label).clicked() {
