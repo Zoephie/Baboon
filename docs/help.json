@@ -188,7 +188,8 @@
             {
               "kind": "bullets",
               "items": [
-                "Shader, material, and material_shader tags use a Guerilla-style parameter grid instead of only the raw field tree.",
+                "Shader and material tags use a Guerilla-style parameter grid instead of only the raw field tree. Halo CE shaders keep the field tree, and material_shader tags show their parameters read-only.",
+                "A Halo 4, Halo 2 Anniversary or Halo 5 material lists the parameters its material shader declares, with the shader's own names and groups: override a default to give the material its own value, and clear it to go back. Halo 5 tags keep their parameters as they are; only values that are there can be changed.",
                 "Baboon resolves render-method definitions and options, then caches them across tags.",
                 "Bitmap, scalar, integer, color, and category parameters show their defaults and edit inline.",
                 "Bitmap-reference rows can show thumbnails with a larger hover preview.",

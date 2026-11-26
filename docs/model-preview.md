@@ -2,7 +2,7 @@ Open a model, object, render model, collision model, physics model, structure BS
 
 ## Keeping up with saved tags
 
-The preview draws its shaders, bitmaps, render model and the rest from the files on disk. When one of them is saved (in another tab, say a shader you are tuning) the preview loads again on its own, keeping its camera, picks and clip, with the old picture up until the new one is ready. The same happens when one changes outside Baboon, for example a bitmap reimported by Tool. Unsaved edits to those other tags show only with **View > Show Unsaved Edits**; otherwise they appear once saved. A preview in a background tab catches up when it is shown. See [File Change Monitoring](file-change-monitoring.md).
+The preview draws its shaders, bitmaps, render model and the rest from the files on disk. The shaders open in its [Material Editor](#material-editor) are the exception: their edits always show, as they are made. When one of them is saved (in another tab, say a shader you are tuning) the preview loads again on its own, keeping its camera, picks and clip, with the old picture up until the new one is ready. The same happens when one changes outside Baboon, for example a bitmap reimported by Tool. Unsaved edits to those other tags show only with **View > Show Unsaved Edits**; otherwise they appear once saved. A preview in a background tab catches up when it is shown. See [File Change Monitoring](file-change-monitoring.md).
 
 ## Moving around
 
@@ -12,6 +12,8 @@ The preview draws its shaders, bitmaps, render model and the rest from the files
 - **View > Camera** has the zoom, **Perspective Projection** (clear it for a flat orthographic view) and **Reset View**.
 
 ## The header
+
+**Material Editor**, right of **Refresh Model**, opens the [Material Editor](#material-editor) over the preview, for a game whose materials the preview draws (Halo CE, Halo 2, Halo 3, ODST, Reach and Halo 4).
 
 The buttons at the left of the header show or hide each part of the model: the **Render Model**, **Collision Model**, **Physics Model** and **Armature**. A button takes its tag icon's colour while its part is shown. A model, or an object such as a biped or vehicle, gets buttons for the parts its `.model` names; a part with nothing to draw is greyed out. Halo CE objects have no physics model, so they get no Physics Model button. Hover a joint of the armature to see its name.
 
@@ -69,3 +71,14 @@ A change that loads the model again (a level of detail, the shading, a weapon) c
 - **Weapons** picks what a unit holds. The held weapon's own regions follow its dropdown, as rows like the Permutations card's.
 - **Effects** (Game Shaders) has a row per effect an event plays, with a button to play it. In Halo CE it starts with Scale A and Scale B, what the effects are played at, and a Fire row per trigger of a weapon.
 - **Object Functions** (Game Shaders) has a slider per input the object's functions read, and per function it makes, its value in the box at the right. A function's slider shows what it makes until you tick its box, which sets it as a script would. A greyed-out row is one nothing in the preview reads. In Halo CE the function rows are its four outputs, A out to D out, named for their use; they show what the function makes. A held object's functions follow under its name.
+
+## Material Editor
+
+The **Material Editor** button in the header opens a window over the preview for editing the shaders the model draws with, and seeing each change at once. Press it again, or close the window, to put it away.
+
+- **The dropdown** lists each shader once, however many parts draw it: those of the model, its LOD model and what it holds. Where else a shader draws follows its name, as `visor (assault_rifle)`; an overlay, a shader drawn over its object rather than on parts of its own (Halo CE's modifier shader, Halo 2's shield and hologram shaders), says `overlay`. Type to search, or step through with the arrows either side. **While the pointer is over a row, the viewport lights every part that shader covers** in amber with white edges, over whatever shading is picked.
+- **Under it** the picked shader is edited as in its own tab: the parameter grid (or, for a Halo CE shader, its fields), with the same colour picker, function editor and undo. Its path is under the dropdown; **Open in Tab** opens it in a tab of its own, with its edits.
+- **Edits show at once.** Each one redraws that shader's parts in the preview, without loading the model again. A colour picker or function editor opened from the window shows what it is picking as it is dragged, before **OK** writes it; **Cancel** puts the preview back. Edits show under **Textured** and **Game Shaders** shading.
+- **Nothing is written until you save.** The shader stays open, unsaved, until you save it or discard its edits; it is the same tag its own tab shows, so edits made in either place are in both. **Modified**, at the bottom of the window, lists each shader with unsaved edits: **Save** writes it, **Reset** discards its edits (after a second click, and saying so when its open tab loses them too), and **Save All** and **Reset All** do so for every one. A shader that can't be saved here (a read-only build's) says why.
+- Closing the model's tab, the workspace or Baboon asks about the shaders with unsaved edits, as it asks about open tabs.
+
