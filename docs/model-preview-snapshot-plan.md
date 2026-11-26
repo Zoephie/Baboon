@@ -282,11 +282,7 @@ All on the headless GL harness, which renders real kit models:
 
 - **macOS:** arboard writes an `NSImage` with alpha. Pastes into Preview,
   Photoshop and Discord keep transparency. To be confirmed by hand.
-- **Windows:** arboard writes a DIB with alpha, and some apps drop the alpha of
-  a pasted DIB. Check which formats arboard 3.6 puts on the clipboard, by
-  reading its source; nothing here can run it on Windows. If there is no PNG
-  format, add one (`RegisterClipboardFormat("PNG")`) through `clipboard-win`,
-  which arboard already uses.
+- **Windows:** arboard 3.6 writes both a `CF_DIBV5` and a registered `"PNG"` format, PNG first (its `set_image`, read from its source), so apps that read PNG keep the transparency. Nothing to add. Not tried on a Windows machine.
 - **Linux:** the kept-alive clipboard above.
 
 ## Decided (owner, 2026-11-26)
