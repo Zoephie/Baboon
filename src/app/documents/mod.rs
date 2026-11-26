@@ -29,6 +29,7 @@ pub(in crate::app) use saving::ordered_unique_keys;
 pub(in crate::app) mod close;
 pub(in crate::app) use close::SaveChangesPromptAction;
 pub(in crate::app) mod undo;
+pub(in crate::app) use undo::claim_history_target;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
 

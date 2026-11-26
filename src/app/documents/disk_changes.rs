@@ -216,7 +216,8 @@ impl Baboon {
         }
     }
 
-    /// Start a check of one kit's open loose tags against their files.
+    /// Start a check of one kit's open loose tags (tabs and held documents)
+    /// against their files.
     fn check_open_tags_in(&mut self, index: usize, ctx: &egui::Context) {
         // Baboon's own move is renaming files under open tabs; it reloads
         // them itself when it ends, and the check runs after.
@@ -231,9 +232,11 @@ impl Baboon {
         if !matches!(source.source, TagSource::LooseFolder { .. }) {
             return;
         }
+        // Held documents (a Material Editor's shaders) are checked as tabs are.
         let files: Vec<(String, PathBuf, DiskStamp)> = kit
             .open_tabs
             .iter()
+            .chain(kit.held_documents.keys().filter(|key| !kit.open_tabs.contains(key)))
             .filter_map(|key| {
                 let stamp = kit.parsed_tags.get(key)?.disk?;
                 let TagEntryLocation::LooseFile(path) = &kit.entry_for_key(key)?.location else {

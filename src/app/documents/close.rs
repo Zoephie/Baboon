@@ -753,19 +753,36 @@ impl Model {
         }
     }
 
+    /// The documents a close would drop, which the save prompt asks about:
+    /// the tabs it closes, then the documents those held (a model's Material
+    /// Editor shaders). Closing the app or the kit drops every document,
+    /// with a tab or without one: a dirty one left out of the prompt kept
+    /// the app from quitting, as `execute_close_action` still found it.
     pub(in crate::app) fn close_action_tag_keys(&self, action: &PendingCloseAction) -> Vec<String> {
+        let kit = &self.kits[self.active];
+        let tabless = |held: Vec<String>| held.into_iter().filter(|key| !kit.open_tabs.contains(key)).collect::<Vec<_>>();
         match action {
-            PendingCloseAction::CloseApp | PendingCloseAction::CloseAllTabs => {
-                ordered_unique_keys(self.kits[self.active].open_tabs.iter())
-            }
-            PendingCloseAction::CloseTabGroup {kit,keys,..} => {
-                if self.kits[self.active].id==*kit {ordered_unique_keys(keys.iter())}else{Vec::new()}
-            }
-            PendingCloseAction::CloseTab(key) => vec![key.clone()],
             // `request_close_action` has already made this kit active, so the
-            // active-kit lookups above address the right documents.
-            PendingCloseAction::CloseKit(_) => {
-                ordered_unique_keys(self.kits[self.active].open_tabs.iter())
+            // active-kit lookups here address the right documents.
+            PendingCloseAction::CloseApp | PendingCloseAction::CloseKit(_) => {
+                let mut rest: Vec<&String> = kit.parsed_tags.keys().filter(|key| !kit.open_tabs.contains(key)).collect();
+                rest.sort();
+                ordered_unique_keys(kit.open_tabs.iter().chain(rest))
+            }
+            PendingCloseAction::CloseAllTabs => {
+                let held = tabless(kit.documents_held_only_by(|_| true));
+                ordered_unique_keys(kit.open_tabs.iter().chain(held.iter()))
+            }
+            PendingCloseAction::CloseTabGroup {kit: group_kit,keys,..} => {
+                if kit.id != *group_kit {
+                    return Vec::new();
+                }
+                let held = tabless(kit.documents_held_only_by(|holder| keys.iter().any(|key| key == holder)));
+                ordered_unique_keys(keys.iter().chain(held.iter()))
+            }
+            PendingCloseAction::CloseTab(key) => {
+                let held = tabless(kit.documents_held_only_by(|holder| holder == key));
+                ordered_unique_keys(std::iter::once(key).chain(held.iter()))
             }
         }
     }
@@ -897,6 +914,138 @@ mod tests {
         edit_field(&mut app, &key, DISTANCE, "12.5");
         assert!(is_dirty(&app, &key));
         (kit, app, key, other)
+    }
+
+    // Documents held without a tab (a model's Material Editor shaders).
+
+    fn prompt_keys(app: &Baboon) -> Vec<String> {
+        app.dialogs
+            .get::<SaveChangesPrompt>()
+            .map(|prompt| prompt.dirty_tags.iter().map(|entry| entry.tag_id.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// A held document's load lands with no tab, where any other tab-less
+    /// load is dropped.
+    #[test]
+    fn a_held_document_loads_without_a_tab_and_an_unheld_one_does_not() {
+        let kit = kit("held-load");
+        let mut app = app();
+        kit.install(&mut app);
+        let model = kit.open(&mut app, MODEL);
+        let held = kit.hold(&mut app, OTHER, &model);
+        assert!(!tab_open(&app, &held));
+        assert!(app.model.kits[0].parsed_tags.contains_key(&held));
+
+        // The disagreeing case: the same load, held by nothing, is dropped.
+        app.kit_and_view(0).drop_document(&held);
+        app.load_tag_in(0, held.clone(), ctx(), false);
+        drain_messages(&mut app, std::time::Duration::from_millis(300));
+        assert!(!app.model.kits[0].parsed_tags.contains_key(&held), "an unheld tab-less load is dropped");
+    }
+
+    /// Closing the model's tab asks about the edits to what it holds, and
+    /// Don't Save drops them with it.
+    #[test]
+    fn closing_a_holder_asks_about_its_held_edits_and_drops_them() {
+        let kit = kit("held-close-tab");
+        let mut app = app();
+        kit.install(&mut app);
+        let model = kit.open(&mut app, MODEL);
+        let held = kit.hold(&mut app, OTHER, &model);
+        edit_field(&mut app, &held, DISTANCE, "3");
+
+        app.request_close_action(PendingCloseAction::CloseTab(model.clone()), &ctx());
+        assert_eq!(prompt_keys(&app), vec![held.clone()], "the held edits are asked about with the tab");
+
+        PromptDriver::new().click(&mut app, "Don't Save");
+        assert!(!tab_open(&app, &model));
+        assert!(!app.model.kits[0].parsed_tags.contains_key(&held), "the held document went with its holder");
+        assert!(app.model.kits[0].held_documents.is_empty());
+    }
+
+    /// A held document with a tab of its own outlives its holder, and isn't
+    /// asked about when only the holder closes.
+    #[test]
+    fn a_held_document_with_its_own_tab_stays_when_its_holder_closes() {
+        let kit = kit("held-with-tab");
+        let mut app = app();
+        kit.install(&mut app);
+        let other = kit.open(&mut app, OTHER);
+        let model = kit.open(&mut app, MODEL);
+        app.model.kits[0].hold_document(&other, &model);
+        edit_field(&mut app, &other, DISTANCE, "3");
+
+        app.request_close_action(PendingCloseAction::CloseTab(model.clone()), &ctx());
+        assert!(app.dialogs.get::<SaveChangesPrompt>().is_none(), "the tab's edits are its own tab's business");
+        assert!(!tab_open(&app, &model));
+        assert!(is_dirty(&app, &other), "the document and its edits stay with its tab");
+        assert!(app.model.kits[0].held_documents.is_empty(), "but it is held no longer");
+    }
+
+    /// Quitting lists a dirty document with no tab. Left out, it kept the
+    /// app from closing: the prompt had nothing to ask and the close then
+    /// refused over the edits it never listed.
+    #[test]
+    fn closing_the_app_lists_and_saves_a_dirty_tab_less_document() {
+        let kit = kit("held-close-app");
+        let mut app = app();
+        kit.install(&mut app);
+        let model = kit.open(&mut app, MODEL);
+        let held = kit.hold(&mut app, OTHER, &model);
+        edit_field(&mut app, &held, DISTANCE, "7.5");
+
+        app.request_close_action(PendingCloseAction::CloseApp, &ctx());
+        assert_eq!(prompt_keys(&app), vec![held.clone()]);
+        PromptDriver::new().click(&mut app, "Save");
+        assert_eq!(distance_on_disk(&kit, OTHER), 7.5);
+        assert!(app.dialogs.get::<SaveChangesPrompt>().is_none());
+        assert!(!app.model.any_kit_dirty());
+        assert_ne!(app.model.status, "Could not close while unsaved workspace data remains");
+    }
+
+    /// Closing every tab asks about held edits too; a clean held document
+    /// is not listed.
+    #[test]
+    fn closing_all_tabs_lists_dirty_held_documents_only() {
+        let kit = kit("held-close-all");
+        let mut app = app();
+        kit.install(&mut app);
+        let model = kit.open(&mut app, MODEL);
+        let held = kit.hold(&mut app, OTHER, &model);
+        app.request_close_action(PendingCloseAction::CloseAllTabs, &ctx());
+        assert!(app.dialogs.get::<SaveChangesPrompt>().is_none(), "clean: nothing to ask");
+        assert!(app.model.kits[0].parsed_tags.is_empty());
+
+        let model = kit.open(&mut app, MODEL);
+        let held_again = kit.hold(&mut app, OTHER, &model);
+        assert_eq!(held, held_again);
+        edit_field(&mut app, &held, DISTANCE, "2");
+        app.request_close_action(PendingCloseAction::CloseAllTabs, &ctx());
+        assert_eq!(prompt_keys(&app), vec![held]);
+    }
+
+    /// Undo acts on a document a window claims, not the selected tab.
+    #[test]
+    fn undo_acts_on_the_claimed_document_then_the_selected_tab() {
+        let kit = kit("held-undo");
+        let mut app = app();
+        kit.install(&mut app);
+        let model = kit.open(&mut app, MODEL);
+        let held = kit.hold(&mut app, OTHER, &model);
+        edit_field(&mut app, &model, DISTANCE, "4");
+        edit_field(&mut app, &held, DISTANCE, "5");
+
+        let kit_id = app.model.kits[0].id;
+        crate::app::documents::claim_history_target(&app.egui_ctx, kit_id, &held);
+        app.undo_current_tag();
+        assert!(!is_dirty(&app, &held), "the claimed document stepped back");
+        assert!(is_dirty(&app, &model), "the selected tab did not");
+
+        // The disagreeing case: unclaimed, Undo is the selected tab's.
+        crate::app::documents::claim_history_target(&app.egui_ctx, kit_id, "nothing open");
+        app.undo_current_tag();
+        assert!(!is_dirty(&app, &model));
     }
 
     #[test]

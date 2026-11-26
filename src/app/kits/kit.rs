@@ -72,6 +72,13 @@ pub(in crate::app) struct Kit {
     /// The open document keys in tab order: re-derived from the view's
     /// `tag_tree`, which owns the layout, by [`Baboon::sync_open_tabs`].
     pub(in crate::app) open_tabs: Vec<String>,
+    /// Documents kept open without a tab, by key, with the keys of what holds
+    /// them: the Model Preview tags whose Material Editor opened a shader.
+    /// A held document is a document the user is working on, as a tab's is:
+    /// its load lands, its file is checked for changes, and closing what
+    /// holds it (or the kit, or the app) asks about its unsaved edits.
+    /// Released when its last holder is dropped ([`KitMut::drop_document`]).
+    pub(in crate::app) held_documents: HashMap<String, std::collections::BTreeSet<String>>,
 
     // --- Source generation and index state ---
     /// This kit's background index work. It lived on the app, shared by every
@@ -141,6 +148,7 @@ impl Kit {
             selected_key: None,
             current_pane: None,
             open_tabs: Vec::new(),
+            held_documents: HashMap::new(),
             index_jobs: IndexJobs::default(),
             generation: 0,
             source_session: 0,
@@ -166,6 +174,34 @@ impl Kit {
             },
             project: KitProject::default(),
         }
+    }
+
+    /// Whether the document at `key` belongs to something the user has open:
+    /// a tab, or a holder such as a Material Editor. A load for a key with
+    /// neither is dropped when it lands.
+    pub(in crate::app) fn document_is_wanted(&self, key: &str) -> bool {
+        self.open_tabs.iter().any(|tab| tab == key) || self.held_documents.contains_key(key)
+    }
+
+    /// Hold the document at `key` open for `holder`, with or without a tab.
+    pub(in crate::app) fn hold_document(&mut self, key: &str, holder: &str) {
+        self.held_documents
+            .entry(key.to_owned())
+            .or_default()
+            .insert(holder.to_owned());
+    }
+
+    /// The documents held only by holders `closing` names: closing those
+    /// leaves them with nothing holding them.
+    pub(in crate::app) fn documents_held_only_by(&self, closing: impl Fn(&str) -> bool) -> Vec<String> {
+        let mut keys: Vec<String> = self
+            .held_documents
+            .iter()
+            .filter(|(_, holders)| holders.iter().all(|holder| closing(holder)))
+            .map(|(key, _)| key.clone())
+            .collect();
+        keys.sort();
+        keys
     }
 
     /// The pending-folder set in the shape `build_tree_with_folders` wants.

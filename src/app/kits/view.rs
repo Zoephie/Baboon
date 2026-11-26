@@ -274,6 +274,34 @@ impl<'a> KitMut<'a> {
     /// only the delete path dropped the model preview, whose geometry and
     /// textures therefore outlived every closed tab.
     pub(in crate::app) fn drop_document(&mut self, key: &str) {
+        // What `key` held goes with it, unless something else still holds it
+        // or it has a tab of its own. Worked as a queue: a held document can
+        // hold documents too.
+        let mut dropping = vec![key.to_owned()];
+        while let Some(key) = dropping.pop() {
+            self.kit.held_documents.remove(&key);
+            for holders in self.kit.held_documents.values_mut() {
+                holders.remove(&key);
+            }
+            let released: Vec<String> = self
+                .kit
+                .held_documents
+                .iter()
+                .filter(|(_, holders)| holders.is_empty())
+                .map(|(held, _)| held.clone())
+                .collect();
+            for held in released {
+                self.kit.held_documents.remove(&held);
+                if !self.kit.open_tabs.iter().any(|tab| tab == &held) {
+                    dropping.push(held);
+                }
+            }
+            self.forget_document(&key);
+        }
+    }
+
+    /// Everything [`Self::drop_document`] forgets for one key.
+    fn forget_document(&mut self, key: &str) {
         self.kit.parsed_tags.remove(key);
         self.kit.loading_tags.remove(key);
         self.kit.disk.forget(key);
@@ -297,6 +325,12 @@ impl<'a> KitMut<'a> {
             .chain(self.view.find_filter_applied.keys())
             .chain(self.view.browser.folder_browsers.keys())
             .filter(|key| Some(key.as_str()) != keep)
+            // What the kept document holds stays with it.
+            .filter(|key| {
+                keep.is_none_or(|keep| {
+                    self.kit.held_documents.get(key.as_str()).is_none_or(|holders| !holders.contains(keep))
+                })
+            })
             .cloned()
             .collect();
         for key in &keys {
@@ -307,10 +341,13 @@ impl<'a> KitMut<'a> {
         match keep {
             None => self.view.edit_buffers.clear(),
             Some(keep) => {
-                let prefix = format!("{keep}|");
+                let kept: Vec<String> = std::iter::once(keep.to_owned())
+                    .chain(self.kit.held_documents.keys().cloned())
+                    .map(|key| format!("{key}|"))
+                    .collect();
                 self.view
                     .edit_buffers
-                    .retain(|draft, _| draft.starts_with(&prefix));
+                    .retain(|draft, _| kept.iter().any(|prefix| draft.starts_with(prefix.as_str())));
             }
         }
     }

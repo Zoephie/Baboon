@@ -246,6 +246,21 @@ impl LooseKit {
     }
 }
 
+impl LooseKit {
+    /// Open the tag at `rel_with_extension` as a document `holder` holds,
+    /// with no tab, as a Material Editor opens a shader, and wait for it.
+    pub(in crate::app) fn hold(&self, app: &mut Baboon, rel_with_extension: &str, holder: &str) -> String {
+        let key = self.key(rel_with_extension);
+        let active = app.model.active;
+        app.model.kits[active].hold_document(&key, holder);
+        app.load_tag_in(active, key.clone(), ctx(), false);
+        pump_until(app, &format!("{rel_with_extension} to load as a held document"), |app| {
+            app.model.kits[app.model.active].parsed_tags.contains_key(&key)
+        });
+        key
+    }
+}
+
 impl Drop for LooseKit {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.base);

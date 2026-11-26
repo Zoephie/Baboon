@@ -253,6 +253,14 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, view: &mut KitView, old: &
         kit.loading_tags.insert(new.to_owned());
     }
     kit.disk.rekey(old, new);
+    // Held documents follow the rename, as held and as holder: a model's
+    // Material Editor keeps its shaders when either is renamed.
+    move_key(&mut kit.held_documents, old, new);
+    for holders in kit.held_documents.values_mut() {
+        if holders.remove(old) {
+            holders.insert(new.to_owned());
+        }
+    }
 
     // Half-typed field values are dropped rather than carried. A draft is a
     // value the user is mid-way through typing into a specific document, and
@@ -1015,6 +1023,7 @@ mod tests {
             // Follows `selected_key` at the next sync.
             current_pane: _,
             open_tabs: _,
+            held_documents: _,
             keywords: _,
 
             // Dropped or invalidated by it, deliberately.
