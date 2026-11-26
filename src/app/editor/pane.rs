@@ -554,6 +554,7 @@ pub(in crate::app) fn draw_tag_body(
             model_preview,
             &mut model_setup_width,
             cx.model.prefs.expert_mode,
+            live_preview.is_none(),
             &mut edit_context,
         );
         if crate::app::editor::string_list::supports_group(entry.group_tag) {
@@ -662,7 +663,7 @@ pub(in crate::app) fn draw_tag_body(
     // the field renderers, which are shared by every pane and know no kit:
     // they are stamped with this pane's here.
     if let Some(state) = tag_reference_picker {
-        cx.open_dialog(TagReferencePickerWindow { state, kit: kit_id });
+        cx.open_dialog(TagReferencePickerWindow { state, kit: kit_id, shader_switch: None });
     }
     if let Some(mut confirm) = block_confirm {
         confirm.kit = Some(kit_id);
@@ -709,9 +710,9 @@ pub(in crate::app) fn draw_tag_body(
         bitmap_hover_requests,
         row_command,
     })));
-    // Last, with the view free again: a model's Material Editor, which draws
-    // its shader with this same function.
-    draw_material_editor_window(cx, kit_index, entry, scope, window_inputs, view, editor);
+    // Last, with the view free again: a model's Material Editor, in the room
+    // its sidebar left, which draws its shader with this same function.
+    draw_material_editor_section(cx, ui, kit_index, entry, scope, window_inputs, view, editor);
 }
 
 /// The definitions a kit's tags are compared with: a loose kit's own, else

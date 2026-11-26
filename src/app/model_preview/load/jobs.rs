@@ -481,8 +481,12 @@ impl Baboon {
         // What this load reads, from scratch: the last one's list described
         // the model being replaced.
         state.reads = crate::core::source::reads::ReadFiles::with_edits(unsaved);
-        for (_, _, file) in &held {
-            if let Some(file) = file {
+        // The shaders the live path keeps up to date; a held render model is
+        // read from its edits, and its changes load the preview again.
+        let shaders: std::collections::HashSet<&String> =
+            state.material_live.documents.values().filter_map(|document| document.as_ref().ok()).collect();
+        for (document, _, file) in &held {
+            if let (Some(file), true) = (file, shaders.contains(document)) {
                 state.reads.mark_live(file);
             }
         }

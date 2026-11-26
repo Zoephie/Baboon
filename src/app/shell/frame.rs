@@ -4060,27 +4060,6 @@ mod tests {
                 &["smoke.render_model", "Model Preview"],
             ),
             case(
-                "material_editor",
-                &[],
-                &["editor/material_editor.rs"],
-                |h| {
-                    let model = render_model_tag();
-                    pane_kit(h, fixture::GAME, "objects\\smoke.render_model", &model);
-                },
-                |h| {
-                    let model = render_model_tag();
-                    let key = fixture::open_document(&mut h.app, "objects\\smoke.render_model", model);
-                    let kit = &mut h.app.model.kits[h.app.model.active];
-                    let mut state = crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(
-                        &key,
-                        &[(b"rmsh", "objects\\smoke\\shaders\\body"), (b"rmsh", "objects\\smoke\\shaders\\visor")],
-                    );
-                    state.material_editor = Some(Default::default());
-                    h.app.views[kit.id].caches.model_previews.insert(key, state);
-                },
-                &["Material Editor — smoke.render_model", "body"],
-            ),
-            case(
                 "pane_function_rows",
                 &[],
                 &[],
@@ -4549,6 +4528,7 @@ mod tests {
                             allowed_groups: vec![u32::from_be_bytes(*b"hlmt")],
                             search: String::new(),
                         },
+                        shader_switch: None,
                         kit,
                     });
                 },
@@ -5953,12 +5933,13 @@ mod tests {
         }
     }
 
-    /// The Material Editor opens from the preview's header, right of Refresh
-    /// Model. It opens the shader the model draws with as a document of its
-    /// own, with no tab, held for the preview, and draws it; closed, it lets
-    /// go of it.
+    /// The Material Editor is the sidebar's Materials card, after
+    /// Permutations and before Weapons, closed at first. Opened, it shows its
+    /// dropdown alone, on "None", holding nothing; a material picked, it
+    /// opens that shader as a document of its own, with no tab, held for the
+    /// preview, and draws it; closed, it lets go of it.
     #[test]
-    fn the_material_editor_holds_the_shader_it_shows_and_lets_it_go() {
+    fn the_materials_card_holds_the_shader_it_shows_and_lets_it_go() {
         let mut h = Harness::new();
         let kit = crate::app::loose_fixture::LooseKit::new("material_editor_pane", "halo3_mcc");
         kit.write_mcc("objects\\smoke", "render_model", |_| {});
@@ -5978,25 +5959,76 @@ mod tests {
         let rect = |h: &Harness, needle: &str| {
             h.painted_rects.iter().find(|(text, _)| text.trim() == needle).map(|(_, rect)| *rect)
         };
-        let button = rect(&h, "Material Editor").expect("the header's button");
-        let refresh = rect(&h, "Refresh Model").expect("Refresh Model");
-        assert!(button.left() > refresh.right(), "right of Refresh Model: {button:?} {refresh:?}");
+        let card = rect(&h, "Materials").expect("the Materials card");
+        let permutations = rect(&h, "Permutations").expect("Permutations");
+        assert!(card.top() > permutations.top(), "after Permutations: {card:?} {permutations:?}");
+        assert!(!h.painted_contains("Material Editor"), "no header button");
+        assert!(h.app.views[id].caches.model_previews[&model].material_editor.is_none(), "closed at first");
 
-        h.click("Material Editor", 0);
-        frames_until(&mut h, "the shader to open", |h| {
-            h.app.model.kits[0].parsed_tags.contains_key(&shader) && h.painted_contains("Material Editor — smoke.render_model")
-        });
+        h.click("Materials", 0);
+        idle(&mut h);
+        assert!(h.app.views[id].caches.model_previews[&model].material_editor.is_some(), "opened");
+        assert!(h.painted.iter().any(|text| text.trim() == "None"), "on None: {:?}", h.painted);
+        assert!(!h.app.model.kits[0].parsed_tags.contains_key(&shader), "None holds nothing");
+        assert!(!h.painted_contains("Open"), "the dropdown alone: {:?}", h.painted);
+
+        // Picked from the dropdown: "None" first, then the shader.
+        h.click("None", 0);
+        idle(&mut h);
+        let rows: Vec<&str> = h.painted.iter().map(|text| text.trim()).filter(|text| *text == "None" || *text == "smoke").collect();
+        assert!(rows.windows(2).any(|pair| pair == ["None", "smoke"]), "None before the materials: {rows:?}");
+        let smoke = h.painted_rects.iter().filter(|(text, _)| text.trim() == "smoke").map(|(_, rect)| *rect).last().unwrap();
+        h.click_at(smoke.center());
+        frames_until(&mut h, "the shader to open", |h| h.app.model.kits[0].parsed_tags.contains_key(&shader));
+        idle(&mut h);
         let kit_state = &h.app.model.kits[0];
         assert!(!kit_state.open_tabs.contains(&shader), "no tab of its own");
         assert!(kit_state.held_documents[&shader].contains(&model), "held for the preview");
-        idle(&mut h);
-        assert!(h.painted_contains("objects\\smoke\\shaders\\smoke") || h.painted_contains("shaders\\smoke"), "{:?}", h.painted);
 
-        // Closed from the header, its clean shader goes.
-        h.click("Material Editor", 0);
+        // Closed from its header, its clean shader goes.
+        h.click("Materials", 0);
         idle(&mut h);
         assert!(!h.app.model.kits[0].parsed_tags.contains_key(&shader), "let go");
         assert!(h.app.model.kits[0].held_documents.is_empty());
+
+        // Opened again, it shows the shader it showed, not None.
+        h.click("Materials", 0);
+        frames_until(&mut h, "the shader to open again", |h| h.app.model.kits[0].parsed_tags.contains_key(&shader));
+        idle(&mut h);
+        let selected = h.app.views[id].caches.model_previews[&model].material_editor.as_ref().and_then(|editor| editor.selected.clone());
+        assert_eq!(selected.map(|key| key.path), Some("shaders\\smoke".to_owned()), "as it was closed on");
+    }
+
+    /// On a sidebar narrower than a shader's grid, the Materials card draws
+    /// at the sidebar's width, its dropdown inside it, and never scrolls
+    /// sideways.
+    #[test]
+    fn the_materials_card_fits_a_narrow_sidebar() {
+        let mut h = Harness::new();
+        let kit = crate::app::loose_fixture::LooseKit::new("material_editor_narrow", "halo3_mcc");
+        kit.write_mcc("objects\\smoke", "render_model", |_| {});
+        kit.install(&mut h.app);
+        let model = kit.open(&mut h.app, "objects\\smoke.render_model");
+        let id = h.app.model.kits[h.app.model.active].id;
+        h.app.model.prefs.model_setup_width = crate::app::model_preview::state::MIN_MODEL_SETUP_WIDTH;
+        let mut state = crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(
+            &model,
+            &[(b"rmsh", "shaders\\smoke")],
+        );
+        state.material_editor = Some(Default::default());
+        h.app.views[id].caches.model_previews.insert(model.clone(), state);
+        idle(&mut h);
+        let header = h.painted_rects.iter().find(|(text, _)| text.trim() == "Materials").map(|(_, rect)| *rect).unwrap();
+        let count = h
+            .painted_rects
+            .iter()
+            .find(|(text, rect)| text.trim() == "(1)" && rect.top() > header.bottom())
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("the dropdown's count: {:?}", h.painted));
+        // The sidebar's right edge: Permutations' own dropdown count is
+        // inside it, as far right as a row reaches.
+        let sidebar_right = h.screen.x - crate::app::model_preview::SETUP_PANEL_PADDING;
+        assert!(count.right() < sidebar_right, "inside the sidebar: {count:?} {sidebar_right}");
     }
 
     /// The centre of the rightmost `text` painted on `label`'s row.
@@ -6049,9 +6081,28 @@ mod tests {
             &model,
             &[(b"mat ", "objects\\multi\\darth_shader")],
         );
-        state.material_editor = Some(Default::default());
+        state.open_material_editor_for_test();
+        // Room for the shader's grid at its own width, as the editor wants,
+        // and for the whole card without scrolling the sidebar.
+        h.app.model.prefs.model_setup_width = 760.0;
+        h.screen = egui::vec2(SCREEN.x, 2400.0);
         h.app.views[id].caches.model_previews.insert(model.clone(), state);
         frames_until(&mut h, "the material's grid", |h| h.painted_contains("Diffuse Intensity"));
+        // The card's room follows what it drew.
+        idle(&mut h);
+        // The card is as tall as the shader's fields, scrolling with the
+        // sidebar rather than in a box of its own: it ends just under its
+        // last row, however much room the sidebar has.
+        let top = h.painted_rects.iter().find(|(text, _)| text.trim() == "darth_shader").map(|(_, rect)| rect.top()).unwrap();
+        let room = h.app.views[id].caches.model_previews[&model].material_content_height.expect("measured");
+        let sidebar = h.painted_rects.iter().find(|(text, _)| text.trim() == "Materials").map(|(_, rect)| rect.left()).unwrap() - 40.0;
+        let last = h
+            .painted_rects
+            .iter()
+            .filter(|(text, rect)| !text.trim().is_empty() && rect.top() > top && rect.bottom() <= top + room + 1.0 && rect.left() > sidebar)
+            .map(|(_, rect)| rect.bottom())
+            .fold(top, f32::max);
+        assert!(top + room - last < 60.0, "ends under its last row: room {room}, last row {}", last - top);
 
         let at = rightmost_on_row(&h, "Diffuse Intensity", "Override Default");
         h.click_at(at);
@@ -6095,28 +6146,40 @@ mod tests {
             &model,
             &[(b"mat ", "objects\\multi\\darth_shader")],
         );
-        state.material_editor = Some(Default::default());
+        state.open_material_editor_for_test();
+        // Room for the shader's grid at its own width, as the editor wants,
+        // and for the whole card without scrolling the sidebar.
+        h.app.model.prefs.model_setup_width = 760.0;
+        h.screen = egui::vec2(SCREEN.x, 2400.0);
         if let Some(Ok(data)) = state.data.as_mut() {
             data.set_textures(vec![Default::default()], false);
         }
         h.app.views[id].caches.model_previews.insert(model.clone(), state);
         frames_until(h, "the material's grid", |h| h.painted_contains("Color Tint"));
+        // The card's room follows what it drew.
+        idle(h);
         Some((kit, model, material_key))
     }
 
-    /// Where the Color Tint row's override swatch is: right of its default
-    /// cell, whose label is the row's only text there (the override draws as
-    /// a preview, with none).
+    /// Where the Color Tint row's override swatch is: left of its override
+    /// cell's label, the row's second "color:", where the grid is wide enough
+    /// to label it; else right of its default cell, whose label is then the
+    /// row's only one (the override draws as a preview, with none).
     fn color_tint_swatch(h: &Harness) -> egui::Pos2 {
         let row = h.painted_rects.iter().find(|(text, _)| text.trim() == "Color Tint").map(|(_, rect)| rect.center().y).unwrap();
-        let default = h
+        let mut cells: Vec<egui::Rect> = h
             .painted_rects
             .iter()
             .filter(|(text, rect)| text.trim().starts_with("color:") && (rect.center().y - row).abs() < 6.0)
             .map(|(_, rect)| *rect)
-            .max_by(|a, b| a.left().total_cmp(&b.left()))
-            .expect("the Color Tint default cell");
-        egui::pos2(default.right() + 40.0, row)
+            .collect();
+        cells.sort_by(|a, b| a.left().total_cmp(&b.left()));
+        match cells[..] {
+            // The swatch is left of its label.
+            [_, override_cell, ..] => egui::pos2(override_cell.left() - 14.0, row),
+            [default] => egui::pos2(default.right() + 40.0, row),
+            [] => panic!("no Color Tint cells in {:?}", h.painted),
+        }
     }
 
     fn live<'a>(h: &'a Harness, model: &str) -> &'a crate::app::model_preview::material_editor::MaterialLive {
@@ -6274,7 +6337,8 @@ mod tests {
     fn reset_with_the_shader_in_a_tab_warns_and_reloads_the_tab() {
         let mut h = Harness::new();
         let Some((_kit, _model, material)) = material_editor_on_darth(&mut h, "material_editor_reset_tab") else { return };
-        h.click("Open in Tab", 0);
+        // The path row's Open: the one on the row of the shader's path.
+        h.click_at(rightmost_on_row(&h, "objects\\multi\\darth_shader", "Open"));
         frames_until(&mut h, "the shader's tab", |h| h.app.model.kits[0].open_tabs.contains(&material));
         // An edit, then back to the model, whose preview the editor is over.
         let ops = crate::core::document::apply::DeferredOps {
@@ -6322,6 +6386,8 @@ mod tests {
         kit.install(&mut h.app);
         let key = kit.open(&mut h.app, material);
         frames_until(&mut h, "the material's grid", |h| h.painted_contains("Diffuse Intensity"));
+        // The card's room follows what it drew.
+        idle(&mut h);
         h.click_at(rightmost_on_row(&h, "Diffuse Intensity", "Override Default"));
         frames_until(&mut h, "the edit", |h| h.app.model.kits[0].parsed_tags[&key].dirty.is_set());
         assert!(parameter_names(&h.app.model.kits[0].parsed_tags[&key].tag).contains(&"diffuse_intensity".to_owned()));
@@ -6335,6 +6401,8 @@ mod tests {
         let Some((kit, _model, material)) = material_editor_on_darth(&mut h, "material_editor_unsaveable") else { return };
         // As a big-endian (Xbox 360) tag is: the MCC writer has no round trip.
         h.app.model.kits[0].parsed_tags.get_mut(&material).unwrap().tag.endian = blam_tags::Endian::Be;
+        // Drawn so, with the note above its grid, before the click.
+        idle(&mut h);
         override_diffuse_intensity(&mut h, &material);
         idle(&mut h);
         assert!(h.painted_contains("Cannot be saved: Only little-endian MCC tags can be saved"), "{:?}", h.painted);
@@ -6406,13 +6474,19 @@ mod tests {
             &model,
             &[(b"mat ", "objects\\multi\\darth_shader")],
         );
-        state.material_editor = Some(Default::default());
+        state.open_material_editor_for_test();
+        // Room for the shader's grid at its own width, as the editor wants,
+        // and for the whole card without scrolling the sidebar.
+        h.app.model.prefs.model_setup_width = 760.0;
+        h.screen = egui::vec2(SCREEN.x, 2400.0);
         // Drawn with its material as a load resolved it.
         if let Some(Ok(data)) = state.data.as_mut() {
             data.set_textures(vec![Default::default()], false);
         }
         h.app.views[id].caches.model_previews.insert(model.clone(), state);
         frames_until(&mut h, "the material's grid", |h| h.painted_contains("Diffuse Intensity"));
+        // The card's room follows what it drew.
+        idle(&mut h);
         let loaded = |h: &Harness| {
             let state = &h.app.views[id].caches.model_previews[&model];
             let Some(Ok(data)) = state.data.as_ref() else { panic!("the preview is loaded") };
@@ -9178,6 +9252,9 @@ mod tests {
         };
         let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
         let mut h = Harness::recording();
+        // Tall enough for every card it watches, the Materials card's header
+        // among them.
+        h.screen = egui::vec2(SCREEN.x, SCREEN.y + 200.0);
         h.frame(Vec::new());
         let entries =
             install_kit_subtree(&mut h, &root, GameId::Halo2, "objects/characters/brute");

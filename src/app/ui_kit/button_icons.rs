@@ -100,8 +100,6 @@ pub(in crate::app) enum ButtonIcon {
     Markers,
     MarkersLookup,
     MaterialsLookup,
-    /// The shader tag's icon in the ink colour: the Material Editor.
-    MaterialEditor,
     Model,
     JumpTo,
     /// Jump To, pointing left: going back.
@@ -214,7 +212,6 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Markers => include_root_str!("assets/tag icons/markers.svg"),
         ButtonIcon::MarkersLookup => include_root_str!("assets/Button Icons/Markers.svg"),
         ButtonIcon::MaterialsLookup => include_root_str!("assets/tag icons/material_effects.svg"),
-        ButtonIcon::MaterialEditor => include_root_str!("assets/tag icons/shader.svg"),
         ButtonIcon::Model => include_root_str!("assets/Button Icons/Model.svg"),
         ButtonIcon::JumpTo => include_root_str!("assets/Button Icons/Jump To.svg"),
         ButtonIcon::JumpBack => include_root_str!("assets/Button Icons/Jump Back.svg"),
@@ -618,7 +615,6 @@ fn recolored_icon_svg(icon: ButtonIcon, color: Color32) -> String {
         ButtonIcon::CloseTab => button_icon_svg(icon).replace("#EB4747", "currentColor"),
         ButtonIcon::AddWorkspace => button_icon_svg(icon).replace("#7EEB47", "currentColor"),
         ButtonIcon::MaterialsLookup => button_icon_svg(icon).replace("#60DF20", "currentColor"),
-        ButtonIcon::MaterialEditor => button_icon_svg(icon).replace("#D74242", "currentColor"),
         _ => button_icon_svg(icon).to_owned(),
     };
     source
@@ -1333,7 +1329,6 @@ mod tests {
             ButtonIcon::Markers,
             ButtonIcon::MarkersLookup,
             ButtonIcon::MaterialsLookup,
-            ButtonIcon::MaterialEditor,
             ButtonIcon::ListDropdownLeft,
             ButtonIcon::ListDropdownRight,
             ButtonIcon::Move,
@@ -1387,7 +1382,7 @@ mod tests {
 
     #[test]
     fn colorized_icon_replaces_current_color() {
-        for icon in [ButtonIcon::Open, ButtonIcon::MarkersLookup, ButtonIcon::MaterialsLookup, ButtonIcon::MaterialEditor] {
+        for icon in [ButtonIcon::Open, ButtonIcon::MarkersLookup, ButtonIcon::MaterialsLookup] {
             let svg = colorized_icon_svg(icon, Color32::from_rgb(1, 2, 3));
             assert!(svg.contains("#010203"));
             assert!(!svg.contains("currentColor"));

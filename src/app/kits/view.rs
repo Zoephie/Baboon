@@ -317,12 +317,12 @@ impl<'a> KitMut<'a> {
     /// dropping each that nothing else holds and no tab shows. Dirty ones
     /// stay held: they are the user's work, and asked about when `holder`
     /// closes. `keep` stays held whatever it holds.
-    pub(in crate::app) fn release_clean_documents_held_by(&mut self, holder: &str, keep: Option<&str>) {
+    pub(in crate::app) fn release_clean_documents_held_by(&mut self, holder: &str, keep: &[&str]) {
         let released: Vec<String> = self
             .kit
             .held_documents
             .iter()
-            .filter(|(key, holders)| holders.contains(holder) && Some(key.as_str()) != keep)
+            .filter(|(key, holders)| holders.contains(holder) && !keep.contains(&key.as_str()))
             .filter(|(key, _)| !self.kit.parsed_tags.get(key.as_str()).is_some_and(|doc| doc.dirty.is_set()))
             .map(|(key, _)| key.clone())
             .collect();

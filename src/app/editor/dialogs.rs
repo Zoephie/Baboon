@@ -10,6 +10,18 @@ use super::*;
 pub(in crate::app) struct TagReferencePickerWindow {
     pub(in crate::app) state: TagReferencePickerState,
     pub(in crate::app) kit: KitId,
+    /// Opened over a Material Editor's shader reference: the pick switches
+    /// the shader of every render model slot naming it, as typing one does.
+    pub(in crate::app) shader_switch: Option<ShaderSwitchTarget>,
+}
+
+/// The render model slots a Material Editor's shader reference writes.
+#[derive(Clone)]
+pub(in crate::app) struct ShaderSwitchTarget {
+    pub(in crate::app) preview: String,
+    pub(in crate::app) render_model: String,
+    pub(in crate::app) paths: Vec<String>,
+    pub(in crate::app) slot: u16,
 }
 
 impl Dialog for TagReferencePickerWindow {
@@ -52,6 +64,17 @@ impl Dialog for TagReferencePickerWindow {
             });
 
         if let Some(input) = picked {
+            if let Some(target) = self.shader_switch.clone() {
+                cx.send(EditorCommand::MaterialEditor(MaterialEditorCommand::SwitchShader {
+                    kit: self.kit,
+                    preview: target.preview,
+                    render_model: target.render_model,
+                    paths: target.paths,
+                    input,
+                    slot: target.slot,
+                }));
+                return false;
+            }
             cx.send(EditorCommand::PickTagReference {
                 kit: self.kit,
                 tag_key: self.state.tag_key.clone(),

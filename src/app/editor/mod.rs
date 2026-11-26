@@ -75,13 +75,18 @@ pub(super) fn draw_tag(
     model_preview: &mut ModelPreviewState,
     model_setup_width: &mut f32,
     expert_mode: bool,
+    // Drawn as a pane of its own (a tab): the tag's header line (group,
+    // version, endian), which expert mode shows over its fields, and a scroll
+    // area of its own. Drawn inside another view (the Material Editor's
+    // card), neither: it takes the height it needs, and that view scrolls.
+    own_pane: bool,
     edit: &mut FieldEditContext<'_>,
 ) {
     let is_object_family = is_object_family_group(entry.group_tag, source_game);
     let is_shaderish = !supports_field_search(entry, &bundled_group_hierarchy(source_game));
     let is_model = is_previewable_geometry_group_for_game(entry.group_tag, names, source_game);
 
-    if expert_mode {
+    if expert_mode && own_pane {
         draw_tag_metadata(ui, tag, entry, names);
     }
 
@@ -125,6 +130,7 @@ pub(super) fn draw_tag(
         edit,
         is_object_family,
         is_shaderish,
+     own_pane,
     );
 }
 
@@ -259,6 +265,8 @@ fn draw_tag_fields_scroll(
     edit: &mut FieldEditContext<'_>,
     is_object_family: bool,
     is_shaderish: bool,
+    // As `draw_tag`'s: false draws the fields at their full height.
+    own_pane: bool,
 ) {
     let scroll_height = ui.available_height().max(0.0);
     if is_shaderish {
@@ -289,7 +297,13 @@ fn draw_tag_fields_scroll(
                     edit,
                 );
         };
-        if is_shader {
+        if !own_pane {
+            if is_shader {
+                draw_shader_unscrolled(ui, scope, &mut contents);
+            } else {
+                contents(ui);
+            }
+        } else if is_shader {
             draw_shader_scroll_area(ui, scope, &mut contents);
         } else {
             ScrollArea::both().id_salt(("tag_scroll", scope)).max_height(scroll_height)
@@ -300,6 +314,15 @@ fn draw_tag_fields_scroll(
 
     // Generic fields reflow to the pane's width. A minimum-width, horizontally
     // scrolling canvas prevents their narrow layouts from ever being reached.
+    if !own_pane {
+        draw_group_summaries(ui, tag, entry, edit);
+        if is_object_family {
+            draw_inherited_object_fields(ui, tag.root(), names, expert_mode, edit);
+        } else {
+            draw_struct_fields(ui, tag.root(), names, 0, expert_mode, "", edit);
+        }
+        return;
+    }
     ScrollArea::vertical()
         .id_salt(("tag_scroll", edit.view_scope))
         .max_height(scroll_height)
@@ -392,6 +415,7 @@ mod responsive_page_tests {
                                 edit,
                                 false,
                                 false,
+                             true,
                             );
                         });
                     });
@@ -458,7 +482,7 @@ mod responsive_page_tests {
                         edit.game = GameId::from_id("halo2_mcc");
                         draw_tag_fields_scroll(ui, &tag, (0, 0, 0, 0), &entry,
                             &TagNameIndex::default(), None, &mut HashMap::new(), &mut HashMap::new(),
-                            &mut H2TemplateCache::default(), &mut None, &mut None, false, edit, false, true);
+                            &mut H2TemplateCache::default(), &mut None, &mut None, false, edit, false, true, true);
                     });
                 });
                 let lines: Vec<_> = output.shapes.iter().filter_map(|shape| match &shape.shape {
@@ -496,7 +520,7 @@ mod responsive_page_tests {
                         fields::with_test_edit_context(|edit| {
                             draw_tag_fields_scroll(ui, &tag, (0, 0, 0, 0), &entry,
                                 &TagNameIndex::default(), None, &mut HashMap::new(), &mut HashMap::new(),
-                                &mut H2TemplateCache::default(), &mut None, &mut None, false, edit, false, false);
+                                &mut H2TemplateCache::default(), &mut None, &mut None, false, edit, false, false, true);
                         });
                     });
                 });

@@ -42,7 +42,28 @@ pub(in crate::app) struct MaterialEditorState {
     pub(in crate::app) hovered: Option<MaterialKey>,
     /// The shader documents a Reset is waiting on a second click to discard.
     pub(in crate::app) confirm_reset: Option<Vec<String>>,
+    /// A render model slot whose shader was just switched, and the load it
+    /// was switched under: once the preview has loaded again, the editor
+    /// shows the material now in that slot.
+    pub(in crate::app) follow_slot: Option<(u16, u64)>,
 }
+
+/// Where the sidebar's Materials card left room for the Material Editor
+/// this pass: the tag pane draws it there once its own drawing is done,
+/// since the editor draws a tag of its own with the pane's machinery.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::app) struct MaterialSlot {
+    pub(in crate::app) rect: eframe::egui::Rect,
+    /// What the sidebar's scroll area shows of it.
+    pub(in crate::app) clip: eframe::egui::Rect,
+    pub(in crate::app) layer: eframe::egui::LayerId,
+    /// Drawn still, taking no clicks, while the model loads again.
+    pub(in crate::app) enabled: bool,
+}
+
+/// How tall the Materials card's room is before the editor has drawn in
+/// it: its dropdown's row.
+pub(in crate::app) const MATERIAL_SLOT_PICKER_HEIGHT: f32 = 28.0;
 
 /// What keeps a preview's materials as the shader documents its Material
 /// Editor holds have them, resolving the materials of one again when it
@@ -59,11 +80,61 @@ pub(in crate::app) struct MaterialLive {
     /// What a picker the editor opened would write now, drawn before OK
     /// writes it.
     pub(in crate::app) draft: Option<DraftPreview>,
+    /// The render model whose material slots the editor's shader reference
+    /// switches. A switch loads the preview again, as Refresh Model does.
+    pub(in crate::app) render_model: Option<EditorRenderModel>,
     /// A resolve is running: one at a time, so they land in order.
     pub(in crate::app) in_flight: bool,
     /// The caches the editor's resolves of this load share, with the
     /// `geometry_id` of the load they belong to.
     pub(in crate::app::model_preview) caches: Option<(u64, std::sync::Arc<std::sync::Mutex<super::materials::ResolveCaches>>)>,
+}
+
+/// The render model the Material Editor's shader reference edits: the
+/// opened model's own, whose material block names the shaders its parts draw
+/// with. Its document is held for the preview, as the shaders are.
+#[derive(Clone, Debug)]
+pub(in crate::app) struct EditorRenderModel {
+    /// The tag path the preview names it by, which a load that draws another
+    /// render model no longer matches.
+    pub(in crate::app) path: String,
+    /// Its document's key in the kit, or why it has none.
+    pub(in crate::app) key: Result<String, String>,
+    /// The groups its shader reference takes, as its definition lists them
+    /// (empty: any).
+    pub(in crate::app) allowed: Vec<u32>,
+    /// Its document's content stamp the preview was last drawn from (`None`
+    /// inside: no document; `None` outside: not yet seen).
+    pub(in crate::app) drawn: Option<Option<(u64, u64)>>,
+}
+
+/// The slots of a render model's material block that name the shader `key`:
+/// each one's index and field path, as the preview reads them (a Halo CE
+/// `gbxmodel`'s `shaders[].shader`, Halo 2's `materials[].shader`, the
+/// later games' `materials[].render method`), with the reference as the
+/// first of them writes it.
+pub(in crate::app) fn shader_slots(
+    tag: &blam_tags::TagFile,
+    key: &MaterialKey,
+) -> (Vec<(u16, String)>, Option<(u32, String)>) {
+    let root = tag.root();
+    let mut slots = Vec::new();
+    let mut reference = None;
+    for block_name in ["materials", "shaders"] {
+        let Some(block) = root.field(block_name).and_then(|field| field.as_block()) else { continue };
+        for at in 0..block.len() {
+            let Some(element) = block.element(at) else { continue };
+            let field = if element.field("render method").is_some() { "render method" } else { "shader" };
+            let Some((group, path)) = element.read_tag_ref_with_group(field) else { continue };
+            if MaterialKey::new(group, path.trim_end_matches('\0')) != *key {
+                continue;
+            }
+            reference.get_or_insert((group, path.trim_end_matches('\0').to_owned()));
+            slots.push((at as u16, format!("{block_name}[{at}]/{field}")));
+        }
+        break;
+    }
+    (slots, reference)
 }
 
 /// What a held document's materials were resolved from.
@@ -305,5 +376,39 @@ mod tests {
         // The overlay is the unit's (object 0): its parts, the LOD's too, but
         // not the rifle's, and not collision.
         assert_eq!(highlighted_batches(&preview, &list[3]), [0, 1, 2]);
+    }
+
+    /// The slots a render model's material block names a shader in, by the
+    /// field each game names it with: Halo 3's `materials[].render method`,
+    /// Halo CE's `shaders[].shader`. Compared as tag paths, without case.
+    #[test]
+    fn shader_slots_are_the_slots_naming_the_shader_by_each_games_field() {
+        use blam_tags::{TagFieldData, TagFile, TagReferenceData};
+        let root = crate::core::bundled::locate_definitions_root();
+        let build = |game: &str, group: &str, block: &str, field: &str, shader_group: &[u8; 4], paths: &[&str]| {
+            let mut tag = TagFile::new(root.join(game).join(format!("{group}.json"))).unwrap();
+            let mut tag_root = tag.root_mut();
+            let mut materials = tag_root.field_mut(block).unwrap();
+            let mut materials = materials.as_block_mut().unwrap();
+            for (at, path) in paths.iter().enumerate() {
+                materials.add_element();
+                materials.element_mut(at).unwrap().field_mut(field).unwrap()
+                    .set(TagFieldData::TagReference(TagReferenceData {
+                        group_tag_and_name: Some((u32::from_be_bytes(*shader_group), (*path).to_owned())),
+                    }))
+                    .unwrap();
+            }
+            tag
+        };
+        let h3 = build("halo3_mcc", "render_model", "materials", "render method", b"rmsh", &["shaders\\a", "shaders\\b", "Shaders\\A"]);
+        let (slots, reference) = shader_slots(&h3, &MaterialKey::new(u32::from_be_bytes(*b"rmsh"), "shaders/a"));
+        assert_eq!(slots, [(0, "materials[0]/render method".to_owned()), (2, "materials[2]/render method".to_owned())]);
+        assert_eq!(reference, Some((u32::from_be_bytes(*b"rmsh"), "shaders\\a".to_owned())));
+        let (slots, reference) = shader_slots(&h3, &MaterialKey::new(u32::from_be_bytes(*b"rmsh"), "shaders\\c"));
+        assert!(slots.is_empty() && reference.is_none(), "a shader it doesn't name");
+
+        let ce = build("haloce_mcc", "gbxmodel", "shaders", "shader", b"soso", &["shaders\\x", "shaders\\x"]);
+        let (slots, _) = shader_slots(&ce, &MaterialKey::new(u32::from_be_bytes(*b"soso"), "shaders\\x"));
+        assert_eq!(slots, [(0, "shaders[0]/shader".to_owned()), (1, "shaders[1]/shader".to_owned())]);
     }
 }

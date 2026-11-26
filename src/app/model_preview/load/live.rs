@@ -25,6 +25,7 @@ impl Baboon {
         ctx: &egui::Context,
     ) -> bool {
         self.drop_stale_draft(kit_index, key);
+        self.reload_for_render_model(kit_index, key);
         let kit = &self.model.kits[kit_index];
         let Some(state) = self.views[kit.id].caches.model_previews.get(key) else {
             return false;
@@ -159,6 +160,29 @@ impl Baboon {
             },
         );
         true
+    }
+
+    /// Load the preview of `key` again when the render model its Material
+    /// Editor switches shaders in has changed: a slot given another shader
+    /// is the model's own, as Refresh Model would read it.
+    fn reload_for_render_model(&mut self, kit_index: usize, key: &str) {
+        let kit = &self.model.kits[kit_index];
+        let Some(state) = self.views[kit.id].caches.model_previews.get(key) else { return };
+        let Some(model) = &state.material_live.render_model else { return };
+        let Ok(document) = &model.key else { return };
+        if kit.loading_tags.contains(document) {
+            return;
+        }
+        let now = kit.parsed_tags.get(document).map(|document| document.content_stamp());
+        let changed = model.drawn.is_some_and(|drawn| drawn != now);
+        let kit_id = kit.id;
+        let Some(state) = self.views[kit_id].caches.model_previews.get_mut(key) else { return };
+        if let Some(model) = state.material_live.render_model.as_mut() {
+            model.drawn = Some(now);
+        }
+        if changed {
+            state.invalidate_load();
+        }
     }
 
     /// Drop the draft of the preview of `key` when the picker that made it

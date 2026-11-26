@@ -72,7 +72,7 @@ pub(in crate::app) fn draw_model_preview_panel(
         ui.available_height().max(MIN_MODEL_PREVIEW_PANEL_HEIGHT),
     );
     let (page, _) = ui.allocate_exact_size(size, Sense::hover());
-    let rects = panel_rects(page, *model_setup_width);
+    let rects = panel_rects(page, setup_width_for(state, *model_setup_width));
 
     let own_view = super::super::load::own_view_settings(tag);
     if state.needs_preview_load(&entry.key) {
@@ -295,6 +295,18 @@ pub(in crate::app::model_preview) fn panel_rects(page: Rect, setup_width: f32) -
     }
 }
 
+/// The sidebar's width: as it was left, but wide enough for a shader's grid
+/// while the Materials card shows one, as the page allows. What was left is
+/// kept, for when it shows none.
+fn setup_width_for(state: &ModelPreviewState, setup_width: f32) -> f32 {
+    let editing = state.material_editor.as_ref().is_some_and(|editor| editor.selected.is_some());
+    if editing { setup_width.max(MATERIALS_SETUP_WIDTH) } else { setup_width }
+}
+
+/// The sidebar's width for a shader's grid: the grid's least, with the
+/// sidebar's and the card's padding.
+const MATERIALS_SETUP_WIDTH: f32 = crate::app::editor::SHADER_GRID_MIN_WIDTH + 4.0 * SETUP_PANEL_PADDING + 24.0;
+
 /// The sidebar's left edge: dragging it widens or narrows the sidebar, and
 /// the viewport takes what is left.
 fn draw_setup_resize_handle(
@@ -403,7 +415,8 @@ pub(in crate::app::model_preview) fn draw_setup_cards(
                     // the first has nothing before it, and starts level with
                     // the viewport's card.
                     ui.add_space(-(8.0 - ui.spacing().item_spacing.y).max(0.0));
-                    draw_setup_body(ui, panel.data, state, &mut |ui, state| {
+                    let materials = panel.supports_textures;
+                    draw_setup_body(ui, panel.data, state, materials, &mut |ui, state| {
                         draw_setup_header_actions(ui, panel, state, edit, requests)
                     })
                 });
@@ -431,7 +444,6 @@ pub(in crate::app::model_preview) fn draw_preview_header(
         panel.own_view,
     );
     // Right of Refresh Model, as the header lays out from the right.
-    draw_material_editor_button(ui, panel, state);
     if icon_text_button(ui, ButtonIcon::Refresh, "Refresh Model", true)
         .on_hover_text("Load the model again from its tags.")
         .clicked()
@@ -456,33 +468,6 @@ pub(in crate::app::model_preview) fn draw_preview_header(
         }
         draw_model_other_menu(ui, panel.data, state);
     });
-}
-
-/// The Material Editor's button: it opens and closes the editor's window,
-/// which the tag pane draws. Only for a game whose materials the preview
-/// resolves, and a model that names some.
-fn draw_material_editor_button(ui: &mut Ui, panel: &PreviewPanel<'_>, state: &mut ModelPreviewState) {
-    let has_materials = panel
-        .data
-        .preview
-        .materials
-        .iter()
-        .any(|material| !material.shader_path.trim().is_empty());
-    if !panel.supports_textures || !has_materials {
-        state.material_editor = None;
-        return;
-    }
-    let open = state.material_editor.is_some();
-    let response = super::super::super::ui_kit::button_icons::selectable_icon_text_button(
-        ui,
-        ButtonIcon::MaterialEditor,
-        "Material Editor",
-        open,
-    )
-    .on_hover_text("Edit the shaders the model draws with, and see each change at once.");
-    if response.clicked() {
-        state.material_editor = if open { None } else { Some(Default::default()) };
-    }
 }
 
 /// What the preview panel and its tab call themselves, by tag group. Only

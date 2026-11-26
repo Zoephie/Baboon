@@ -71,7 +71,6 @@ impl DefDocs {
     }
 
     /// Every entry of every struct, in no particular order.
-    #[cfg(test)]
     pub(in crate::app) fn all_entries(&self) -> impl Iterator<Item = &DefEntry> {
         self.by_struct.values().flatten()
     }

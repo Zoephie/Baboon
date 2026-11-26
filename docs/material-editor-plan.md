@@ -2,6 +2,8 @@
 
 Status: plan only, nothing built. Written 2026-11-26 against `main` at 011500c0.
 
+Changed since, at the owner's request (2026-11-26): the editor is no longer a window but the Model Preview sidebar's **Materials** card, after Permutations and before Weapons, closed at first, replacing the header's button. Its dropdown starts on **None**, which shows the dropdown alone and holds no shader. The shader's path line is the render model's shader reference field, unlabelled, whose Open opens the shader in a tab; switching it rewrites every slot of the render model naming the shader, as an unsaved edit, and the preview loads again. The card's room is reserved by the sidebar (`MaterialSlot`) and filled by the tag pane after its own drawing, since the editor needs the pane's machinery; the sidebar widens to the shader grid's width while a shader is picked.
+
 Status: **built** on branch `material-editor`, 2026-11-26, one commit per step. Kept local by the owner's choice, for review in the app before pushing. Halo 5 stays as described below by the owner's choice: real Halo 5 tags and turning Halo 5 tag ids into paths are a follow-up. Where the build departed from this plan:
 
 - **Material saving is not held back** (§3.9). The research answered it: all 6977 Halo 4 kit materials ship an empty `postprocess definition` (counted with `blam-tag-shell block … count`), and the game builds the postprocess from the parameters at load (blam-tags `material` module, after `c_material::postprocess`). What the grid writes is what the game reads.

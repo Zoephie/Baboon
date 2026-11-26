@@ -47,6 +47,22 @@ pub(in crate::app) fn draw_shader_scroll_area(
         });
 }
 
+/// A shader's grid at its full height under its column header, for a view
+/// that scrolls it itself (the Material Editor's card), at that view's width.
+pub(in crate::app) fn draw_shader_unscrolled(
+    ui: &mut Ui,
+    scope: impl std::hash::Hash + std::fmt::Debug,
+    contents: impl FnOnce(&mut Ui),
+) {
+    let header = ui.allocate_exact_size(Vec2::new(shader_grid_width(ui), TABLE_HEADER_HEIGHT), Sense::hover()).0;
+    let width = ui.available_width();
+    ui.scope(contents);
+    let mut header_ui = ui.new_child(egui::UiBuilder::new()
+        .id_salt(("shader_columns_header", &scope))
+        .max_rect(egui::Rect::from_min_size(header.min, Vec2::new(width, header.height()))));
+    draw_shader_columns_header(&mut header_ui);
+}
+
 pub(in crate::app) fn draw_shader_editor_model(
     ui: &mut Ui,
     model: &ShaderEditorModel,

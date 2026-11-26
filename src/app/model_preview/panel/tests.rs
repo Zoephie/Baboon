@@ -1407,7 +1407,7 @@ impl SetupBody {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(context, |ui| {
-                        super::functions::draw_setup_body(ui, data, state, &mut |_, _| {})
+                        super::functions::draw_setup_body(ui, data, state, true, &mut |_, _| {})
                     });
             },
         );

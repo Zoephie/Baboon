@@ -165,9 +165,18 @@ pub(in crate::app) struct ModelPreviewState {
     /// around what the user framed — screen-space panning made orbiting a
     /// BSP's far corner swing it offscreen.
     pub(in crate::app) focus: [f32; 3],
-    /// The Material Editor, while it is open: what it shows and what the
-    /// pointer is over, which the viewport lights.
+    /// The Material Editor, while the sidebar's Materials card is open: what
+    /// it shows and what the pointer is over, which the viewport lights.
     pub(in crate::app) material_editor: Option<super::material_editor::MaterialEditorState>,
+    /// The Material Editor as the Materials card was closed on: opened
+    /// again, it shows what it did.
+    pub(in crate::app) material_editor_closed: Option<super::material_editor::MaterialEditorState>,
+    /// Where the Materials card left room for the editor this pass, for the
+    /// tag pane to draw it in; taken when drawn.
+    pub(in crate::app) material_slot: Option<super::material_editor::MaterialSlot>,
+    /// How tall the Material Editor drew last pass: the room the Materials
+    /// card leaves it.
+    pub(in crate::app) material_content_height: Option<f32>,
     /// What keeps the materials as the Material Editor's shaders have them.
     pub(in crate::app) material_live: super::material_editor::MaterialLive,
 }
@@ -259,6 +268,9 @@ impl Default for ModelPreviewState {
             pitch: 0.25,
             focus: [0.0; 3],
             material_editor: None,
+            material_editor_closed: None,
+            material_slot: None,
+            material_content_height: None,
             material_live: Default::default(),
         }
     }
@@ -392,6 +404,17 @@ impl ModelPreviewState {
     /// [`Self::loaded_empty_for_test`], drawing a part with each of
     /// `shaders`, `(group, path)`, under its own region.
     #[cfg(test)]
+    /// The Material Editor open on the first material the preview lists, as
+    /// picking it from the dropdown leaves it.
+    #[cfg(test)]
+    pub(in crate::app) fn open_material_editor_for_test(&mut self) {
+        let first = match &self.data {
+            Some(Ok(data)) => super::material_editor::editor_materials(&data.preview).first().map(|material| material.key.clone()),
+            _ => None,
+        };
+        self.material_editor = Some(super::material_editor::MaterialEditorState { selected: first, ..Default::default() });
+    }
+
     pub(in crate::app) fn loaded_with_shaders_for_test(entry_key: &str, shaders: &[(&[u8; 4], &str)]) -> Self {
         let mut state = Self::loaded_empty_for_test(entry_key);
         let Some(Ok(data)) = state.data.as_mut() else { unreachable!() };
