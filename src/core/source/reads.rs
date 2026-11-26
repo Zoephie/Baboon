@@ -118,6 +118,14 @@ impl ReadFiles {
         Self { read: Arc::default(), edits: Arc::new(edits) }
     }
 
+    /// The files whose reads take unsaved edits, by [`file_key`].
+    #[cfg(test)]
+    pub(crate) fn edited_files(&self) -> Vec<String> {
+        let mut files: Vec<String> = self.edits.keys().cloned().collect();
+        files.sort();
+        files
+    }
+
     /// How many files have been read so far.
     pub(crate) fn len(&self) -> usize {
         self.read.lock().map(|read| read.len()).unwrap_or_default()

@@ -420,11 +420,14 @@ impl Baboon {
         let edits = snapshot_edits(kit.parsed_tags.get(key));
         // View > Show Unsaved Edits: other open tags' edits stand in for
         // their files.
-        let unsaved = if state.show_unsaved_edits {
+        let mut unsaved = if state.show_unsaved_edits {
             open_tag_edits(kit, key, &state.reads)
         } else {
             Default::default()
         };
+        // The preview's own Material Editor's shaders, whatever that says:
+        // a load (Refresh Model, a weapon, Game Shaders) never drops them.
+        unsaved.extend(held_tag_edits(kit, key));
         let names = kit.names.clone();
         let stamp = KitStamp {
             kit: kit.id,
@@ -760,17 +763,35 @@ fn open_tag_edits(
     own: &str,
     previous: &crate::core::source::reads::ReadFiles,
 ) -> HashMap<String, crate::core::source::reads::Edited> {
-    use crate::core::source::reads::{Edited, file_key};
     let previous: std::collections::HashSet<String> = previous.keys().into_iter().collect();
+    tag_edits(kit, |key, file| key != own && (previous.is_empty() || previous.contains(file)))
+}
+
+/// The unsaved edits of the documents the preview of `holder` holds: its
+/// Material Editor's shaders.
+pub(in crate::app::model_preview) fn held_tag_edits(
+    kit: &crate::app::kits::Kit,
+    holder: &str,
+) -> HashMap<String, crate::core::source::reads::Edited> {
+    tag_edits(kit, |key, _| kit.held_documents.get(key).is_some_and(|holders| holders.contains(holder)))
+}
+
+/// The unsaved edits of `kit`'s open loose tags that `wanted` takes, by key
+/// and file, keyed by file.
+fn tag_edits(
+    kit: &crate::app::kits::Kit,
+    wanted: impl Fn(&str, &str) -> bool,
+) -> HashMap<String, crate::core::source::reads::Edited> {
+    use crate::core::source::reads::{Edited, file_key};
     kit.parsed_tags
         .iter()
-        .filter(|(key, document)| key.as_str() != own && document.dirty.is_set())
+        .filter(|(_, document)| document.dirty.is_set())
         .filter_map(|(key, document)| {
             let TagEntryLocation::LooseFile(path) = &kit.entry_for_key(key)?.location else {
                 return None;
             };
             let file = file_key(path);
-            if !previous.is_empty() && !previous.contains(&file) {
+            if !wanted(key, &file) {
                 return None;
             }
             // One that cannot be written out is still noted at its stamp, or

@@ -2546,7 +2546,11 @@ mod tests {
                 .nth(nth)
                 .map(|(_, rect)| *rect)
                 .unwrap_or_else(|| panic!("{text:?} is not painted: {:?}", self.painted));
-            let target = rect.center();
+            self.click_at(rect.center())
+        }
+
+        /// [`Self::click`], at `target`.
+        pub(super) fn click_at(&mut self, target: egui::Pos2) -> Vec<egui::OutputCommand> {
             let from = target - egui::vec2(30.0, 30.0);
             let button = |pressed| egui::Event::PointerButton {
                 pos: target,
@@ -5991,6 +5995,70 @@ mod tests {
         idle(&mut h);
         assert!(!h.app.model.kits[0].parsed_tags.contains_key(&shader), "let go");
         assert!(h.app.model.kits[0].held_documents.is_empty());
+    }
+
+    /// The centre of the rightmost `text` painted on `label`'s row.
+    fn rightmost_on_row(h: &Harness, label: &str, text: &str) -> egui::Pos2 {
+        let row = h
+            .painted_rects
+            .iter()
+            .find(|(painted, _)| painted.trim() == label)
+            .map(|(_, rect)| rect.center().y)
+            .unwrap_or_else(|| panic!("no {label:?} in {:?}", h.painted));
+        h.painted_rects
+            .iter()
+            .filter(|(painted, rect)| painted.trim() == text && (rect.center().y - row).abs() < 6.0)
+            .map(|(_, rect)| rect.center())
+            .max_by(|a, b| a.x.total_cmp(&b.x))
+            .unwrap_or_else(|| panic!("no {text:?} on {label:?}'s row in {:?}", h.painted))
+    }
+
+    /// An edit made in the Material Editor's window lands in the shader's
+    /// document, as one made in its tab would: a Halo 4 material's default,
+    /// overridden from the window, is a parameter of the material, unsaved.
+    #[test]
+    fn an_edit_in_the_material_editor_lands_in_the_shaders_document() {
+        let kit_tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        let material = "objects\\multi\\darth_shader.material";
+        let shader = "shaders\\material_shaders\\materials\\srf_lambert.material_shader";
+        if !kit_tags.join(material.replace('\\', "/")).exists() {
+            eprintln!("skipping: set BLAM_TEST_H4EK");
+            return;
+        }
+        let mut h = Harness::new();
+        let kit = crate::app::loose_fixture::LooseKit::new("material_editor_edit", "halo4_mcc");
+        for tag in [material, shader] {
+            let to = kit.path(tag);
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::copy(kit_tags.join(tag.replace('\\', "/")), to).unwrap();
+        }
+        kit.write_mcc("objects\\smoke", "render_model", |_| {});
+        kit.install(&mut h.app);
+        let model = kit.open(&mut h.app, "objects\\smoke.render_model");
+        let material_key = kit.key(material);
+        let id = h.app.model.kits[h.app.model.active].id;
+        let mut state = crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(
+            &model,
+            &[(b"mat ", "objects\\multi\\darth_shader")],
+        );
+        state.material_editor = Some(Default::default());
+        h.app.views[id].caches.model_previews.insert(model.clone(), state);
+        frames_until(&mut h, "the material's grid", |h| h.painted_contains("Diffuse Intensity"));
+
+        let at = rightmost_on_row(&h, "Diffuse Intensity", "Override Default");
+        h.click_at(at);
+        idle(&mut h);
+        let document = &h.app.model.kits[0].parsed_tags[&material_key];
+        assert!(document.dirty.is_set(), "the material has unsaved edits");
+        let names: Vec<String> = document
+            .tag
+            .root()
+            .field("material parameters")
+            .and_then(|field| field.as_block())
+            .map(|block| block.iter().map(|element| element.read_string_id("parameter name").unwrap_or_default()).collect())
+            .unwrap_or_default();
+        assert!(names.contains(&"diffuse_intensity".to_owned()), "{names:?}");
+        assert!(!h.app.model.kits[0].open_tabs.contains(&material_key), "still no tab");
     }
 
     /// Refresh Model sits in the viewport's header, left of the Camera

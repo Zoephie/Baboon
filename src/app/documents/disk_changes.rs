@@ -743,6 +743,25 @@ mod tests {
         assert!(preview(&app, &key).reads_changed, "the edits paused: load again");
     }
 
+    /// A preview's own Material Editor shaders are read from their edits by
+    /// every load, with Show Unsaved Edits off; another open tag's are not.
+    #[test]
+    fn a_load_reads_its_material_editors_edits_whatever_the_option_says() {
+        use crate::core::source::reads::file_key;
+        let (fixture, mut app, key, shader) = previewed_rock("preview-held-edits");
+        let rock = fixture.hold(&mut app, "objects/rock/shaders/rock.shader", &key);
+        let bark = fixture.open(&mut app, "objects/tree/shaders/bark.shader");
+        for edited in [&rock, &bark] {
+            app.model.kits[0].parsed_tags.get_mut(edited).unwrap().dirty.touch();
+        }
+        let id = app.model.kits[0].id;
+        let state = app.views[id].caches.model_previews.get_mut(&key).unwrap();
+        assert!(!state.show_unsaved_edits);
+        state.invalidate_load();
+        assert!(app.maybe_request_model_preview(0, &key, &ctx()), "a load starts");
+        assert_eq!(preview(&app, &key).reads.edited_files(), vec![file_key(&shader)], "the held shader's edits, not the bark's");
+    }
+
     /// With the option off, the preview keeps drawing the saved shader.
     #[test]
     fn with_unsaved_edits_hidden_an_edited_shader_changes_nothing() {
