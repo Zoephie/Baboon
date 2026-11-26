@@ -11,6 +11,8 @@
 //! function inputs from `H2_SHOT_FUNCTIONS=name=value,..`, leaving out the
 //! features `H2_SHOT_DROP` names by their paths (`h2.flares`, `particles`,
 //! `gen3.prt`, `reach.shield` …), and exports forced by `H2_SHOT_FORCE`.
+//! `H2_SHOT_MARKERS=<text>` draws the markers whose names hold the text
+//! (empty for all).
 //! `H2_SHOT_PLAY=<text>@<seconds>` plays each Halo CE event effect whose
 //! name holds the text, that long before the shot, and
 //! `H2_SHOT_FIRE=<trigger>@<seconds>` fires the held weapon's trigger.
@@ -70,6 +72,9 @@ pub(in crate::app::model_preview) struct ShotOptions {
     pub(in crate::app::model_preview) mode: Option<String>,
     pub(in crate::app::model_preview) light_theme: bool,
     pub(in crate::app::model_preview) grid: bool,
+    /// The markers drawn, those whose names hold this (`H2_SHOT_MARKERS`;
+    /// empty draws them all).
+    pub(in crate::app::model_preview) markers: Option<String>,
     /// The imposter drawn beside the model (`H2_SHOT_IMPOSTER`).
     pub(in crate::app::model_preview) imposter: bool,
     pub(in crate::app::model_preview) camo: bool,
@@ -113,6 +118,7 @@ impl ShotOptions {
             mode: None,
             light_theme: false,
             grid: false,
+            markers: None,
             imposter: false,
             camo: false,
             bloom: false,
@@ -171,6 +177,7 @@ impl ShotOptions {
             mode: var("H2_SHOT_MODE"),
             light_theme: set("H2_SHOT_LIGHT"),
             grid: set("H2_SHOT_GRID"),
+            markers: var("H2_SHOT_MARKERS"),
             imposter: set("H2_SHOT_IMPOSTER"),
             camo: set("H2_SHOT_CAMO"),
             bloom: set("H2_SHOT_BLOOM"),
@@ -402,6 +409,10 @@ pub(super) fn render(
         state.render_mode = mode;
     }
     state.show_grid = options.grid;
+    if let Some(filter) = &options.markers {
+        state.show_markers = true;
+        state.marker_filter = filter.clone();
+    }
     state.show_imposter = options.imposter;
     state.active_camo = options.camo;
     state.bloom = options.bloom;
@@ -506,11 +517,14 @@ pub(super) fn render(
                     state.ce.event_scales[0],
                     frame.time,
                 );
+                // With the effects dropped (`H2_SHOT_DROP=ce.effects`) the
+                // shot still raises the weapon's inputs, and plays nothing.
+                let played = effect.filter(|at| *at < data.preview.ce.effects.len());
                 eprintln!(
                     "NOTE fired, playing {:?}",
-                    effect.and_then(|at| data.preview.ce.effects[at].event.as_ref())
+                    played.and_then(|at| data.preview.ce.effects[at].event.as_ref())
                 );
-                if let Some(effect) = effect {
+                if let Some(effect) = played {
                     frame.ce.plays.counts[effect] += 1;
                 }
             }
@@ -561,10 +575,57 @@ pub(super) fn render(
             glow::UNSIGNED_BYTE,
             glow::PixelPackData::Slice(Some(&mut pixels)),
         );
+        if options.markers.is_some() {
+            draw_markers(&mut pixels, &data, &state, rect, frame.bones.as_deref());
+        }
         Rendered {
             pixels,
             geometry_id: data.geometry_id,
             gl_state,
+        }
+    }
+}
+
+/// The viewport's marker overlay (`viewport::markers`), which egui paints
+/// over the GL image in the app, drawn into `pixels` (RGBA, bottom row first)
+/// the same way: each marker the filter shows, where the pose puts it, its
+/// forward, left and up as red, green and blue strokes.
+fn draw_markers(
+    pixels: &mut [u8],
+    data: &ModelPreviewData,
+    state: &ModelPreviewState,
+    rect: egui::Rect,
+    bones: Option<&Vec<[f32; 4]>>,
+) {
+    use super::super::viewport::{animated_marker_transform, marker_axis_screen_deltas};
+    const COLORS: [[u8; 3]; 3] = [[220, 35, 28], [20, 180, 45], [40, 85, 235]];
+    let (width, height) = (rect.width() as i32, rect.height() as i32);
+    let camera = PreviewCamera::new(data, state, rect);
+    let filter = state.marker_filter.trim().to_ascii_lowercase();
+    let mut plot = |x: i32, y: i32, color: [u8; 3]| {
+        if (0..width).contains(&x) && (0..height).contains(&y) {
+            let at = (((height - 1 - y) * width + x) * 4) as usize;
+            pixels[at..at + 3].copy_from_slice(&color);
+        }
+    };
+    for marker in &data.preview.markers {
+        if !filter.is_empty() && !marker.name.to_ascii_lowercase().contains(&filter) {
+            continue;
+        }
+        let (position, axes) = animated_marker_transform(marker, bones.map(Vec::as_slice));
+        let projected = camera.project(position);
+        if !projected.in_front {
+            continue;
+        }
+        for (delta, color) in marker_axis_screen_deltas(&camera, axes)
+            .into_iter()
+            .zip(COLORS)
+        {
+            let steps = delta.length().ceil().max(1.0) as i32;
+            for step in 0..=steps {
+                let at = projected.pos + delta * (step as f32 / steps as f32);
+                plot(at.x.round() as i32, at.y.round() as i32, color);
+            }
         }
     }
 }
