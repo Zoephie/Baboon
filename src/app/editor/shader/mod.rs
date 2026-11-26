@@ -2191,4 +2191,61 @@ mod tests {
             let _ = std::fs::remove_dir_all(&root);
         }
     }
+
+    /// A Halo 5 material, in Halo 5's own native (`ucsh`) form, takes the
+    /// grid too, its structure locked as the pane locks every Halo 5 tag:
+    /// its fields edit in place, and the edit writes back out as Halo 5
+    /// bytes. No Halo 5 tag is at hand, and new ones can't be made from the
+    /// definitions, so this one is laid out by hand as blam-tags' own Halo 5
+    /// tests lay theirs: a header and a zeroed root.
+    #[test]
+    fn a_halo_5_material_edits_in_place_in_the_grid() {
+        let definition = locate_definitions_root().join("halo5_guardians").join("material.json");
+        let layout = blam_tags::TagLayout::from_json(&definition).expect("Halo 5's material layout");
+        let root = &layout.struct_layouts
+            [layout.block_layouts[layout.header.tag_group_block_index as usize].struct_index as usize];
+        let mut bytes = vec![0u8; 128 + root.size];
+        bytes[..4].copy_from_slice(b"ucsh");
+        for (offset, value) in [(4, 27u32), (32, 1), (36, 1), (60, 128), (64, root.size as u32), (80, root.size as u32), (120, u32::MAX)] {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        bytes[86] = 1;
+        bytes[96..112].copy_from_slice(&root.guid);
+        let group = u32::from_be_bytes(*b"mat ");
+        let tag = crate::core::source::read_tag_from_bytes(&bytes, None, None, group).expect("read as Baboon reads Halo 5 tags");
+        assert!(tag.is_halo5());
+
+        let mut grid = Grid::new(1);
+        grid.entry = TagEntry {
+            key: TAG_KEY.to_owned(),
+            display_path: "objects/h5.material".to_owned(),
+            group_tag: group,
+            group_name: Some("material".to_owned()),
+            location: TagEntryLocation::LooseFile("objects/h5.material".into()),
+        };
+        grid.doc = TagDocument::clean(tag);
+        grid.locked = true;
+        grid.idle(3);
+        for label in ["material shader", "MATERIAL PROPERTIES", "sort offset", "alpha blend mode"] {
+            assert_eq!(grid.count(label), 1, "{label}: {:?}", grid.texts());
+        }
+        assert_eq!(grid.count("Override Default"), 0, "nothing to add on a locked tag");
+
+        let row = grid.find("sort offset", 0).center().y;
+        let value = grid
+            .painted
+            .iter()
+            .filter(|(text, rect)| text == "0.0" && (rect.center().y - row).abs() < 6.0)
+            .map(|(_, rect)| *rect)
+            .max_by(|a, b| a.left().total_cmp(&b.left()))
+            .expect("its value box");
+        grid.click_at(value.center());
+        grid.type_text("0.75");
+        grid.apply();
+        assert_eq!(grid.doc.tag.root().read_real("sort offset"), Some(0.75), "edited in place");
+        let written = grid.doc.tag.write_to_bytes().expect("written as Halo 5 bytes");
+        assert!(blam_tags::halo5::looks_like_halo5(&written));
+        let reread = crate::core::source::read_tag_from_bytes(&written, None, None, group).unwrap();
+        assert_eq!(reread.root().read_real("sort offset"), Some(0.75), "and read back");
+    }
 }

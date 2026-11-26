@@ -93,8 +93,15 @@ pub(in crate::app) fn build_material_tag_editor_model(
         return None;
     }
     let root = tag.root();
-    let shader_path = root.read_tag_ref_path("material shader").unwrap_or_default();
-    let shader_tag = (!shader_path.is_empty())
+    let mut shader_path = root.read_tag_ref_path("material shader").unwrap_or_default();
+    // A Halo 5 tag names what it references by tag id, which reads as a
+    // placeholder: id 0 is none, any other is a tag no path can be found
+    // for here.
+    let unresolved = shader_path.starts_with("<unresolved tag");
+    if shader_path == "<unresolved tag 0x00000000>" {
+        shader_path.clear();
+    }
+    let shader_tag = (!shader_path.is_empty() && !unresolved)
         .then(|| source.and_then(|source| templates.get_tag(source, &shader_path, "material_shader", *b"mats")))
         .flatten();
     let declared = shader_tag
@@ -107,12 +114,12 @@ pub(in crate::app) fn build_material_tag_editor_model(
 
     let mut top_rows = vec![material_shader_row(&shader_path)];
     if !shader_path.is_empty() && shader_tag.is_none() {
-        top_rows.push(shader_plain_value_row(
-            "material shader".to_owned(),
-            String::new(),
-            "did not load: its parameters can't be listed".to_owned(),
-            Some("note".to_owned()),
-        ));
+        let why = if unresolved {
+            "named by a tag id this source can't open: its parameters can't be listed"
+        } else {
+            "did not load: its parameters can't be listed"
+        };
+        top_rows.push(shader_plain_value_row("material shader".to_owned(), String::new(), why.to_owned(), Some("note".to_owned())));
     }
 
     // Sections in the shader's order, named for their display groups.

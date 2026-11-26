@@ -13,7 +13,7 @@ Status: **built** on branch `material-editor` (local, not pushed), 2026-11-26, o
 - **The highlight shows the hovered material whole** (§3.8): it tests depth against its own parts alone, culling faces turned away as the model does. Against the picture's depth, what it lit hung on the shading: a Reach Warthog's tyre core lit whole under Game Shaders, but only at its treads under Textured, where its motion-blur shell (`warthog_tire_blur`) draws solid in front of it.
 - **Gates:** baselines blessed fresh from `main` in a worktree, then compared. Load, options, pixels, simulations and GL state all match `main`; the GL-call logs differ in texture ids alone (240 of 240 logs make the same calls in the same order), as the texture pool now deletes old textures after making new ones.
 - **Run in the app** on a Reach Warthog (Textured and Game Shaders): the button, window, dropdown, the shader's grid and the hover highlight all work.
-- **Not covered:** Halo 5 materials (none on hand, and the engine builds no Halo 5 tag from definitions); H2A materials only over tags built from its definitions (no kit).
+- **Halo 5 and H2A materials without kits:** no tag of either is on hand. H2A's grid is tested over tags built from its definitions. A Halo 5 `material` is laid out by hand in Halo 5's native (`ucsh`) form, as blam-tags' own Halo 5 tests do theirs: its grid draws with the structure locked, a field edits in place, and the edit writes back as Halo 5 bytes. A Halo 5 tag names its material shader by tag id, which no source here resolves to a path, so its grid can't list that shader's parameters; it says so, and a zero id reads as none. Halo 5 has no Model Preview, so no Material Editor.
 
 ## 1. What we're building
 
