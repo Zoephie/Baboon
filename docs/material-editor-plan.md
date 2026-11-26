@@ -7,9 +7,13 @@ Status: **built** on branch `material-editor` (local, not pushed), 2026-11-26, o
 - **Material saving is not held back** (§3.9). The research answered it: all 6977 Halo 4 kit materials ship an empty `postprocess definition` (counted with `blam-tag-shell block … count`), and the game builds the postprocess from the parameters at load (blam-tags `material` module, after `c_material::postprocess`). What the grid writes is what the game reads.
 - **The material view was designed without Foundation's.** `~/Source/HREK_Foundation` is no longer on disk; the view follows the tag's own semantics (the engine's bake: an override's value, then its functions over it) and the render-method grid's rows.
 - **No input-bytes key** (§3.6, point 10). After OK on a picker, the preview resolves the material once more and gets the same textures; its maps come from the kept caches, so nothing is uploaded and nothing flickers. Not worth the hashing.
+- **The unsaveable Save** is tested in the window: it says why, and writes nothing.
 - **A picker shows a draft only once its colour differs from the one it opened with** (§3.7): sending the tag's own colour at open made a resolve for nothing.
 - **A new read kind, `ReadAs::Live`**, notes the files of a preview's held shaders: neither a save nor an edit of one makes the preview load again.
-- **Not run:** the pixel/GL-call gates (their baselines, `~/Source/baboon-gates`, are gone), and the unsaveable Save button in the window (covered by `unsaveable_reason`'s own tests). H2A and Halo 5 materials were not tried on real tags (no kits).
+- **The highlight shows the hovered material whole** (§3.8): it tests depth against its own parts alone, culling faces turned away as the model does. Against the picture's depth, what it lit hung on the shading: a Reach Warthog's tyre core lit whole under Game Shaders, but only at its treads under Textured, where its motion-blur shell (`warthog_tire_blur`) draws solid in front of it.
+- **Gates:** baselines blessed fresh from `main` in a worktree, then compared. Load, options, pixels, simulations and GL state all match `main`; the GL-call logs differ in texture ids alone (240 of 240 logs make the same calls in the same order), as the texture pool now deletes old textures after making new ones.
+- **Run in the app** on a Reach Warthog (Textured and Game Shaders): the button, window, dropdown, the shader's grid and the hover highlight all work.
+- **Not covered:** Halo 5 materials (none on hand, and the engine builds no Halo 5 tag from definitions); H2A materials only over tags built from its definitions (no kit).
 
 ## 1. What we're building
 
