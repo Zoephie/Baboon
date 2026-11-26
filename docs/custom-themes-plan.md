@@ -3,7 +3,7 @@
 **Status (2026-11-25, branch `custom-themes`).** Every phase is built, one
 local commit each, not yet pushed or in a pull request. Phase 0 is Paddy's
 (#131, #133); Phase 1 is `269ce20e`, Phase 2 `e03b44bb`, Phase 3 `b8d6ad19`,
-Phase 4 `317f54b6`, and Phase 5 the commit after it. Where the build differs
+Phase 4 `317f54b6`, Phase 5 `e034969d`. Where the build differs
 from the plan, the phase says so under **As built**. The running app has not
 been tried: live reload with an outside editor, the editor's feel, preview on
 hover, and everything on Windows are owed a check
