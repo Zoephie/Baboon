@@ -33,6 +33,10 @@ pub(in crate::app) enum MaterialEditorCommand {
     /// The preview's editor closed: let go of its documents that have no
     /// unsaved edits.
     Release { kit: KitId, preview: String },
+    /// Save the shader documents at `keys`, each where its tag saves.
+    Save { kit: KitId, keys: Vec<String> },
+    /// Throw away the unsaved edits of the shader documents at `keys`.
+    Reset { kit: KitId, keys: Vec<String> },
 }
 
 impl Baboon {
@@ -59,6 +63,37 @@ impl Baboon {
                         state.reads.mark_live(file);
                     }
                     state.material_live.documents.insert(material, result);
+                }
+            }
+            MaterialEditorCommand::Save { kit, keys } => {
+                let Some(index) = self.model.kit_index(kit) else { return };
+                // The save paths act on the active kit.
+                self.focus_kit(index);
+                let (mut saved, mut errors) = (0, Vec::new());
+                for key in keys {
+                    match self.save_tag_routed(&key) {
+                        Ok(_) => saved += 1,
+                        // One refused stops the rest, as a disk conflict
+                        // opens its window and waits on it.
+                        Err(error) => {
+                            errors.push(error);
+                            break;
+                        }
+                    }
+                }
+                self.model.status = if errors.is_empty() {
+                    format!("Saved {saved} material(s)")
+                } else {
+                    format!("Save failed: {}", errors.join("; "))
+                };
+            }
+            MaterialEditorCommand::Reset { kit, keys } => {
+                let Some(index) = self.model.kit_index(kit) else { return };
+                for key in &keys {
+                    self.discard_tag_changes(index, key, ctx);
+                }
+                if keys.len() > 1 {
+                    self.model.status = format!("Discarded the unsaved changes to {} materials", keys.len());
                 }
             }
             MaterialEditorCommand::Release { kit, preview } => {
@@ -205,7 +240,13 @@ pub(in crate::app) fn draw_material_editor_window(
                 );
             }
             ui.separator();
-            draw_material_body(cx, ui, kit_index, model, scope, inputs, view, editor, &documents, &material);
+            let modified = modified_materials(cx, kit_index, &materials, &documents);
+            let list_height = modified_list_height(&modified, editor_state.confirm_reset.is_some());
+            let body = ui.available_size();
+            ui.allocate_ui(egui::vec2(body.x, (body.y - list_height).max(240.0)), |ui| {
+                draw_material_body(cx, ui, kit_index, model, scope, inputs, view, editor, &documents, &material);
+            });
+            draw_modified_list(cx, ui, kit_id, &modified, &mut editor_state);
         });
 
     // Pressing in the window makes its kit the one actions land in, and its
@@ -396,8 +437,132 @@ fn draw_material_body(
         });
     });
     disk_banner::draw_disk_banner(cx, ui, kit_index, &entry);
-    let body = ui.available_size();
-    ui.allocate_ui(egui::vec2(body.x, body.y.max(240.0)), |ui| {
-        draw_tag_body(cx, ui, kit_index, &entry, &editor_scope(scope), PaneInputs { field_nav: None, live_preview: Some(model.key.clone()), ..inputs }, view, editor);
+    draw_tag_body(cx, ui, kit_index, &entry, &editor_scope(scope), PaneInputs { field_nav: None, live_preview: Some(model.key.clone()), ..inputs }, view, editor);
+}
+
+/// A material whose shader has unsaved edits, as the modified list shows it.
+struct ModifiedMaterial {
+    material: EditorMaterial,
+    /// Its shader document's key.
+    document: String,
+    /// The shader is open in a tab too: Reset discards that tab's edits.
+    in_tab: bool,
+    /// Why Save is refused, when it is.
+    unsaveable: Option<&'static str>,
+}
+
+/// The listed materials whose shader documents have unsaved edits.
+fn modified_materials(
+    cx: &Ctx,
+    kit_index: usize,
+    materials: &[EditorMaterial],
+    documents: &std::collections::BTreeMap<MaterialKey, Result<String, String>>,
+) -> Vec<ModifiedMaterial> {
+    let kit = &cx.model.kits[kit_index];
+    materials
+        .iter()
+        .filter_map(|material| {
+            let Some(Ok(document)) = documents.get(&material.key) else { return None };
+            let tag = kit.parsed_tags.get(document).filter(|tag| tag.dirty.is_set())?;
+            let entry = kit.entry_for_key(document)?;
+            Some(ModifiedMaterial {
+                material: material.clone(),
+                document: document.clone(),
+                in_tab: kit.open_tabs.contains(document),
+                unsaveable: unsaveable_reason(entry, &tag.tag),
+            })
+        })
+        .collect()
+}
+
+/// The height the modified list takes, kept clear of the editor above it.
+fn modified_list_height(modified: &[ModifiedMaterial], confirming: bool) -> f32 {
+    if modified.is_empty() {
+        return 0.0;
+    }
+    let row = BUTTON_HEIGHT + 4.0;
+    12.0 + row * (modified.len() as f32 + 1.0) + if confirming { row * 2.0 } else { 0.0 }
+}
+
+/// What has unsaved edits, each with Save and Reset, and both for all.
+/// Reset asks a second click first: it can't be undone.
+fn draw_modified_list(
+    cx: &Ctx,
+    ui: &mut Ui,
+    kit: KitId,
+    modified: &[ModifiedMaterial],
+    state: &mut crate::app::model_preview::material_editor::MaterialEditorState,
+) {
+    if modified.is_empty() {
+        state.confirm_reset = None;
+        return;
+    }
+    ui.separator();
+    let saveable: Vec<String> =
+        modified.iter().filter(|item| item.unsaveable.is_none()).map(|item| item.document.clone()).collect();
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(format!("Modified ({})", modified.len())).strong());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if icon_text_button(ui, ButtonIcon::Clear, "Reset All", true)
+                .on_hover_text("Discard the unsaved changes to every material listed.")
+                .clicked()
+            {
+                state.confirm_reset = Some(modified.iter().map(|item| item.document.clone()).collect());
+            }
+            if icon_text_button(ui, ButtonIcon::Save, "Save All", !saveable.is_empty())
+                .on_hover_text("Save every material listed.")
+                .clicked()
+            {
+                cx.send(EditorCommand::MaterialEditor(MaterialEditorCommand::Save { kit, keys: saveable.clone() }));
+            }
+        });
+    });
+    for item in modified {
+        ui.horizontal(|ui| {
+            let name = ui.label(format!("● {}", item.material.display_name())).on_hover_text(&item.material.path);
+            if name.hovered() {
+                state.hovered = Some(item.material.key.clone());
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if icon_text_button(ui, ButtonIcon::Clear, "Reset", true)
+                    .on_hover_text("Discard this material's unsaved changes.")
+                    .clicked()
+                {
+                    state.confirm_reset = Some(vec![item.document.clone()]);
+                }
+                let save = icon_text_button(ui, ButtonIcon::Save, "Save", item.unsaveable.is_none());
+                let save = match item.unsaveable {
+                    Some(reason) => save.on_disabled_hover_text(format!("Cannot be saved: {reason}")),
+                    None => save.on_hover_text("Save this material's shader."),
+                };
+                if save.clicked() {
+                    cx.send(EditorCommand::MaterialEditor(MaterialEditorCommand::Save {
+                        kit,
+                        keys: vec![item.document.clone()],
+                    }));
+                }
+            });
+        });
+    }
+    let Some(keys) = state.confirm_reset.clone() else { return };
+    let names: Vec<String> = modified
+        .iter()
+        .filter(|item| keys.contains(&item.document))
+        .map(|item| item.material.label.clone())
+        .collect();
+    let in_tab = modified.iter().any(|item| keys.contains(&item.document) && item.in_tab);
+    let mut text = format!("Discard the unsaved changes to {}? This can't be undone.", names.join(", "));
+    if in_tab {
+        text.push_str(" This also discards the changes made in its tab.");
+    }
+    ui.label(RichText::new(text).color(save_error_text()));
+    ui.horizontal(|ui| {
+        if icon_text_button(ui, ButtonIcon::Clear, "Discard", true).clicked() {
+            cx.send(EditorCommand::MaterialEditor(MaterialEditorCommand::Reset { kit, keys: keys.clone() }));
+            state.confirm_reset = None;
+        }
+        if ui.button("Keep").clicked() {
+            state.confirm_reset = None;
+        }
     });
 }

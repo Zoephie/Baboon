@@ -40,6 +40,8 @@ pub(in crate::app) struct MaterialEditorState {
     /// The material the pointer is over in its lists, this pass: the
     /// viewport lights its parts.
     pub(in crate::app) hovered: Option<MaterialKey>,
+    /// The shader documents a Reset is waiting on a second click to discard.
+    pub(in crate::app) confirm_reset: Option<Vec<String>>,
 }
 
 /// What keeps a preview's materials as the shader documents its Material

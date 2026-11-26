@@ -6200,6 +6200,133 @@ mod tests {
         frames_until(&mut h, "the draft to go", |h| live(h, &model).draft.is_none());
     }
 
+    /// Override Diffuse Intensity in the Material Editor's window, as a user
+    /// would, and wait for it to land.
+    fn override_diffuse_intensity(h: &mut Harness, material: &str) {
+        h.click_at(rightmost_on_row(h, "Diffuse Intensity", "Override Default"));
+        frames_until(h, "the edit", |h| h.app.model.kits[0].parsed_tags[material].dirty.is_set());
+    }
+
+    fn parameter_names(tag: &TagFile) -> Vec<String> {
+        tag.root()
+            .field("material parameters")
+            .and_then(|field| field.as_block())
+            .map(|block| block.iter().map(|element| element.read_string_id("parameter name").unwrap_or_default()).collect())
+            .unwrap_or_default()
+    }
+
+    /// The modified list's Save writes the material's file, and the preview,
+    /// which already draws it, is not loaded again.
+    #[test]
+    fn the_modified_lists_save_writes_the_material_without_a_load() {
+        let mut h = Harness::new();
+        let Some((kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_save") else { return };
+        override_diffuse_intensity(&mut h, &material);
+        idle(&mut h);
+        assert!(h.painted_contains("Modified (1)"), "{:?}", h.painted);
+        let id = h.app.model.kits[0].id;
+        let geometry = |h: &Harness| match &h.app.views[id].caches.model_previews[&model].data {
+            Some(Ok(data)) => data.geometry_id,
+            _ => 0,
+        };
+        let before = geometry(&h);
+
+        h.click("Save", 0);
+        idle(&mut h);
+        assert!(!h.app.model.kits[0].parsed_tags[&material].dirty.is_set(), "saved");
+        let on_disk = TagFile::read(kit.path("objects\\multi\\darth_shader.material")).unwrap();
+        assert!(parameter_names(&on_disk).contains(&"diffuse_intensity".to_owned()));
+        let state = &h.app.views[id].caches.model_previews[&model];
+        assert!(!state.reads_changed && !state.needs_preview_load(&model), "no load for a save it already draws");
+        assert_eq!(geometry(&h), before);
+        assert!(!h.painted_contains("Modified ("), "nothing left modified");
+    }
+
+    /// The modified list's Reset asks first, then discards: the material
+    /// opens again from its file, its preview drawn so.
+    #[test]
+    fn the_modified_lists_reset_asks_then_puts_the_material_back() {
+        let mut h = Harness::new();
+        let Some((_kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_reset") else { return };
+        override_diffuse_intensity(&mut h, &material);
+        idle(&mut h);
+        h.click("Reset", 0);
+        idle(&mut h);
+        assert!(h.app.model.kits[0].parsed_tags[&material].dirty.is_set(), "one click discards nothing");
+        assert!(h.painted_contains("Discard the unsaved changes to darth_shader"), "{:?}", h.painted);
+        assert!(!h.painted_contains("its tab"), "it has no tab");
+
+        h.click("Discard", 0);
+        frames_until(&mut h, "the material opened again", |h| {
+            h.app.model.kits[0].parsed_tags.get(&material).is_some_and(|document| !document.dirty.is_set())
+        });
+        let document = &h.app.model.kits[0].parsed_tags[&material];
+        assert!(!parameter_names(&document.tag).contains(&"diffuse_intensity".to_owned()), "back to its file");
+        let stamp = document.content_stamp();
+        frames_until(&mut h, "the preview drawn from it", |h| {
+            live(h, &model).drawn.get(&material).is_some_and(|drawn| drawn.stamp.is_none() || drawn.stamp == Some(stamp))
+        });
+    }
+
+    /// Reset with the shader open in a tab too says that tab's edits go with
+    /// it, and leaves the tab open on the file.
+    #[test]
+    fn reset_with_the_shader_in_a_tab_warns_and_reloads_the_tab() {
+        let mut h = Harness::new();
+        let Some((_kit, _model, material)) = material_editor_on_darth(&mut h, "material_editor_reset_tab") else { return };
+        h.click("Open in Tab", 0);
+        frames_until(&mut h, "the shader's tab", |h| h.app.model.kits[0].open_tabs.contains(&material));
+        // An edit, then back to the model, whose preview the editor is over.
+        let ops = crate::core::document::apply::DeferredOps {
+            shader_param_ops: vec![crate::core::document::ops::ShaderParamOp {
+                parameters_block_path: "material parameters".to_owned(),
+                parameter_name: "diffuse_intensity".to_owned(),
+                initial_fields: Vec::new(),
+                animated_parameters: Vec::new(),
+            }],
+            ..Default::default()
+        };
+        h.app.apply_doc_ops(0, &material, "Add", ops, crate::core::document::apply::UndoStep::Own);
+        let model = h.app.model.kits[0].open_tabs.iter().find(|key| key.ends_with("smoke.render_model")).unwrap().clone();
+        h.app.kit_and_view(0).open_tag_pane(&model);
+        h.app.kit_and_view(0).focus_pane(model);
+        frames_until(&mut h, "the model's editor", |h| h.painted_contains("Modified (1)"));
+        h.click("Reset", 0);
+        idle(&mut h);
+        assert!(h.painted_contains("its tab"), "{:?}", h.painted);
+        h.click("Discard", 0);
+        frames_until(&mut h, "the tab's material read again", |h| {
+            h.app.model.kits[0].parsed_tags.get(&material).is_some_and(|document| !document.dirty.is_set())
+        });
+        assert!(h.app.model.kits[0].open_tabs.contains(&material), "its tab stays");
+    }
+
+    /// A Halo 4 material's own tab edits it in the grid too: Override
+    /// Default there adds the parameter.
+    #[test]
+    fn a_halo_4_materials_own_tab_overrides_a_default() {
+        let kit_tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        let material = "objects\\multi\\darth_shader.material";
+        let shader = "shaders\\material_shaders\\materials\\srf_lambert.material_shader";
+        if !kit_tags.join(material.replace('\\', "/")).exists() {
+            eprintln!("skipping: set BLAM_TEST_H4EK");
+            return;
+        }
+        let mut h = Harness::new();
+        let kit = crate::app::loose_fixture::LooseKit::new("material_tab_edit", "halo4_mcc");
+        for tag in [material, shader] {
+            let to = kit.path(tag);
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::copy(kit_tags.join(tag.replace('\\', "/")), to).unwrap();
+        }
+        kit.install(&mut h.app);
+        let key = kit.open(&mut h.app, material);
+        frames_until(&mut h, "the material's grid", |h| h.painted_contains("Diffuse Intensity"));
+        h.click_at(rightmost_on_row(&h, "Diffuse Intensity", "Override Default"));
+        frames_until(&mut h, "the edit", |h| h.app.model.kits[0].parsed_tags[&key].dirty.is_set());
+        assert!(parameter_names(&h.app.model.kits[0].parsed_tags[&key].tag).contains(&"diffuse_intensity".to_owned()));
+    }
+
     /// OK on a live picker writes what it drew.
     #[test]
     fn ok_on_a_live_picker_writes_what_it_drew() {

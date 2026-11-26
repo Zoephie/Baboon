@@ -111,6 +111,39 @@ impl Baboon {
         self.close_tag_popups(kit, |tag| tag == key);
     }
 
+    /// Save the active kit's document at `key` wherever its kind of tag
+    /// saves to, as the save-changes prompt's Save and the Material Editor's
+    /// do: what it was saved as, or why not, each labelled with the tag.
+    ///
+    /// Container tags have no loose file to write. A brand-new one saves via
+    /// a file dialog (new override container); an existing one is
+    /// overwritten inside the game's pak, the Save asked for standing in for
+    /// the separate overwrite confirmation. Both report through `status`
+    /// instead of returning a path, so success is read back off the
+    /// document's dirty flag.
+    pub(in crate::app) fn save_tag_routed(&mut self, key: &str) -> Result<String, String> {
+        let label = self.model.tag_path_label(key);
+        match close_prompt_save_route(self.model.entry_for_key(key).map(|entry| &entry.location)) {
+            ClosePromptSave::NewContainer => {
+                self.save_new_container_tag(key);
+                if self.model.tag_is_dirty(key) { Err(format!("{label}: not saved")) } else { Ok(key.to_owned()) }
+            }
+            ClosePromptSave::ContainerInPlace => {
+                self.overwrite_current_tag_in_place(key);
+                if self.model.tag_is_dirty(key) {
+                    // The overwrite failure reason is in `status`.
+                    Err(format!("{label}: {}", self.model.status))
+                } else {
+                    Ok(key.to_owned())
+                }
+            }
+            ClosePromptSave::File => self
+                .save_tag_by_key(key)
+                .map(|path| path.display().to_string())
+                .map_err(|error| format!("{label}: {error}")),
+        }
+    }
+
     /// Close the color and function popups editing those of `kit`'s tags
     /// that `closing` names. A popup for any other tag stays, with its
     /// unconfirmed edits: closing one tab used to throw away the popup open
@@ -435,46 +468,9 @@ impl Baboon {
                 let mut saved = Vec::new();
                 let mut errors = Vec::new();
                 for tag_id in tag_ids {
-                    // Container tags have no loose file to write. A brand-new
-                    // one saves via a file dialog (new override container); an
-                    // existing one is overwritten inside the game's pak, with
-                    // this prompt's Save button standing in for the separate
-                    // overwrite confirmation. Both report through `status`
-                    // instead of returning a path, so success is read back off
-                    // the document's dirty flag.
-                    match close_prompt_save_route(
-                        self.model.entry_for_key(&tag_id).map(|entry| &entry.location),
-                    ) {
-                        ClosePromptSave::NewContainer => {
-                            self.save_new_container_tag(&tag_id);
-                            if self.model.tag_is_dirty(&tag_id) {
-                                let label = self.model.tag_path_label(&tag_id);
-                                errors.push(format!("{label}: not saved"));
-                            } else {
-                                saved.push(tag_id.clone());
-                            }
-                            continue;
-                        }
-                        ClosePromptSave::ContainerInPlace => {
-                            self.overwrite_current_tag_in_place(&tag_id);
-                            if self.model.tag_is_dirty(&tag_id) {
-                                // The overwrite failure reason is in `status`.
-                                let label = self.model.tag_path_label(&tag_id);
-                                let detail = self.model.status.clone();
-                                errors.push(format!("{label}: {detail}"));
-                            } else {
-                                saved.push(tag_id.clone());
-                            }
-                            continue;
-                        }
-                        ClosePromptSave::File => {}
-                    }
-                    match self.save_tag_by_key(&tag_id) {
-                        Ok(path) => saved.push(path.display().to_string()),
-                        Err(error) => {
-                            let label = self.model.tag_path_label(&tag_id);
-                            errors.push(format!("{label}: {error}"));
-                        }
+                    match self.save_tag_routed(&tag_id) {
+                        Ok(saved_as) => saved.push(saved_as),
+                        Err(error) => errors.push(error),
                     }
                 }
                 if errors.is_empty() {
