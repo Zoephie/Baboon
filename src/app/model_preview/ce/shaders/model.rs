@@ -4,7 +4,7 @@ use super::animation::{CeModelAnimation, DETAIL_FUNCTIONS, color_channel, read_m
 use super::base::{
     ALPHA_REFERENCE, AMBIENT, COMMON_FILE, FIRST_LIGHT_COLOR, FIRST_LIGHT_DIRECTION, GREY,
     REFLECTION_TINT, SECOND_LIGHT_COLOR, SECOND_LIGHT_DIRECTION, ShaderFlags, WHITE, flat,
-    option_index, read_shader_source, shader_directory, texture,
+    option_index, read_shader_source, shader_directory, source_error, texture,
 };
 use super::transparent::MODEL_DECAL_DEPTH_BIAS;
 use super::{
@@ -19,16 +19,13 @@ use std::sync::Arc;
 pub(in crate::app::model_preview) type CeModelCommon = Arc<TranslatedFxShader>;
 
 /// The kit's `shaders/fx` folder, beside `tags`.
-pub(super) fn read_common(reader: &TagReader) -> Option<CeModelCommon> {
-    let directory = shader_directory(reader)?;
+pub(super) fn read_common(reader: &TagReader) -> Result<CeModelCommon, String> {
+    let directory = shader_directory(reader)
+        .ok_or_else(|| "the shader source is read from an editing kit's folder".to_owned())?;
     let read = |name: &str| read_shader_source(&directory, name);
-    match translate_fx(COMMON_FILE, PASS_GLSL_VERSION, &[], read) {
-        Ok(shader) => Some(Arc::new(shader)),
-        Err(error) => {
-            eprintln!("model preview: {COMMON_FILE}: {error}");
-            None
-        }
-    }
+    translate_fx(COMMON_FILE, PASS_GLSL_VERSION, &[], read)
+        .map(Arc::new)
+        .map_err(|error| source_error(&directory, &error))
 }
 
 /// A `real_argb_color` of tag fields: brightness, then a color.
@@ -195,15 +192,13 @@ pub(in crate::app::model_preview) fn ce_model_passes(
     root: TagStruct<'_>,
     group: &[u8; 4],
     flags: &ShaderFlags<'_>,
-    common: &mut Option<Option<CeModelCommon>>,
+    common: &mut Option<Result<CeModelCommon, String>>,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
-) -> Vec<Dx9DrawPass> {
+) -> Result<Vec<Dx9DrawPass>, String> {
     if !matches!(group, b"soso" | b"senv") {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let Some(common) = common.get_or_insert_with(|| read_common(reader)).clone() else {
-        return Vec::new();
-    };
+    let common = common.get_or_insert_with(|| read_common(reader)).clone()?;
     let has = |flag: &str| flags.has(flag);
     let factor = |value: Option<f32>| value.filter(|v| v.is_finite() && *v != 0.0).unwrap_or(1.0);
     let mut map = |name: &str, kind| {
@@ -303,5 +298,5 @@ pub(in crate::app::model_preview) fn ce_model_passes(
             common: &common,
         }
     };
-    build_passes(pass)
+    Ok(build_passes(pass))
 }

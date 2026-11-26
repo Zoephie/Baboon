@@ -277,8 +277,8 @@ fn a_gen3_material_translates_its_passes_only_for_game_shaders() {
         resolve_model_textures(&source, std::slice::from_ref(&material), game_shaders).remove(0)
     };
     let (off, on) = (resolve(false), resolve(true));
-    assert!(on.gen3.is_some(), "{:?}", on.gen3_error);
-    assert!(off.gen3.is_none() && off.gen3_error.is_none());
+    assert!(on.gen3.is_some(), "{:?}", on.game_shaders_error);
+    assert!(off.gen3.is_none() && off.game_shaders_error.is_none());
     assert!(off.error.is_none(), "{:?}", off.error);
     for slot in [TextureSlot::Base, TextureSlot::Detail] {
         assert_eq!(off.get(slot).is_some(), on.get(slot).is_some(), "{slot:?}");
@@ -345,6 +345,62 @@ fn resolve_classic(source: &TagSource, path: &str, group: &[u8; 4]) -> MaterialT
         true,
     )
     .remove(0)
+}
+
+/// Against `BLAM_TEST_HCEEK`: the scorpion's treads scroll by the game's own
+/// shader, read from the kit's `shaders\fx`. A tags folder with no shaders
+/// folder beside it draws them as with Game Shaders off, and says so, naming
+/// where it looked, rather than leaving the treads still and their functions
+/// greyed for no reason shown.
+#[cfg(unix)]
+#[test]
+fn halo_ce_game_shaders_say_when_the_kits_shader_source_is_missing() {
+    let Some(tags) = kit_root(GameId::HaloCe) else {
+        return;
+    };
+    let tread = |root: PathBuf| {
+        let source = loose_source(root, "haloce_mcc");
+        resolve_classic(&source, r"vehicles\scorpion\shaders\tread_left", b"soso")
+    };
+    let animated = |textures: &MaterialTextures| {
+        textures
+            .dx9_layers
+            .iter()
+            .flatten()
+            .filter_map(|pass| pass.own_animation.as_ref())
+            .any(|animation| animation.outputs_read()[0])
+    };
+    let kit = tread(tags.clone());
+    assert_eq!(kit.game_shaders_error, None);
+    assert!(animated(&kit), "the tread scrolls by output A");
+
+    let bare = std::env::temp_dir().join(format!("baboon-ce-no-shaders-{}", std::process::id()));
+    std::fs::create_dir_all(&bare).unwrap();
+    let link = bare.join("tags");
+    if !link.exists() {
+        std::os::unix::fs::symlink(&tags, &link).unwrap();
+    }
+    let missing = tread(link);
+    std::fs::remove_dir_all(&bare).unwrap();
+    assert!(!animated(&missing));
+    assert!(missing.get(TextureSlot::Base).is_some(), "it still draws its map");
+    let error = missing.game_shaders_error.clone().expect("the reason is kept");
+    assert!(
+        error.contains(&bare.join("shaders").join("fx").display().to_string())
+            && error.contains("beside its tags folder"),
+        "{error}"
+    );
+    let (summary, detail) = crate::app::model_preview::panel::game_shaders_note(
+        None,
+        std::slice::from_ref(&missing),
+        &[RenderModelPreviewMaterial {
+            shader_path: r"vehicles\scorpion\shaders\tread_left".to_owned(),
+            ..Default::default()
+        }],
+    )
+    .expect("the footer says so");
+    assert_eq!(summary, "Game Shaders incomplete — hover for why");
+    assert!(detail.contains(&error), "{detail}");
 }
 
 /// Halo CE model shading, against `BLAM_TEST_HCEEK` (the kit's `tags`).
@@ -758,7 +814,7 @@ fn game_shaders_say_what_they_left_out() {
     let textures = [
         MaterialTextures::default(),
         MaterialTextures {
-            gen3_error: Some("no definition".to_owned()),
+            game_shaders_error: Some("no definition".to_owned()),
             ..Default::default()
         },
     ];

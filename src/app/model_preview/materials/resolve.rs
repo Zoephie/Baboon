@@ -188,7 +188,7 @@ fn resolve_one_material(
                 if textures.slots.iter().all(Option::is_none) {
                     textures.error = Some(format!("Halo 3 shader not translated: {error}"));
                 }
-                textures.gen3_error = Some(error);
+                textures.game_shaders_error = Some(error);
             }
         }
     }

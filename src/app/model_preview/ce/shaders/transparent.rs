@@ -7,7 +7,7 @@ use super::animation::{
 };
 use super::base::{
     ALPHA_REFERENCE, CHICAGO_FILE, GENERIC_FILE, ShaderFlags, flat, option_index,
-    read_shader_source, shader_directory, texture,
+    read_shader_source, shader_directory, source_error, texture,
 };
 use super::glass::{decal_bias, glass_passes};
 use super::model::LAYER_GROUPS;
@@ -529,15 +529,16 @@ fn chicago_pass(
 }
 
 /// A transparent shader's passes: its extra layers, then itself. Empty for
-/// any other group, or where the kit has no shaders.
+/// any other group, or outside a loose kit; why, when its own shader could
+/// not be translated. An extra layer that cannot be is left out.
 pub(in crate::app::model_preview) fn ce_transparent_passes(
     reader: &TagReader,
     root: TagStruct<'_>,
     group: &[u8; 4],
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
-) -> Vec<Dx9DrawPass> {
+) -> Result<Vec<Dx9DrawPass>, String> {
     let Some(directory) = shader_directory(reader) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let single = match group {
         b"sgla" => Some(glass_passes(
@@ -565,13 +566,10 @@ pub(in crate::app::model_preview) fn ce_transparent_passes(
         _ => None,
     };
     if let Some(passes) = single {
-        return passes.unwrap_or_else(|error| {
-            eprintln!("model preview: transparent shader: {error}");
-            Vec::new()
-        });
+        return passes.map_err(|error| source_error(&directory, &error));
     }
     if !matches!(group, b"sotr" | b"schi" | b"scex") {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let mut passes = Vec::new();
     let layers = root
@@ -588,12 +586,10 @@ pub(in crate::app::model_preview) fn ce_transparent_passes(
         };
         for (extension, layer_group) in LAYER_GROUPS {
             if let Ok(tag) = reader.load(&path, extension, layer_group) {
-                passes.extend(ce_transparent_passes(
-                    reader,
-                    tag.root(),
-                    layer_group,
-                    bitmap,
-                ));
+                match ce_transparent_passes(reader, tag.root(), layer_group, bitmap) {
+                    Ok(layer) => passes.extend(layer),
+                    Err(error) => eprintln!("model preview: {path}: {error}"),
+                }
                 break;
             }
         }
@@ -604,12 +600,6 @@ pub(in crate::app::model_preview) fn ce_transparent_passes(
         b"schi" => chicago_pass(&directory, root, &flags, "maps", bitmap),
         _ => chicago_pass(&directory, root, &flags, "4 stage maps", bitmap),
     };
-    match pass {
-        Ok(pass) => passes.push(pass),
-        Err(error) => {
-            eprintln!("model preview: transparent shader: {error}");
-            return Vec::new();
-        }
-    }
-    passes
+    passes.push(pass.map_err(|error| source_error(&directory, &error))?);
+    Ok(passes)
 }

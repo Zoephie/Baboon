@@ -100,6 +100,20 @@ pub(super) fn read_shader_source(
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// Why the kit's shader source in `directory` gave no shader: the folder is
+/// missing, which is said so the user can find it, or `error` translating it.
+pub(super) fn source_error(directory: &std::path::Path, error: &str) -> String {
+    if directory.is_dir() {
+        format!("the kit's shader source in {} could not be translated: {error}", directory.display())
+    } else {
+        format!(
+            "the kit's shader source is not in {}: Game Shaders need the editing kit's shaders \
+             folder beside its tags folder",
+            directory.display()
+        )
+    }
+}
+
 pub(super) fn shader_directory(reader: &TagReader) -> Option<std::path::PathBuf> {
     let TagSource::LooseFolder { root, .. } = &reader.source else {
         return None;

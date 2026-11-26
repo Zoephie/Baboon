@@ -183,7 +183,7 @@ pub(in crate::app::model_preview) fn game_shaders_note(
         .iter()
         .enumerate()
         .filter_map(|(index, texture)| {
-            let error = texture.gen3_error.as_ref()?;
+            let error = texture.game_shaders_error.as_ref()?;
             let name = materials
                 .get(index)
                 .map(|material| material.shader_path.as_str())

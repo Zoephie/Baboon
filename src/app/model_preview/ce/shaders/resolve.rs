@@ -19,8 +19,10 @@ pub(in crate::app::model_preview) struct CeResolveCaches {
     pub(in crate::app::model_preview) camo: Option<Option<super::CeCamoSettings>>,
     /// How many images a bitmap holds.
     pub(in crate::app::model_preview) image_counts: HashMap<String, usize>,
-    /// The kit's model shader as GLSL, read once. `None` until asked for.
-    pub(in crate::app::model_preview) model_common: Option<Option<super::CeModelCommon>>,
+    /// The kit's model shader as GLSL, or why it could not be read, read
+    /// once. `None` until asked for.
+    pub(in crate::app::model_preview) model_common:
+        Option<Result<super::CeModelCommon, String>>,
 }
 use std::sync::Arc;
 
@@ -134,9 +136,22 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
         caches.dx9_images.insert(key, decoded.clone());
         decoded
     };
+    // Without the kit's shader source the material draws as with Game
+    // Shaders off: no texture animation, nothing reading its functions. Said
+    // in the preview's footer, or it just looks as it would anyway.
+    let mut source_error = None;
     textures.dx9_layers[Dx9Layer::Lightmap as usize] =
-        ce_model_passes(reader, root, &group, &flags, &mut common, &mut bitmap);
-    let transparent = ce_transparent_passes(reader, root, &group, &mut bitmap);
+        ce_model_passes(reader, root, &group, &flags, &mut common, &mut bitmap)
+            .unwrap_or_else(|error| {
+                source_error = Some(error);
+                Vec::new()
+            });
+    let transparent = ce_transparent_passes(reader, root, &group, &mut bitmap)
+        .unwrap_or_else(|error| {
+            source_error.get_or_insert(error);
+            Vec::new()
+        });
+    textures.game_shaders_error = source_error.clone();
     if matches!(&group, b"soso" | b"senv") {
         let settings = caches
             .ce
@@ -160,9 +175,12 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
         return textures;
     }
     if !matches!(&group, b"soso" | b"senv") {
-        return MaterialTextures::failed(
-            "a Halo CE transparent shader the preview does not draw yet",
-        );
+        let mut failed = MaterialTextures::failed(match &source_error {
+            Some(error) => format!("a Halo CE transparent shader not translated: {error}"),
+            None => "a Halo CE transparent shader the preview does not draw yet".to_owned(),
+        });
+        failed.game_shaders_error = source_error;
+        return failed;
     }
     if textures.slots.iter().all(Option::is_none) {
         textures.error = Some("the shader names no base or detail map".to_owned());

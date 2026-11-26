@@ -162,7 +162,8 @@ fn every_transparent_shader_links_with_its_stage() {
                     SamplerKind::Volume => None,
                     SamplerKind::Texture2D => Some(flat(WHITE)),
                 },
-            );
+            )
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
             assert!(!passes.is_empty(), "{} has no passes", path.display());
             for pass in passes {
                 if !drawn.insert((pass.stage, pass.fragment.clone())) {
