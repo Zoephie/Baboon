@@ -134,7 +134,7 @@ fn halo_3_chief(bloom: bool) -> Option<(crate::app::model_preview::snapshot::Sna
     let ShotFrame { frame, .. } = shot_frame(&source, &shot("objects\\characters\\masterchief\\masterchief", "biped", true), &options);
     let gl = Arc::new(headless_gl());
     let mut renderer = ModelGlRenderer::new(&gl).unwrap();
-    let request = crate::app::model_preview::snapshot::SnapshotRequest::new(frame.clone(), size, Vec::new(), size.map(|edge| edge as f32));
+    let request = crate::app::model_preview::snapshot::SnapshotRequest::new(frame.clone(), size, Vec::new(), size.map(|edge| edge as f32), 1.0);
     let image = unsafe { super::super::renderer::draw_snapshot(&gl, &|_| None, &mut renderer, &request) }.expect("a snapshot");
     let [black, white] = [(0.0, false), (1.0, true)].map(|(background, held)| unsafe {
         super::super::renderer::draw_floats(&gl, &mut renderer, &frame, size, background, held)
@@ -223,7 +223,7 @@ fn after(source: &TagSource, game: GameId, model: &str, kind: &str, next: f32, s
     unsafe { super::super::renderer::draw_floats(&gl, &mut renderer, &first.frame, size, 0.2, false) };
     if snapshot {
         let request =
-            crate::app::model_preview::snapshot::SnapshotRequest::new(first.frame.clone(), size, Vec::new(), size.map(|edge| edge as f32));
+            crate::app::model_preview::snapshot::SnapshotRequest::new(first.frame.clone(), size, Vec::new(), size.map(|edge| edge as f32), 1.0);
         unsafe { super::super::renderer::draw_snapshot(&gl, &|_| None, &mut renderer, &request) }.expect("a snapshot");
     }
     let pixels = unsafe { super::super::renderer::draw_floats(&gl, &mut renderer, &second.frame, size, 0.2, false) };
@@ -333,9 +333,173 @@ fn the_snapshot_has_the_helpers_shown_over_the_frame() {
         );
         texture
     };
-    let request = crate::app::model_preview::snapshot::SnapshotRequest::new(frame, size, helpers, size.map(|edge| edge as f32));
+    let request = crate::app::model_preview::snapshot::SnapshotRequest::new(frame, size, helpers, size.map(|edge| edge as f32), 1.0);
     let image = unsafe { super::super::renderer::draw_snapshot(&gl, &|_| Some(white), &mut renderer, &request) }.expect("a snapshot");
     let at = |x: usize, y: usize| image.rgba[(y * image.width + x) * 4..(y * image.width + x) * 4 + 4].to_vec();
     assert_eq!(at(30, 25), [255, 128, 0, 255], "the helper, whole");
     assert_eq!(at(70, 25), [0, 0, 0, 0], "beside it, clear");
+}
+
+/// A snapshot of `frame` at `size`.
+fn snapshot_of(frame: &crate::app::model_preview::frame::ModelGpuFrame, size: [i32; 2]) -> crate::app::model_preview::snapshot::SnapshotImage {
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let request = crate::app::model_preview::snapshot::SnapshotRequest::new(
+        frame.clone(),
+        size,
+        Vec::new(),
+        [SHOT_SIZE[0] as f32, SHOT_SIZE[1] as f32],
+        size[0] as f32 / SHOT_SIZE[0] as f32,
+    );
+    unsafe { super::super::renderer::draw_snapshot(&gl, &|_| None, &mut renderer, &request) }.expect("a snapshot")
+}
+
+/// `image` halved each way, each pixel the mean of the four it covers, in
+/// premultiplied colour (as compositing sees it), back to straight.
+fn halved(image: &crate::app::model_preview::snapshot::SnapshotImage) -> Vec<[f32; 4]> {
+    let (width, height) = (image.width / 2, image.height / 2);
+    let mut out = Vec::with_capacity(width * height);
+    for y in 0..height {
+        for x in 0..width {
+            let mut sum = [0.0f32; 4];
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let at = ((2 * y + dy) * image.width + 2 * x + dx) * 4;
+                let alpha = image.rgba[at + 3] as f32 / 255.0;
+                for channel in 0..3 {
+                    sum[channel] += image.rgba[at + channel] as f32 / 255.0 * alpha;
+                }
+                sum[3] += alpha;
+            }
+            out.push(sum.map(|value| value / 4.0));
+        }
+    }
+    out
+}
+
+/// A snapshot at 2× is the same picture as at 1×, with more pixels: halved,
+/// it matches the 1× one, its bloom as wide relative to the picture. Pixel
+/// for pixel at edges they differ (each samples its own pixels), so what is
+/// compared is the mean, and how much glows past the outline.
+#[test]
+fn a_snapshot_at_twice_the_size_is_the_same_picture() {
+    let size = SHOT_SIZE.map(|edge| edge as i32);
+    let mut failures = Vec::new();
+    for (variable, game, model, kind) in MODELS {
+        let Some(source) = source(variable, *game) else { continue };
+        for shaders in [false, true] {
+            let mut options = ShotOptions::new(*game);
+            options.time = 1.5;
+            options.bloom = true;
+            let ShotFrame { frame, .. } = shot_frame(&source, &shot(model, kind, shaders), &options);
+            let one = snapshot_of(&frame, size);
+            let two_whole = snapshot_of(&frame, size.map(|edge| edge * 2));
+            if let Some(folder) = std::env::var_os("BABOON_SNAPSHOT_SHOTS") {
+                let folder = std::path::PathBuf::from(folder);
+                let _ = std::fs::create_dir_all(&folder);
+                let name = format!("{game:?}_{}_{shaders}", model.rsplit('\\').next().unwrap_or(model));
+                for (image, suffix) in [(&one, "1x"), (&two_whole, "2x")] {
+                    let _ = ::image::RgbaImage::from_raw(image.width as u32, image.height as u32, image.rgba.clone())
+                        .map(|png| png.save(folder.join(format!("{name}_{suffix}.png"))));
+                }
+            }
+            let two = halved(&two_whole);
+            let premultiplied = |at: usize| {
+                let alpha = one.rgba[at * 4 + 3] as f32 / 255.0;
+                [0, 1, 2].map(|channel| one.rgba[at * 4 + channel] as f32 / 255.0 * alpha).into_iter().chain([alpha]).collect::<Vec<_>>()
+            };
+            let mut difference = 0.0f64;
+            // The glow's reach: the cover of faint pixels, summed, which
+            // neither rounds a barely-there pixel in nor out.
+            let (mut glow_one, mut glow_two) = (0f64, 0f64);
+            for (at, two) in two.iter().enumerate() {
+                let one = premultiplied(at);
+                difference += one.iter().zip(two).map(|(a, b)| (a - b).abs() as f64).sum::<f64>();
+                if one[3] < 0.2 {
+                    glow_one += one[3] as f64;
+                }
+                if two[3] < 0.2 {
+                    glow_two += two[3] as f64;
+                }
+            }
+            let mean = difference / (two.len() * 4) as f64;
+            let label = format!("{game:?} {model} shaders {shaders}");
+            eprintln!("{label}: mean difference {mean:.5}; faint cover {glow_one:.0} at 1×, {glow_two:.0} at 2× halved");
+            if mean > 0.01 {
+                failures.push(format!("{label}: mean difference {mean:.5}"));
+            }
+            let (low, high) = (glow_one.min(glow_two), glow_one.max(glow_two));
+            if high > 20.0 && low < high * 0.8 {
+                failures.push(format!("{label}: faint cover {glow_one:.0} at 1× but {glow_two:.0} at 2×"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+
+/// A snapshot too large for the GPU to draw at once is drawn in tiles, each a
+/// window of the picture, adding the bloom built once from the whole of it:
+/// put together, they are the snapshot drawn whole, with no seam where they
+/// meet. Here the tiles are made small, to be many.
+#[test]
+fn a_snapshot_drawn_in_tiles_is_the_snapshot_drawn_whole() {
+    let size = SHOT_SIZE.map(|edge| edge as i32 * 2);
+    let mut failures = Vec::new();
+    for (variable, game, model, kind) in MODELS {
+        let Some(source) = source(variable, *game) else { continue };
+        for shaders in [false, true] {
+            let mut options = ShotOptions::new(*game);
+            options.time = 1.5;
+            options.bloom = true;
+            let ShotFrame { frame, .. } = shot_frame(&source, &shot(model, kind, shaders), &options);
+            let request = crate::app::model_preview::snapshot::SnapshotRequest::new(
+                frame,
+                size,
+                Vec::new(),
+                [SHOT_SIZE[0] as f32, SHOT_SIZE[1] as f32],
+                2.0,
+            );
+            let draw = |limit: i32| {
+                let gl = Arc::new(headless_gl());
+                let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+                unsafe { super::super::renderer::draw_snapshot_in_tiles(&gl, &|_| None, &mut renderer, &request, limit) }
+                    .expect("a snapshot")
+            };
+            let (whole, tiled) = (draw(16384), draw(1024));
+            let differences: Vec<u8> = whole.rgba.iter().zip(&tiled.rgba).map(|(a, b)| a.abs_diff(*b)).collect();
+            let mean = differences.iter().map(|&d| d as f64).sum::<f64>() / differences.len() as f64;
+            let worst = differences.iter().copied().max().unwrap_or(0);
+            let label = format!("{game:?} {model} shaders {shaders}");
+            // Where the differences are: on the tiles' seams, or anywhere.
+            let tiles = super::super::renderer::snapshot_tiles(size, 1024, 64).unwrap();
+            let on_seam = |x: i32, y: i32| {
+                tiles.iter().any(|tile| {
+                    let [kx, ky, kw, kh] = tile.kept;
+                    let near = |a: i32, b: i32| (a - b).abs() <= 2;
+                    (near(x, kx) && kx > 0) || (near(y, ky) && ky > 0) || (near(x, kx + kw) && kx + kw < size[0]) || (near(y, ky + kh) && ky + kh < size[1])
+                })
+            };
+            let (mut big, mut big_on_seams) = (0, 0);
+            for (at, chunk) in differences.chunks_exact(4).enumerate() {
+                if chunk.iter().any(|&d| d > 8) {
+                    big += 1;
+                    let (x, y) = ((at % size[0] as usize) as i32, size[1] - 1 - (at / size[0] as usize) as i32);
+                    if on_seam(x, y) {
+                        big_on_seams += 1;
+                    }
+                }
+            }
+            eprintln!("{label}: mean {mean:.4}, worst {worst}; {big} pixels off by more than 8, {big_on_seams} on seams");
+            // A triangle's edge can fall a hair differently through a tile's
+            // window, flipping a pixel's coverage here and there; a seam, or a
+            // tile's own bloom, would be thousands of pixels, and on the seams.
+            let pixels = (size[0] * size[1]) as usize;
+            if mean > 0.002 || big * 10_000 > pixels || big_on_seams > 2 {
+                failures.push(format!(
+                    "{label}: tiles differ from whole by mean {mean:.4}, worst {worst}; {big} pixels, {big_on_seams} on seams"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

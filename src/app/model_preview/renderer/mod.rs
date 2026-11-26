@@ -22,7 +22,7 @@ pub(in crate::app::model_preview) use grid::*;
 mod snapshot;
 pub(in crate::app::model_preview) use snapshot::{paint_snapshot, snapshot_size_limit};
 #[cfg(test)]
-pub(in crate::app::model_preview) use snapshot::{draw_floats, draw_snapshot};
+pub(in crate::app::model_preview) use snapshot::{draw_floats, draw_snapshot, draw_snapshot_in_tiles, snapshot_tiles};
 
 thread_local! {
     static MODEL_GL_RENDERER: RefCell<Option<CachedModelGlRenderer>> = const { RefCell::new(None) };

@@ -6240,6 +6240,20 @@ mod tests {
         let copied = TEST_CLIPBOARD.lock().unwrap().take().expect("written to the clipboard");
         assert_eq!((copied.width, copied.height), (2, 1));
         assert!(h.painted_contains("Copied the preview to the clipboard (2 × 1)"), "{:?}", h.painted);
+
+        // Past a gigabyte of image, the first press asks; the second copies.
+        h.app.model.prefs.model_preview_snapshot_scale = 25.0;
+        idle(&mut h);
+        let scale = rect(&h, "25×").expect("the scale menu at 25×");
+        h.click_at(egui::pos2(scale.left() - 18.0, scale.center().y));
+        idle(&mut h);
+        assert!(matches!(preview(&h, id, &key).snapshot, SnapshotPhase::Confirming(_)), "asks first");
+        assert!(h.painted.iter().any(|text| text.contains("press the camera again")), "{:?}", h.painted);
+        h.click_at(egui::pos2(scale.left() - 18.0, scale.center().y));
+        let SnapshotPhase::Drawing(request) = &preview(&h, id, &key).snapshot else {
+            panic!("the second press copies")
+        };
+        assert_eq!(request.size, [points.x, points.y].map(|edge| (edge * ppp * 25.0).round() as i32));
     }
 
     /// The scale menu: a typed scale past the slider's reach is taken and

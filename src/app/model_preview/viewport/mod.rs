@@ -315,6 +315,6 @@ fn follow_snapshot(ctx: &egui::Context, state: &mut ModelPreviewState) {
                 state.snapshot = SnapshotPhase::Idle;
             }
         }
-        SnapshotPhase::Idle | SnapshotPhase::Asked => {}
+        SnapshotPhase::Idle | SnapshotPhase::Asked | SnapshotPhase::Confirming(_) => {}
     }
 }

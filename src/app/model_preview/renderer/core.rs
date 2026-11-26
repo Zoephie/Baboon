@@ -25,6 +25,9 @@ use eframe::glow::HasContext as _;
 /// The GL state the preview draws with: the shared program, slots and
 /// targets, and, until each game's drawing moves to its own folder, every
 /// game's own state too.
+/// A draw's whole picture, as [`RenderCore::bloom_window`] has it.
+pub(in crate::app::model_preview) const WHOLE_WINDOW: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+
 pub(in crate::app::model_preview) struct RenderCore {
     /// The gen3 targets between frames. Every gen3 pipeline draws through
     /// the one set, taking it for its frame and handing it back, so a session
@@ -63,11 +66,24 @@ pub(in crate::app::model_preview) struct RenderCore {
     /// bytes for the viewport, half floats for a snapshot, whose render on a
     /// white background must not clamp where light is added to it.
     pub(in crate::app::model_preview) frame_texels: crate::app::model_preview::gl::target::Texels,
-    /// Draw bloom from what the last frame left rather than from this one:
-    /// a snapshot's render on white adds the bloom its render on black built,
-    /// which is the model's alone. Halo 2's bright pass reads the whole scene,
-    /// so on white the background itself would bloom.
+    /// Add the bloom the last draw built rather than building this one's: a
+    /// snapshot builds its bloom once, from the whole picture at the
+    /// viewport's size on black (the model's alone, as the viewport's), and
+    /// every render after adds it (its tiles, on black and on white). Halo 2's
+    /// bright pass reads the whole scene, so on white the background itself
+    /// would bloom; and a tile's own bloom would stop at its edges.
     pub(in crate::app::model_preview) held_bloom: bool,
+    /// The bloom the last gen3 draw built, which a held draw adds.
+    pub(in crate::app::model_preview) held_bloom_texture: Option<glow::NativeTexture>,
+    /// Where this draw sits in the held bloom's picture: its texture
+    /// coordinates times `[2..4]` plus `[0..2]`. The whole of it, but in a
+    /// snapshot's tile.
+    pub(in crate::app::model_preview) bloom_window: [f32; 4],
+    /// The field-of-view zoom a tile's composite left out (`view_scale`),
+    /// which the snapshot applies to the whole image once its tiles are put
+    /// together: a tile can't sample its neighbours.
+    pub(in crate::app::model_preview) tile_view_scale: f32,
+
     pub(in crate::app::model_preview) program: glow::NativeProgram,
     pub(in crate::app::model_preview) slots: Vec<ModelGpuSlot>,
     pub(super) lru: ModelSlotLru,
@@ -75,6 +91,7 @@ pub(in crate::app::model_preview) struct RenderCore {
     pub(in crate::app::model_preview) scale: glow::NativeUniformLocation,
     pub(super) angles: glow::NativeUniformLocation,
     pub(in crate::app::model_preview) clip_scale: glow::NativeUniformLocation,
+    pub(in crate::app::model_preview) clip_offset: Option<glow::NativeUniformLocation>,
     pub(in crate::app::model_preview) depth_scale: glow::NativeUniformLocation,
     pub(in crate::app::model_preview) depth_map: glow::NativeUniformLocation,
     pub(in crate::app::model_preview) perspective: glow::NativeUniformLocation,
@@ -194,6 +211,9 @@ impl RenderCore {
                 scene: None,
                 frame_texels: crate::app::model_preview::gl::target::Texels::RGBA8,
                 held_bloom: false,
+                held_bloom_texture: None,
+                bloom_window: WHOLE_WINDOW,
+                tile_view_scale: 1.0,
                 program,
                 slots: Vec::new(),
                 lru: ModelSlotLru::default(),
@@ -201,6 +221,7 @@ impl RenderCore {
                 scale: uniform("u_scale")?,
                 angles: uniform("u_angles")?,
                 clip_scale: uniform("u_clip_scale")?,
+                clip_offset: gl.get_uniform_location(program, "u_clip_offset"),
                 depth_scale: uniform("u_depth_scale")?,
                 depth_map: uniform("u_depth_map")?,
                 perspective: uniform("u_perspective")?,
@@ -299,6 +320,7 @@ impl RenderCore {
                 frame.camera.clip_scale[0],
                 frame.camera.clip_scale[1],
             );
+            gl.uniform_2_f32_slice(self.clip_offset.as_ref(), &frame.camera.clip_offset);
             gl.uniform_1_f32(Some(&self.depth_scale), frame.camera.depth_scale);
             gl.uniform_2_f32(
                 Some(&self.depth_map),
@@ -585,6 +607,27 @@ impl RenderCore {
             gl.bind_vertex_array(None);
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
             gl.use_program(None);
+        }
+    }
+
+    /// A final composite's `view_scale` and `bloom_window`, for `program`.
+    /// In a tile the zoom is left out and kept for the whole image.
+    pub(in crate::app::model_preview) unsafe fn set_composite_window(
+        &mut self,
+        gl: &glow::Context,
+        program: glow::NativeProgram,
+        view_scale: f32,
+    ) {
+        let tiled = self.bloom_window != WHOLE_WINDOW;
+        if tiled {
+            self.tile_view_scale = view_scale;
+        }
+        unsafe {
+            gl.uniform_1_f32(
+                gl.get_uniform_location(program, "view_scale").as_ref(),
+                if tiled { 1.0 } else { view_scale },
+            );
+            gl.uniform_4_f32_slice(gl.get_uniform_location(program, "bloom_window").as_ref(), &self.bloom_window);
         }
     }
 

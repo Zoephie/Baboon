@@ -12,6 +12,11 @@ pub(in crate::app::model_preview) struct ModelGpuCamera {
     pub(in crate::app::model_preview) yaw: f32,
     pub(in crate::app::model_preview) pitch: f32,
     pub(in crate::app::model_preview) clip_scale: [f32; 2],
+    /// Where in the whole picture this draw's window sits, as an offset of
+    /// clip space per unit of `w`: 0 for the whole picture, as the viewport
+    /// draws it. A snapshot's tile draws a window of it, its `clip_scale`
+    /// zoomed and offset here, so clip `x' = x · clip_scale + clip_offset · w`.
+    pub(in crate::app::model_preview) clip_offset: [f32; 2],
     pub(in crate::app::model_preview) depth_scale: f32,
     /// Linear remap `z = t · x + y` (with `t = view.y · depth_scale`) that
     /// spreads the extended render distance across NDC depth; see
@@ -20,6 +25,22 @@ pub(in crate::app::model_preview) struct ModelGpuCamera {
     /// `1 / eye` in scaled view units: `w = 1 + view.y · this`. 0.0 is the
     /// orthographic view.
     pub(in crate::app::model_preview) perspective: f32,
+}
+
+impl ModelGpuCamera {
+    /// This camera drawing only `window` of its picture, `[x0, y0, x1, y1]`
+    /// in the whole picture's clip space (-1 to 1 each way), onto a whole
+    /// target: a snapshot's tile.
+    pub(in crate::app::model_preview) fn windowed(&self, window: [f32; 4]) -> Self {
+        let [x0, y0, x1, y1] = window;
+        let scale = [2.0 / (x1 - x0), 2.0 / (y1 - y0)];
+        let offset = [-(x1 + x0) / (x1 - x0), -(y1 + y0) / (y1 - y0)];
+        Self {
+            clip_scale: [self.clip_scale[0] * scale[0], self.clip_scale[1] * scale[1]],
+            clip_offset: [self.clip_offset[0] * scale[0] + offset[0], self.clip_offset[1] * scale[1] + offset[1]],
+            ..*self
+        }
+    }
 }
 
 /// Perspective's vertical field of view (across the viewport's shorter side),
@@ -260,6 +281,7 @@ impl PreviewCamera {
             yaw: self.yaw,
             pitch: self.pitch,
             clip_scale: [2.0 * fit / width, 2.0 * fit / height],
+            clip_offset: [0.0; 2],
             // Orthographic projection: smaller view-space Y is nearer. The
             // focus-grown radius safely maps all depths inside NDC even when
             // the orbit point sits far from the bounds center.
@@ -308,11 +330,12 @@ pub(in crate::app::model_preview) fn clip_position(
 ) -> [f32; 4] {
     let scaled = std::array::from_fn(|axis| (point[axis] - camera.center[axis]) * camera.scale);
     let view = rotate_view_vector(camera.yaw, camera.pitch, scaled);
+    let w = 1.0 + view[1] * camera.perspective;
     [
-        view[0] * camera.clip_scale[0],
-        view[2] * camera.clip_scale[1],
+        view[0] * camera.clip_scale[0] + camera.clip_offset[0] * w,
+        view[2] * camera.clip_scale[1] + camera.clip_offset[1] * w,
         view[1] * camera.depth_scale * camera.depth_map[0] + camera.depth_map[1],
-        1.0 + view[1] * camera.perspective,
+        w,
     ]
 }
 

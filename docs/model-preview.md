@@ -56,6 +56,14 @@ The **Other** menu (the **…** button beside the model buttons):
 - **Background Color** clears the viewport to the **Theme**'s own background, **White**, **Black** or **Green Screen**. The choice is kept for every tag and the next time Baboon opens.
 - **Camera** has the zoom, projection and reset.
 
+### Snapshot
+
+The **camera**, right of **View**, copies the frame the viewport is showing to the clipboard as an image with a transparent background and no grid. It is the frame on screen when you press it: animated shaders, function-driven values, particles and the animation pose are as they were then. Every pixel that only shows background is fully transparent. What the model gives off past its outline stays: bloom, glows and additive effects are kept as partly transparent light, and transparent surfaces keep the cover they have. Markers, the armature, the bounding sphere and collision or physics overlays are in it when they are shown; the Material Editor's highlight is not. The status bar says when it has been copied.
+
+The menu beside the camera sets the image's size as a **scale** of the viewport's: a slider from 0.1× to 10×, a box that takes any scale above 0, and the size that gives with the viewport as it is (`2160 × 1800`). The scale is kept for every preview and the next time Baboon opens. A larger image is the same picture with more pixels: bloom is as wide and as bright as on screen, though lines a pixel wide (the wireframe, markers) are thinner relative to it. An image too large for the GPU to draw at once is drawn in tiles, which the menu says; one over a gigabyte asks first (press the camera again), since it takes several on its way to the clipboard, and some apps won't take that large a paste.
+
+Heat haze, refraction and other effects that bend what is behind the model have nothing to bend over a transparent background, so they aren't in the image.
+
 ## The footer
 
 The footer counts the model's own vertices and triangles, leaving out the collision, physics and imposter geometry drawn with it. While **LOD Model** is ticked it counts the LOD model's instead. When part of the preview was left out, or a material drew without its textures, it says so there; hover the note for why.

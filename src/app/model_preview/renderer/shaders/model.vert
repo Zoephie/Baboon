@@ -9,6 +9,7 @@ uniform vec3 u_center;
 uniform float u_scale;
 uniform vec2 u_angles;
 uniform vec2 u_clip_scale;
+uniform vec2 u_clip_offset;
 uniform float u_depth_scale;
 // Depth remap `z = t * x + y` across the near and far planes.
 // See PREVIEW_RENDER_DISTANCE.
@@ -75,7 +76,7 @@ vec3 view = rotate_view((position - u_center) * u_scale);
 // on PERSPECTIVE_FOV_Y.
 float w = 1.0 + view.y * u_perspective;
 float z_clip = view.y * u_depth_scale * u_depth_map.x + u_depth_map.y;
-return vec4(view.x * u_clip_scale.x, view.z * u_clip_scale.y, z_clip, w);
+return vec4(view.x * u_clip_scale.x + u_clip_offset.x * w, view.z * u_clip_scale.y + u_clip_offset.y * w, z_clip, w);
 }
 void main() {
 vec3 position;

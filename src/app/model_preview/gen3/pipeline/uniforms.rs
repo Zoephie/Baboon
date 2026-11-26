@@ -57,6 +57,11 @@ pub(in crate::app::model_preview) fn view_projection(camera: &ModelGpuCamera) ->
     matrix[13] = origin[2] * camera.clip_scale[1];
     matrix[14] = origin[1] * camera.depth_scale * camera.depth_map[0] + camera.depth_map[1];
     matrix[15] = 1.0 + origin[1] * camera.perspective;
+    // The window: clip x and y plus their offset times w, the fourth row.
+    for column in 0..4 {
+        matrix[column * 4] += camera.clip_offset[0] * matrix[column * 4 + 3];
+        matrix[column * 4 + 1] += camera.clip_offset[1] * matrix[column * 4 + 3];
+    }
     matrix
 }
 

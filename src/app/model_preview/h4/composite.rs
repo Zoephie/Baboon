@@ -146,10 +146,7 @@ impl H4Game {
             );
             let filmic = super::lighting::h4_filmic_params(super::lighting::H4_FILMIC_CURVE, false);
             gl.uniform_1_f32_slice(gl.get_uniform_location(program, "filmic").as_ref(), &filmic);
-            gl.uniform_1_f32(
-                gl.get_uniform_location(program, "view_scale").as_ref(),
-                screen.view_scale(HALF_LENS),
-            );
+core.set_composite_window(gl, program, screen.view_scale(HALF_LENS));
             premultiplied_over(state.empty_array(gl)).apply(gl);
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             PassState::new().enable(glow::DEPTH_TEST).apply(gl);

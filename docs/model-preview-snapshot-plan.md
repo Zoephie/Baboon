@@ -1,6 +1,12 @@
 # Model Preview snapshot: the current frame to the clipboard, background-free
 
-Status: **plan**, 2026-11-26. Nothing built.
+Status: **built** on branch `material-editor`, 2026-11-26. Where the build departed from this plan:
+
+- **Bloom comes from one pass at the viewport's size.** A snapshot first draws the whole frame at the viewport's size on black, which builds each game's bloom exactly as the viewport does; every render after (both backgrounds, every tile) adds that bloom (`RenderCore::held_bloom`, through `bloom_window`), instead of building its own. This answers three things at once: Halo 2's bright pass reads the whole scene, so a white background bloomed itself (the matte's premise test found it); Halo 3's and Halo 4's blur taps are in texels, so a larger image's bloom was narrower, and Halo 4's MCC resolution scale dimmed it; and Reach's bloom surfaces are a fixed size at high resolutions, which no tile could build its share of.
+- **Tiles** are a window of the picture: `ModelGpuCamera::clip_offset`, applied in the GLSL `clip_position`, the gen3 view-projection and the CPU `clip_position`. Each is drawn with a margin of 32 pixels times the scale, within the image. Tiles are at most 4096 a side (about a gigabyte of targets), not the GPU's own limit.
+- **A field-of-view screen effect's zoom** (`view_scale`) can't be applied per tile; tiled composites leave it out and the assembled image is resampled about its centre (`snapshot::zoom_about_centre`).
+- **The large-image limit** asks at 1 GiB of image (a second press of the camera), not 4 GiB of total memory.
+- **The clipboard** under test writes to a test sink, so the suite never overwrites the machine's clipboard.
 
 A camera button in the Model Preview's top bar, right of the **View** dropdown,
 copies the frame the viewport is showing to the clipboard as an image with a

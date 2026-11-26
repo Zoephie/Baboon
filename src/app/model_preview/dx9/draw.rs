@@ -713,6 +713,8 @@ impl RenderCore {
             gl.uniform_2_f32(location.as_ref(), camera.yaw, camera.pitch);
             let location = program.location(gl, "u_clip_scale");
             gl.uniform_2_f32_slice(location.as_ref(), &camera.clip_scale);
+            let location = program.location(gl, "u_clip_offset");
+            gl.uniform_2_f32_slice(location.as_ref(), &camera.clip_offset);
             let location = program.location(gl, "u_depth_map");
             gl.uniform_2_f32_slice(location.as_ref(), &camera.depth_map);
             if let Some(rows) = frame.bones.as_ref() {

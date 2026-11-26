@@ -7,6 +7,8 @@ uniform vec2 u_step;
 uniform float u_scale;
 uniform float u_threshold;
 uniform float u_brightness;
+// Where this draw sits in the bloom's picture (a snapshot's tile).
+uniform vec4 u_window;
 void main() {
     if (u_mode == 0) {
         vec4 color = texture(u_source, v_uv);
@@ -23,7 +25,7 @@ void main() {
         out_color = sum;
     } else {
         // `pPixelShader_6`: twice the bright part and the self-bloom.
-        vec4 bloom = texture(u_source, v_uv);
+        vec4 bloom = texture(u_source, v_uv * u_window.zw + u_window.xy);
         out_color = vec4(2.0 * (bloom.rgb * u_brightness + bloom.a), 1.0);
     }
 }

@@ -74,13 +74,17 @@ impl H2Bloom {
         size: [i32; 2],
         show_backfaces: bool,
         held: bool,
+        window: [f32; 4],
     ) {
         let small = [(size[0] / DOWNSAMPLE).max(1), (size[1] / DOWNSAMPLE).max(1)];
         unsafe {
-            if self
-                .surfaces
-                .as_ref()
-                .is_none_or(|(_, current)| *current != small)
+            // Held, it adds what the last draw built, at that draw's size.
+            let keep = held && self.surfaces.is_some();
+            if !keep
+                && self
+                    .surfaces
+                    .as_ref()
+                    .is_none_or(|(_, current)| *current != small)
             {
                 if let Some((old, _)) = self.surfaces.take() {
                     old.iter().for_each(|surface| surface.delete(gl));
@@ -127,6 +131,7 @@ impl H2Bloom {
 
             gl.viewport(0, 0, size[0], size[1]);
             add_state().apply(gl);
+            gl.uniform_4_f32_slice(uniform("u_window").as_ref(), &window);
             draw(scene_framebuffer, first.texture, 2);
             after_bloom_state(show_backfaces).apply(gl);
         }
@@ -219,7 +224,7 @@ pub(in crate::app::model_preview) unsafe fn draw_h2_bloom(
             );
         }
         if let Some(bloom) = made.get_or_insert_with(|| H2Bloom::new(gl, PASS_GLSL_VERSION)) {
-            bloom.apply(gl, framebuffer, color, size, frame.show_backfaces, core.held_bloom);
+            bloom.apply(gl, framebuffer, color, size, frame.show_backfaces, core.held_bloom, core.bloom_window);
         }
     }
 }

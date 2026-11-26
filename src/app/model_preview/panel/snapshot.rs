@@ -4,7 +4,7 @@
 
 use super::super::super::ui_kit::button_icons::{ButtonIcon, icon_button, text_dropdown_button};
 use super::super::super::ui_kit::style::{subtle_dark, text_dark};
-use super::super::snapshot::{SnapshotPhase, snapshot_size};
+use super::super::snapshot::{LARGE_SNAPSHOT_BYTES, SnapshotPhase, snapshot_bytes, snapshot_size};
 use super::super::ModelPreviewState;
 use eframe::egui::{self, RichText, Ui};
 
@@ -37,9 +37,28 @@ pub(in crate::app::model_preview) fn draw_snapshot_controls(ui: &mut Ui, state: 
     } else {
         response
     };
-    if response.clicked() {
-        state.snapshot = SnapshotPhase::Asked;
+    if response.clicked()
+        && let Some(size) = size
+    {
+        // A very large image asks first: it takes gigabytes on its way.
+        let confirmed = matches!(state.snapshot, SnapshotPhase::Confirming(asked) if asked == size);
+        if snapshot_bytes(size) > LARGE_SNAPSHOT_BYTES && !confirmed {
+            state.snapshot = SnapshotPhase::Confirming(size);
+            state.snapshot_message = Some(format!(
+                "A {} × {} snapshot is {}: press the camera again to copy it",
+                size[0],
+                size[1],
+                gigabytes(snapshot_bytes(size))
+            ));
+        } else {
+            state.snapshot = SnapshotPhase::Asked;
+        }
     }
+}
+
+/// `bytes` as gigabytes, to one place.
+fn gigabytes(bytes: u64) -> String {
+    format!("{:.1} GB", bytes as f64 / 1e9)
 }
 
 /// "1×", "2.5×", "0.25×": the scale as the menu's button shows it.
@@ -86,10 +105,15 @@ fn draw_scale_menu(ui: &mut Ui, state: &mut ModelPreviewState) {
     let resolution = match &state.snapshot_source {
         Some(source) => {
             let [width, height] = snapshot_size(source.points, source.pixels_per_point, state.snapshot_scale);
-            match super::super::renderer::snapshot_size_limit() {
-                Some(limit) if width.max(height) > limit => format!("{width} × {height}: over this GPU's {limit} pixel limit"),
-                _ => format!("{width} × {height}"),
+            let mut line = format!("{width} × {height}");
+            if super::super::renderer::snapshot_size_limit().is_some_and(|limit| width.max(height) > limit) {
+                line.push_str(", drawn in tiles");
             }
+            let bytes = snapshot_bytes([width, height]);
+            if bytes > LARGE_SNAPSHOT_BYTES {
+                line.push_str(&format!(", {}: asks first", gigabytes(bytes)));
+            }
+            line
         }
         None => "the viewport's size, once it has drawn".to_owned(),
     };

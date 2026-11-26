@@ -26,6 +26,8 @@ pub(in crate::app) struct SnapshotRequest {
     pub(in crate::app) helpers: Vec<egui::ClippedPrimitive>,
     /// The viewport's size in points, which `helpers` are laid out over.
     pub(in crate::app) points: [f32; 2],
+    /// Its size over the viewport's (`RenderCore::pixel_scale`).
+    pub(in crate::app) scale: f32,
     pub(in crate::app) result: Mutex<Option<Result<SnapshotImage, String>>>,
 }
 
@@ -35,8 +37,9 @@ impl SnapshotRequest {
         size: [i32; 2],
         helpers: Vec<egui::ClippedPrimitive>,
         points: [f32; 2],
+        scale: f32,
     ) -> Arc<Self> {
-        Arc::new(Self { frame, size, helpers, points, result: Mutex::new(None) })
+        Arc::new(Self { frame, size, helpers, points, scale, result: Mutex::new(None) })
     }
 
     /// What the paint left, once it has drawn: taken, so it is handled once.
@@ -79,7 +82,7 @@ impl SnapshotSource {
     pub(in crate::app) fn request(&self, ctx: &egui::Context, scale: f32) -> Arc<SnapshotRequest> {
         let pixels_per_point = self.pixels_per_point * scale;
         let helpers = if self.helpers.is_empty() { Vec::new() } else { ctx.tessellate(self.helpers.clone(), pixels_per_point) };
-        SnapshotRequest::new(self.frame.clone(), self.size(scale), helpers, [self.points.x, self.points.y])
+        SnapshotRequest::new(self.frame.clone(), self.size(scale), helpers, [self.points.x, self.points.y], scale)
     }
 }
 
@@ -89,11 +92,22 @@ pub(in crate::app) fn snapshot_size(points: egui::Vec2, pixels_per_point: f32, s
     [points.x, points.y].map(|edge| ((edge * pixels_per_point * scale).round() as i32).max(1))
 }
 
+/// Bytes of image past which a snapshot asks first: about 4 GB at its peak,
+/// with the copies the clipboard makes.
+pub(in crate::app) const LARGE_SNAPSHOT_BYTES: u64 = 1 << 30;
+
+/// The bytes an image of `size` takes, as RGBA.
+pub(in crate::app) fn snapshot_bytes(size: [i32; 2]) -> u64 {
+    size[0].max(0) as u64 * size[1].max(0) as u64 * 4
+}
+
 /// Where a snapshot is.
 #[derive(Default)]
 pub(in crate::app) enum SnapshotPhase {
     #[default]
     Idle,
+    /// A large snapshot waiting on a second press, at this size.
+    Confirming([i32; 2]),
     /// Asked for this pass: the viewport makes the request from the frame on
     /// screen.
     Asked,
@@ -104,8 +118,9 @@ pub(in crate::app) enum SnapshotPhase {
 }
 
 impl SnapshotPhase {
+    /// Taking a snapshot: the camera waits for it.
     pub(in crate::app) fn busy(&self) -> bool {
-        !matches!(self, Self::Idle)
+        matches!(self, Self::Asked | Self::Drawing(_) | Self::Copying(_))
     }
 }
 
@@ -154,6 +169,46 @@ fn write_clipboard(image: SnapshotImage) -> Result<(), String> {
     Ok(())
 }
 
+/// `image` zoomed about its centre as a composite's `view_scale` zooms the
+/// frame: each pixel shows the one `(place - ½) · view_scale + ½` of the
+/// way across, sampled between its neighbours in premultiplied colour, and
+/// nothing past the edges. What a tiled snapshot's composites left out,
+/// since a tile can't sample its neighbours.
+pub(in crate::app) fn zoom_about_centre(image: &SnapshotImage, view_scale: f32) -> SnapshotImage {
+    let (width, height) = (image.width, image.height);
+    let premultiplied = |x: usize, y: usize| {
+        let at = (y * width + x) * 4;
+        let alpha = image.rgba[at + 3] as f32 / 255.0;
+        [image.rgba[at] as f32 / 255.0 * alpha, image.rgba[at + 1] as f32 / 255.0 * alpha, image.rgba[at + 2] as f32 / 255.0 * alpha, alpha]
+    };
+    let mut rgba = vec![0u8; image.rgba.len()];
+    for y in 0..height {
+        for x in 0..width {
+            let place = [(x as f32 + 0.5) / width as f32, (y as f32 + 0.5) / height as f32];
+            let source = place.map(|axis| (axis - 0.5) * view_scale + 0.5);
+            if source.iter().any(|axis| !(0.0..=1.0).contains(axis)) {
+                continue;
+            }
+            let (sx, sy) = (source[0] * width as f32 - 0.5, source[1] * height as f32 - 0.5);
+            let (x0, y0) = (sx.floor().max(0.0) as usize, sy.floor().max(0.0) as usize);
+            let (x1, y1) = ((x0 + 1).min(width - 1), (y0 + 1).min(height - 1));
+            let (fx, fy) = ((sx - x0 as f32).clamp(0.0, 1.0), (sy - y0 as f32).clamp(0.0, 1.0));
+            let mix = |a: [f32; 4], b: [f32; 4], t: f32| -> [f32; 4] { std::array::from_fn(|c| a[c] + (b[c] - a[c]) * t) };
+            let sample = mix(mix(premultiplied(x0, y0), premultiplied(x1, y0), fx), mix(premultiplied(x0, y1), premultiplied(x1, y1), fx), fy);
+            let alpha = sample[3];
+            if alpha < 0.5 / 255.0 {
+                continue;
+            }
+            let at = (y * width + x) * 4;
+            for channel in 0..3 {
+                rgba[at + channel] = ((sample[channel] / alpha).clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+            rgba[at + 3] = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+        }
+    }
+    SnapshotImage { width, height, rgba }
+}
+
 /// One pixel of the matte, as `snapshot_matte.frag` makes it, from the frame
 /// drawn on black and on white: straight colour and alpha, each 0 to 1. The
 /// shader's oracle in the tests.
@@ -171,7 +226,27 @@ pub(in crate::app) fn matte_pixel(black: [f32; 3], white: [f32; 3]) -> [f32; 4] 
 
 #[cfg(test)]
 mod tests {
-    use super::matte_pixel;
+    use super::{SnapshotImage, matte_pixel, zoom_about_centre};
+
+    /// The zoom left out of a tiled snapshot's composites: at 1 nothing
+    /// changes; at ½ the middle half fills the image (a centred square
+    /// doubles); at 4 the picture shrinks, and past its edge is clear.
+    #[test]
+    fn a_tiled_snapshots_zoom_is_about_its_centre() {
+        // 8 × 8, clear but for a red 2 × 2 square in the middle.
+        let mut rgba = vec![0u8; 8 * 8 * 4];
+        for (x, y) in [(3, 3), (4, 3), (3, 4), (4, 4)] {
+            rgba[(y * 8 + x) * 4..(y * 8 + x) * 4 + 4].copy_from_slice(&[255, 0, 0, 255]);
+        }
+        let image = SnapshotImage { width: 8, height: 8, rgba };
+        assert_eq!(zoom_about_centre(&image, 1.0), image, "at 1, as it was");
+        let zoomed = zoom_about_centre(&image, 0.5);
+        let at = |x: usize, y: usize| zoomed.rgba[(y * 8 + x) * 4..(y * 8 + x) * 4 + 4].to_vec();
+        assert_eq!(at(3, 3), [255, 0, 0, 255], "inside the grown square");
+        assert_eq!(at(0, 0), [0, 0, 0, 0], "outside it");
+        let wider = zoom_about_centre(&image, 4.0);
+        assert_eq!(wider.rgba[..4], [0, 0, 0, 0], "past the picture's edge, clear");
+    }
 
     fn close(a: [f32; 4], b: [f32; 4]) -> bool {
         a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-5)
