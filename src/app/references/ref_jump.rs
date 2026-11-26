@@ -256,84 +256,86 @@ impl Baboon {
         let Some(req) = self.references.pending_open.take() else {
             return;
         };
-        let container_key = self.model.source().and_then(|source| {
-            matches!(&source.source, TagSource::IoStoreContainerSet { .. }).then(|| {
-                container_entry_for_reference(
-                    &source.entries,
-                    req.group_tag,
-                    &req.rel_path,
-                    self.model.names(),
-                )
-                .map(|entry| entry.key.clone())
-            })
-        });
-        if let Some(container_key) = container_key {
-            let Some(key) = container_key else {
-                self.model.status = format!(
-                    "Referenced Campaign Evolved tag not found: {} (group {})",
-                    req.rel_path,
-                    blam_tags::format_group_tag(req.group_tag)
-                );
-                return;
-            };
-            self.select_entry(key.clone(), ctx.clone());
-            if req.float {
-                self.kit_and_view(self.model.active).open_tag_pane_beside(&key);
-            }
-            return;
-        }
-
-        let root = match self.model.source().map(|s| &s.source) {
-            Some(TagSource::LooseFolder { root, .. }) => root.clone(),
-            _ => {
-                self.model.status = "Open requires a loose-folder source".to_owned();
+        let active = self.model.active;
+        let key = match self.reference_entry_key(active, req.group_tag, &req.rel_path) {
+            Ok(key) => key,
+            Err(error) => {
+                self.model.status = error;
                 return;
             }
         };
-        // Resolve the file extension from the definitions name index first
-        // (covers every group, e.g. collision_model/physics_model), falling
-        // back to the built-in table.
-        let ext = self
-            .model.names()
-            .name_for(req.group_tag)
-            .or_else(|| blam_tags::paths::group_tag_to_extension(req.group_tag))
-            .unwrap_or("");
-        // Tolerate a path that already carries its extension (e.g. a shader
-        // bitmap ref), so we don't double-append.
-        let rel = without_extension(&req.rel_path, ext).to_owned();
-        let abs = blam_tags::paths::resolve_tag_path(&root, &rel, ext);
-        if !abs.exists() {
-            self.model.status = format!(
-                "Referenced tag not found: {} (group {})",
-                abs.display(),
-                blam_tags::format_group_tag(req.group_tag)
-            );
-            return;
-        }
-        let key = file_entry_key(&abs);
-        // Ensure an entry exists so ensure_tag_loading can resolve it. Built by
-        // the scanner's own constructor: this used to derive the display path
-        // from the unstripped reference, which could double the extension.
-        if self.model.entry_for_key(&key).is_none() {
-            let names = self
-                .model.source()
-                .map(|source| source.names.clone())
-                .unwrap_or_default();
-            if let Ok(Some(entry)) = loose_file_entry(&root, &abs, &names) {
-                let folder_seeds = self.model.kits[self.model.active].folder_seeds();
-                if let Some(source) = self.source_mut() {
-                    source.upsert_entry(entry, &folder_seeds);
-                }
-                self.model.kits[self.model.active].generation =
-                    self.model.kits[self.model.active].generation.wrapping_add(1);
-            }
-        }
         self.select_entry(key.clone(), ctx.clone());
         // Alt-click asks for the tag beside the current one rather than as
         // another tab in the same group.
         if req.float {
             self.kit_and_view(self.model.active).open_tag_pane_beside(&key);
         }
+    }
+
+    /// The key of the tag a reference `(group_tag, rel_path)` names in the
+    /// kit at `kit_index`, or why there is none. In a loose kit the tag is
+    /// given an entry when the scan had none for it yet, so it can be
+    /// loaded. Opening a referenced tag and the Material Editor's shaders go
+    /// through here.
+    pub(in crate::app) fn reference_entry_key(
+        &mut self,
+        kit_index: usize,
+        group_tag: u32,
+        rel_path: &str,
+    ) -> Result<String, String> {
+        let kit = &self.model.kits[kit_index];
+        let Some(source) = kit.source.as_ref() else {
+            return Err("No tags are loaded".to_owned());
+        };
+        if matches!(&source.source, TagSource::IoStoreContainerSet { .. }) {
+            return container_entry_for_reference(&source.entries, group_tag, rel_path, &kit.names)
+                .map(|entry| entry.key.clone())
+                .ok_or_else(|| {
+                    format!(
+                        "Referenced Campaign Evolved tag not found: {rel_path} (group {})",
+                        blam_tags::format_group_tag(group_tag)
+                    )
+                });
+        }
+        let TagSource::LooseFolder { root, .. } = &source.source else {
+            return Err("Open requires a loose-folder source".to_owned());
+        };
+        let root = root.clone();
+        // Resolve the file extension from the definitions name index first
+        // (covers every group, e.g. collision_model/physics_model), falling
+        // back to the built-in table.
+        let ext = kit
+            .names
+            .name_for(group_tag)
+            .or_else(|| blam_tags::paths::group_tag_to_extension(group_tag))
+            .unwrap_or("");
+        // Tolerate a path that already carries its extension (e.g. a shader
+        // bitmap ref), so we don't double-append.
+        let rel = without_extension(rel_path, ext).to_owned();
+        let abs = blam_tags::paths::resolve_tag_path(&root, &rel, ext);
+        if !abs.exists() {
+            return Err(format!(
+                "Referenced tag not found: {} (group {})",
+                abs.display(),
+                blam_tags::format_group_tag(group_tag)
+            ));
+        }
+        let key = file_entry_key(&abs);
+        // Ensure an entry exists so the tag can be loaded. Built by the
+        // scanner's own constructor: this used to derive the display path
+        // from the unstripped reference, which could double the extension.
+        if self.model.entry_for_key_in(kit_index, &key).is_none() {
+            let names = source.names.clone();
+            if let Ok(Some(entry)) = loose_file_entry(&root, &abs, &names) {
+                let kit = &mut self.model.kits[kit_index];
+                let folder_seeds = kit.folder_seeds();
+                if let Some(source) = kit.source.as_mut() {
+                    source.upsert_entry(entry, &folder_seeds);
+                }
+                kit.generation = kit.generation.wrapping_add(1);
+            }
+        }
+        Ok(key)
     }
 }
 

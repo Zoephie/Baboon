@@ -48,6 +48,7 @@ mod harness;
 pub(in crate::app) use harness::headless_gl;
 pub(in crate::app) mod load;
 pub(in crate::app) mod materials;
+pub(in crate::app) mod material_editor;
 mod panel;
 pub(crate) mod particles;
 mod reach;
