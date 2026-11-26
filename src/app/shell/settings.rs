@@ -2270,8 +2270,27 @@ pub(in crate::app) fn draw_theme_picker(ui: &mut Ui, prefs: &mut GuiPrefs) {
     }
 }
 
+/// Chooses `entry` as the theme in use, as picking it from Settings' Theme
+/// menu does: it stops following the system and sets the slot of its own
+/// appearance.
+pub(in crate::app) fn choose_theme(
+    prefs: &mut GuiPrefs,
+    entry: &crate::app::ui_kit::themes::library::ThemeEntry,
+) {
+    let dark = entry
+        .appearance
+        .is_some_and(crate::app::ui_kit::themes::Appearance::is_dark);
+    prefs.follow_system_theme = false;
+    prefs.dark_mode = dark;
+    if dark {
+        prefs.dark_theme = entry.id.clone();
+    } else {
+        prefs.light_theme = entry.id.clone();
+    }
+}
+
 /// A theme as a menu shows it: its name and appearance.
-fn theme_label(entry: &crate::app::ui_kit::themes::library::ThemeEntry) -> String {
+pub(in crate::app) fn theme_label(entry: &crate::app::ui_kit::themes::library::ThemeEntry) -> String {
     // The built-ins' names already say.
     if entry.built_in {
         return entry.name.clone();
@@ -2285,7 +2304,7 @@ fn theme_label(entry: &crate::app::ui_kit::themes::library::ThemeEntry) -> Strin
 }
 
 /// The label of the theme `id`, or the id when no theme has it.
-fn theme_label_of(entries: &[crate::app::ui_kit::themes::library::ThemeEntry], id: &str) -> String {
+pub(in crate::app) fn theme_label_of(entries: &[crate::app::ui_kit::themes::library::ThemeEntry], id: &str) -> String {
     entries
         .iter()
         .find(|entry| entry.id == id)
@@ -2366,16 +2385,7 @@ fn draw_theme_settings(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
                                 hovered = Some(entry.id.clone());
                             }
                             if response.clicked() {
-                                // A theme sets the slot of its own appearance.
-                                let dark =
-                                    entry.appearance.is_some_and(themes::Appearance::is_dark);
-                                prefs.follow_system_theme = false;
-                                prefs.dark_mode = dark;
-                                if dark {
-                                    prefs.dark_theme = entry.id.clone();
-                                } else {
-                                    prefs.light_theme = entry.id.clone();
-                                }
+                                choose_theme(prefs, entry);
                             }
                         });
                     }

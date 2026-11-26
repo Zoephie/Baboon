@@ -122,6 +122,18 @@ impl ThemeDraft {
         })
     }
 
+    /// The draft of a theme just chosen: Cancel puts back its own colours,
+    /// not those drawn before it was chosen.
+    pub(in crate::app) fn chosen(mut self) -> Self {
+        self.before = self.saved_resolved.colors.clone();
+        self
+    }
+
+    /// The id of the theme edited.
+    pub(in crate::app) fn id(&self) -> &str {
+        &self.id
+    }
+
     fn draft_id(&self) -> &str {
         if self.built_in.is_some() {
             BUILT_IN_DRAFT_ID

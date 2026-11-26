@@ -9362,6 +9362,63 @@ mod tests {
         }
     }
 
+    /// The Theme Editor's Theme menu chooses the theme to use and edit: with
+    /// edits it asks first, and Keep Editing keeps them; without, it switches.
+    #[test]
+    fn the_theme_editor_switches_themes() {
+        use crate::app::shell::ThemeEditorWindow;
+        use crate::app::ui_kit::themes::{self, BuiltIn, Token};
+        // What the editor shows is read, not the installed theme, which other
+        // tests' frames install over meanwhile.
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("docs")
+            .join("theme-examples");
+        themes::state::use_folder(folder.clone());
+        let mut h = Harness::new();
+        h.app.model.prefs.follow_system_theme = false;
+        h.app.model.prefs.dark_mode = false;
+        h.app.model.prefs.light_theme = BuiltIn::Light.id().to_owned();
+        h.idle(5);
+        let mut editor = ThemeEditorWindow::for_active_theme();
+        // fixed: an edit to lose
+        let edited = egui::Color32::from_rgb(0xE8, 0x86, 0x2A);
+        editor.edit_for_shot(Token::Accent, edited, Token::Accent);
+        h.app.dialogs.open(editor);
+        h.idle(5);
+        assert!(h.painted_contains("#E8862A"), "the accent row shows the edit");
+
+        let pick = |h: &mut Harness, current: &str, theme: &str| {
+            h.click(current, 0);
+            h.idle(3);
+            h.click(theme, 0);
+            h.idle(5);
+        };
+        let prompt = "Switching to Ember drops your unsaved edits.";
+        pick(&mut h, "Light", "Ember (Dark)");
+        assert!(h.painted_contains(prompt), "edits are asked about first");
+        assert!(!h.app.model.prefs.dark_mode, "nothing is chosen yet");
+        h.click("Keep Editing", 0);
+        h.idle(5);
+        assert!(!h.painted_contains(prompt));
+        assert!(h.painted_contains("#E8862A"), "the edit is kept");
+        assert!(!h.app.model.prefs.dark_mode);
+
+        pick(&mut h, "Light", "Ember (Dark)");
+        h.click("Drop Edits and Switch", 0);
+        h.idle(5);
+        assert!(h.app.model.prefs.dark_mode);
+        assert_eq!(h.app.model.prefs.dark_theme, "ember");
+        assert!(h.painted_contains("Theme Editor - Ember"));
+        assert!(!h.painted_contains("#E8862A"), "the edit is dropped");
+        assert!(h.painted_contains("#B4561E"), "Ember's own accent is shown");
+
+        // Unedited, a theme picked is switched to at once.
+        pick(&mut h, "Ember (Dark)", "Harbor (Light)");
+        assert!(!h.app.model.prefs.dark_mode);
+        assert_eq!(h.app.model.prefs.light_theme, "harbor");
+        assert!(h.painted_contains("Theme Editor - Harbor"));
+    }
+
     /// A tag in a scratch kit, with the keywords that tests below give it.
     fn keyword_kit(name: &str) -> (LooseKit, Harness, KitId, String, String) {
         let kit = LooseKit::new(name, "halo3_mcc");

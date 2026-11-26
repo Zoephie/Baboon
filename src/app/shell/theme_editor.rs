@@ -1,14 +1,17 @@
 //! The Theme Editor: every token of the theme in use, grouped as the token
 //! table groups them, each with its colour, where the colour comes from and a
 //! reset. Edits are drawn live; Cancel puts back what was drawn when the
-//! editor opened. Save writes a theme file back; Save As writes a new theme
-//! that extends the one edited and holds only what changed. The draft and its
-//! files are `ui_kit::themes::draft`.
+//! editor opened. Its Theme menu chooses another theme to use and edit, as
+//! Settings' does, asking first when there are edits to lose. Save writes a
+//! theme file back; Save As writes a new theme that extends the one edited and
+//! holds only what changed. The draft and its files are
+//! `ui_kit::themes::draft`.
 
 use super::*;
 use crate::app::editor::{MaterialColorPopup, draw_color_picker_editor};
 use crate::app::prefs::ColorPaletteSwatch;
 use crate::app::ui_kit::themes::draft::{RowState, SaveError, ThemeDraft};
+use crate::app::ui_kit::themes::library::ThemeEntry;
 use crate::app::ui_kit::themes::{self, Token, state::with_state};
 
 /// A colour being picked for one row, and what the row held before, for the
@@ -32,6 +35,11 @@ pub(in crate::app) struct ThemeEditorWindow {
     confirm_overwrite: bool,
     /// The last save's outcome, or why it failed.
     message: Option<String>,
+    /// A theme chosen from the Theme menu while there are edits, until
+    /// switching to it is confirmed.
+    switching: Option<ThemeEntry>,
+    /// The Theme menu is previewing the theme under its pointer.
+    previewing: bool,
 }
 
 impl ThemeEditorWindow {
@@ -53,8 +61,73 @@ impl ThemeEditorWindow {
             save_as: None,
             confirm_overwrite: false,
             message: None,
+            switching: None,
+            previewing: false,
         }
     }
+
+    /// Chooses `entry` as the theme in use and edits it in place of the
+    /// draft, whose edits are dropped.
+    fn switch_to(&mut self, cx: &Ctx, entry: ThemeEntry) {
+        let draft = with_state(|state| {
+            ThemeDraft::open(
+                state.current_library().clone(),
+                &entry.id,
+                themes::installed(),
+            )
+        })
+        .map(ThemeDraft::chosen)
+        .map_err(|report| format!("{} cannot be edited: {report}", entry.name));
+        // Drawn now, before the preferences apply it on a later frame.
+        if let Ok(draft) = &draft {
+            themes::install(draft.colors());
+        }
+        cx.set_status(format!("Switched to the theme {}", entry.name));
+        cx.edit_prefs(move |prefs| super::settings::choose_theme(prefs, &entry));
+        self.draft = draft;
+        self.picking = None;
+        self.save_as = None;
+        self.confirm_overwrite = false;
+        self.message = None;
+        self.switching = None;
+    }
+}
+
+/// The Theme menu: every theme that can be applied, the one edited chosen.
+/// Returns the theme picked, and sets `hovered` to the one under the pointer.
+fn draw_theme_menu(
+    ui: &mut Ui,
+    entries: &[ThemeEntry],
+    editing: Option<&str>,
+    hovered: &mut Option<String>,
+) -> Option<ThemeEntry> {
+    let mut picked = None;
+    ui.horizontal(|ui| {
+        ui.label("Theme");
+        let selected = editing.map_or_else(
+            || "None".to_owned(),
+            |id| super::settings::theme_label_of(entries, id),
+        );
+        crate::app::ui_kit::ValueComboBox::from_id_salt("theme_editor_theme")
+            .width(240.0)
+            .selected_text(selected)
+            .show_ui(ui, |ui| {
+                for entry in entries {
+                    ui.add_enabled_ui(!entry.broken, |ui| {
+                        let chosen = editing == Some(entry.id.as_str());
+                        let response =
+                            ui.selectable_label(chosen, super::settings::theme_label(entry));
+                        if response.hovered() {
+                            *hovered = Some(entry.id.clone());
+                        }
+                        if response.clicked() && !chosen {
+                            picked = Some(entry.clone());
+                        }
+                    });
+                }
+            });
+    });
+    picked
 }
 
 impl Dialog for ThemeEditorWindow {
@@ -62,11 +135,19 @@ impl Dialog for ThemeEditorWindow {
         let ctx = cx.egui;
         let mut open = true;
         let mut cancel = false;
-        // The draft is what is drawn while the editor is open: installing an
-        // unchanged theme does nothing.
-        if let Ok(draft) = &self.draft {
+        // The draft is what is drawn while the editor is open, unless the
+        // Theme menu is previewing another: installing an unchanged theme
+        // does nothing.
+        if !self.previewing
+            && let Ok(draft) = &self.draft
+        {
             themes::install(draft.colors());
         }
+        // The folder is read again at most once a second, so a theme added
+        // while the editor is open appears in its menu.
+        let entries = with_state(|state| state.entries(std::time::Instant::now()));
+        let mut hovered = None;
+        let mut picked = None;
         egui::Window::new("Theme Editor")
             .constrain_to(window_work_area(ctx))
             .id(egui::Id::unique("theme_editor"))
@@ -87,6 +168,29 @@ impl Dialog for ThemeEditorWindow {
                     &mut open,
                 );
                 ui.add_space(6.0);
+                let editing = match &self.draft {
+                    Ok(draft) => Some(draft.id().to_owned()),
+                    Err(_) => with_state(|state| state.applied_id().map(str::to_owned)),
+                };
+                picked = draw_theme_menu(ui, &entries, editing.as_deref(), &mut hovered);
+                if let Some(entry) = self.switching.clone() {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "Switching to {} drops your unsaved edits.",
+                                entry.name
+                            ))
+                            .color(unapplied_value_text()),
+                        );
+                        if ui.button("Drop Edits and Switch").clicked() {
+                            picked = Some(entry.clone());
+                        }
+                        if ui.button("Keep Editing").clicked() {
+                            self.switching = None;
+                        }
+                    });
+                }
+                ui.add_space(4.0);
                 match &mut self.draft {
                     Err(error) => {
                         ui.label(RichText::new(error.as_str()).color(error_text()));
@@ -107,7 +211,36 @@ impl Dialog for ThemeEditorWindow {
                     }
                 }
             });
+        // A theme picked while there are edits waits to be confirmed; picking
+        // another from the menu meanwhile waits in its place.
+        if let Some(entry) = picked {
+            let dirty = self.draft.as_ref().is_ok_and(ThemeDraft::is_dirty);
+            if dirty && self.switching.as_ref() != Some(&entry) {
+                self.switching = Some(entry);
+            } else {
+                self.switch_to(cx, entry);
+            }
+        }
+        // The theme under the menu's pointer is drawn until it leaves, then
+        // the draft again.
+        match hovered {
+            Some(id) => {
+                with_state(|state| state.preview(Some(&id)));
+                self.previewing = true;
+            }
+            None if self.previewing => {
+                with_state(|state| state.preview(None));
+                self.previewing = false;
+                if let Ok(draft) = &self.draft {
+                    themes::install(draft.colors());
+                }
+            }
+            None => {}
+        }
         // Closing without saving is Cancel.
+        if (!open || cancel) && self.previewing {
+            with_state(|state| state.preview(None));
+        }
         if (!open || cancel)
             && let Ok(draft) = &self.draft
         {
@@ -410,6 +543,7 @@ mod tests {
 
 #[cfg(test)]
 impl ThemeEditorWindow {
+
     /// Sets `token` to `color` and opens the picker on `picked`, as using the
     /// window would: for screenshots.
     pub(in crate::app) fn edit_for_shot(

@@ -35,6 +35,10 @@ colour, its value and where the colour comes from: **set** by the theme,
 another token by its rule. Click a swatch to pick a colour; Baboon draws the
 change at once. **Reset** unsets a token, so it inherits or follows again.
 
+The **Theme** menu at the top switches to another theme, and makes it the one
+in use as choosing it in Settings does. Resting the pointer on a theme in the
+menu previews it. If you have unsaved edits, Baboon asks before dropping them.
+
 - **Save** writes the changes back to the theme's file. Its other keys, its
   palette and its comments are kept; a token set from the palette stays
   `$name` until you pick a new colour for it. If the file changed on disk since
