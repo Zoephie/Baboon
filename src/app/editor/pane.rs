@@ -21,6 +21,7 @@ const BITMAP_HEADER_ACTIONS_WIDTH: f32 = 225.0;
 /// for the filter it may apply; the field a reference jump is heading for;
 /// the sound player; and the docs and Wwise binding the caller resolved for
 /// this tag, which fill caches and so are resolved before the draw.
+#[derive(Clone)]
 pub(in crate::app) struct PaneInputs<'a> {
     pub(in crate::app) find: &'a FindDialogState,
     pub(in crate::app) field_nav: Option<&'a FieldNav>,
@@ -153,11 +154,6 @@ pub(in crate::app) fn draw_tag_pane(
         cx.set_status("Cut cancelled because the source changed. The clipboard can still be pasted as a copy.".to_owned());
     }
     if ctx.input(|input| input.key_pressed(egui::Key::Escape)) { string_row_clipboard::dismiss(ctx); }
-    let key = entry.key.clone();
-    let hud_message_usage = if entry.group_tag == blam_tags::string_list::HUD_GROUP {
-        let kit = &cx.model.kits[kit_index];
-        kit.source.as_ref().map_or(hud_messages::HudMessageUsage::Unknown, |source| hud_messages::usage(source, &key, &kit.parsed_tags))
-    } else { hud_messages::HudMessageUsage::Unknown };
     let kit_read_only = cx.model.editing_kit_is_read_only(kit_index);
     draw_responsive_tag_header(cx, ui, kit_index, entry, show_keyword_bar);
     disk_banner::draw_disk_banner(cx, ui, kit_index, entry);
@@ -168,6 +164,32 @@ pub(in crate::app) fn draw_tag_pane(
                 .color(subtle_dark()),
         );
     }
+    draw_tag_body(cx, ui, kit_index, entry, scope, inputs, view, editor);
+}
+
+/// The body of a tag pane: everything under its header, as
+/// [`draw_tag_pane`] describes. A window that shows a tag of its own (the
+/// Model Preview's Material Editor, for a shader) draws this under a header
+/// of its own, with a `scope` of its own, so the document is drawn, edited
+/// and undone exactly as in its tab, and its popups are stamped the same way.
+#[allow(clippy::too_many_arguments)]
+pub(in crate::app) fn draw_tag_body(
+    cx: &Ctx,
+    ui: &mut Ui,
+    kit_index: usize,
+    entry: &TagEntry,
+    scope: &str,
+    inputs: PaneInputs,
+    view: &mut KitView,
+    editor: &mut EditorFeature,
+) {
+    let ctx = cx.egui;
+    let key = entry.key.clone();
+    let hud_message_usage = if entry.group_tag == blam_tags::string_list::HUD_GROUP {
+        let kit = &cx.model.kits[kit_index];
+        kit.source.as_ref().map_or(hud_messages::HudMessageUsage::Unknown, |source| hud_messages::usage(source, &key, &kit.parsed_tags))
+    } else { hud_messages::HudMessageUsage::Unknown };
+    let kit_read_only = cx.model.editing_kit_is_read_only(kit_index);
 
     let supports_field_search = supports_field_search(
         entry,
