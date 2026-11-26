@@ -35,16 +35,26 @@
     "modal.backdrop": "#0000008C",
 
     // Chrome
-    // The menu bar and status bar.
+    // The menu bar, and bars across a pane such as Chimp's.
     "menu_bar.background": "#262834",
+    // The status bar along the bottom of the window.
+    "status_bar.background": "#262834",
+    // Text on the status bar.
+    "status_bar.text": "#E4E6F0",
     // Fill of a hovered menu bar item.
     "menu_bar.item.hover": "#FFFFFF1A",
     // Window chrome strips: tile title bars and menu panels.
     "chrome.background": "#2B2D39",
     // Edge of the window chrome strips.
     "chrome.border": "#474954",
-    // The active document tab.
+    // The active document tab in Chimp.
     "tab.active.background": "#3D3F4A",
+    // The active tag tab, joined to the page below it.
+    "tab.tag.active.background": "#1B1D2A",
+    // The chosen kit tab, joined to the tag browser below it.
+    "tab.kit.active.background": "#151621",
+    // Text of an active tag or kit tab.
+    "tab.active.text": "#E4E6F0",
     // Tint mixed into a tab whose document has unsaved changes.
     "tab.modified.tint": "#B8860B",
     // The tag browser's toolbar.
@@ -149,6 +159,14 @@
     "block.jump.icon": "#4DD0E1",
     // Highlight on the block a jump landed on.
     "block.jump.highlight": "#FFD70026",
+    // Names of tag fields, left of their values.
+    "field.label.text": "#E4E6F0",
+    // Inside of a list of flags.
+    "flags.background": "#0000004D",
+    // Outline of a list of flags.
+    "flags.border": "#4A4B56",
+    // Names of the flags in a list of flags.
+    "flags.text": "#E4E6F0",
     // Fill of a hovered flag row.
     "flags.hover": "#2D2F3B",
 

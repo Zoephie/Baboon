@@ -204,11 +204,16 @@ the rule it follows. Example themes are in
 
 | Token | Where it appears | Dark | Light | Classic Light | Follows (dark; light) |
 |---|---|---|---|---|---|
-| `menu_bar.background` | The menu bar and status bar. | `#323232` | `#E5CCB2` | `#DBDBD8` | background 0.047 toward white; nothing |
+| `menu_bar.background` | The menu bar, and bars across a pane such as Chimp's. | `#323232` | `#E5CCB2` | `#DBDBD8` | background 0.047 toward white; nothing |
+| `status_bar.background` | The status bar along the bottom of the window. | `#323232` | `#E5CCB2` | `#DBDBD8` | menu_bar.background; menu_bar.background |
+| `status_bar.text` | Text on the status bar. | `#F2F2F2` | `#1C1815` | `#191918` | text; text |
 | `menu_bar.item.hover` | Fill of a hovered menu bar item. | `#FFFFFF1A` | `#0000001A` | `#0000001A` | nothing; nothing |
 | `chrome.background` | Window chrome strips: tile title bars and menu panels. | `#373737` | `#E5CCB2` | `#DBDBD8` | background 0.07 toward white; nothing |
 | `chrome.border` | Edge of the window chrome strips. | `#525252` | `#D0966A` | `#B4B4AE` | background 0.195 toward white; nothing |
-| `tab.active.background` | The active document tab. | `#484848` | `#E5CCB2` | `#A1A19D` | background 0.149 toward white; nothing |
+| `tab.active.background` | The active document tab in Chimp. | `#484848` | `#E5CCB2` | `#A1A19D` | background 0.149 toward white; nothing |
+| `tab.tag.active.background` | The active tag tab, joined to the page below it. | `#282828` | `#F2F1F0` | `#E0E0DC` | background; background |
+| `tab.kit.active.background` | The chosen kit tab, joined to the tag browser below it. | `#1F1F1F` | `#EBE5E0` | `#EEEEEA` | panel.background; panel.background |
+| `tab.active.text` | Text of an active tag or kit tab. | `#F2F2F2` | `#1C1815` | `#191918` | text; text |
 | `tab.modified.tint` | Tint mixed into a tab whose document has unsaved changes. | `#B8860B` | `#B8860B` | `#B8860B` | nothing; nothing |
 | `browser.toolbar.background` | The tag browser's toolbar. | `#444444` | `#EEECEA` | `#E2E2DE` | background 0.13 toward white; background 0.021 toward black |
 | `browser.toolbar.active.background` | A toggled-on button in the tag browser toolbar. | `#497088` | `#5D899E` | `#5D899E` | accent 0.03 toward white; nothing |
@@ -269,6 +274,10 @@ the rule it follows. Example themes are in
 | `block.border` | Outline of a tag block. | `#5E5E5E` | `#D6C8BC` | `#9A9A95` | background 0.251 toward white; nothing |
 | `block.jump.icon` | Icon of the button that jumps to a block. | `#4DD0E1` | `#4DD0E1` | `#4DD0E1` | nothing; nothing |
 | `block.jump.highlight` | Highlight on the block a jump landed on. | `#FFD70026` | `#FFD70026` | `#FFD70026` | nothing; nothing |
+| `field.label.text` | Names of tag fields, left of their values. | `#F2F2F2` | `#1C1815` | `#191918` | text; text |
+| `flags.background` | Inside of a list of flags. | `#0000004D` | `#EDD3B980` | `#FFFFFF4D` | input.background; input.background |
+| `flags.border` | Outline of a list of flags. | `#545454` | `#CC9966` | `#70706C` | input.border; input.border |
+| `flags.text` | Names of the flags in a list of flags. | `#F2F2F2` | `#1C1815` | `#191918` | text; text |
 | `flags.hover` | Fill of a hovered flag row. | `#3A3A38` | `#ECE8E4` | `#E8E8E4` | background 0.081 toward white; background 0.037 toward black |
 
 ### Status

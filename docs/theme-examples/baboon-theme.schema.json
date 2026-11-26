@@ -110,7 +110,17 @@
         "menu_bar.background": {
           "type": "string",
           "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
-          "description": "The menu bar and status bar. (Chrome)"
+          "description": "The menu bar, and bars across a pane such as Chimp's. (Chrome)"
+        },
+        "status_bar.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The status bar along the bottom of the window. (Chrome)"
+        },
+        "status_bar.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text on the status bar. (Chrome)"
         },
         "menu_bar.item.hover": {
           "type": "string",
@@ -130,7 +140,22 @@
         "tab.active.background": {
           "type": "string",
           "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
-          "description": "The active document tab. (Chrome)"
+          "description": "The active document tab in Chimp. (Chrome)"
+        },
+        "tab.tag.active.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The active tag tab, joined to the page below it. (Chrome)"
+        },
+        "tab.kit.active.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "The chosen kit tab, joined to the tag browser below it. (Chrome)"
+        },
+        "tab.active.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Text of an active tag or kit tab. (Chrome)"
         },
         "tab.modified.tint": {
           "type": "string",
@@ -381,6 +406,26 @@
           "type": "string",
           "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
           "description": "Highlight on the block a jump landed on. (Field editor)"
+        },
+        "field.label.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Names of tag fields, left of their values. (Field editor)"
+        },
+        "flags.background": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Inside of a list of flags. (Field editor)"
+        },
+        "flags.border": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Outline of a list of flags. (Field editor)"
+        },
+        "flags.text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8}|\\$[a-z0-9_-]+)$",
+          "description": "Names of the flags in a list of flags. (Field editor)"
         },
         "flags.hover": {
           "type": "string",

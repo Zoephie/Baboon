@@ -11,6 +11,16 @@ use eframe::egui::Color32;
 /// premultiplied RGBA.
 const GOLDEN: &[(&str, [u32; 3])] = &[
     ("menu_bar", [0x323232FF, 0xE5CCB2FF, 0xDBDBD8FF]),
+    // Added with their tokens, at the values they replaced.
+    ("status_bar", [0x323232FF, 0xE5CCB2FF, 0xDBDBD8FF]),
+    ("status_bar_text", [0xF2F2F2FF, 0x1C1815FF, 0x191918FF]),
+    ("tag_tab_active", [0x282828FF, 0xF2F1F0FF, 0xE0E0DCFF]),
+    ("kit_tab_active", [0x1F1F1FFF, 0xEBE5E0FF, 0xEEEEEAFF]),
+    ("active_tab_text", [0xF2F2F2FF, 0x1C1815FF, 0x191918FF]),
+    ("field_label", [0xF2F2F2FF, 0x1C1815FF, 0x191918FF]),
+    ("flag_panel", [0x0000004D, 0x776A5D80, 0x4D4D4D4D]),
+    ("flag_text", [0xF2F2F2FF, 0x1C1815FF, 0x191918FF]),
+    ("flag_panel_edge", [0x545454FF, 0xCC9966FF, 0x70706CFF]),
     ("chrome_edge", [0x525252FF, 0xD0966AFF, 0xB4B4AEFF]),
     ("chrome_bar", [0x373737FF, 0xE5CCB2FF, 0xDBDBD8FF]),
     ("active_tab", [0x484848FF, 0xE5CCB2FF, 0xA1A19DFF]),
@@ -253,6 +263,15 @@ const GOLDEN: &[(&str, [u32; 3])] = &[
 fn current(name: &str) -> Color32 {
     match name {
         "menu_bar" => s::menu_bar(),
+        "status_bar" => s::status_bar(),
+        "status_bar_text" => s::status_bar_text(),
+        "tag_tab_active" => s::tag_tab_active(),
+        "kit_tab_active" => s::kit_tab_active(),
+        "active_tab_text" => s::active_tab_text(),
+        "field_label" => s::field_label(),
+        "flag_panel" => s::flag_panel(),
+        "flag_panel_edge" => s::flag_panel_edge(),
+        "flag_text" => s::flag_text(),
         "chrome_edge" => s::chrome_edge(),
         "chrome_bar" => s::chrome_bar(),
         "active_tab" => s::active_tab(),

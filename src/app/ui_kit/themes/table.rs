@@ -23,11 +23,16 @@ tokens! {
         ModalBackdrop "modal.backdrop" ["#0000008C", "#0000008C", "#0000008C"] "Dimming laid over the app behind a modal dialog.";
     }
     group "Chrome" {
-        MenuBarBackground "menu_bar.background" ["#323232", "#E5CCB2", "#DBDBD8"] "The menu bar and status bar." => dark(tint(Background, 0.047));
+        MenuBarBackground "menu_bar.background" ["#323232", "#E5CCB2", "#DBDBD8"] "The menu bar, and bars across a pane such as Chimp's." => dark(tint(Background, 0.047));
+        StatusBarBackground "status_bar.background" ["#323232", "#E5CCB2", "#DBDBD8"] "The status bar along the bottom of the window." => both(reference(MenuBarBackground));
+        StatusBarText "status_bar.text" ["#F2F2F2", "#1C1815", "#191918"] "Text on the status bar." => both(reference(Text));
         MenuBarItemHover "menu_bar.item.hover" ["#FFFFFF1A", "#0000001A", "#0000001A"] "Fill of a hovered menu bar item.";
         ChromeBackground "chrome.background" ["#373737", "#E5CCB2", "#DBDBD8"] "Window chrome strips: tile title bars and menu panels." => dark(tint(Background, 0.07));
         ChromeBorder "chrome.border" ["#525252", "#D0966A", "#B4B4AE"] "Edge of the window chrome strips." => dark(tint(Background, 0.195));
-        TabActiveBackground "tab.active.background" ["#484848", "#E5CCB2", "#A1A19D"] "The active document tab." => dark(tint(Background, 0.149));
+        TabActiveBackground "tab.active.background" ["#484848", "#E5CCB2", "#A1A19D"] "The active document tab in Chimp." => dark(tint(Background, 0.149));
+        TagTabActiveBackground "tab.tag.active.background" ["#282828", "#F2F1F0", "#E0E0DC"] "The active tag tab, joined to the page below it." => both(reference(Background));
+        KitTabActiveBackground "tab.kit.active.background" ["#1F1F1F", "#EBE5E0", "#EEEEEA"] "The chosen kit tab, joined to the tag browser below it." => both(reference(PanelBackground));
+        TabActiveText "tab.active.text" ["#F2F2F2", "#1C1815", "#191918"] "Text of an active tag or kit tab." => both(reference(Text));
         TabModifiedTint "tab.modified.tint" ["#B8860B", "#B8860B", "#B8860B"] "Tint mixed into a tab whose document has unsaved changes.";
         BrowserToolbarBackground "browser.toolbar.background" ["#444444", "#EEECEA", "#E2E2DE"] "The tag browser's toolbar." => by_appearance(tint(Background, 0.13), shade(Background, 0.021));
         BrowserToolbarActiveBackground "browser.toolbar.active.background" ["#497088", "#5D899E", "#5D899E"] "A toggled-on button in the tag browser toolbar." => dark(tint(Accent, 0.03));
@@ -82,6 +87,10 @@ tokens! {
         BlockBorder "block.border" ["#5E5E5E", "#D6C8BC", "#9A9A95"] "Outline of a tag block." => dark(tint(Background, 0.251));
         BlockJumpIcon "block.jump.icon" ["#4DD0E1", "#4DD0E1", "#4DD0E1"] "Icon of the button that jumps to a block.";
         BlockJumpHighlight "block.jump.highlight" ["#FFD70026", "#FFD70026", "#FFD70026"] "Highlight on the block a jump landed on.";
+        FieldLabelText "field.label.text" ["#F2F2F2", "#1C1815", "#191918"] "Names of tag fields, left of their values." => both(reference(Text));
+        FlagsBackground "flags.background" ["#0000004D", "#EDD3B980", "#FFFFFF4D"] "Inside of a list of flags." => both(reference(InputBackground));
+        FlagsBorder "flags.border" ["#545454", "#CC9966", "#70706C"] "Outline of a list of flags." => both(reference(InputBorder));
+        FlagsText "flags.text" ["#F2F2F2", "#1C1815", "#191918"] "Names of the flags in a list of flags." => both(reference(Text));
         FlagsHover "flags.hover" ["#3A3A38", "#ECE8E4", "#E8E8E4"] "Fill of a hovered flag row." => by_appearance(tint(Background, 0.081), shade(Background, 0.037));
     }
     group "Status" {

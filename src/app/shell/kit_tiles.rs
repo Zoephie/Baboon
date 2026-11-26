@@ -298,13 +298,14 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
             }
             let inner = rect.shrink(margin);
             let text_pos = egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), inner).min;
-            ui.painter().galley(text_pos, galley, text_dark());
+            let text_color = if state.active { active_tab_text() } else { text_dark() };
+            ui.painter().galley(text_pos, galley, text_color);
             if state.closable {
                 let close_rect = egui::Align2::RIGHT_CENTER.align_size_within_rect(close_size, inner);
                 if dirty {
                     ui.painter().circle_filled(
                         egui::pos2(close_rect.left() - CLOSE_GAP * 0.5, close_rect.center().y),
-                        2.0, text_dark(),
+                        2.0, text_color,
                     );
                 }
                 let close = ui.interact(close_rect, id.with("close"), Sense::click_and_drag())
@@ -480,7 +481,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         state: &egui_tiles::TabState,
     ) -> Color32 {
         if state.active {
-            left_panel()
+            kit_tab_active()
         } else {
             Color32::TRANSPARENT
         }

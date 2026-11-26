@@ -567,6 +567,26 @@ pub(in crate::app) fn menu_bar() -> Color32 {
     themes::color(themes::Token::MenuBarBackground)
 }
 
+pub(in crate::app) fn status_bar() -> Color32 {
+    themes::color(themes::Token::StatusBarBackground)
+}
+
+pub(in crate::app) fn status_bar_text() -> Color32 {
+    themes::color(themes::Token::StatusBarText)
+}
+
+pub(in crate::app) fn tag_tab_active() -> Color32 {
+    themes::color(themes::Token::TagTabActiveBackground)
+}
+
+pub(in crate::app) fn kit_tab_active() -> Color32 {
+    themes::color(themes::Token::KitTabActiveBackground)
+}
+
+pub(in crate::app) fn active_tab_text() -> Color32 {
+    themes::color(themes::Token::TabActiveText)
+}
+
 /// Fill for the selected tab in every tiled tab rack. In dark mode this must
 /// sit visibly above the surrounding 31-55 gray fills; the old menu-bar gray
 /// was actually darker than document tabs, which hid the active selection.
@@ -726,6 +746,22 @@ pub(in crate::app) fn function_plot_bg() -> Color32 {
 
 pub(in crate::app) fn function_grid_line() -> Color32 {
     themes::color(themes::Token::GraphGrid)
+}
+
+pub(in crate::app) fn field_label() -> Color32 {
+    themes::color(themes::Token::FieldLabelText)
+}
+
+pub(in crate::app) fn flag_panel() -> Color32 {
+    themes::color(themes::Token::FlagsBackground)
+}
+
+pub(in crate::app) fn flag_panel_edge() -> Color32 {
+    themes::color(themes::Token::FlagsBorder)
+}
+
+pub(in crate::app) fn flag_text() -> Color32 {
+    themes::color(themes::Token::FlagsText)
 }
 
 pub(in crate::app) fn foundation_flag_hover() -> Color32 {

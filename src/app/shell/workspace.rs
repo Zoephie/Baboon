@@ -480,13 +480,15 @@ pub(in crate::app) fn draw_status_bar(
 ) {
     let ctx = &ui.ctx().clone();
     let bar = egui::Panel::bottom("status")
-        .frame(Frame::NONE.fill(menu_bar()).inner_margin(egui::Margin {
+        .frame(Frame::NONE.fill(status_bar()).inner_margin(egui::Margin {
             left: 6,
             right: 6,
             top: 2,
             bottom: 2,
         }))
         .show(ui, |ui| {
+            // Text the bar does not colour itself is the bar's own.
+            ui.visuals_mut().override_text_color = Some(status_bar_text());
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Status").strong());
 
