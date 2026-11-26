@@ -471,7 +471,11 @@ fn the_built_in_themes_build_the_visuals_baboon_built_before() {
     ];
     for (built_in, captured) in LOOKS.into_iter().zip(captured) {
         let now = with_colors(&built_in.colors(), || {
-            format!("{:#?}", s::foundation_visuals())
+            let mut visuals = s::foundation_visuals();
+            // egui's own default, by platform (on for Windows' IME), which
+            // Baboon leaves alone: the capture was taken where it is off.
+            visuals.ime_composition.legacy_visuals = false;
+            format!("{visuals:#?}")
         });
         let changed: Vec<(&str, &str)> = captured
             .lines()
