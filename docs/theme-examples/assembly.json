@@ -1,0 +1,121 @@
+// Assembly's default look: its Dark brushes under the Blue accent, read from
+// Assembly's Metro/Themes/Dark.xaml and Blue.xaml and the greys its control
+// styles hard-code. The accent fills selections as Assembly's does. Set
+// "blue" and "blue_light" to another accent pair to match Assembly's others:
+// Green (#77BB44, #98E062), Orange (#CA5100, #D66F2B) or Purple (#68217A,
+// #9C40B4), and "accent.text" and "link.text" to the lighter one.
+{
+  "$schema": "./baboon-theme.schema.json",
+  "name": "Assembly",
+  "extends": "baboon-dark",
+  "palette": {
+    // ExtryzeAccentBrush and ExtryzeAccentBrushSecondary.
+    "blue": "#0079CB",
+    "blue_light": "#1D98EB",
+    // MainBackgroundBrush: the window, its menu and tab bars, and the tag
+    // list beside the editor.
+    "main": "#2D2D30",
+    // The meta editor's page, behind the fields.
+    "page": "#252525",
+    // SidebarBlockBrush, also an unfocused tree selection.
+    "block": "#3F3F46",
+    // SidebarHeaderSeperatorBrush.
+    "separator": "#46464A",
+    // Menus, popups and the inside of a tag block.
+    "menu": "#1B1B1C",
+    "menu_border": "#333337",
+    "menu_hover": "#3E3E40",
+    // Text: TextBrushPrimary and GenericTextblock labels.
+    "white": "#FFFFFF",
+    "label": "#999999",
+    // Buttons: rest, hover, pressed, and their outlines.
+    "button": "#222222",
+    "button_hover": "#393939",
+    "button_pressed": "#575757",
+    "button_border": "#616161",
+    "button_border_pressed": "#8B8B8B",
+    // Text boxes.
+    "textbox": "#414141",
+    // Check boxes.
+    "check": "#3F3F3F",
+    "check_hover": "#454545",
+    // A tag block's header bar and outline.
+    "block_header": "#474747",
+    // Scroll bar track, also used for the slider rail.
+    "track": "#3E3E42"
+  },
+  "colors": {
+    // Core
+    "background": "$page",
+    // TextBrushPrimary: white also reads on the blue a selection is filled
+    // with, where the field values' #CCCCCC does not.
+    "text": "$white",
+    "text.muted": "$label",
+    "text.strong": "$white",
+    "accent": "$blue",
+    "accent.border": "$blue_light",
+    // The lighter accent, lifted 4% toward white so it reads as body text.
+    "accent.text": "#289DEC",
+    "focus.border": "$blue",
+    "link.text": "#289DEC",
+    "panel.background": "$main",
+    "row.background": "$menu_border",
+    "border": "$block",
+    "separator": "$separator",
+    // HomeOpacityBrush at the opacity Assembly dims with.
+    "modal.backdrop": "#212121A6",
+
+    // Chrome: the menu and tab bars sit on the window, active tabs and the
+    // status bar are filled with the accent.
+    "menu_bar.background": "$main",
+    "menu_bar.item.hover": "$menu_hover",
+    "status_bar.background": "$blue",
+    "status_bar.text": "$white",
+    "chrome.background": "$main",
+    "chrome.border": "$menu_border",
+    "tab.active.background": "$blue",
+    "tab.tag.active.background": "$blue",
+    "tab.kit.active.background": "$blue",
+    "tab.active.text": "$white",
+    "browser.toolbar.background": "$main",
+    "browser.toolbar.active.background": "$blue",
+    "browser.search.background": "$textbox",
+    "progress.background": "$track",
+    "progress.bar": "$blue",
+
+    // Controls
+    "button.background": "$button",
+    "button.hover": "$button_hover",
+    "button.active": "$button_pressed",
+    "button.border": "$button_border",
+    "button.border.hover": "$button_border",
+    "button.border.active": "$button_border_pressed",
+    "button.border.open": "$button_border_pressed",
+    "menu.hover": "$menu_hover",
+    "control.background": "$check",
+    "control.hover": "$check_hover",
+    "control.active": "$button_pressed",
+    "input.background": "$textbox",
+    // Assembly outlines a text box only while it is hovered.
+    "input.border": "$textbox",
+    "card.background": "$page",
+    "settings.card.background": "$page",
+    "slider.rail.background": "$track",
+    "control.well": "$menu",
+    "code.inline.background": "$menu_border",
+
+    // Field editor
+    "group.background": "$page",
+    // GenericTextblock: field names are grey, their values white.
+    "field.label.text": "$label",
+    "group.border": "$block",
+    "section.header.background": "$menu_border",
+    "block.header.background": "$block_header",
+    "block.border": "$block_header",
+    // A list of flags sits on the page with a faint outline.
+    "flags.background": "$page",
+    "flags.border": "#3B3B3B",
+    "flags.text": "$label",
+    "flags.hover": "$menu_hover"
+  }
+}

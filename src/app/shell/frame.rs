@@ -9233,6 +9233,7 @@ mod tests {
             ("ember", true, "theme_ember.png"),
             ("harbor", false, "theme_harbor.png"),
             ("nightfall", true, "theme_nightfall.png"),
+            ("assembly", true, "theme_assembly.png"),
         ] {
             let mut h = Harness::recording();
             h.app.model.prefs.follow_system_theme = false;

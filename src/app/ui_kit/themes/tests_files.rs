@@ -402,8 +402,8 @@ fn the_authoring_guide_lists_every_token() {
     assert_ne!(missing, expected);
 }
 
-/// The example themes in `docs/theme-examples` read with no problems: two
-/// that extend a built-in, and Nightfall, written from scratch with every
+/// The example themes in `docs/theme-examples` read with no problems: three
+/// that extend a built-in, Assembly's readable by the contrast checks, and Nightfall, written from scratch with every
 /// token. Set `BABOON_WRITE_THEME_DOCS` to write Nightfall from its roots.
 #[test]
 fn the_example_themes_read_cleanly() {
@@ -433,7 +433,7 @@ fn the_example_themes_read_cleanly() {
     }
     let library = ThemeLibrary::scan(&folder);
     assert!(library.reports.is_empty(), "{:?}", library.reports);
-    for id in ["ember", "harbor", "nightfall"] {
+    for id in ["assembly", "ember", "harbor", "nightfall"] {
         let resolved = library
             .resolve(id)
             .unwrap_or_else(|report| panic!("{report}"));
@@ -449,6 +449,9 @@ fn the_example_themes_read_cleanly() {
         Token::ALL.len(),
         "Nightfall sets every token"
     );
+    let assembly = library.resolve("assembly").unwrap().colors;
+    let warnings = super::contrast::warnings(&assembly);
+    assert!(warnings.is_empty(), "Assembly: {warnings:?}");
     let ember = library.resolve("ember").unwrap();
     assert!(
         !ember.following.is_empty(),
