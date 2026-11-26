@@ -28,7 +28,8 @@ pub(in crate::app) fn draw_material_tag(
     expert_mode: bool,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let is_shader = is_shader_tag(entry, &bundled_group_hierarchy(edit.game));
+    let is_shader = uses_shader_grid(entry, &bundled_group_hierarchy(edit.game));
+    let is_material = is_material_tag(entry);
     Frame::NONE
         .fill(if is_shader { Color32::TRANSPARENT } else { material_panel() })
         .stroke(if is_shader { Stroke::NONE } else { Stroke::new(1.0_f32, material_panel_edge()) })
@@ -49,7 +50,8 @@ pub(in crate::app) fn draw_material_tag(
                     Some((revision, model)) if revision == document_revision => model,
                     _ => {
                         let model =
-                            build_h2ek_shader_editor_model(tag, entry, names, source, h2_templates)
+                            build_material_tag_editor_model(tag, entry.group_tag, source, h2_templates)
+                                .or_else(|| build_h2ek_shader_editor_model(tag, entry, names, source, h2_templates))
                                 .or_else(|| {
                                     build_shader_editor_model(
                                         tag,
@@ -85,13 +87,14 @@ pub(in crate::app) fn draw_material_tag(
                 // read-only material struct view — and say so, because a
                 // silent downgrade reads as "the editor is broken" when the
                 // actual problem is the kit's render_method_definition.
-                ui.label(
-                    RichText::new(
-                        "Shader editor unavailable — the render method definition this shader \
-                         names did not load or parse. Showing raw fields.",
-                    )
-                    .color(subtle_dark()),
-                );
+                let why = if is_material {
+                    "Material editor unavailable — this material's fields could not be read. \
+                     Showing raw fields."
+                } else {
+                    "Shader editor unavailable — the render method definition this shader \
+                     names did not load or parse. Showing raw fields."
+                };
+                ui.label(RichText::new(why).color(subtle_dark()));
                 ui.add_space(4.0);
                 draw_struct_fields(ui, tag.root(), names, 0, expert_mode, "", edit);
                 return;
@@ -716,6 +719,13 @@ pub(in crate::app) fn is_material_shader_tag(entry: &TagEntry) -> bool {
 /// not by name: a list of groups missed each subclass a game added, and
 /// Halo CE's `shader_*` groups, Halo 2's `shader_template` and Reach's
 /// `rumble` (`rmbl`) share a name or FOURCC prefix but have no grid.
+/// Whether `entry` is edited in the shader grid: a shader, or a `material`
+/// (Halo 4, Halo 2 Anniversary, Halo 5), whose grid lists its material
+/// shader's parameters.
+pub(in crate::app) fn uses_shader_grid(entry: &TagEntry, groups: &GroupHierarchy) -> bool {
+    is_shader_tag(entry, groups) || is_material_tag(entry)
+}
+
 pub(in crate::app) fn is_shader_tag(entry: &TagEntry, groups: &GroupHierarchy) -> bool {
     entry.group_tag == u32::from_be_bytes(*b"shad")
         || groups.is_a(entry.group_tag, u32::from_be_bytes(*b"rm  "))

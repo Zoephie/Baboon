@@ -264,7 +264,7 @@ fn draw_tag_fields_scroll(
         // separate field tab. The grid's bitmap/scalar/int/function/category
         // cells are editable inline; when the grid can't be built it falls
         // back to the standard editable field tree (inside draw_material_tag).
-        let is_shader = is_shader_tag(entry, &bundled_group_hierarchy(edit.game));
+        let is_shader = uses_shader_grid(entry, &bundled_group_hierarchy(edit.game));
         let scope = (edit.view_scope, "fields");
         let mut contents = |ui: &mut Ui| {
             scroll_during_drag(ui);

@@ -253,6 +253,7 @@ fn push_shader_override_create(edit: &mut FieldEditContext<'_>, row_edit: &Shade
             parameters_block_path,
             parameter_name,
             parameter_type_index,
+            field,
         } => {
             edit.shader_param_ops.push(ShaderParamOp {
                 parameters_block_path: parameters_block_path.clone(),
@@ -260,7 +261,7 @@ fn push_shader_override_create(edit: &mut FieldEditContext<'_>, row_edit: &Shade
                 initial_fields: vec![
                     shader_parameter_type_initial_field(*parameter_type_index),
                     ShaderParamInitialField {
-                        field: "real".to_owned(),
+                        field: (*field).to_owned(),
                         input: row_edit.current.clone(),
                     },
                 ],
@@ -675,7 +676,42 @@ pub(super) fn draw_unused_shader_grid_row(
     draw_shader_grid_row_inner(ui, row, 0, color_popup, function_popup, edit, Some(delete));
 }
 
+/// Whether `kind` writes a value where it stands: a number, a flag, a
+/// colour, an option. The rest add or remove elements, or rewrite a
+/// reference, a string_id or a function's bytes, which a tag whose structure
+/// is locked ([`FieldEditContext::structure_locked`], Halo 5's) can't take.
+fn edits_in_place(kind: &ShaderRowEditKind) -> bool {
+    matches!(
+        kind,
+        ShaderRowEditKind::Scalar
+            | ShaderRowEditKind::Int
+            | ShaderRowEditKind::Bool { create: None }
+            | ShaderRowEditKind::ColorField { .. }
+            | ShaderRowEditKind::Enum(_)
+            | ShaderRowEditKind::Flags(_)
+    )
+}
+
 fn draw_shader_grid_row_inner(
+    ui: &mut Ui,
+    row: &ShaderGridRow,
+    depth: usize,
+    color_popup: &mut Option<MaterialColorPopup>,
+    function_popup: &mut Option<FunctionPopup>,
+    edit: &mut FieldEditContext<'_>,
+    unused_delete: Option<&BlockOp>,
+) {
+    // A locked tag keeps only the edits that write a value in place; the
+    // row draws read-only otherwise, and nothing below adds or deletes.
+    let editable = edit.editable;
+    if edit.structure_locked && !row.edit.as_ref().is_some_and(|row_edit| edits_in_place(&row_edit.kind)) {
+        edit.editable = false;
+    }
+    draw_shader_grid_row_body(ui, row, depth, color_popup, function_popup, edit, unused_delete);
+    edit.editable = editable;
+}
+
+fn draw_shader_grid_row_body(
     ui: &mut Ui,
     row: &ShaderGridRow,
     depth: usize,
@@ -686,6 +722,8 @@ fn draw_shader_grid_row_inner(
 ) {
     let tag_key = edit.tag_key;
     let editable = edit.editable;
+    // Adding or deleting elements: never on a tag whose structure is locked.
+    let restructurable = editable && !edit.structure_locked;
     let available = shader_grid_width(ui);
     let base_label_width = shader_label_width(ui);
     let indent = (depth as f32 * 10.0).min((base_label_width - 110.0).max(0.0));
@@ -753,8 +791,9 @@ fn draw_shader_grid_row_inner(
         });
     let function_reset = (editable && unused_delete.is_none())
         .then(|| shader_function_default_edit(row))
-        .flatten();
-    let reset = (editable && function_reset.is_none())
+        .flatten()
+        .filter(|reset| restructurable || !matches!(reset, ShaderFunctionReset::Create(_)));
+    let reset = (restructurable && function_reset.is_none())
         .then(|| unused_delete.cloned().or_else(|| reset_op_for_row(row)))
         .flatten();
     let has_clear = !show_override && (function_reset.is_some() || reset.is_some());
@@ -1146,7 +1185,7 @@ fn draw_shader_grid_row_inner(
                 editable && func_view.edit.is_some(),
             ));
         }
-    } else if let (true, Some(action)) = (editable && !show_override, create_function.as_ref()) {
+    } else if let (true, Some(action)) = (restructurable && !show_override, create_function.as_ref()) {
         // No animated parameter yet — show an "f()+" button to create one.
         let button_rect = egui::Rect::from_min_size(
             egui::pos2(next_function_x, value_rect.top()),
@@ -1535,6 +1574,7 @@ fn shader_range_control(row: &ShaderGridRow) -> Option<ShaderRangeControl> {
             parameters_block_path,
             parameter_name,
             parameter_type_index,
+            ..
         } => ShaderFunctionCreateTarget::NewParameter {
             parameters_block_path: parameters_block_path.clone(),
             parameter_name: parameter_name.clone(),
@@ -2403,7 +2443,9 @@ fn draw_shader_editable_value_with_color_preview(
             parameters_block_path,
             parameter_name,
             parameter_type_index,
+            field,
         } => {
+            let field = *field;
             let current = row_edit.current.clone();
             let create_buf_key = format!("{}|create:{label}", edit.tag_key);
             let id = edit.widget_id(("shader_create_scalar", label));
@@ -2427,6 +2469,7 @@ fn draw_shader_editable_value_with_color_preview(
                         parameters_block_path,
                         parameter_name,
                         *parameter_type_index,
+                        field,
                         &draft.text,
                     ));
                 }
@@ -2437,7 +2480,7 @@ fn draw_shader_editable_value_with_color_preview(
                         *parameter_type_index,
                     );
                     shader_draft_commit(edit.tag_key, &create_buf_key, move |text| {
-                        create_scalar_param_ops(&block, &name, type_index, text)
+                        create_scalar_param_ops(&block, &name, type_index, field, text)
                     })
                 });
             });
@@ -2948,10 +2991,11 @@ fn h2_create_function_scalar_ops(
 }
 
 /// The edit a not-yet-created scalar parameter box commits.
-fn create_scalar_param_ops(
+pub(super) fn create_scalar_param_ops(
     parameters_block_path: &str,
     parameter_name: &str,
     parameter_type_index: i32,
+    field: &str,
     text: &str,
 ) -> Result<DeferredOps, String> {
     let value = parse_shader_number(text)?;
@@ -2962,7 +3006,7 @@ fn create_scalar_param_ops(
             initial_fields: vec![
                 shader_parameter_type_initial_field(parameter_type_index),
                 ShaderParamInitialField {
-                    field: "real".to_owned(),
+                    field: field.to_owned(),
                     input: value.to_string(),
                 },
             ],
