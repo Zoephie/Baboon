@@ -2,10 +2,11 @@
 //! table groups them, each with its colour, where the colour comes from and a
 //! reset. Edits are drawn live; Cancel puts back what was drawn when the
 //! editor opened. Its Theme menu chooses another theme to use and edit, as
-//! Settings' does, asking first when there are edits to lose. Save writes a
-//! theme file back; Save As writes a new theme that extends the one edited and
-//! holds only what changed. The draft and its files are
-//! `ui_kit::themes::draft`.
+//! Settings' does, asking first when there are edits to lose. The eye in its
+//! header shows the gallery (`theme_gallery`) beside the rows, widening the
+//! window to fit it. Save writes a theme file back; Save As writes a new theme
+//! that extends the one edited and holds only what changed. The draft and its
+//! files are `ui_kit::themes::draft`.
 
 use super::*;
 use crate::app::editor::{MaterialColorPopup, draw_color_picker_editor};
@@ -40,7 +41,23 @@ pub(in crate::app) struct ThemeEditorWindow {
     switching: Option<ThemeEntry>,
     /// The Theme menu is previewing the theme under its pointer.
     previewing: bool,
+    /// The gallery beside the rows, and whether it is shown.
+    gallery: super::ThemeGallery,
+    show_gallery: bool,
+    /// The window's content width last frame, and how much of it the
+    /// gallery took from the rows (its width, frame and gap).
+    width: f32,
+    gallery_width: f32,
+    /// A width to hold the window's content at, and for how many more
+    /// frames, after the gallery is shown or hidden.
+    resizing: Option<(f32, u8)>,
+    /// The rows' width when the gallery was shown, until the window has been
+    /// widened by all the gallery takes.
+    rows_width: Option<f32>,
 }
+
+/// The gallery's width when first shown.
+const GALLERY_WIDTH: f32 = 440.0;
 
 impl ThemeEditorWindow {
     /// An editor on the theme in use.
@@ -63,6 +80,12 @@ impl ThemeEditorWindow {
             message: None,
             switching: None,
             previewing: false,
+            gallery: super::ThemeGallery::default(),
+            show_gallery: false,
+            width: 0.0,
+            gallery_width: GALLERY_WIDTH,
+            resizing: None,
+            rows_width: None,
         }
     }
 
@@ -148,69 +171,125 @@ impl Dialog for ThemeEditorWindow {
         let entries = with_state(|state| state.entries(std::time::Instant::now()));
         let mut hovered = None;
         let mut picked = None;
-        egui::Window::new("Theme Editor")
+        let mut window = egui::Window::new("Theme Editor")
             .constrain_to(window_work_area(ctx))
             .id(egui::Id::unique("theme_editor"))
             .title_bar(false)
             .collapsible(false)
             .resizable(true)
             .default_width(window_width(ctx, 720.0))
-            .default_height(window_height(ctx, 820.0, false))
-            .show(ctx, |ui| {
-                let title = match &self.draft {
-                    Ok(draft) => format!("Theme Editor - {}", draft.name()),
-                    Err(_) => "Theme Editor".to_owned(),
-                };
-                crate::app::search::draw_icon_window_header(
-                    ui,
-                    &title,
-                    ButtonIcon::ColorPicker,
-                    &mut open,
-                );
-                ui.add_space(6.0);
-                let editing = match &self.draft {
-                    Ok(draft) => Some(draft.id().to_owned()),
-                    Err(_) => with_state(|state| state.applied_id().map(str::to_owned)),
-                };
-                picked = draw_theme_menu(ui, &entries, editing.as_deref(), &mut hovered);
-                if let Some(entry) = self.switching.clone() {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!(
-                                "Switching to {} drops your unsaved edits.",
-                                entry.name
-                            ))
-                            .color(unapplied_value_text()),
-                        );
-                        if ui.button("Drop Edits and Switch").clicked() {
-                            picked = Some(entry.clone());
-                        }
-                        if ui.button("Keep Editing").clicked() {
-                            self.switching = None;
-                        }
-                    });
-                }
-                ui.add_space(4.0);
-                match &mut self.draft {
-                    Err(error) => {
-                        ui.label(RichText::new(error.as_str()).color(error_text()));
-                    }
-                    Ok(draft) => {
-                        cancel = draw_editor(
-                            cx,
-                            ui,
-                            draft,
-                            &mut self.search,
-                            &mut self.picking,
-                            &mut self.swatches,
-                            &mut self.save_as,
-                            &mut self.confirm_overwrite,
-                            &mut self.message,
-                            &mut open,
-                        );
+            .default_height(window_height(ctx, 820.0, false));
+        // The window keeps the size it was given, so it is held at the width
+        // the gallery needs for long enough that its stored size takes it.
+        if let Some((width, frames)) = &mut self.resizing {
+            // The window's width counts its inner margin and stroke; the
+            // content's does not.
+            let style = ctx.global_style();
+            let margin = style.spacing.window_margin;
+            let width = *width
+                + f32::from(margin.left)
+                + f32::from(margin.right)
+                + 2.0 * style.visuals.window_stroke.width;
+            window = window.min_width(width).max_width(width);
+            *frames -= 1;
+            if *frames == 0 {
+                self.resizing = None;
+            }
+            ctx.request_repaint();
+        }
+        // An editor opened with the gallery shown widens on its first frame.
+        let showing_gallery = self.show_gallery && self.width > 0.0;
+        window.show(ctx, |ui| {
+            self.width = ui.available_width();
+            let title = match &self.draft {
+                Ok(draft) => format!("Theme Editor - {}", draft.name()),
+                Err(_) => "Theme Editor".to_owned(),
+            };
+            crate::app::search::draw_icon_window_header_with_toggle(
+                ui,
+                &title,
+                ButtonIcon::ColorPicker,
+                &mut open,
+                ("Show or hide the gallery", ButtonIcon::View, &mut self.show_gallery),
+            );
+            if self.show_gallery {
+                egui::Panel::right("theme_editor_gallery")
+                    .resizable(true)
+                    .default_size(GALLERY_WIDTH)
+                    .min_size(240.0)
+                    .show(ui, |ui| self.gallery.draw(ui));
+                self.gallery_width = self.width - ui.available_width();
+                // Widened by the gallery's own width, the window gave the
+                // rows less than they had by its frame and gap: once that
+                // is known, widen it by that too.
+                if self.resizing.is_none()
+                    && let Some(rows) = self.rows_width.take()
+                {
+                    let short = rows - ui.available_width();
+                    if short > 0.5 {
+                        self.resizing = Some((self.width + short, 2));
+                        ui.ctx().request_repaint();
                     }
                 }
-            });
+            }
+            ui.add_space(6.0);
+            let editing = match &self.draft {
+                Ok(draft) => Some(draft.id().to_owned()),
+                Err(_) => with_state(|state| state.applied_id().map(str::to_owned)),
+            };
+            picked = draw_theme_menu(ui, &entries, editing.as_deref(), &mut hovered);
+            if let Some(entry) = self.switching.clone() {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "Switching to {} drops your unsaved edits.",
+                            entry.name
+                        ))
+                        .color(unapplied_value_text()),
+                    );
+                    if ui.button("Drop Edits and Switch").clicked() {
+                        picked = Some(entry.clone());
+                    }
+                    if ui.button("Keep Editing").clicked() {
+                        self.switching = None;
+                    }
+                });
+            }
+            ui.add_space(4.0);
+            match &mut self.draft {
+                Err(error) => {
+                    ui.label(RichText::new(error.as_str()).color(error_text()));
+                }
+                Ok(draft) => {
+                    cancel = draw_editor(
+                        cx,
+                        ui,
+                        draft,
+                        &mut self.search,
+                        &mut self.picking,
+                        &mut self.swatches,
+                        &mut self.save_as,
+                        &mut self.confirm_overwrite,
+                        &mut self.message,
+                        &mut open,
+                    );
+                }
+            }
+        });
+        // Showing the gallery widens the window by its width, hiding it gives
+        // that width back, so the rows keep theirs.
+        if self.show_gallery != showing_gallery {
+            let work_area = window_work_area(ctx).width();
+            let width = if self.show_gallery {
+                self.rows_width = Some(self.width);
+                (self.width + GALLERY_WIDTH).min(work_area)
+            } else {
+                self.rows_width = None;
+                (self.width - self.gallery_width).max(360.0)
+            };
+            self.resizing = Some((width, 2));
+            ctx.request_repaint();
+        }
         // A theme picked while there are edits waits to be confirmed; picking
         // another from the menu meanwhile waits in its place.
         if let Some(entry) = picked {
@@ -415,15 +494,6 @@ fn draw_editor(
             if ui.button("Save As...").clicked() {
                 *save_as = Some(format!("{} (custom)", draft.name()));
             }
-            if ui
-                .button("Gallery")
-                .on_hover_text("One of everything, in the theme as edited")
-                .clicked()
-            {
-                cx.send(crate::app::context::Command::OpenDialog(Box::new(
-                    super::ThemeGalleryWindow::default(),
-                )));
-            }
             let label = if draft.is_dirty() { "Cancel" } else { "Close" };
             if ui.button(label).clicked() {
                 cancel = true;
@@ -543,6 +613,11 @@ mod tests {
 
 #[cfg(test)]
 impl ThemeEditorWindow {
+    /// The editor with its gallery shown.
+    pub(in crate::app) fn with_gallery(mut self) -> Self {
+        self.show_gallery = true;
+        self
+    }
 
     /// Sets `token` to `color` and opens the picker on `picked`, as using the
     /// window would: for screenshots.

@@ -4353,16 +4353,16 @@ mod tests {
                 &["Theme Editor - Light", "background", "inherited"],
             ),
             case(
-                "theme_gallery",
-                &["dialog:ThemeGalleryWindow"],
-                &["shell/theme_gallery.rs"],
+                "theme_editor_gallery",
+                &["dialog:ThemeEditorWindow"],
+                &["shell/theme_editor.rs"],
                 welcome,
                 |h| {
-                    h.app
-                        .dialogs
-                        .open(super::super::ThemeGalleryWindow::default());
+                    h.app.dialogs.open(
+                        super::super::ThemeEditorWindow::for_active_theme().with_gallery(),
+                    );
                 },
-                &["Theme Gallery", "Widgets", "Collapsing header", "accent"],
+                &["Theme Editor - Light", "Widgets", "Collapsing header", "inherited"],
             ),
             case(
                 "settings_custom_kit_draft",
@@ -9351,9 +9351,7 @@ mod tests {
                 h.frame(Vec::new());
             }
             h.shoot(&dir.join(name));
-            h.app
-                .dialogs
-                .open(crate::app::shell::ThemeGalleryWindow::default());
+            h.app.dialogs.open(ThemeEditorWindow::for_active_theme().with_gallery());
             for _ in 0..30 {
                 h.frame(Vec::new());
             }
@@ -9361,6 +9359,59 @@ mod tests {
             // Cancel puts the built-in back for the next shot.
             crate::app::ui_kit::themes::install(&built_in.colors());
         }
+    }
+
+    /// The eye in the Theme Editor's header shows the gallery beside the
+    /// rows, widening the window by the gallery's width, and hides it again,
+    /// giving the width back.
+    #[test]
+    fn the_theme_editor_shows_and_hides_its_gallery() {
+        use crate::app::shell::ThemeEditorWindow;
+        let mut h = Harness::new();
+        h.app.dialogs.open(ThemeEditorWindow::for_active_theme());
+        h.idle(5);
+        let window = |h: &Harness| {
+            h.ctx
+                .memory(|memory| memory.area_rect(egui::Id::unique("theme_editor")))
+                .expect("the editor's window")
+        };
+        // The toggle sits beside Close, in the header's band.
+        let toggle = |h: &mut Harness| {
+            let rect = window(h);
+            let margin = h.ctx.global_style().spacing.window_margin;
+            let target = egui::pos2(
+                rect.right() - f32::from(margin.right) - 34.0,
+                rect.top() + f32::from(margin.top) + 10.0,
+            );
+            for step in 1..=3 {
+                h.frame(vec![pointer_at(target - egui::vec2(9.0 - 3.0 * step as f32, 0.0))]);
+            }
+            for pressed in [true, false] {
+                h.frame(vec![egui::Event::PointerButton {
+                    pos: target,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            h.idle(6);
+        };
+        let narrow = window(&h).width();
+        assert!(!h.painted_contains("Collapsing header"), "the gallery starts hidden");
+
+        toggle(&mut h);
+        assert!(h.painted_contains("Collapsing header"), "the gallery is shown");
+        assert!(h.painted_contains("inherited"), "beside the rows");
+        let wide = window(&h).width();
+        assert!(
+            (wide - narrow - 440.0).abs() < 4.0,
+            "the window widens by the gallery: {narrow} to {wide}"
+        );
+
+        toggle(&mut h);
+        assert!(!h.painted_contains("Collapsing header"), "the gallery is hidden");
+        let back = window(&h).width();
+        assert!((back - narrow).abs() < 4.0, "the width is given back: {narrow} to {back}");
     }
 
     /// The Theme Editor's Theme menu chooses the theme to use and edit: with

@@ -1,12 +1,13 @@
 //! The Theme Gallery: one of every kind of widget Baboon draws, the text
 //! colours, and a swatch of every token by group, all in the theme drawn now.
-//! For theme authors, beside the Theme Editor, and for screenshots.
+//! The Theme Editor shows it beside its rows, so an edit can be judged on
+//! every widget as it is made.
 
 use super::*;
 use crate::app::ui_kit::themes::{self, Token};
 
-/// The Theme Gallery window, and the state of its sample widgets.
-pub(in crate::app) struct ThemeGalleryWindow {
+/// The gallery, and the state of its sample widgets.
+pub(in crate::app) struct ThemeGallery {
     checked: bool,
     choice: usize,
     amount: f32,
@@ -14,7 +15,7 @@ pub(in crate::app) struct ThemeGalleryWindow {
     selected: usize,
 }
 
-impl Default for ThemeGalleryWindow {
+impl Default for ThemeGallery {
     fn default() -> Self {
         Self {
             checked: true,
@@ -26,35 +27,15 @@ impl Default for ThemeGalleryWindow {
     }
 }
 
-impl Dialog for ThemeGalleryWindow {
-    fn show(&mut self, cx: &Ctx, _app: &AppReads) -> bool {
-        let ctx = cx.egui;
-        let mut open = true;
-        egui::Window::new("Theme Gallery")
-            .constrain_to(window_work_area(ctx))
-            .id(egui::Id::unique("theme_gallery"))
-            .title_bar(false)
-            .collapsible(false)
-            .resizable(true)
-            .default_width(window_width(ctx, 640.0))
-            .default_height(window_height(ctx, 720.0, false))
-            .show(ctx, |ui| {
-                crate::app::search::draw_icon_window_header(
-                    ui,
-                    "Theme Gallery",
-                    ButtonIcon::ColorPicker,
-                    &mut open,
-                );
-                egui::ScrollArea::vertical()
-                    .id_salt("theme_gallery_body")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| self.draw_body(ui));
-            });
-        open
+impl ThemeGallery {
+    /// Draws the gallery, scrolling, in all of `ui`.
+    pub(in crate::app) fn draw(&mut self, ui: &mut Ui) {
+        egui::ScrollArea::both()
+            .id_salt("theme_gallery_body")
+            .auto_shrink([false, false])
+            .show(ui, |ui| self.draw_body(ui));
     }
-}
 
-impl ThemeGalleryWindow {
     fn draw_body(&mut self, ui: &mut Ui) {
         let colors = themes::installed();
         heading(ui, "Widgets");

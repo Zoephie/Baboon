@@ -478,7 +478,19 @@ pub(in crate::app) fn draw_icon_window_header(
     icon: ButtonIcon,
     open: &mut bool,
 ) {
-    draw_icon_window_header_impl(ui, title, icon, Some(open), None);
+    draw_icon_window_header_impl(ui, title, icon, Some(open), None, None);
+}
+
+/// [`draw_icon_window_header`] with a toggle beside Close: `icon`, filled
+/// with the accent while `on`, flips `on` when clicked.
+pub(in crate::app) fn draw_icon_window_header_with_toggle(
+    ui: &mut Ui,
+    title: &str,
+    icon: ButtonIcon,
+    open: &mut bool,
+    toggle: (&str, ButtonIcon, &mut bool),
+) {
+    draw_icon_window_header_impl(ui, title, icon, Some(open), None, Some(toggle));
 }
 
 /// [`draw_icon_window_header`] with an About button beside Close, like the
@@ -490,7 +502,7 @@ pub(in crate::app) fn draw_icon_window_header_with_help(
     open: &mut bool,
     help: (&str, egui::Id),
 ) -> bool {
-    draw_icon_window_header_impl(ui, title, icon, Some(open), Some(help))
+    draw_icon_window_header_impl(ui, title, icon, Some(open), Some(help), None)
 }
 
 pub(in crate::app) fn draw_icon_window_header_without_close(
@@ -498,7 +510,7 @@ pub(in crate::app) fn draw_icon_window_header_without_close(
     title: &str,
     icon: ButtonIcon,
 ) {
-    draw_icon_window_header_impl(ui, title, icon, None, None);
+    draw_icon_window_header_impl(ui, title, icon, None, None, None);
 }
 
 fn draw_icon_window_header_impl(
@@ -507,6 +519,7 @@ fn draw_icon_window_header_impl(
     icon: ButtonIcon,
     open: Option<&mut bool>,
     help: Option<(&str, egui::Id)>,
+    toggle: Option<(&str, ButtonIcon, &mut bool)>,
 ) -> bool {
     const HEADER_HEIGHT: f32 = 28.0;
     const TITLE_ICON_SIZE: f32 = 18.0;
@@ -565,6 +578,26 @@ fn draw_icon_window_header_impl(
         ui.painter().line_segment([cross.right_top(), cross.left_bottom()], stroke);
         if close.clicked() {
             *open = false;
+        }
+    }
+    if let Some((tooltip, icon, on)) = toggle {
+        let toggle_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - 34.0, background.center().y),
+            Vec2::splat(22.0),
+        );
+        let response = ui
+            .interact(toggle_rect, ui.scope_id().with("window_header_toggle"), Sense::click())
+            .on_hover_text(tooltip);
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, *on, tooltip));
+        if *on {
+            ui.painter().rect_filled(toggle_rect, 3.0, ui.visuals().selection.bg_fill);
+        } else if response.hovered() {
+            ui.painter().rect_filled(toggle_rect, 3.0, ui.visuals().widgets.hovered.weak_bg_fill);
+        }
+        paint_button_icon_at(ui, icon, toggle_rect.shrink(3.0),
+            if *on || response.hovered() { text_dark() } else { subtle_dark() });
+        if response.clicked() {
+            *on = !*on;
         }
     }
     let Some((tooltip, id)) = help else { return false };

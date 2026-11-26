@@ -666,8 +666,9 @@ shows.
 
 ### Phase 5 — Optional: DONE
 
-**As built.** All three. The gallery is `shell/theme_gallery.rs` (View menu
-and the editor's Gallery button). Contrast pairs are `ui_kit/themes/contrast.rs`:
+**As built.** All three. The gallery is `shell/theme_gallery.rs`, at first a
+window of its own, then a panel the editor shows beside its rows from a toggle
+in its header. Contrast pairs are `ui_kit/themes/contrast.rs`:
 text and status colours at 4.5:1, muted text at 3:1, shown in the editor and
 in Settings. `link.text` and `field.help.text` are left out, because the light
 built-ins draw them at 2.2 to 2.6:1 on the page; that is worth a look on its

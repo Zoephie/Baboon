@@ -750,12 +750,6 @@ fn draw_view_menu(cx: &Ctx, ui: &mut Ui, view: &mut KitView, navigation_enabled:
         )));
         close_menu(ui);
     }
-    if ui.button("Theme Gallery...").clicked() {
-        cx.send(crate::app::context::Command::OpenDialog(Box::new(
-            super::ThemeGalleryWindow::default(),
-        )));
-        close_menu(ui);
-    }
 }
 
 /// The Help menu: About, documentation, tutorials, and the update check.

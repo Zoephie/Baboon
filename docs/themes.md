@@ -56,9 +56,11 @@ drawn on, muted text under 3:1. They are warnings; the theme still applies.
 
 ### Gallery
 
-*View → Theme Gallery...*, or **Gallery** in the editor, draws one of every
-kind of widget, the text colours and a swatch of every token, in the theme
-drawn now, edits included.
+The eye at the top right of the editor shows the gallery beside the token
+list, and widens the window to make room for it. The gallery has one of every
+kind of widget, the text colours and a swatch of every token, all in the theme
+being edited, so you see each edit on every widget as you make it. Click the
+eye again to hide the gallery and give the width back.
 
 ### Previewing
 

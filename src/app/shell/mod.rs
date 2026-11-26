@@ -68,7 +68,7 @@ pub(in crate::app) mod settings;
 pub(in crate::app) mod theme_editor;
 pub(in crate::app) mod theme_gallery;
 pub(in crate::app) use theme_editor::ThemeEditorWindow;
-pub(in crate::app) use theme_gallery::ThemeGalleryWindow;
+pub(in crate::app) use theme_gallery::ThemeGallery;
 pub(in crate::app) mod shortcuts;
 pub(in crate::app) use settings::{
     SettingsCommand, SettingsWindow, draw_nested_default_picker, draw_update_channel_picker,
