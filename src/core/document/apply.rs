@@ -34,7 +34,7 @@ pub(crate) struct AppliedFieldEdits {
 
 /// Every kind of edit a tag pane collects while it draws. They are applied
 /// together once the draw has finished, behind one undo snapshot.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct DeferredOps {
     pub(crate) pending: Vec<PendingFieldEdit>,
     pub(crate) block_ops: Vec<BlockOp>,

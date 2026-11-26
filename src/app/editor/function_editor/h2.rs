@@ -286,6 +286,44 @@ mod tests {
         assert_eq!(&data[4..8], &raw[4..8]);
     }
 
+    /// The function editor's draft for the Material Editor's live preview:
+    /// a colour its picker shows, not yet picked, is in the preview's batch
+    /// and not in OK's; once picked, OK's batch is what the preview drew.
+    #[test]
+    fn a_tentative_colour_previews_without_being_written_until_picked() {
+        let mut function = TagFunction::parse(&decode_hex(&constant_function_hex(0.0)).unwrap())
+            .expect("constant function should parse");
+        let blob = function.as_blob_mut().unwrap();
+        blob.set_color_graph_type(ColorGraphType::TwoColor);
+        blob.set_color(3, 0x0044_5566);
+        let paths = FunctionEditPaths {
+            data: FunctionDataStorage::DataField("parameters[0]/animated parameters[0]/function/data".to_owned()),
+            parameter_type: "parameters[0]/animated parameters[0]/type".to_owned(),
+            input_name: "parameters[0]/animated parameters[0]/input name".to_owned(),
+            range_name: "parameters[0]/animated parameters[0]/range name".to_owned(),
+            time_period: "parameters[0]/animated parameters[0]/time period".to_owned(),
+            block_path: "parameters[0]/animated parameters".to_owned(),
+            block_index: 0,
+        };
+        let mut popup = FunctionPopup::new(
+            "tag".to_owned(),
+            "function".to_owned(),
+            FunctionView::from_function(function).with_edit(paths),
+            true,
+        );
+        assert!(popup.batch(true).is_none() && popup.batch(false).is_none(), "nothing changed yet");
+
+        popup.set_tentative_color(Some((FunctionDraftColorTarget::Logical(1), 0x00AA_BBCC)));
+        let previewed = popup.batch(true).expect("the preview draws the shown colour");
+        assert!(popup.batch(false).is_none(), "OK writes nothing it hasn't picked");
+
+        popup.apply_draft_color(FunctionDraftColorTarget::Logical(1), 0x00AA_BBCC);
+        let written = popup.batch(false).expect("picked, OK writes it");
+        let inputs = |batch: &FunctionEditBatch| batch.edits.iter().map(|edit| (edit.path.clone(), edit.input.clone())).collect::<Vec<_>>();
+        assert_eq!(inputs(&written), inputs(&previewed), "what the preview drew");
+        assert!(popup.tentative_color.is_none(), "picking ends the tentative colour");
+    }
+
     /// The picker a function popup opens is a dialog of its own; the color it
     /// chooses comes back as a command, and lands in the open popup's draft.
     #[test]
@@ -307,6 +345,7 @@ mod tests {
             popup: Some(popup),
             kit,
             opened_at: None,
+            live: None,
         });
 
         app.commands.send(EditorCommand::FunctionDraftColor {
@@ -447,6 +486,9 @@ pub(in crate::app) struct FunctionPopup {
     pub(super) selected_point: usize,
     /// Selected graph slot in the Foundation H3+ editor (green=0, red=1).
     pub(super) selected_graph: usize,
+    /// A colour its own colour picker is showing, not yet picked: drawn by
+    /// the Material Editor's live preview, never written.
+    pub(super) tentative_color: Option<(FunctionDraftColorTarget, u32)>,
 }
 
 impl FunctionPopup {
@@ -489,7 +531,38 @@ impl FunctionPopup {
             last_applied,
             selected_point: 0,
             selected_graph: 0,
+            tentative_color: None,
         }
+    }
+
+    /// What OK writes, as the editor stands; with `tentative`, its colour
+    /// picker's colour not yet picked too. `None` when it changes nothing.
+    /// OK and the Material Editor's live preview both build it here, so the
+    /// preview can't show what OK wouldn't write.
+    pub(in crate::app) fn batch(&self, tentative: bool) -> Option<FunctionEditBatch> {
+        if !self.editable {
+            return None;
+        }
+        let paths = self.view.edit.clone()?;
+        let mut view = self.view.clone();
+        if tentative && let Some((FunctionDraftColorTarget::Logical(index), argb)) = self.tentative_color {
+            let mut editor = TagFunctionEditor::from_function(view.function.clone());
+            if editor.set_color(index, argb).is_ok() {
+                view.function = editor.into_function();
+            }
+        }
+        let edits = push_function_edit(&paths, &self.last_applied, &view);
+        (!edits.edits.is_empty() || !edits.data_ops.is_empty()).then(|| FunctionEditBatch {
+            tag_key: self.tag_key.clone(),
+            edits: edits.edits,
+            data_ops: edits.data_ops,
+        })
+    }
+
+    /// Show `color` for `target` in the live preview without picking it, or
+    /// stop showing one.
+    pub(in crate::app) fn set_tentative_color(&mut self, color: Option<(FunctionDraftColorTarget, u32)>) {
+        self.tentative_color = color;
     }
 
     pub(in crate::app) fn apply_draft_color(
@@ -504,6 +577,7 @@ impl FunctionPopup {
             self.view.function = editor.into_function();
             self.history.observe(&self.view, false);
         }
+        self.tentative_color = None;
     }
 }
 

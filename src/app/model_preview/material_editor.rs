@@ -51,11 +51,12 @@ pub(in crate::app) struct MaterialLive {
     /// The key of each material's shader tag in the kit, once looked up,
     /// or why it has none.
     pub(in crate::app) documents: std::collections::BTreeMap<MaterialKey, Result<String, String>>,
-    /// Each held document as the drawn materials were resolved from it: its
-    /// content stamp, or `None` for its file (the document gone, its edits
-    /// discarded). A document missing here is drawn as its file, which a
-    /// clean one is.
-    pub(in crate::app) drawn: std::collections::HashMap<String, Option<(u64, u64)>>,
+    /// Each held document as the drawn materials were resolved from it. A
+    /// document missing here is drawn as its file, which a clean one is.
+    pub(in crate::app) drawn: std::collections::HashMap<String, DrawnFrom>,
+    /// What a picker the editor opened would write now, drawn before OK
+    /// writes it.
+    pub(in crate::app) draft: Option<DraftPreview>,
     /// A resolve is running: one at a time, so they land in order.
     pub(in crate::app) in_flight: bool,
     /// The caches the editor's resolves of this load share, with the
@@ -63,11 +64,42 @@ pub(in crate::app) struct MaterialLive {
     pub(in crate::app::model_preview) caches: Option<(u64, std::sync::Arc<std::sync::Mutex<super::materials::ResolveCaches>>)>,
 }
 
+/// What a held document's materials were resolved from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) struct DrawnFrom {
+    /// The document's content stamp, or `None` for its file (the document
+    /// gone, its edits discarded).
+    pub(in crate::app) stamp: Option<(u64, u64)>,
+    /// The picker draft drawn over it, by [`DraftPreview::seq`]; 0 for none.
+    pub(in crate::app) draft: u64,
+}
+
+impl DrawnFrom {
+    pub(in crate::app) fn document(stamp: Option<(u64, u64)>) -> Self {
+        Self { stamp, draft: 0 }
+    }
+}
+
+/// A live picker's draft: the edits OK would make to `document`, drawn
+/// over it while the picker is open.
+#[derive(Clone)]
+pub(in crate::app) struct DraftPreview {
+    /// The picker's [`crate::app::editor::LivePreviewTarget::draft_id`].
+    pub(in crate::app) draft_id: u64,
+    pub(in crate::app) document: String,
+    pub(in crate::app) ops: crate::core::document::apply::DeferredOps,
+    /// The document's layout stamp the picker opened on: a draft for a
+    /// layout since changed is dropped, as OK would refuse it.
+    pub(in crate::app) layout_stamp: Option<(u64, u64)>,
+    /// Bumped with each draft, so each is drawn.
+    pub(in crate::app) seq: u64,
+}
+
 impl MaterialLive {
     /// A load has begun: what was resolved belonged to the one before, and
     /// the held documents are drawn as the load reads them, at `stamps`.
     pub(in crate::app) fn restart(&mut self, stamps: std::collections::HashMap<String, Option<(u64, u64)>>) {
-        self.drawn = stamps;
+        self.drawn = stamps.into_iter().map(|(document, stamp)| (document, DrawnFrom::document(stamp))).collect();
         self.caches = None;
     }
 }

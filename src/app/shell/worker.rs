@@ -245,10 +245,9 @@ pub(in crate::app) enum WorkerMessage {
         key: String,
         /// The textures these replace.
         textures_id: u64,
-        /// The shader document's key, and its content stamp the resolve read
-        /// (`None`: its file).
+        /// The shader document's key, and what of it the resolve read.
         document: String,
-        drawn: Option<(u64, u64)>,
+        drawn: crate::app::model_preview::material_editor::DrawnFrom,
         textures: Option<Vec<MaterialTextures>>,
     },
     BitmapReimportFinished {

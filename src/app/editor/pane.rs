@@ -28,6 +28,9 @@ pub(in crate::app) struct PaneInputs<'a> {
     pub(in crate::app) audio: &'a audio::AudioState,
     pub(in crate::app) def_docs: Option<Rc<DefDocs>>,
     pub(in crate::app) ce_sound: Option<Arc<crate::core::source::ce_audio::CeSoundBinding>>,
+    /// Drawn by a Model Preview's Material Editor, for the preview of this
+    /// tag: the colour and function pickers it opens show live there.
+    pub(in crate::app) live_preview: Option<String>,
 }
 
 /// What a tag pane hands on once it has drawn: its edits, a jump Find's
@@ -212,6 +215,7 @@ pub(in crate::app) fn draw_tag_body(
         audio,
         def_docs,
         ce_sound,
+        live_preview,
     } = inputs;
     let bitmap_preview_view = cx.model.prefs.bitmap_preview_view;
     let model_preview_perspective = cx.model.prefs.model_preview_perspective;
@@ -630,6 +634,7 @@ pub(in crate::app) fn draw_tag_body(
             popup: Some(popup),
             kit: kit_id,
             opened_at: Some(layout_stamp),
+            live: live_preview.as_deref().map(LivePreviewTarget::new),
         });
     }
     if let Some(popup) = grid_function_popup.or(function_request) {
@@ -644,6 +649,7 @@ pub(in crate::app) fn draw_tag_body(
             popup: Some(popup),
             kit: kit_id,
             opened_at: Some(layout_stamp),
+            live: live_preview.as_deref().map(LivePreviewTarget::new),
         });
     }
     // A referenced sound was played/extracted from a container source. It

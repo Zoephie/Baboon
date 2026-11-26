@@ -4565,6 +4565,7 @@ mod tests {
                         popup: Some(MaterialColorPopup::new("Smoke Tint", 1.0, 0.5, 0.25, 1.0)),
                         kit,
                         opened_at: None,
+                        live: None,
                     });
                 },
                 &["Color Picker"],
@@ -4587,6 +4588,7 @@ mod tests {
                         )),
                         kit,
                         opened_at: None,
+                        live: None,
                     });
                 },
                 &["Smoke Function"],
@@ -6005,9 +6007,15 @@ mod tests {
             .find(|(painted, _)| painted.trim() == label)
             .map(|(_, rect)| rect.center().y)
             .unwrap_or_else(|| panic!("no {label:?} in {:?}", h.painted));
+        // A text cut short to fit ends in an ellipsis: matched by what it
+        // shows of `text`.
+        let shows = |painted: &str| {
+            let painted = painted.trim();
+            painted == text || painted.strip_suffix('…').is_some_and(|start| !start.is_empty() && text.starts_with(start))
+        };
         h.painted_rects
             .iter()
-            .filter(|(painted, rect)| painted.trim() == text && (rect.center().y - row).abs() < 6.0)
+            .filter(|(painted, rect)| shows(painted) && (rect.center().y - row).abs() < 6.0)
             .map(|(_, rect)| rect.center())
             .max_by(|a, b| a.x.total_cmp(&b.x))
             .unwrap_or_else(|| panic!("no {text:?} on {label:?}'s row in {:?}", h.painted))
@@ -6061,6 +6069,168 @@ mod tests {
         assert!(!h.app.model.kits[0].open_tabs.contains(&material_key), "still no tab");
     }
 
+    /// A Halo 4 material's preview, with its Material Editor open on it and
+    /// its material drawn as a load resolved it, in a loose kit holding the
+    /// kit's `darth_shader.material`; `None` without the kit.
+    fn material_editor_on_darth(h: &mut Harness, name: &str) -> Option<(crate::app::loose_fixture::LooseKit, String, String)> {
+        let kit_tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        let material = "objects\\multi\\darth_shader.material";
+        let shader = "shaders\\material_shaders\\materials\\srf_lambert.material_shader";
+        if !kit_tags.join(material.replace('\\', "/")).exists() {
+            eprintln!("skipping: set BLAM_TEST_H4EK");
+            return None;
+        }
+        let kit = crate::app::loose_fixture::LooseKit::new(name, "halo4_mcc");
+        for tag in [material, shader] {
+            let to = kit.path(tag);
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::copy(kit_tags.join(tag.replace('\\', "/")), to).unwrap();
+        }
+        kit.write_mcc("objects\\smoke", "render_model", |_| {});
+        kit.install(&mut h.app);
+        let model = kit.open(&mut h.app, "objects\\smoke.render_model");
+        let material_key = kit.key(material);
+        let id = h.app.model.kits[h.app.model.active].id;
+        let mut state = crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(
+            &model,
+            &[(b"mat ", "objects\\multi\\darth_shader")],
+        );
+        state.material_editor = Some(Default::default());
+        if let Some(Ok(data)) = state.data.as_mut() {
+            data.set_textures(vec![Default::default()], false);
+        }
+        h.app.views[id].caches.model_previews.insert(model.clone(), state);
+        frames_until(h, "the material's grid", |h| h.painted_contains("Color Tint"));
+        Some((kit, model, material_key))
+    }
+
+    /// Where the Color Tint row's override swatch is: right of its default
+    /// cell, whose label is the row's only text there (the override draws as
+    /// a preview, with none).
+    fn color_tint_swatch(h: &Harness) -> egui::Pos2 {
+        let row = h.painted_rects.iter().find(|(text, _)| text.trim() == "Color Tint").map(|(_, rect)| rect.center().y).unwrap();
+        let default = h
+            .painted_rects
+            .iter()
+            .filter(|(text, rect)| text.trim().starts_with("color:") && (rect.center().y - row).abs() < 6.0)
+            .map(|(_, rect)| *rect)
+            .max_by(|a, b| a.left().total_cmp(&b.left()))
+            .expect("the Color Tint default cell");
+        egui::pos2(default.right() + 40.0, row)
+    }
+
+    fn live<'a>(h: &'a Harness, model: &str) -> &'a crate::app::model_preview::material_editor::MaterialLive {
+        let id = h.app.model.kits[0].id;
+        &h.app.views[id].caches.model_previews[model].material_live
+    }
+
+    /// A colour picker opened in the Material Editor draws what it picks in
+    /// the preview while it is dragged, writing nothing; Cancel draws the
+    /// material as it was. One opened outside the editor draws nothing.
+    #[test]
+    fn a_picker_opened_in_the_material_editor_previews_live_and_writes_nothing() {
+        let mut h = Harness::new();
+        let Some((_kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_picker") else { return };
+        h.click_at(color_tint_swatch(&h));
+        frames_until(&mut h, "the colour picker", |h| h.app.dialogs.get::<ColorPopupWindow>().is_some());
+        assert!(h.app.dialogs.get::<ColorPopupWindow>().unwrap().live.is_some(), "opened live");
+
+        h.app.dialogs.get_mut::<ColorPopupWindow>().unwrap().popup.as_mut().unwrap().pick_for_test(1.0, 0.0, 0.0);
+        frames_until(&mut h, "the draft to be drawn", |h| {
+            live(h, &model).draft.is_some() && live(h, &model).drawn.get(&material).is_some_and(|drawn| drawn.draft > 0)
+        });
+        assert!(!h.app.model.kits[0].parsed_tags[&material].dirty.is_set(), "nothing written while dragging");
+
+        h.click("Cancel", 0);
+        frames_until(&mut h, "the material drawn as it was", |h| {
+            live(h, &model).draft.is_none() && live(h, &model).drawn.get(&material).is_some_and(|drawn| drawn.draft == 0)
+        });
+        assert!(!h.app.model.kits[0].parsed_tags[&material].dirty.is_set(), "cancelled: still nothing written");
+
+        // The other case: the same picker without the editor's target.
+        let kit = h.app.model.kits[0].id;
+        let mut popup = MaterialColorPopup::new("Color Tint", 1.0, 1.0, 1.0, 1.0)
+            .with_write(material.clone(), "material parameters[0]/function parameters[0]/function/data");
+        popup.pick_for_test(0.0, 1.0, 0.0);
+        h.app.dialogs.open(ColorPopupWindow { popup: Some(popup), kit, opened_at: None, live: None });
+        idle(&mut h);
+        assert!(live(&h, &model).draft.is_none(), "a picker from elsewhere draws nothing here");
+    }
+
+    /// A live picker's draft goes when another picker takes its place
+    /// before it could say so.
+    #[test]
+    fn a_live_pickers_draft_goes_when_another_picker_replaces_it() {
+        let mut h = Harness::new();
+        let Some((_kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_replaced") else { return };
+        h.click_at(color_tint_swatch(&h));
+        frames_until(&mut h, "the colour picker", |h| h.app.dialogs.get::<ColorPopupWindow>().is_some());
+        h.app.dialogs.get_mut::<ColorPopupWindow>().unwrap().popup.as_mut().unwrap().pick_for_test(0.0, 0.0, 1.0);
+        frames_until(&mut h, "the draft", |h| live(h, &model).draft.is_some());
+
+        let kit = h.app.model.kits[0].id;
+        let other = MaterialColorPopup::new("Other", 1.0, 1.0, 1.0, 1.0).with_write(material, "material parameters[0]/color");
+        h.app.dialogs.open(ColorPopupWindow { popup: Some(other), kit, opened_at: None, live: None });
+        frames_until(&mut h, "the draft to go", |h| live(h, &model).draft.is_none());
+    }
+
+    /// A live picker's draft goes when its document's blocks change shape
+    /// while it is open: its path may name another element by then, and OK
+    /// would refuse it.
+    #[test]
+    fn a_live_pickers_draft_goes_when_its_documents_layout_moves() {
+        let mut h = Harness::new();
+        let Some((_kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_layout") else { return };
+        h.click_at(color_tint_swatch(&h));
+        frames_until(&mut h, "the colour picker", |h| h.app.dialogs.get::<ColorPopupWindow>().is_some());
+        h.app.dialogs.get_mut::<ColorPopupWindow>().unwrap().popup.as_mut().unwrap().pick_for_test(0.2, 0.4, 0.6);
+        frames_until(&mut h, "the draft", |h| live(h, &model).draft.is_some());
+
+        // A parameter added: the material's blocks change shape.
+        let ops = crate::core::document::apply::DeferredOps {
+            shader_param_ops: vec![crate::core::document::ops::ShaderParamOp {
+                parameters_block_path: "material parameters".to_owned(),
+                parameter_name: "added".to_owned(),
+                initial_fields: Vec::new(),
+                animated_parameters: Vec::new(),
+            }],
+            ..Default::default()
+        };
+        h.app.apply_doc_ops(0, &material, "Add", ops, crate::core::document::apply::UndoStep::Own);
+        frames_until(&mut h, "the draft to go", |h| live(h, &model).draft.is_none());
+    }
+
+    /// OK on a live picker writes what it drew.
+    #[test]
+    fn ok_on_a_live_picker_writes_what_it_drew() {
+        let mut h = Harness::new();
+        let Some((_kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_ok") else { return };
+        h.click_at(color_tint_swatch(&h));
+        frames_until(&mut h, "the colour picker", |h| h.app.dialogs.get::<ColorPopupWindow>().is_some());
+        frames_until(&mut h, "the picker's OK", |h| h.painted.iter().any(|text| text == "OK"));
+        assert!(live(&h, &model).draft.is_none(), "an unchanged picker shows no draft");
+        h.app.dialogs.get_mut::<ColorPopupWindow>().unwrap().popup.as_mut().unwrap().pick_for_test(1.0, 0.5, 0.0);
+        frames_until(&mut h, "the draft", |h| live(h, &model).draft.is_some());
+        let drafted = live(&h, &model).draft.as_ref().unwrap().ops.clone();
+        let before = h.app.model.kits[0].parsed_tags[&material].tag.write_to_bytes().unwrap();
+        frames_until(&mut h, "the picker's OK", |h| h.painted.iter().any(|text| text == "OK"));
+        h.click("OK", 0);
+        frames_until(&mut h, "the edit to land", |h| h.app.model.kits[0].parsed_tags[&material].dirty.is_set());
+        // Each field the draft wrote holds, in the document as OK left it,
+        // what it held in the copy the preview drew.
+        let paths: Vec<String> = drafted.pending.iter().map(|edit| edit.path.clone()).collect();
+        assert!(!paths.is_empty(), "the draft wrote something");
+        let mut copy = crate::core::document::TagDocument::clean(TagFile::read_from_bytes(&before).unwrap());
+        crate::core::document::apply::apply_deferred_ops(&mut copy, drafted, "draft");
+        let document = &h.app.model.kits[0].parsed_tags[&material].tag;
+        for path in &paths {
+            let value = |tag: &TagFile| format!("{:?}", tag.root().field_path(path).and_then(|field| field.value()));
+            assert_eq!(value(document), value(&copy.tag), "{path}: OK wrote what the draft drew");
+            assert_ne!(value(document), value(&TagFile::read_from_bytes(&before).unwrap()), "{path} changed");
+        }
+        frames_until(&mut h, "the draft to go", |h| live(h, &model).draft.is_none());
+    }
+
     /// An edit in the Material Editor redraws the preview with that
     /// material resolved again from the edited document, without loading
     /// the model again.
@@ -6106,7 +6276,7 @@ mod tests {
         h.click_at(rightmost_on_row(&h, "Diffuse Intensity", "Override Default"));
         let edited = h.app.model.kits[0].parsed_tags[&material_key].content_stamp();
         frames_until(&mut h, "the material to be resolved from the edit", |h| {
-            h.app.views[id].caches.model_previews[&model].material_live.drawn.get(&material_key) == Some(&Some(edited))
+            h.app.views[id].caches.model_previews[&model].material_live.drawn.get(&material_key).is_some_and(|drawn| drawn.stamp == Some(edited))
         });
         let (geometry_after, textures_after) = loaded(&h);
         assert_eq!(geometry_after, geometry, "the model was not loaded again");

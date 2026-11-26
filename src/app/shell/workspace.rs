@@ -1228,6 +1228,7 @@ pub(in crate::app) mod tests {
             popup: Some(MaterialColorPopup::new("color", 1.0, 0.5, 0.25, 1.0)),
             kit,
             opened_at: None,
+            live: None,
         });
     }
 

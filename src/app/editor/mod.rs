@@ -539,7 +539,7 @@ mod block_table;
 mod block_table_window;
 pub(in crate::app) use block_table::block_table_for;
 pub(in crate::app) mod dialogs;
-pub(in crate::app) use dialogs::{
+pub(in crate::app) use dialogs::{LivePreviewTarget, 
     ColorPopupWindow, EditorCommand, FunctionPopupWindow, TagReferencePickerWindow,
 };
 

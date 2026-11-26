@@ -566,7 +566,7 @@ mod tests {
         let gl = crate::app::model_preview::headless_gl();
         let mut pool: TexturePool<usize, ()> = TexturePool::default();
         let mut uploads = 0;
-        let mut take = |pool: &mut TexturePool<usize, ()>, image: usize, uploads: &mut usize| {
+        let take = |pool: &mut TexturePool<usize, ()>, image: usize, uploads: &mut usize| {
             pool.get(image, || (), || {
                 *uploads += 1;
                 unsafe { gl.create_texture().ok() }

@@ -9,7 +9,7 @@
 //! changed (`TexturePool`).
 
 use super::super::super::Baboon;
-use super::super::material_editor::editor_materials;
+use super::super::material_editor::{DrawnFrom, editor_materials};
 use super::super::materials::{MaterialTextures, resolve_caches, resolve_model_materials};
 use super::super::{KitStamp, WorkerMessage, egui, spawn_worker};
 use std::sync::{Arc, Mutex};
@@ -24,6 +24,7 @@ impl Baboon {
         key: &str,
         ctx: &egui::Context,
     ) -> bool {
+        self.drop_stale_draft(kit_index, key);
         let kit = &self.model.kits[kit_index];
         let Some(state) = self.views[kit.id].caches.model_previews.get(key) else {
             return false;
@@ -48,19 +49,25 @@ impl Baboon {
                 continue;
             }
             let now = kit.parsed_tags.get(document);
-            let stamp = now.map(|document| document.content_stamp());
+            let draft = live.draft.as_ref().filter(|draft| &draft.document == document && now.is_some());
+            let wanted = DrawnFrom {
+                stamp: now.map(|document| document.content_stamp()),
+                draft: draft.map_or(0, |draft| draft.seq),
+            };
             match live.drawn.get(document) {
-                Some(drawn) if *drawn == stamp => {}
+                Some(drawn) if *drawn == wanted => {}
                 // Drawn from its file, which a clean document is.
-                None if now.is_some_and(|document| !document.dirty.is_set()) => clean.push((document.clone(), stamp)),
+                None if draft.is_none() && now.is_some_and(|document| !document.dirty.is_set()) => {
+                    clean.push((document.clone(), wanted))
+                }
                 _ => {
                     if changed.is_none() {
-                        changed = Some((material.clone(), document.clone(), stamp));
+                        changed = Some((material.clone(), document.clone(), wanted, draft.map(|draft| draft.ops.clone())));
                     }
                 }
             }
         }
-        let Some((material, document, stamp)) = changed else {
+        let Some((material, document, stamp, draft)) = changed else {
             if !clean.is_empty()
                 && let Some(state) = self.views[kit.id].caches.model_previews.get_mut(key)
             {
@@ -78,11 +85,12 @@ impl Baboon {
         let Some(source) = kit.source.as_ref().map(|source| source.source.clone()) else {
             return false;
         };
-        // A clean document is its file; edits go to the worker as bytes.
+        // A clean document is its file; edits go to the worker as bytes, and
+        // a picker's draft as the edits to make over them.
         let bytes = kit
             .parsed_tags
             .get(&document)
-            .filter(|document| document.dirty.is_set())
+            .filter(|document| document.dirty.is_set() || draft.is_some())
             .and_then(|document| document.tag.write_to_bytes().ok());
         let group = material.group;
         let preview = Arc::clone(&data.preview);
@@ -112,9 +120,13 @@ impl Baboon {
                     _ => crate::core::bundled::locate_definitions_root(),
                 };
                 let shader = bytes.and_then(|bytes| {
-                    crate::core::source::read_tag_from_bytes(&bytes, source.game(), Some(&definitions_root), group)
-                        .ok()
-                        .map(Arc::new)
+                    let tag = crate::core::source::read_tag_from_bytes(&bytes, source.game(), Some(&definitions_root), group).ok()?;
+                    let Some(ops) = draft else { return Some(Arc::new(tag)) };
+                    // The draft made on a copy, as OK will make it on the
+                    // document.
+                    let mut copy = crate::core::document::TagDocument::clean(tag);
+                    crate::core::document::apply::apply_deferred_ops(&mut copy, ops, "Material Editor preview");
+                    Some(Arc::new(copy.tag))
                 });
                 let mut caches = caches.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 let textures = resolve_model_materials(
@@ -147,16 +159,37 @@ impl Baboon {
         true
     }
 
+    /// Drop the draft of the preview of `key` when the picker that made it
+    /// is gone (another took its place before it could say so) or its
+    /// document's layout has moved since it opened.
+    fn drop_stale_draft(&mut self, kit_index: usize, key: &str) {
+        use crate::app::editor::{ColorPopupWindow, FunctionPopupWindow};
+        let kit = &self.model.kits[kit_index];
+        let Some(state) = self.views[kit.id].caches.model_previews.get(key) else { return };
+        let Some(draft) = &state.material_live.draft else { return };
+        let id = draft.draft_id;
+        let open = self.dialogs.any::<ColorPopupWindow>(|window| window.live.as_ref().is_some_and(|live| live.draft_id == id))
+            || self.dialogs.any::<FunctionPopupWindow>(|window| window.live.as_ref().is_some_and(|live| live.draft_id == id));
+        let layout = kit.parsed_tags.get(&draft.document).map(|document| document.layout_stamp());
+        let moved = draft.layout_stamp.is_some_and(|stamp| Some(stamp) != layout);
+        if !open || moved {
+            let kit_id = kit.id;
+            if let Some(state) = self.views[kit_id].caches.model_previews.get_mut(key) {
+                state.material_live.draft = None;
+            }
+        }
+    }
+
     /// Applies `WorkerMessage::MaterialsResolved`: the materials of
-    /// `document`'s shader, resolved from it at `drawn`, in place of those
-    /// drawn, unless the model loaded again meanwhile.
+    /// `document`'s shader, resolved from it as `drawn` says, in place of
+    /// those drawn, unless the model loaded again meanwhile.
     pub(in crate::app) fn handle_materials_resolved(
         &mut self,
         stamp: KitStamp,
         key: String,
         textures_id: u64,
         document: String,
-        drawn: Option<(u64, u64)>,
+        drawn: DrawnFrom,
         textures: Option<Vec<MaterialTextures>>,
     ) -> bool {
         let Some(kit_index) = self.model.resolve_kit(stamp.kit) else {

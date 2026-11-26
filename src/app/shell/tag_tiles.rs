@@ -194,6 +194,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
                             audio: parts.audio,
                             def_docs: caches.and_then(|caches| caches.def_docs.clone()),
                             ce_sound: caches.and_then(|caches| caches.ce_sound.clone()),
+                            live_preview: None,
                         };
                         draw_tag_pane(
                             cx,

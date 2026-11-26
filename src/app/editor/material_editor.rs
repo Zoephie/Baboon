@@ -92,6 +92,42 @@ impl Baboon {
     }
 }
 
+impl Baboon {
+    /// Keep (or, with no `ops`, drop) what a picker the Material Editor of
+    /// `preview` opened would write now: its preview draws it. A draft for a
+    /// document whose layout has moved since the picker opened is dropped,
+    /// as OK would refuse it.
+    pub(in crate::app) fn apply_draft_preview(
+        &mut self,
+        kit: KitId,
+        preview: String,
+        draft_id: u64,
+        tag_key: String,
+        opened_at: Option<(u64, u64)>,
+        ops: Option<DeferredOps>,
+    ) {
+        let Some(index) = self.model.kit_index(kit) else { return };
+        let layout = self.model.kits[index].parsed_tags.get(&tag_key).map(TagDocument::layout_stamp);
+        let Some(state) = self.views[kit].caches.model_previews.get_mut(&preview) else { return };
+        let live = &mut state.material_live;
+        let seq = live.draft.as_ref().map_or(0, |draft| draft.seq) + 1;
+        live.draft = match ops {
+            Some(ops) if opened_at.is_none_or(|stamp| Some(stamp) == layout) => Some(
+                crate::app::model_preview::material_editor::DraftPreview {
+                    draft_id,
+                    document: tag_key,
+                    ops,
+                    layout_stamp: opened_at,
+                    seq,
+                },
+            ),
+            // Gone, or another picker's: only its own picker clears a draft.
+            None if live.draft.as_ref().is_some_and(|draft| draft.draft_id != draft_id) => live.draft.take(),
+            _ => None,
+        };
+    }
+}
+
 /// The scope the window draws its shader under: the pane's, so two panes
 /// of one model keep windows of their own, and apart from the shader's tab.
 fn editor_scope(scope: &str) -> String {
@@ -362,6 +398,6 @@ fn draw_material_body(
     disk_banner::draw_disk_banner(cx, ui, kit_index, &entry);
     let body = ui.available_size();
     ui.allocate_ui(egui::vec2(body.x, body.y.max(240.0)), |ui| {
-        draw_tag_body(cx, ui, kit_index, &entry, &editor_scope(scope), PaneInputs { field_nav: None, ..inputs }, view, editor);
+        draw_tag_body(cx, ui, kit_index, &entry, &editor_scope(scope), PaneInputs { field_nav: None, live_preview: Some(model.key.clone()), ..inputs }, view, editor);
     });
 }
