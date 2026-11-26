@@ -173,7 +173,9 @@ about tags), `prefs`, `model_preview`, `audio`, plus `model`, `context` and
 for what it is for rather than how it looks, and each reads a token of the
 installed theme (`ui_kit/themes`): `table.rs` declares every token's id,
 description and value in each built-in theme, `library.rs` reads and resolves
-theme files, `state.rs` applies the preferences' choice and reloads it, and
+theme files, `rules.rs` says how unset tokens follow set ones, `state.rs`
+applies the preferences' choice and reloads it, `draft.rs` is the Theme
+Editor's draft and its saves (the window is `shell/theme_editor.rs`), and
 `golden.rs` checks the built-ins against the colours captured before the
 registry. Only `style.rs` asks whether the theme is dark. A test
 (`ui_kit/palette_gate.rs`) fails on a colour written as numbers, or a theme

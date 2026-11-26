@@ -743,6 +743,13 @@ fn draw_view_menu(cx: &Ctx, ui: &mut Ui, view: &mut KitView, navigation_enabled:
         cx.send(AppAction::ToggleTerminal);
         close_menu(ui);
     }
+    ui.separator();
+    if icon_text_button(ui, ButtonIcon::ColorPicker, "Theme Editor...", true).clicked() {
+        cx.send(crate::app::context::Command::OpenDialog(Box::new(
+            super::ThemeEditorWindow::for_active_theme(),
+        )));
+        close_menu(ui);
+    }
 }
 
 /// The Help menu: About, documentation, tutorials, and the update check.

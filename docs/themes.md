@@ -15,6 +15,8 @@ system can switch to Classic Light or to a theme of your own.
 
 - **Open Themes Folder** opens the folder, making it first if needed, and
   writes `baboon-theme.schema.json` into it.
+- **Edit Theme...** opens the Theme Editor on the theme in use (also
+  *View → Theme Editor...*; see below).
 - **Export Current Theme** writes the theme in use into the folder as a
   complete file: the best place to start a theme.
 - **Reload** reads the folder again.
@@ -22,6 +24,24 @@ system can switch to Classic Light or to a theme of your own.
 A theme in use is read again within a second of its file changing, so you can
 edit it in another editor and watch Baboon follow. A file that stops reading
 correctly keeps the colours it last gave, and Settings says why.
+
+## The Theme Editor
+
+The editor lists every token of the theme in use, grouped as in the token
+list below, and searches them by id, description or group. Each row shows its
+colour, its value and where the colour comes from: **set** by the theme,
+**inherited** from the theme it extends (or the built-in), or **follows**
+another token by its rule. Click a swatch to pick a colour; Baboon draws the
+change at once. **Reset** unsets a token, so it inherits or follows again.
+
+- **Save** writes the changes back to the theme's file. Its other keys, its
+  palette and its comments are kept; a token set from the palette stays
+  `$name` until you pick a new colour for it. If the file changed on disk since
+  the editor read it, Baboon asks before overwriting it.
+- **Save As...** writes a new theme that extends the one being edited and sets
+  only the colours you changed, then chooses it. A built-in is kept this way.
+- **Cancel**, or closing the window, puts back the colours drawn when the
+  editor opened, as far back as the last save.
 
 ## Where themes live
 

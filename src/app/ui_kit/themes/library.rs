@@ -170,6 +170,26 @@ impl ThemeLibrary {
         library
     }
 
+    /// This library with `file` as the theme `id`, read from `path`, in
+    /// place of any file with that id: how the theme editor resolves its
+    /// draft.
+    pub(in crate::app) fn with_file(
+        &self,
+        id: &str,
+        path: PathBuf,
+        file: ThemeFile,
+    ) -> ThemeLibrary {
+        let mut library = self.clone();
+        library.themes.insert(
+            id.to_owned(),
+            ListedTheme {
+                path,
+                parsed: Ok((file, Vec::new())),
+            },
+        );
+        library
+    }
+
     /// Every theme, the built-ins first, then the files by name.
     pub(in crate::app) fn entries(&self) -> Vec<ThemeEntry> {
         let mut entries: Vec<ThemeEntry> = BuiltIn::ALL

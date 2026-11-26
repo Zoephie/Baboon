@@ -970,7 +970,7 @@ fn settings_window_body(
 }
 
 /// Cards always consume the available width, including after a window resize.
-fn settings_card<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> R {
+pub(in crate::app) fn settings_card<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> R {
     Frame::NONE
         .fill(settings_card_fill())
         .stroke(Stroke::new(1.0, foundation_group_edge()))
@@ -2393,6 +2393,10 @@ fn draw_theme_settings(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
                         cx.set_status(format!("Could not make the themes folder: {error}"))
                     }
                 }
+            }
+            if ui.button("Edit Theme...").clicked() {
+                s.opened
+                    .push(Box::new(super::ThemeEditorWindow::for_active_theme()));
             }
             if ui.button("Export Current Theme").clicked() {
                 cx.set_status(export_current_theme(&folder));

@@ -118,11 +118,6 @@ pub(in crate::app) const fn reference(token: Token) -> Rule {
     Rule::Reference(token)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-pub(in crate::app) const fn alpha(token: Token, alpha: f32) -> Rule {
-    Rule::Alpha(token, alpha)
-}
-
 pub(in crate::app) const fn tint(token: Token, t: f32) -> Rule {
     Rule::Tint(token, t)
 }

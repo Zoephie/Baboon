@@ -435,6 +435,7 @@
               "kind": "bullets",
               "items": [
                 "A theme's id is its file name. It may extend another theme and set only the colours it changes, or set every colour itself.",
+                "Edit Theme... in Settings, or View > Theme Editor..., edits the theme in use live: Save writes it back, Save As writes a new theme that extends it with only your changes, and Cancel puts the colours back.",
                 "Export Current Theme writes the theme in use as a complete file to start from; Open Themes Folder also writes a schema that editors complete theme files from.",
                 "A theme in use is read again within a second of its file changing; one that stops reading correctly keeps its last colours, and Settings lists every problem.",
                 "docs/themes.md describes the file and lists every colour a theme can set."

@@ -95,6 +95,7 @@ macro_rules! tokens {
 mod table;
 pub(in crate::app) use table::{TOKEN_COUNT, Token};
 
+pub(in crate::app) mod draft;
 pub(in crate::app) mod export;
 pub(in crate::app) mod file;
 pub(in crate::app) mod library;
@@ -295,7 +296,6 @@ pub(in crate::app) fn appearance() -> Appearance {
 }
 
 /// The installed theme, read back.
-#[cfg(test)]
 pub(in crate::app) fn installed() -> ThemeColors {
     let mut colors = [Color32::TRANSPARENT; TOKEN_COUNT];
     for token in Token::ALL {

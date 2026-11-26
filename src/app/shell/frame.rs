@@ -4341,6 +4341,18 @@ mod tests {
                 &["Settings", "Theme files"],
             ),
             case(
+                "theme_editor",
+                &["dialog:ThemeEditorWindow"],
+                &["shell/theme_editor.rs"],
+                welcome,
+                |h| {
+                    h.app
+                        .dialogs
+                        .open(super::super::ThemeEditorWindow::for_active_theme());
+                },
+                &["Theme Editor - Light", "background", "inherited"],
+            ),
+            case(
                 "settings_custom_kit_draft",
                 &["dialog:CustomEditingKitDraft"],
                 &["shell/settings.rs"],
@@ -9289,6 +9301,45 @@ mod tests {
                 h.frame(Vec::new());
             }
             h.shoot(&dir.join(name));
+        }
+    }
+
+    /// `BABOON_APP_SHOTS` shots of the Theme Editor in a light and a dark
+    /// built-in, with the accent edited live and the picker open on it.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    #[ignore = "writes screenshots for a person to look at; run with BABOON_APP_SHOTS"]
+    fn app_shots_of_the_theme_editor() {
+        let Some(dir) = std::env::var_os("BABOON_APP_SHOTS") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        use crate::app::shell::ThemeEditorWindow;
+        use crate::app::ui_kit::themes::{BuiltIn, Token};
+        for (built_in, name) in [
+            (BuiltIn::Light, "theme_editor_light.png"),
+            (BuiltIn::Dark, "theme_editor_dark.png"),
+        ] {
+            let mut h = Harness::recording();
+            h.app.model.prefs.follow_system_theme = false;
+            h.app.model.prefs.dark_mode = built_in.appearance().is_dark();
+            for _ in 0..5 {
+                h.frame(Vec::new());
+            }
+            let mut editor = ThemeEditorWindow::for_active_theme();
+            // fixed: a sample edit for the shot
+            editor.edit_for_shot(
+                Token::Accent,
+                egui::Color32::from_rgb(0xE8, 0x86, 0x2A),
+                Token::Accent,
+            );
+            h.app.dialogs.open(editor);
+            for _ in 0..30 {
+                h.frame(Vec::new());
+            }
+            h.shoot(&dir.join(name));
+            // Cancel puts the built-in back for the next shot.
+            crate::app::ui_kit::themes::install(&built_in.colors());
         }
     }
 
