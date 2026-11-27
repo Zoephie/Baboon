@@ -391,7 +391,7 @@ impl H4Game {
                             gl,
                             &texture.image,
                             texture.texels,
-                            &texture.mips,
+                            texture.mips.as_deref().map(Vec::as_slice),
                             texture.sampler,
                         ) {
                             map.insert(texture.uniform.clone(), uploaded);

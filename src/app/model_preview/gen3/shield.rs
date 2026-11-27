@@ -202,7 +202,7 @@ impl ShieldSettings {
                 uniform: uniform.to_owned(),
                 image: Arc::new(image),
                 texels: ImageTexels::Linear,
-                mips: Arc::default(),
+                mips: None,
                 sampler: None,
                 frames: Vec::new(),
             });

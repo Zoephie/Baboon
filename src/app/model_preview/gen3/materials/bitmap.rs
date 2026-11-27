@@ -21,8 +21,10 @@ pub(in crate::app::model_preview) fn gen3_image(
     found
 }
 
-/// One image of a bitmap, what its texels mean, and its stored mips.
-pub(in crate::app::model_preview) type Gen3Bitmap = (Arc<Image>, ImageTexels, Arc<Vec<Image>>);
+/// One image of a bitmap, what its texels mean, and its stored mips: none
+/// for a bitmap built without them, `None` where the levels it stores would
+/// not continue the image as decoded, so they are generated.
+pub(in crate::app::model_preview) type Gen3Bitmap = (Arc<Image>, ImageTexels, Option<Arc<Vec<Image>>>);
 
 /// Levels past the top, as the tag stores them. None when `image` was not
 /// decoded at the tag's own size, since these would not continue it.
@@ -149,11 +151,10 @@ pub(in crate::app::model_preview) fn read_gen3_bitmap(
         });
         let mut mips = tag
             .as_ref()
-            .and_then(|tag| gen3_stored_mips(tag, index.max(0) as usize, &image))
-            .unwrap_or_default();
+            .and_then(|tag| gen3_stored_mips(tag, index.max(0) as usize, &image));
         if format == Some(blam_tags::bitmap::BitmapFormat::A8) {
             std::iter::once(&mut image)
-                .chain(&mut mips)
+                .chain(mips.iter_mut().flatten())
                 .for_each(alpha_only);
         }
         if reader.rules().gen3.luminance_as_red
@@ -163,9 +164,36 @@ pub(in crate::app::model_preview) fn read_gen3_bitmap(
             )
         {
             std::iter::once(&mut image)
-                .chain(&mut mips)
+                .chain(mips.iter_mut().flatten())
                 .for_each(red_only);
         }
-        (Arc::new(image), texels, Arc::new(mips))
+        (Arc::new(image), texels, mips.map(Arc::new))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
+
+    /// With `BLAM_TEST_H3EK`: the elite's head diffuse, built with `max
+    /// mipmap level` 1, stores no mips and reads back with none, so the
+    /// game's one level is all the preview samples too (its eyes, which a
+    /// generated chain blurred to their orange surround far off); the
+    /// helmet's stores its eight.
+    #[test]
+    fn a_bitmap_built_without_mips_reads_back_with_none() {
+        let Some(source) = kit_source(GameId::Halo3) else {
+            return;
+        };
+        let reader = TagReader::with_game_shaders(&source, true);
+        let mut caches = ResolveCaches::default();
+        let mut stored = |path: &str| {
+            let (_, _, mips) = gen3_image(&reader, path, 0, SamplerKind::Texture2D, &mut caches).unwrap();
+            mips.map(|mips| mips.len())
+        };
+        assert_eq!(stored("objects\\characters\\elite\\bitmaps\\newelitehead_diffuse"), Some(0));
+        assert_eq!(stored("objects\\characters\\elite\\bitmaps\\elite_helmet_diffuse"), Some(8));
+    }
 }

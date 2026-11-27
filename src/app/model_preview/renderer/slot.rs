@@ -320,7 +320,7 @@ impl ModelGpuSlot {
                 .map(|at| {
                     let (image, texels, mips) = at.bitmap();
                     vec![crate::app::model_preview::gl::texture::upload_image_linear(
-                        gl, image, *texels, mips, None,
+                        gl, image, *texels, mips.as_deref().map(Vec::as_slice), None,
                     )]
                 })
                 .chain(super::game::game_flare_images(gl, frame))
@@ -338,7 +338,7 @@ impl ModelGpuSlot {
                             gl,
                             image,
                             *texels,
-                            mips,
+                            mips.as_deref().map(Vec::as_slice),
                             Some(antenna.sampler()),
                         )
                     }
@@ -359,7 +359,7 @@ impl ModelGpuSlot {
                         gl,
                         image,
                         *texels,
-                        mips,
+                        mips.as_deref().map(Vec::as_slice),
                         at.sampler(),
                     )
                 })

@@ -137,7 +137,7 @@ impl H4EffectGl {
                     gl,
                     &texture.image,
                     texture.texels,
-                    &texture.mips,
+                    texture.mips.as_deref().map(Vec::as_slice),
                     texture.sampler,
                 )
             }

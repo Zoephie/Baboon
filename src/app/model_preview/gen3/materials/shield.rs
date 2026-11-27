@@ -111,7 +111,7 @@ pub(in crate::app::model_preview) fn read_shield_settings(
             uniform: uniform.to_owned(),
             image,
             texels: ImageTexels::Linear,
-            mips: Arc::default(),
+            mips: None,
             sampler: None,
             frames: Vec::new(),
         });

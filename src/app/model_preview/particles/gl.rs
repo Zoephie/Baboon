@@ -79,7 +79,7 @@ pub(in crate::app::model_preview) unsafe fn sprite_maps(
     .map(|(map, sampler)| {
         map.as_ref().and_then(|(image, texels, mips)| unsafe {
             crate::app::model_preview::gl::texture::upload_image_linear(
-                gl, image, *texels, mips, sampler,
+                gl, image, *texels, mips.as_deref().map(Vec::as_slice), sampler,
             )
         })
     })

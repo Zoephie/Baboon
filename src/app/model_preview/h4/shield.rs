@@ -74,7 +74,7 @@ pub(crate) fn read_h4_shield(reader: &TagReader, model: &TagFile) -> Option<Arc<
             uniform: rename(&texture.uniform),
             image: Arc::clone(&texture.image),
             texels: texture.texels,
-            mips: Arc::clone(&texture.mips),
+            mips: texture.mips.clone(),
             sampler: texture.sampler,
             frames: Vec::new(),
         })

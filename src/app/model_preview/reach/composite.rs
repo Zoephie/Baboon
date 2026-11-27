@@ -38,7 +38,7 @@ impl ReachGame {
                     address: [BitmapAddressMode::Wrap; 2],
                     filter: BitmapFilterMode::Point,
                 };
-                self.noise = upload_image_linear(gl, image, *texels, mips, Some(sampler));
+                self.noise = upload_image_linear(gl, image, *texels, mips.as_deref().map(Vec::as_slice), Some(sampler));
             }
             if self.composite_program.is_none() {
                 self.composite_program = screen_program(gl, REACH_COMPOSITE_FRAGMENT);
