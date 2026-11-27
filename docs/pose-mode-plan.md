@@ -81,6 +81,12 @@ follows like a puppet, over the bind pose or over an animation.
    the pointer's run along the ring's way round where it was taken, over the ring's radius, so a ring
    seen edge on still turns. Alt-drag still twists about the bone.
 
+7. **The pose tools in the viewport (done).** Pose's buttons (Limits, Move, Rotate, Reset pose)
+   ran the header into its right-hand menus in a narrow card. Only the Pose toggle stays in the
+   header; the rest ride in a strip in the viewport's top-left corner while posing. The header
+   now measures its two groups before drawing them and, too narrow for both, gives the right
+   group's menus up to icons, then folds the model toggles into the Other menu.
+
 ## Research
 
 FABRIK (Aristidou & Lasenby) works in joint positions and needs a twist rule when turned back into

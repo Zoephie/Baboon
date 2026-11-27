@@ -33,9 +33,10 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
     state: &mut ModelPreviewState,
     supports_textures: bool,
     own_view: Option<OwnViewSettings>,
+    compact: bool,
 ) {
-    draw_model_view_menu(ui, data, state, own_view);
-    draw_model_shading_menu(ui, data, state, supports_textures);
+    draw_model_view_menu(ui, data, state, own_view, compact);
+    draw_model_shading_menu(ui, data, state, supports_textures, compact);
 }
 
 const MENU_WIDTH: f32 = 280.0;
@@ -60,14 +61,20 @@ pub(in crate::app::model_preview) fn draw_model_shading_menu(
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
     supports_textures: bool,
+    compact: bool,
 ) {
     let current = state.shading();
-    fixed_width_icon_text_menu_button(
+    let tooltip = format!("Shading: {}", current.label());
+    let menu = |ui: &mut Ui, add: &mut dyn FnMut(&mut Ui)| {
+        if compact {
+            icon_dropdown_button(ui, ButtonIcon::Shading, &tooltip, add);
+        } else {
+            fixed_width_icon_text_menu_button(ui, ButtonIcon::Shading, current.label(), SHADING_BUTTON_WIDTH, add);
+        }
+    };
+    menu(
         ui,
-        ButtonIcon::Shading,
-        current.label(),
-        SHADING_BUTTON_WIDTH,
-        |ui| {
+        &mut |ui| {
             // Fix both bounds: a menu's sizing pass can otherwise let its rows
             // grow wider than the menu.
             ui.set_width(MENU_WIDTH);
@@ -184,8 +191,16 @@ pub(in crate::app::model_preview) fn draw_model_view_menu(
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
     own_view: Option<OwnViewSettings>,
+    compact: bool,
 ) {
-    preview_header_menu(ui, ButtonIcon::View, "View", |ui| {
+    let menu = |ui: &mut Ui, add: &mut dyn FnMut(&mut Ui)| {
+        if compact {
+            icon_dropdown_button(ui, ButtonIcon::View, "View", add);
+        } else {
+            preview_header_menu(ui, ButtonIcon::View, "View", add);
+        }
+    };
+    menu(ui, &mut |ui| {
         ui.set_width(MENU_WIDTH);
         if let Some(own) = own_view {
             (own.draw)(ui, state);
@@ -238,15 +253,23 @@ pub(in crate::app::model_preview) fn object_bounding_sphere(
 
 /// The Other menu, beside the header's model toggles: the markers, with
 /// their filter, the error reports and, for an object, its bounding sphere.
+/// In a header too narrow for the model toggles, `folded` draws them in a
+/// row at the menu's top.
 pub(in crate::app::model_preview) fn draw_model_other_menu(
     ui: &mut Ui,
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
+    folded: Option<&mut dyn FnMut(&mut Ui, &mut ModelPreviewState) -> bool>,
 ) {
     icon_dropdown_button(ui, ButtonIcon::Other, "Other: markers, errors and level of detail", |ui| {
         // Fix both bounds: a menu's sizing pass can otherwise let the
         // full-width marker filter grow wider than the rest.
         ui.set_width(MENU_WIDTH);
+        if let Some(folded) = folded
+            && ui.horizontal(|ui| folded(ui, state)).inner
+        {
+            ui.separator();
+        }
         model_view_icon_checkbox(
             ui,
             &mut state.show_markers,
@@ -440,7 +463,7 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
     }
     apply_layer_actions(state, &drawn);
     if has_armature {
-        draw_pose_toggle(ui, state, !data.preview.joint_limits.is_empty());
+        draw_pose_toggle(ui, state);
     }
     if state.overlays_pending && (state.show_collision || state.show_physics) {
         ui.spinner();
@@ -449,26 +472,31 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
 }
 
 /// Pose mode, which drags joints rather than orbiting when a drag starts on
-/// one, and once anything is posed, the button that undoes it.
-fn draw_pose_toggle(ui: &mut Ui, state: &mut ModelPreviewState, limited: bool) {
+/// one. Its tools ride in the viewport's corner while it is on
+/// ([`draw_pose_tools`]).
+fn draw_pose_toggle(ui: &mut Ui, state: &mut ModelPreviewState) {
     ui.selectable_label(state.pose.on, "Pose").on_hover_text(
         "Drag a joint to pose the skeleton, over the bind pose or the animation playing; scroll while dragging to turn more or fewer nodes above it.\nClick a joint for its gizmo: drag an arrow to move it along that axis alone, a square to move it within that plane.\nAlt-drag a joint to twist it about its bone. Drag the root to move the whole skeleton.\nDouble-click a joint to pin it where it stands.\nDragging anywhere else still orbits.",
     ).clicked().then(|| state.pose.on = !state.pose.on);
-    if state.pose.on && limited {
+}
+
+/// Pose mode's tools, in the viewport's corner while posing: Limits for a
+/// model whose physics model limits its joints, the gizmo's Move and
+/// Rotate, and once anything is posed, the button that undoes it.
+pub(in crate::app::model_preview) fn draw_pose_tools(ui: &mut Ui, state: &mut ModelPreviewState, limited: bool) {
+    if limited {
         ui.selectable_label(state.pose.limits, "Limits")
             .on_hover_text("Keep the joints the physics model limits (shoulders, hips, elbows, knees, head) within their ragdoll limits")
             .clicked()
             .then(|| state.pose.limits = !state.pose.limits);
     }
-    if state.pose.on {
-        use super::super::pose::GizmoMode;
-        for (mode, label, tip) in [
-            (GizmoMode::Move, "Move", "The selected joint's gizmo moves it: an arrow along one axis, a square within one plane"),
-            (GizmoMode::Rotate, "Rotate", "The selected joint's gizmo turns it: drag round a ring to turn it about that axis"),
-        ] {
-            if ui.selectable_label(state.pose.gizmo == mode, label).on_hover_text(tip).clicked() {
-                state.pose.gizmo = mode;
-            }
+    use super::super::pose::GizmoMode;
+    for (mode, label, tip) in [
+        (GizmoMode::Move, "Move", "The selected joint's gizmo moves it: an arrow along one axis, a square within one plane"),
+        (GizmoMode::Rotate, "Rotate", "The selected joint's gizmo turns it: drag round a ring to turn it about that axis"),
+    ] {
+        if ui.selectable_label(state.pose.gizmo == mode, label).on_hover_text(tip).clicked() {
+            state.pose.gizmo = mode;
         }
     }
     let posed = state.pose.is_posed() || !state.pose.pins.is_empty();

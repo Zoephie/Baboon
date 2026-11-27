@@ -1165,6 +1165,7 @@ fn a_shading_choice_is_picked_inside_the_shading_menu() {
                         state,
                         true,
                         None,
+                        false,
                     );
                 });
             },
@@ -1969,4 +1970,111 @@ fn a_drag_round_the_gizmos_z_ring_turns_the_joint_about_z() {
     assert!((after[2][2] - before[2][2]).abs() < 1e-4, "the hand keeps its height");
     let turned = around(after[2]) - around(before[2]);
     assert!(turned > 0.1, "turned about z the way the ring runs: {turned}");
+}
+
+/// With `BLAM_TEST_H3EK`: the Model Preview card's header fits its width,
+/// from wide down to narrow: no two of its labels or icons overlap, and
+/// none leaves the card. Posing, the header carries its most.
+#[test]
+fn the_preview_header_never_overlaps_itself() {
+    use crate::app::model_preview::load::TagReader;
+    use crate::app::{TagEntry, TagEntryLocation};
+    let Some(root) = kit_root(GameId::Halo3) else {
+        return;
+    };
+    let path = "objects\\characters\\masterchief\\masterchief";
+    let data = crate::app::model_preview::harness::kit::kit_preview(&root, GameId::Halo3, path, "biped", b"bipd");
+    let source = TagSource::LooseFolder {
+        root: root.clone(),
+        game: Some(GameId::Halo3),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let tag = TagReader::new(&source).load(path, "biped", b"bipd").unwrap();
+    let entry = TagEntry {
+        key: format!("{path}.biped"),
+        display_path: format!("{path}.biped"),
+        group_tag: u32::from_be_bytes(*b"bipd"),
+        group_name: Some("biped".to_owned()),
+        location: TagEntryLocation::LooseFile(root.join("objects/characters/masterchief/masterchief.biped")),
+    };
+    let panel = super::layout::PreviewPanel {
+        tag: &tag,
+        entry: &entry,
+        source_game: Some(GameId::Halo3),
+        supports_textures: true,
+        own_view: None,
+        data: &data,
+        reloading: false,
+    };
+    for width in [1400.0_f32, 1000.0, 800.0, 640.0, 520.0, 440.0, 380.0, 340.0] {
+        let mut state = ModelPreviewState::default();
+        state.pose.on = true;
+        state.pose.follow(data.geometry_id);
+        state.pose.turns.insert(0, blam_tags::math::RealQuaternion::IDENTITY);
+        // Untextured, so the viewport draws rather than waiting on textures.
+        state.set_shading(crate::app::model_preview::ModelShading::Solid);
+        let context = egui::Context::default();
+        let mut card = egui::Rect::NOTHING;
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            let output = crate::app::run_ui_test(
+                &context,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(width + 40.0, 500.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let mut requests = super::layout::SetupRequests::default();
+                        ui.allocate_ui(Vec2::new(width, 480.0), |ui| {
+                            ui.set_width(width);
+                            card = ui.max_rect();
+                            super::layout::draw_preview_card(ui, &panel, &mut state, &mut requests, 460.0);
+                        });
+                    });
+                },
+            );
+            shapes = output.shapes;
+        }
+        // What the header paints: each label's and each icon's bounds.
+        let header = egui::Rect::from_min_size(card.min, Vec2::new(card.width(), super::layout::PREVIEW_HEADER_HEIGHT));
+        let mut pieces: Vec<egui::Rect> = Vec::new();
+        let mut labels = String::new();
+        for clipped in &shapes {
+            if let egui::Shape::Text(text) = &clipped.shape
+                && header.contains(text.visual_bounding_rect().center())
+            {
+                labels.push_str(text.galley.text());
+                labels.push('|');
+            }
+            let rect = match &clipped.shape {
+                egui::Shape::Text(text) => text.visual_bounding_rect(),
+                egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => mesh.calc_bounds(),
+                _ => continue,
+            };
+            // A hair's overlap at an edge is anti-aliasing, not a clash.
+            let rect = rect.shrink(1.0);
+            if rect.is_positive() && header.contains(rect.center()) {
+                pieces.push(rect);
+            }
+        }
+        assert!(pieces.len() > 3, "{width}: the header drew its controls");
+        if width >= 1000.0 {
+            assert!(labels.contains("Refresh Model") && labels.contains("Pose"), "{width}: {labels}");
+        }
+        // Pose's tools ride in the viewport, not the header.
+        assert!(!labels.contains("Rotate"), "{width}: {labels}");
+        let strip = shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Rotate" => Some(text.visual_bounding_rect()),
+            _ => None,
+        });
+        let strip = strip.unwrap_or_else(|| panic!("{width}: no Rotate in the viewport"));
+        assert!(strip.top() > header.bottom() && strip.left() < card.left() + 200.0, "{width}: {strip:?}");
+        for (index, a) in pieces.iter().enumerate() {
+            assert!(a.min.x >= card.min.x - 1.0 && a.max.x <= card.max.x + 1.0, "{width}: {a:?} leaves the card {card:?}");
+            for b in &pieces[index + 1..] {
+                assert!(!a.intersects(*b), "{width}: {a:?} overlaps {b:?}");
+            }
+        }
+    }
 }

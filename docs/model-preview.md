@@ -22,6 +22,8 @@ Collision and physics draw in their own colours (pink and red) over the render m
 - **Alt-click** shows only that part, hiding the others.
 - **Shift-click** hides only that part, showing the others.
 
+In a narrow preview the header gives up room rather than drawing one button over another: first **View**, **Shading** and **Refresh Model** lose their labels (hover one for its name), then the part buttons move into the top row of the **Other** menu (`···`).
+
 A Reach or Halo 2 Anniversary model whose `.model` names an **imposter** (the low, untextured stand-in the game draws far away) gets an **Imposter** button. It draws the imposter where the model is, each triangle in the colour baked into its vertices, and it doesn't take the model's animation. It starts hidden. Tool names an imposter's regions and permutations by position (`region_00`, `permutation_00` and on), and the game matches them to the render model's the same way, so the imposter follows the sidebar's region and permutation picks. If the render model's regions or permutations have changed since the imposter was made, they no longer line up: the game then unloads the imposter, and the button is greyed out; it needs generating again. An `.imposter_model` opened on its own previews in its own Model Preview tab, with its own `region_00` names.
 
 ### Shading
