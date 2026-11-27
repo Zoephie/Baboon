@@ -476,7 +476,7 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
 /// ([`draw_pose_tools`]).
 fn draw_pose_toggle(ui: &mut Ui, state: &mut ModelPreviewState) {
     ui.selectable_label(state.pose.on, "Pose").on_hover_text(
-        "Drag a joint to pose the skeleton, over the bind pose or the animation playing; scroll while dragging to turn more or fewer nodes above it.\nClick a joint for its gizmo: drag an arrow to move it along that axis alone, a square to move it within that plane.\nAlt-drag a joint to twist it about its bone. Drag the root to move the whole skeleton.\nDouble-click a joint to pin it where it stands.\nDragging anywhere else still orbits.",
+        "Drag a joint to pose the skeleton, over the bind pose or the animation playing; scroll while dragging to turn more or fewer nodes above it.\nClick a joint for its gizmo: drag an arrow to move it along that axis alone, a square to move it within that plane.\nShift-click to select more joints, which the gizmo then moves, turns or scales together; Shift-double-click to select a joint and everything below it.\nAlt-drag a joint to twist it about its bone. Drag the root to move the whole skeleton.\nDouble-click a joint to pin it where it stands.\nDragging anywhere else still orbits.",
     ).clicked().then(|| state.pose.on = !state.pose.on);
 }
 

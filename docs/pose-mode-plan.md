@@ -95,6 +95,17 @@ follows like a puppet, over the bind pose or over an animation.
    lengths from the posed skeleton, so a drag below a scaled joint reaches as far as its longer
    bones now do. Reset pose undoes scales too.
 
+9. **Selecting several joints (done).** Shift+click adds a joint to the selection or takes it
+   out; the last one clicked is active and carries the gizmo, the active joint drawn larger.
+   Shift+double-click selects a joint and everything below it; a plain click selects one alone,
+   and a click on empty space lets them go. Rotate, Scale and Alt-twist take every selected joint
+   by the same amount, each about its own origin (Blender's individual origins), so nested ones
+   add up: a hand's finger joints curl together. A move takes the others along by as far as the
+   active joint actually went, each through its own chain, leaving out any above or below the
+   active joint, and of two on one limb all but the upper, whose chains would fight over the same
+   bones. Dragging the root still moves the whole skeleton. No box select: a plain drag on empty
+   space orbits.
+
 ## Research
 
 FABRIK (Aristidou & Lasenby) works in joint positions and needs a twist rule when turned back into

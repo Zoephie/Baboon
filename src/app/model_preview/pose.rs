@@ -23,7 +23,7 @@ use super::RenderModelPreviewNode;
 use super::common::fields::elements;
 use blam_tags::math::{Matrix4, RealQuaternion, RealVector3d};
 use blam_tags::{TagFieldData, TagFile, TagStruct};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The hand pose, and the posing under way.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,8 +36,11 @@ pub(crate) struct PoseEdit {
     /// three axes, as a Halo node transform (and its animations) carries.
     /// It scales the node and everything below it.
     pub scales: BTreeMap<usize, f32>,
-    /// The joint last picked, which the armature marks.
+    /// The joint last picked, the active one, which carries the gizmo.
     pub selected: Option<usize>,
+    /// The other joints selected with it (Shift+click), which the gizmo's
+    /// drags take along. See [`PoseEdit::joints`].
+    pub selection: BTreeSet<usize>,
     /// The drag under way: the joint dragged.
     pub dragging: Option<PoseDrag>,
     /// How many nodes above a dragged joint turn: its parent alone at 1.
@@ -205,6 +208,7 @@ impl Default for PoseEdit {
             turns: BTreeMap::new(),
             scales: BTreeMap::new(),
             selected: None,
+            selection: BTreeSet::new(),
             dragging: None,
             chain: DEFAULT_CHAIN,
             limits: true,
@@ -262,6 +266,59 @@ impl PoseEdit {
         self.dragging = None;
     }
 
+    /// Every selected joint, the active one among them, in node order.
+    pub(crate) fn joints(&self) -> Vec<usize> {
+        let mut all = self.selection.clone();
+        all.extend(self.selected);
+        all.into_iter().collect()
+    }
+
+    /// Whether `joint` is selected, active or not.
+    pub(crate) fn is_selected(&self, joint: usize) -> bool {
+        self.selected == Some(joint) || self.selection.contains(&joint)
+    }
+
+    /// `joint` made the active joint, the selection otherwise kept.
+    pub(crate) fn activate(&mut self, joint: usize) {
+        self.selection.extend(self.selected);
+        self.selection.remove(&joint);
+        self.selected = Some(joint);
+    }
+
+    /// `joint` alone selected, or nothing.
+    pub(crate) fn select_only(&mut self, joint: Option<usize>) {
+        self.selection.clear();
+        self.selected = joint;
+    }
+
+    /// Shift+click: `joint` added to the selection and made active, or, if
+    /// it was selected, taken out of it; the active joint then falls to the
+    /// last of the rest.
+    pub(crate) fn toggle_selected(&mut self, joint: usize) {
+        if self.is_selected(joint) {
+            self.selection.remove(&joint);
+            if self.selected == Some(joint) {
+                self.selected = self.selection.pop_last();
+            }
+        } else {
+            self.selection.extend(self.selected);
+            self.selected = Some(joint);
+        }
+    }
+
+    /// Shift+double-click: `joint` and every node below it added to the
+    /// selection, `joint` active.
+    pub(crate) fn select_below(&mut self, nodes: &[RenderModelPreviewNode], joint: usize) {
+        self.selection.extend(self.selected);
+        for index in 0..nodes.len() {
+            if descends(nodes, index, joint) {
+                self.selection.insert(index);
+            }
+        }
+        self.selection.remove(&joint);
+        self.selected = Some(joint);
+    }
+
     /// Pin `joint` where it stands, or unpin it.
     pub(crate) fn toggle_pin(&mut self, joint: usize, at: [f32; 3]) {
         if self.pins.remove(&joint).is_none() {
@@ -283,6 +340,35 @@ impl PoseEdit {
             .unwrap_or(RealQuaternion::IDENTITY);
         self.turns.insert(node, (local * before).normalized());
     }
+}
+
+/// Whether `node` is `ancestor` or hangs anywhere below it.
+pub(crate) fn descends(nodes: &[RenderModelPreviewNode], node: usize, ancestor: usize) -> bool {
+    let mut at = node;
+    // A malformed parent list can't loop: a node's parent comes before it.
+    for _ in 0..=nodes.len() {
+        if at == ancestor {
+            return true;
+        }
+        match nodes.get(at).and_then(|node| usize::try_from(node.parent).ok()).filter(|&parent| parent < at) {
+            Some(parent) => at = parent,
+            None => return false,
+        }
+    }
+    false
+}
+
+/// The selected joints a move of `active` takes along by the same amount:
+/// each not `active`, not above or below it, and not below another of
+/// them, which rides along with that one. Moving a joint and one below it
+/// both would set their chains fighting over the same bones.
+pub(crate) fn moved_with(nodes: &[RenderModelPreviewNode], joints: &[usize], active: usize) -> Vec<usize> {
+    joints
+        .iter()
+        .copied()
+        .filter(|&joint| joint != active && !descends(nodes, joint, active) && !descends(nodes, active, joint))
+        .filter(|&joint| !joints.iter().any(|&other| other != joint && descends(nodes, joint, other)))
+        .collect()
 }
 
 /// `matrices`, each node's world transform as the preview poses it, with
@@ -1114,6 +1200,59 @@ mod tests {
 
     fn near(a: [f32; 3], b: [f32; 3]) -> bool {
         (0..3).all(|axis| (a[axis] - b[axis]).abs() < 1e-4)
+    }
+
+    /// Shift+click adds a joint and makes it active, and again takes it
+    /// out, the active falling to another; Shift+double-click takes a
+    /// joint and all below it; a plain click selects one alone.
+    #[test]
+    fn the_selection_adds_takes_out_and_takes_all_below() {
+        let (nodes, _) = chain();
+        let mut edit = PoseEdit::default();
+        edit.select_only(Some(0));
+        edit.toggle_selected(2);
+        assert_eq!((edit.selected, edit.joints()), (Some(2), vec![0, 2]));
+        edit.toggle_selected(2);
+        assert_eq!((edit.selected, edit.joints()), (Some(0), vec![0]));
+        edit.select_only(None);
+        edit.select_below(&nodes, 1);
+        assert_eq!((edit.selected, edit.joints()), (Some(1), vec![1, 2]));
+        edit.activate(2);
+        assert_eq!((edit.selected, edit.joints()), (Some(2), vec![1, 2]));
+        edit.select_only(Some(0));
+        assert_eq!(edit.joints(), vec![0]);
+    }
+
+    /// A move of one joint takes along the others selected, but none above
+    /// or below it, and of two on one limb only the upper.
+    #[test]
+    fn a_move_takes_along_the_others_but_none_on_its_own_limb() {
+        // 0 the root; 1 → 2 one limb, 3 → 4 another.
+        let parents = [-1, 0, 1, 0, 3];
+        let nodes: Vec<RenderModelPreviewNode> = parents
+            .iter()
+            .enumerate()
+            .map(|(index, &parent)| RenderModelPreviewNode { name: format!("node {index}"), parent, ..Default::default() })
+            .collect();
+        assert!(descends(&nodes, 2, 1) && descends(&nodes, 2, 0) && !descends(&nodes, 2, 3));
+        assert_eq!(moved_with(&nodes, &[2, 4], 2), vec![4]);
+        assert_eq!(moved_with(&nodes, &[1, 2, 4], 2), vec![4], "not the joint above it");
+        assert_eq!(moved_with(&nodes, &[2, 3, 4], 2), vec![3], "the upper of the other limb's two");
+    }
+
+    /// Turning a joint and the one below it both by a quarter about up adds
+    /// up: the tip swings a half turn round from where it pointed.
+    #[test]
+    fn nested_turns_add_up() {
+        let (nodes, base) = chain();
+        let mut edit = PoseEdit::default();
+        for joint in [1, 2] {
+            rotate(&nodes, &base, &mut edit, joint, 2, std::f32::consts::FRAC_PI_2, &[]);
+        }
+        let mut matrices = base.clone();
+        apply(&nodes, &mut matrices, &edit);
+        assert!(near(matrices[1].translation(), [1.0, 0.0, 0.0]));
+        assert!(near(matrices[2].translation(), [1.0, 1.0, 0.0]), "{:?}", matrices[2].translation());
     }
 
     /// Scaling the middle node scales it and carries down: it stays where

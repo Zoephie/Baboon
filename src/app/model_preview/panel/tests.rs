@@ -2062,6 +2062,134 @@ fn a_drag_outward_on_the_scale_circle_grows_the_joint() {
     assert_eq!(state.pose.selected, Some(1), "the press on the circle keeps the joint selected");
 }
 
+/// Selecting several joints, driven through the viewport: a click on one
+/// hand and a Shift+click on the other select both, the second active; a
+/// drag up its z arrow raises both hands alike, each through its own arm.
+/// A Shift+double-click on a shoulder selects it and its arm below.
+#[test]
+fn shift_click_selects_both_hands_and_the_arrow_moves_them_together() {
+    use crate::app::model_preview::{PreviewCamera, RenderModelPreviewNode, armature_node_positions};
+    // A root, then each side's shoulder, elbow and hand: arms out along y,
+    // bent forward at the elbow, so a hand can rise without reaching out.
+    let worlds: [[f32; 3]; 7] = [
+        [0.0, 0.0, 0.0],
+        [0.0, 0.2, 0.5],
+        [0.25, 0.45, 0.5],
+        [0.0, 0.7, 0.5],
+        [0.0, -0.2, 0.5],
+        [0.25, -0.45, 0.5],
+        [0.0, -0.7, 0.5],
+    ];
+    let parents = [-1_i16, 0, 1, 2, 0, 4, 5];
+    let nodes = (0..7)
+        .map(|index| {
+            let parent = usize::try_from(parents[index]).map_or([0.0; 3], |parent| worlds[parent]);
+            RenderModelPreviewNode {
+                name: format!("node {index}"),
+                parent: parents[index],
+                bind_rotation: [0.0, 0.0, 0.0, 1.0],
+                bind_translation: std::array::from_fn(|axis| worlds[index][axis] - parent[axis]),
+                inverse_bind: [
+                    [1.0, 0.0, 0.0, -worlds[index][0]],
+                    [0.0, 1.0, 0.0, -worlds[index][1]],
+                    [0.0, 0.0, 1.0, -worlds[index][2]],
+                ],
+            }
+        })
+        .collect();
+    let preview = RenderModelPreview {
+        nodes,
+        bounds_min: [-1.0; 3],
+        bounds_max: [1.0; 3],
+        ..Default::default()
+    };
+    let data = model_preview_data("test".into(), "test".into(), preview, vec![]);
+    let mut state = ModelPreviewState::default();
+    state.pose.on = true;
+    let context = egui::Context::default();
+    let time = std::cell::Cell::new(0.0_f64);
+    let mut rect = egui::Rect::NOTHING;
+    let mut frame = |state: &mut ModelPreviewState, events: Vec<egui::Event>, modifiers: egui::Modifiers| {
+        time.set(time.get() + 1.0 / 60.0);
+        let events = std::iter::once(egui::Event::ModifiersChanged(modifiers)).chain(events).collect();
+        crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(500.0, 400.0))),
+                time: Some(time.get()),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(400.0, 300.0));
+                    crate::app::model_preview::viewport::draw_model_viewport(ui, &data, state, rect.size());
+                });
+            },
+        );
+        rect
+    };
+    let none = egui::Modifiers::NONE;
+    let shift = egui::Modifiers::SHIFT;
+    let button = |pos, pressed, modifiers| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers,
+    };
+    let slide = |frame: &mut dyn FnMut(&mut ModelPreviewState, Vec<egui::Event>, egui::Modifiers) -> egui::Rect,
+                 state: &mut ModelPreviewState,
+                 from: egui::Pos2,
+                 to: egui::Pos2,
+                 modifiers: egui::Modifiers| {
+        for step in 1..=4 {
+            frame(state, vec![egui::Event::PointerMoved(from + (to - from) * (step as f32 / 4.0))], modifiers);
+        }
+    };
+    frame(&mut state, vec![], none);
+    let rect = frame(&mut state, vec![], none);
+    let camera = PreviewCamera::new(&data, &state, rect);
+    let before = armature_node_positions(&data, &state);
+    let (left, right) = (camera.project(before[3]).pos, camera.project(before[6]).pos);
+    slide(&mut frame, &mut state, rect.center(), left, none);
+    frame(&mut state, vec![button(left, true, none)], none);
+    frame(&mut state, vec![button(left, false, none)], none);
+    // Past the double-click window before the next click.
+    time.set(time.get() + 1.0);
+    slide(&mut frame, &mut state, left, right, shift);
+    frame(&mut state, vec![button(right, true, shift)], shift);
+    frame(&mut state, vec![button(right, false, shift)], shift);
+    assert_eq!((state.pose.selected, state.pose.joints()), (Some(6), vec![3, 6]), "both hands, the right active");
+    // Up the right hand's z arrow, most of the way out, then further up.
+    time.set(time.get() + 1.0);
+    let length = 70.0 / camera.points_per_unit(before[6]);
+    let arrow = camera.project([before[6][0], before[6][1], before[6][2] + length * 0.7]).pos;
+    let along = (arrow - right).normalized();
+    slide(&mut frame, &mut state, right, arrow, none);
+    frame(&mut state, vec![button(arrow, true, none)], none);
+    let to = arrow + along * 20.0;
+    slide(&mut frame, &mut state, arrow, to, none);
+    frame(&mut state, vec![button(to, false, none)], none);
+    let after = armature_node_positions(&data, &state);
+    let risen = |hand: usize| after[hand][2] - before[hand][2];
+    assert!(risen(6) > 0.01, "the right hand rose: {}", risen(6));
+    assert!((after[6][0] - before[6][0]).abs() < 1e-3 && (after[6][1] - before[6][1]).abs() < 1e-3, "along z alone");
+    assert!((risen(3) - risen(6)).abs() < 1e-3, "the left hand rose alike: {} and {}", risen(3), risen(6));
+    assert!((0..3).all(|axis| (after[0][axis] - before[0][axis]).abs() < 1e-5), "the root stays");
+    // A Shift+double-click on the left shoulder: it and its arm.
+    time.set(time.get() + 1.0);
+    let shoulder = camera.project(after[1]).pos;
+    slide(&mut frame, &mut state, to, shoulder, shift);
+    for _ in 0..2 {
+        frame(&mut state, vec![button(shoulder, true, shift)], shift);
+        frame(&mut state, vec![button(shoulder, false, shift)], shift);
+    }
+    assert_eq!(state.pose.selected, Some(1));
+    assert_eq!(state.pose.joints(), vec![1, 2, 3, 6], "the shoulder and its arm, added to the hands");
+    assert!(state.pose.pins.is_empty(), "with Shift, a double-click pins nothing");
+}
+
 /// With `BLAM_TEST_H3EK`: the Model Preview card's header fits its width,
 /// from wide down to narrow: no two of its labels or icons overlap, and
 /// none leaves the card. Posing, the header carries its most.
