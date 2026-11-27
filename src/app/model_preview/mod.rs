@@ -52,6 +52,7 @@ pub(in crate::app) mod materials;
 pub(in crate::app) mod material_editor;
 mod panel;
 pub(crate) mod particles;
+pub(crate) mod pose;
 mod reach;
 mod renderer;
 mod selection;
@@ -93,7 +94,7 @@ pub(in crate::app) use panel::snapshot_chevron_id;
 #[cfg(test)]
 use animation::PreviewAnimationPose;
 use animation::{
-    ANIMATION_FRAME_RATE, animation_skinning_rows, armature_node_matrices, armature_node_positions,
+    ANIMATION_FRAME_RATE, animation_skinning_rows, armature_node_matrices, armature_node_positions, pose_beneath,
 };
 #[cfg(test)]
 use ce::frame::object_states;

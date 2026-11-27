@@ -1165,6 +1165,7 @@ fn a_shading_choice_is_picked_inside_the_shading_menu() {
                         state,
                         true,
                         None,
+                        false,
                     );
                 });
             },
@@ -1773,5 +1774,823 @@ fn a_shipped_objects_bounding_sphere_holds_its_geometry() {
             distance < placed.radius * 0.5,
             "{game:?} {path}: {placed:?} about the middle {mid:?}"
         );
+    }
+}
+
+/// Pose mode's gizmo, driven through the viewport: a click on a joint
+/// selects it; a drag that starts on its x arrow moves it along x alone,
+/// though the pointer strays across the arrow too; a click on empty space
+/// deselects it.
+#[test]
+fn a_drag_on_the_gizmos_x_arrow_moves_the_joint_along_x_alone() {
+    use crate::app::model_preview::{PreviewCamera, RenderModelPreviewNode, armature_node_positions};
+    // A bent arm: a root, an elbow up and out, a hand back down level.
+    let worlds = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.8, 0.0, 0.0]];
+    let locals = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.4, 0.0, -0.3]];
+    let nodes = (0..3)
+        .map(|index| RenderModelPreviewNode {
+            name: format!("node {index}"),
+            parent: index as i16 - 1,
+            bind_rotation: [0.0, 0.0, 0.0, 1.0],
+            bind_translation: locals[index],
+            inverse_bind: [
+                [1.0, 0.0, 0.0, -worlds[index][0]],
+                [0.0, 1.0, 0.0, -worlds[index][1]],
+                [0.0, 0.0, 1.0, -worlds[index][2]],
+            ],
+        })
+        .collect();
+    let preview = RenderModelPreview {
+        nodes,
+        bounds_min: [-1.0; 3],
+        bounds_max: [1.0; 3],
+        ..Default::default()
+    };
+    let data = model_preview_data("test".into(), "test".into(), preview, vec![]);
+    let mut state = ModelPreviewState::default();
+    state.pose.on = true;
+    let context = egui::Context::default();
+    let mut time = 0.0;
+    let mut rect = egui::Rect::NOTHING;
+    let mut frame = |state: &mut ModelPreviewState, events: Vec<egui::Event>| {
+        time += 1.0 / 60.0;
+        crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(500.0, 400.0))),
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(400.0, 300.0));
+                    crate::app::model_preview::viewport::draw_model_viewport(ui, &data, state, rect.size());
+                });
+            },
+        );
+        rect
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    // Slid onto a point over a few frames, as a pointer comes.
+    let slide = |frame: &mut dyn FnMut(&mut ModelPreviewState, Vec<egui::Event>) -> egui::Rect,
+                 state: &mut ModelPreviewState,
+                 from: egui::Pos2,
+                 to: egui::Pos2| {
+        for step in 1..=4 {
+            frame(state, vec![egui::Event::PointerMoved(from + (to - from) * (step as f32 / 4.0))]);
+        }
+    };
+    frame(&mut state, vec![]);
+    let rect = frame(&mut state, vec![]);
+    let camera = PreviewCamera::new(&data, &state, rect);
+    let hand = armature_node_positions(&data, &state)[2];
+    let at = camera.project(hand).pos;
+    slide(&mut frame, &mut state, rect.center(), at);
+    frame(&mut state, vec![button(at, true)]);
+    frame(&mut state, vec![button(at, false)]);
+    assert_eq!(state.pose.selected, Some(2), "a click selects the joint");
+    // Along the x arrow, most of the way out.
+    let length = 70.0 / camera.points_per_unit(hand);
+    let arrow = camera.project([hand[0] + length * 0.7, hand[1], hand[2]]).pos;
+    let along = (arrow - at).normalized();
+    let across = Vec2::new(-along.y, along.x);
+    slide(&mut frame, &mut state, at, arrow);
+    frame(&mut state, vec![button(arrow, true)]);
+    let to = arrow + along * 25.0 + across * 20.0;
+    slide(&mut frame, &mut state, arrow, to);
+    frame(&mut state, vec![button(to, false)]);
+    let moved = armature_node_positions(&data, &state)[2];
+    assert!((moved[0] - hand[0]).abs() > 0.01, "moved along x: {moved:?}");
+    assert!((moved[1] - hand[1]).abs() < 1e-3 && (moved[2] - hand[2]).abs() < 1e-3, "y and z held: {hand:?} → {moved:?}");
+    // A click on empty space lets the joint go.
+    let empty = rect.min + Vec2::new(12.0, 12.0);
+    slide(&mut frame, &mut state, to, empty);
+    frame(&mut state, vec![button(empty, true)]);
+    frame(&mut state, vec![button(empty, false)]);
+    assert_eq!(state.pose.selected, None, "a click on empty space deselects");
+}
+
+/// Pose mode's gizmo in the joint's own axes, driven through the viewport:
+/// the hand turned a quarter about up, its x runs along the model's y, and
+/// with Local on a drag on its x arrow moves it along the model's y alone.
+#[test]
+fn with_local_axes_the_x_arrow_runs_along_the_joints_own_x() {
+    use crate::app::model_preview::{PreviewCamera, RenderModelPreviewNode, armature_node_positions};
+    // A bent arm: a root, an elbow up and out, a hand back down level.
+    let worlds = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.8, 0.0, 0.0]];
+    let locals = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.4, 0.0, -0.3]];
+    let nodes = (0..3)
+        .map(|index| RenderModelPreviewNode {
+            name: format!("node {index}"),
+            parent: index as i16 - 1,
+            bind_rotation: if index == 2 {
+                [0.0, 0.0, std::f32::consts::FRAC_1_SQRT_2, std::f32::consts::FRAC_1_SQRT_2]
+            } else {
+                [0.0, 0.0, 0.0, 1.0]
+            },
+            bind_translation: locals[index],
+            inverse_bind: [
+                [1.0, 0.0, 0.0, -worlds[index][0]],
+                [0.0, 1.0, 0.0, -worlds[index][1]],
+                [0.0, 0.0, 1.0, -worlds[index][2]],
+            ],
+        })
+        .collect();
+    let preview = RenderModelPreview {
+        nodes,
+        bounds_min: [-1.0; 3],
+        bounds_max: [1.0; 3],
+        ..Default::default()
+    };
+    let data = model_preview_data("test".into(), "test".into(), preview, vec![]);
+    let mut state = ModelPreviewState::default();
+    state.pose.on = true;
+    state.pose.local = true;
+    // Turned a quarter round, so the model's y lies across the screen
+    // rather than into it.
+    state.yaw = std::f32::consts::FRAC_PI_2;
+    state.pitch = 0.3;
+    let context = egui::Context::default();
+    let mut time = 0.0;
+    let mut rect = egui::Rect::NOTHING;
+    let mut frame = |state: &mut ModelPreviewState, events: Vec<egui::Event>| {
+        time += 1.0 / 60.0;
+        crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(500.0, 400.0))),
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(400.0, 300.0));
+                    crate::app::model_preview::viewport::draw_model_viewport(ui, &data, state, rect.size());
+                });
+            },
+        );
+        rect
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    // Slid onto a point over a few frames, as a pointer comes.
+    let slide = |frame: &mut dyn FnMut(&mut ModelPreviewState, Vec<egui::Event>) -> egui::Rect,
+                 state: &mut ModelPreviewState,
+                 from: egui::Pos2,
+                 to: egui::Pos2| {
+        for step in 1..=4 {
+            frame(state, vec![egui::Event::PointerMoved(from + (to - from) * (step as f32 / 4.0))]);
+        }
+    };
+    frame(&mut state, vec![]);
+    let rect = frame(&mut state, vec![]);
+    let camera = PreviewCamera::new(&data, &state, rect);
+    let hand = armature_node_positions(&data, &state)[2];
+    let at = camera.project(hand).pos;
+    slide(&mut frame, &mut state, rect.center(), at);
+    frame(&mut state, vec![button(at, true)]);
+    frame(&mut state, vec![button(at, false)]);
+    assert_eq!(state.pose.selected, Some(2), "a click selects the joint");
+    // Along the x arrow, most of the way out: the model's y, as turned.
+    let length = 70.0 / camera.points_per_unit(hand);
+    let arrow = camera.project([hand[0], hand[1] + length * 0.7, hand[2]]).pos;
+    let along = (arrow - at).normalized();
+    let across = Vec2::new(-along.y, along.x);
+    slide(&mut frame, &mut state, at, arrow);
+    frame(&mut state, vec![button(arrow, true)]);
+    // Short of the arm's full reach, where the hand keeps to the line.
+    let to = arrow + along * 6.0 + across * 20.0;
+    slide(&mut frame, &mut state, arrow, to);
+    frame(&mut state, vec![button(to, false)]);
+    let moved = armature_node_positions(&data, &state)[2];
+    assert!((moved[1] - hand[1]).abs() > 0.01, "moved along the model's y: {moved:?}");
+    assert!((moved[0] - hand[0]).abs() < 1e-3 && (moved[2] - hand[2]).abs() < 1e-3, "x and z held: {hand:?} → {moved:?}");
+    // Moved by the pointer's run past where it took the arrow, 6 points of
+    // the arrow's 70: not jumped to the pointer, 0.7 of an arrow out.
+    let run = (moved[1] - hand[1]).abs() / length;
+    assert!(run < 0.2, "kept behind the pointer as taken, not jumped to it: {run} of an arrow");
+}
+
+/// Pose mode's rotate gizmo, driven through the viewport: with the elbow
+/// selected, a drag along its z ring the way the ring runs turns the hand
+/// about z that way round, the elbow staying put and the hand's height kept.
+#[test]
+fn a_drag_round_the_gizmos_z_ring_turns_the_joint_about_z() {
+    use crate::app::model_preview::pose::GizmoMode;
+    use crate::app::model_preview::{PreviewCamera, RenderModelPreviewNode, armature_node_positions};
+    let worlds = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.8, 0.0, 0.0]];
+    let locals = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.4, 0.0, -0.3]];
+    let nodes = (0..3)
+        .map(|index| RenderModelPreviewNode {
+            name: format!("node {index}"),
+            parent: index as i16 - 1,
+            bind_rotation: [0.0, 0.0, 0.0, 1.0],
+            bind_translation: locals[index],
+            inverse_bind: [
+                [1.0, 0.0, 0.0, -worlds[index][0]],
+                [0.0, 1.0, 0.0, -worlds[index][1]],
+                [0.0, 0.0, 1.0, -worlds[index][2]],
+            ],
+        })
+        .collect();
+    let preview = RenderModelPreview {
+        nodes,
+        bounds_min: [-1.0; 3],
+        bounds_max: [1.0; 3],
+        ..Default::default()
+    };
+    let data = model_preview_data("test".into(), "test".into(), preview, vec![]);
+    let mut state = ModelPreviewState::default();
+    state.pose.on = true;
+    state.pose.gizmo = GizmoMode::Rotate;
+    // Looking down on it from above, so the z ring is a full circle.
+    state.pitch = 1.2;
+    // The pose belongs to this model before the elbow is picked.
+    state.pose.follow(data.geometry_id);
+    state.pose.selected = Some(1);
+    let context = egui::Context::default();
+    let mut time = 0.0;
+    let mut rect = egui::Rect::NOTHING;
+    let mut frame = |state: &mut ModelPreviewState, events: Vec<egui::Event>| {
+        time += 1.0 / 60.0;
+        crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(500.0, 400.0))),
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(400.0, 300.0));
+                    crate::app::model_preview::viewport::draw_model_viewport(ui, &data, state, rect.size());
+                });
+            },
+        );
+        rect
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut state, vec![]);
+    let rect = frame(&mut state, vec![]);
+    let camera = PreviewCamera::new(&data, &state, rect);
+    let before = armature_node_positions(&data, &state);
+    let elbow = before[1];
+    // A point on the z ring, at 0.6 of a turn round, and the way it runs.
+    let radius = 60.0 / camera.points_per_unit(elbow);
+    let on_ring = |t: f32| camera.project([elbow[0] + radius * t.cos(), elbow[1] + radius * t.sin(), elbow[2]]).pos;
+    let (t, step) = (3.8_f32, 0.05_f32);
+    let start = on_ring(t);
+    let way = (on_ring(t + step) - on_ring(t - step)).normalized();
+    let to = start + way * 30.0;
+    for index in 1..=4 {
+        let at = rect.center() + (start - rect.center()) * (index as f32 / 4.0);
+        frame(&mut state, vec![egui::Event::PointerMoved(at)]);
+    }
+    frame(&mut state, vec![button(start, true)]);
+    for index in 1..=4 {
+        frame(&mut state, vec![egui::Event::PointerMoved(start + (to - start) * (index as f32 / 4.0))]);
+    }
+    frame(&mut state, vec![button(to, false)]);
+    let after = armature_node_positions(&data, &state);
+    let around = |hand: [f32; 3]| (hand[1] - elbow[1]).atan2(hand[0] - elbow[0]);
+    assert!((0..3).all(|axis| (after[1][axis] - elbow[axis]).abs() < 1e-4), "the elbow stays");
+    assert!((after[2][2] - before[2][2]).abs() < 1e-4, "the hand keeps its height");
+    let turned = around(after[2]) - around(before[2]);
+    assert!(turned > 0.1, "turned about z the way the ring runs: {turned}");
+}
+
+/// Pose mode's scale gizmo, driven through the viewport: with the elbow
+/// selected, a drag taking its circle out to twice as far from the joint
+/// doubles the elbow's scale, and the forearm with it, the elbow staying put.
+#[test]
+fn a_drag_outward_on_the_scale_circle_grows_the_joint() {
+    use crate::app::model_preview::pose::GizmoMode;
+    use crate::app::model_preview::{PreviewCamera, RenderModelPreviewNode, armature_node_positions};
+    let worlds = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.8, 0.0, 0.0]];
+    let locals = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.4, 0.0, -0.3]];
+    let nodes = (0..3)
+        .map(|index| RenderModelPreviewNode {
+            name: format!("node {index}"),
+            parent: index as i16 - 1,
+            bind_rotation: [0.0, 0.0, 0.0, 1.0],
+            bind_translation: locals[index],
+            inverse_bind: [
+                [1.0, 0.0, 0.0, -worlds[index][0]],
+                [0.0, 1.0, 0.0, -worlds[index][1]],
+                [0.0, 0.0, 1.0, -worlds[index][2]],
+            ],
+        })
+        .collect();
+    let preview = RenderModelPreview {
+        nodes,
+        bounds_min: [-1.0; 3],
+        bounds_max: [1.0; 3],
+        ..Default::default()
+    };
+    let data = model_preview_data("test".into(), "test".into(), preview, vec![]);
+    let mut state = ModelPreviewState::default();
+    state.pose.on = true;
+    state.pose.gizmo = GizmoMode::Scale;
+    // The pose belongs to this model before the elbow is picked.
+    state.pose.follow(data.geometry_id);
+    state.pose.selected = Some(1);
+    let context = egui::Context::default();
+    let mut time = 0.0;
+    let mut rect = egui::Rect::NOTHING;
+    let mut frame = |state: &mut ModelPreviewState, events: Vec<egui::Event>| {
+        time += 1.0 / 60.0;
+        crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(500.0, 400.0))),
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(400.0, 300.0));
+                    crate::app::model_preview::viewport::draw_model_viewport(ui, &data, state, rect.size());
+                });
+            },
+        );
+        rect
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut state, vec![]);
+    let rect = frame(&mut state, vec![]);
+    let camera = PreviewCamera::new(&data, &state, rect);
+    let before = armature_node_positions(&data, &state);
+    let elbow = before[1];
+    let centre = camera.project(elbow).pos;
+    let start = centre + Vec2::new(45.0, 0.0);
+    let to = centre + Vec2::new(90.0, 0.0);
+    for index in 1..=4 {
+        let at = rect.center() + (start - rect.center()) * (index as f32 / 4.0);
+        frame(&mut state, vec![egui::Event::PointerMoved(at)]);
+    }
+    frame(&mut state, vec![button(start, true)]);
+    for index in 1..=4 {
+        frame(&mut state, vec![egui::Event::PointerMoved(start + (to - start) * (index as f32 / 4.0))]);
+    }
+    frame(&mut state, vec![button(to, false)]);
+    let after = armature_node_positions(&data, &state);
+    let forearm = |positions: &[[f32; 3]]| (0..3).map(|axis| (positions[2][axis] - positions[1][axis]).powi(2)).sum::<f32>().sqrt();
+    assert!((0..3).all(|axis| (after[1][axis] - elbow[axis]).abs() < 1e-4), "the elbow stays");
+    assert!((state.pose.scale_of(1) - 2.0).abs() < 0.05, "scaled by 2: {}", state.pose.scale_of(1));
+    let grown = forearm(&after) / forearm(&before);
+    assert!((grown - state.pose.scale_of(1)).abs() < 1e-3, "the forearm grows with it: {grown}");
+    assert_eq!(state.pose.selected, Some(1), "the press on the circle keeps the joint selected");
+}
+
+/// Selecting several joints, driven through the viewport: a click on one
+/// hand and a Shift+click on the other select both, the second active; a
+/// drag up its z arrow raises both hands alike, each through its own arm.
+/// A Shift+double-click on a shoulder selects it and its arm below.
+#[test]
+fn shift_click_selects_both_hands_and_the_arrow_moves_them_together() {
+    use crate::app::model_preview::{PreviewCamera, RenderModelPreviewNode, armature_node_positions};
+    // A root, then each side's shoulder, elbow and hand: arms out along y,
+    // bent forward at the elbow, so a hand can rise without reaching out.
+    let worlds: [[f32; 3]; 7] = [
+        [0.0, 0.0, 0.0],
+        [0.0, 0.2, 0.5],
+        [0.25, 0.45, 0.5],
+        [0.0, 0.7, 0.5],
+        [0.0, -0.2, 0.5],
+        [0.25, -0.45, 0.5],
+        [0.0, -0.7, 0.5],
+    ];
+    let parents = [-1_i16, 0, 1, 2, 0, 4, 5];
+    let nodes = (0..7)
+        .map(|index| {
+            let parent = usize::try_from(parents[index]).map_or([0.0; 3], |parent| worlds[parent]);
+            RenderModelPreviewNode {
+                name: format!("node {index}"),
+                parent: parents[index],
+                bind_rotation: [0.0, 0.0, 0.0, 1.0],
+                bind_translation: std::array::from_fn(|axis| worlds[index][axis] - parent[axis]),
+                inverse_bind: [
+                    [1.0, 0.0, 0.0, -worlds[index][0]],
+                    [0.0, 1.0, 0.0, -worlds[index][1]],
+                    [0.0, 0.0, 1.0, -worlds[index][2]],
+                ],
+            }
+        })
+        .collect();
+    let preview = RenderModelPreview {
+        nodes,
+        bounds_min: [-1.0; 3],
+        bounds_max: [1.0; 3],
+        ..Default::default()
+    };
+    let data = model_preview_data("test".into(), "test".into(), preview, vec![]);
+    let mut state = ModelPreviewState::default();
+    state.pose.on = true;
+    let context = egui::Context::default();
+    let time = std::cell::Cell::new(0.0_f64);
+    let mut rect = egui::Rect::NOTHING;
+    let mut frame = |state: &mut ModelPreviewState, events: Vec<egui::Event>, modifiers: egui::Modifiers| {
+        time.set(time.get() + 1.0 / 60.0);
+        let events = std::iter::once(egui::Event::ModifiersChanged(modifiers)).chain(events).collect();
+        crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(500.0, 400.0))),
+                time: Some(time.get()),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(400.0, 300.0));
+                    crate::app::model_preview::viewport::draw_model_viewport(ui, &data, state, rect.size());
+                });
+            },
+        );
+        rect
+    };
+    let none = egui::Modifiers::NONE;
+    let shift = egui::Modifiers::SHIFT;
+    let button = |pos, pressed, modifiers| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers,
+    };
+    let slide = |frame: &mut dyn FnMut(&mut ModelPreviewState, Vec<egui::Event>, egui::Modifiers) -> egui::Rect,
+                 state: &mut ModelPreviewState,
+                 from: egui::Pos2,
+                 to: egui::Pos2,
+                 modifiers: egui::Modifiers| {
+        for step in 1..=4 {
+            frame(state, vec![egui::Event::PointerMoved(from + (to - from) * (step as f32 / 4.0))], modifiers);
+        }
+    };
+    frame(&mut state, vec![], none);
+    let rect = frame(&mut state, vec![], none);
+    let camera = PreviewCamera::new(&data, &state, rect);
+    let before = armature_node_positions(&data, &state);
+    let (left, right) = (camera.project(before[3]).pos, camera.project(before[6]).pos);
+    slide(&mut frame, &mut state, rect.center(), left, none);
+    frame(&mut state, vec![button(left, true, none)], none);
+    frame(&mut state, vec![button(left, false, none)], none);
+    // Past the double-click window before the next click.
+    time.set(time.get() + 1.0);
+    slide(&mut frame, &mut state, left, right, shift);
+    frame(&mut state, vec![button(right, true, shift)], shift);
+    frame(&mut state, vec![button(right, false, shift)], shift);
+    assert_eq!((state.pose.selected, state.pose.joints()), (Some(6), vec![3, 6]), "both hands, the right active");
+    // Up the right hand's z arrow, most of the way out, then further up.
+    time.set(time.get() + 1.0);
+    let length = 70.0 / camera.points_per_unit(before[6]);
+    let arrow = camera.project([before[6][0], before[6][1], before[6][2] + length * 0.7]).pos;
+    let along = (arrow - right).normalized();
+    slide(&mut frame, &mut state, right, arrow, none);
+    frame(&mut state, vec![button(arrow, true, none)], none);
+    let to = arrow + along * 20.0;
+    slide(&mut frame, &mut state, arrow, to, none);
+    frame(&mut state, vec![button(to, false, none)], none);
+    let after = armature_node_positions(&data, &state);
+    let risen = |hand: usize| after[hand][2] - before[hand][2];
+    assert!(risen(6) > 0.01, "the right hand rose: {}", risen(6));
+    assert!((after[6][0] - before[6][0]).abs() < 1e-3 && (after[6][1] - before[6][1]).abs() < 1e-3, "along z alone");
+    assert!((risen(3) - risen(6)).abs() < 1e-3, "the left hand rose alike: {} and {}", risen(3), risen(6));
+    assert!((0..3).all(|axis| (after[0][axis] - before[0][axis]).abs() < 1e-5), "the root stays");
+    // A Shift+double-click on the left shoulder: it and its arm.
+    time.set(time.get() + 1.0);
+    let shoulder = camera.project(after[1]).pos;
+    slide(&mut frame, &mut state, to, shoulder, shift);
+    for _ in 0..2 {
+        frame(&mut state, vec![button(shoulder, true, shift)], shift);
+        frame(&mut state, vec![button(shoulder, false, shift)], shift);
+    }
+    assert_eq!(state.pose.selected, Some(1));
+    assert_eq!(state.pose.joints(), vec![1, 2, 3, 6], "the shoulder and its arm, added to the hands");
+    assert!(state.pose.pins.is_empty(), "with Shift, a double-click pins nothing");
+}
+
+/// A joint under the pointer is named while the view is still, not while
+/// the camera moves (here zooming in on it, which keeps it under the
+/// pointer), and named again once the camera has settled.
+#[test]
+fn a_joints_name_waits_for_the_camera_to_settle() {
+    use crate::app::model_preview::{PreviewCamera, RenderModelPreviewNode, armature_node_positions};
+    let worlds = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.8, 0.0, 0.0]];
+    let locals = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.4, 0.0, -0.3]];
+    let nodes = (0..3)
+        .map(|index| RenderModelPreviewNode {
+            name: format!("node {index}"),
+            parent: index as i16 - 1,
+            bind_rotation: [0.0, 0.0, 0.0, 1.0],
+            bind_translation: locals[index],
+            inverse_bind: [
+                [1.0, 0.0, 0.0, -worlds[index][0]],
+                [0.0, 1.0, 0.0, -worlds[index][1]],
+                [0.0, 0.0, 1.0, -worlds[index][2]],
+            ],
+        })
+        .collect();
+    let preview = RenderModelPreview {
+        nodes,
+        bounds_min: [-1.0; 3],
+        bounds_max: [1.0; 3],
+        ..Default::default()
+    };
+    let data = model_preview_data("test".into(), "test".into(), preview, vec![]);
+    let mut state = ModelPreviewState::default();
+    state.show_armature = true;
+    let context = egui::Context::default();
+    let time = std::cell::Cell::new(0.0_f64);
+    let mut rect = egui::Rect::NOTHING;
+    // A pass, and whether it named the hand.
+    let mut frame = |state: &mut ModelPreviewState, events: Vec<egui::Event>| {
+        time.set(time.get() + 1.0 / 60.0);
+        let output = crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(500.0, 400.0))),
+                time: Some(time.get()),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                // The wheel goes to whoever claims it in the gesture, as the
+                // workspace sets it going each pass.
+                crate::app::editor::begin_wheel_gesture(ui.ctx());
+                egui::CentralPanel::default().show(ui, |ui| {
+                    rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(400.0, 300.0));
+                    crate::app::model_preview::viewport::draw_model_viewport(ui, &data, state, rect.size());
+                });
+                crate::app::editor::end_wheel_gesture(ui.ctx());
+            },
+        );
+        let named = output.shapes.iter().any(|clipped| {
+            matches!(&clipped.shape, egui::Shape::Text(text) if text.galley.text() == "node 2")
+        });
+        (rect, named)
+    };
+    frame(&mut state, vec![]);
+    let (rect, _) = frame(&mut state, vec![]);
+    let camera = PreviewCamera::new(&data, &state, rect);
+    let hand = camera.project(armature_node_positions(&data, &state)[2]).pos;
+    for step in 1..=4 {
+        frame(&mut state, vec![egui::Event::PointerMoved(rect.center() + (hand - rect.center()) * (step as f32 / 4.0))]);
+    }
+    assert!(frame(&mut state, vec![]).1, "still, the joint under the pointer is named");
+    let wheel = egui::Event::MouseWheel {
+        source: egui::MouseWheelSource::Unknown,
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, 20.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+    };
+    let scale = state.scale;
+    let zooming = frame(&mut state, vec![wheel.clone()]).1;
+    assert!(state.scale > scale, "the wheel zoomed: {scale} → {}", state.scale);
+    assert!(!zooming, "zooming, it is not");
+    assert!(!frame(&mut state, vec![]).1, "nor between a zoom's wheel ticks");
+    assert!(!frame(&mut state, vec![wheel]).1);
+    time.set(time.get() + 0.5);
+    assert!(frame(&mut state, vec![]).1, "settled, it is named again");
+}
+
+/// During a drag, `[` takes a node from the chain and `]` adds one back,
+/// for a trackpad with no wheel, up to the most above the joint; nothing is
+/// labelled while the joint is dragged.
+#[test]
+fn brackets_change_how_many_joints_follow_a_drag_and_no_label_shows() {
+    use crate::app::model_preview::{PreviewCamera, RenderModelPreviewNode, armature_node_positions};
+    let worlds = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.8, 0.0, 0.0]];
+    let locals = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.4, 0.0, -0.3]];
+    let nodes = (0..3)
+        .map(|index| RenderModelPreviewNode {
+            name: format!("node {index}"),
+            parent: index as i16 - 1,
+            bind_rotation: [0.0, 0.0, 0.0, 1.0],
+            bind_translation: locals[index],
+            inverse_bind: [
+                [1.0, 0.0, 0.0, -worlds[index][0]],
+                [0.0, 1.0, 0.0, -worlds[index][1]],
+                [0.0, 0.0, 1.0, -worlds[index][2]],
+            ],
+        })
+        .collect();
+    let preview = RenderModelPreview {
+        nodes,
+        bounds_min: [-1.0; 3],
+        bounds_max: [1.0; 3],
+        ..Default::default()
+    };
+    let data = model_preview_data("test".into(), "test".into(), preview, vec![]);
+    let mut state = ModelPreviewState::default();
+    state.pose.on = true;
+    let context = egui::Context::default();
+    let mut time = 0.0;
+    let mut rect = egui::Rect::NOTHING;
+    // A pass, and whether it labelled anything.
+    let mut frame = |state: &mut ModelPreviewState, events: Vec<egui::Event>| {
+        time += 1.0 / 60.0;
+        let output = crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(500.0, 400.0))),
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(400.0, 300.0));
+                    crate::app::model_preview::viewport::draw_model_viewport(ui, &data, state, rect.size());
+                });
+            },
+        );
+        let labelled = output.shapes.iter().any(|clipped| {
+            matches!(&clipped.shape, egui::Shape::Text(text) if text.galley.text().starts_with("node"))
+        });
+        (rect, labelled)
+    };
+    let key = |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut state, vec![]);
+    let (rect, _) = frame(&mut state, vec![]);
+    let camera = PreviewCamera::new(&data, &state, rect);
+    let hand = camera.project(armature_node_positions(&data, &state)[2]).pos;
+    for step in 1..=4 {
+        frame(&mut state, vec![egui::Event::PointerMoved(rect.center() + (hand - rect.center()) * (step as f32 / 4.0))]);
+    }
+    assert!(frame(&mut state, vec![]).1, "hovered, the hand is named");
+    frame(&mut state, vec![button(hand, true)]);
+    let mut at = hand;
+    for _ in 0..3 {
+        at += Vec2::new(0.0, -3.0);
+        frame(&mut state, vec![egui::Event::PointerMoved(at)]);
+    }
+    assert!(state.pose.dragging.is_some(), "the hand is dragged");
+    at += Vec2::new(0.0, -3.0);
+    assert!(!frame(&mut state, vec![egui::Event::PointerMoved(at)]).1, "dragged, nothing is labelled");
+    assert_eq!(state.pose.chain, 2);
+    at += Vec2::new(0.0, -3.0);
+    frame(&mut state, vec![egui::Event::PointerMoved(at), key(egui::Key::OpenBracket)]);
+    assert_eq!(state.pose.chain, 1, "[ takes one");
+    at += Vec2::new(0.0, -3.0);
+    frame(&mut state, vec![egui::Event::PointerMoved(at), key(egui::Key::CloseBracket)]);
+    at += Vec2::new(0.0, -3.0);
+    frame(&mut state, vec![egui::Event::PointerMoved(at), key(egui::Key::CloseBracket)]);
+    assert_eq!(state.pose.chain, 2, "] adds one back, no more than the two above the hand");
+    frame(&mut state, vec![button(at, false)]);
+}
+
+/// With `BLAM_TEST_H3EK`: the Model Preview card's header fits its width,
+/// from wide down to narrow: no two of its labels or icons overlap, and
+/// none leaves the card. Posing, the header carries its most.
+#[test]
+fn the_preview_header_never_overlaps_itself() {
+    use crate::app::model_preview::load::TagReader;
+    use crate::app::{TagEntry, TagEntryLocation};
+    let Some(root) = kit_root(GameId::Halo3) else {
+        return;
+    };
+    let path = "objects\\characters\\masterchief\\masterchief";
+    let data = crate::app::model_preview::harness::kit::kit_preview(&root, GameId::Halo3, path, "biped", b"bipd");
+    let source = TagSource::LooseFolder {
+        root: root.clone(),
+        game: Some(GameId::Halo3),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let tag = TagReader::new(&source).load(path, "biped", b"bipd").unwrap();
+    let entry = TagEntry {
+        key: format!("{path}.biped"),
+        display_path: format!("{path}.biped"),
+        group_tag: u32::from_be_bytes(*b"bipd"),
+        group_name: Some("biped".to_owned()),
+        location: TagEntryLocation::LooseFile(root.join("objects/characters/masterchief/masterchief.biped")),
+    };
+    let panel = super::layout::PreviewPanel {
+        tag: &tag,
+        entry: &entry,
+        source_game: Some(GameId::Halo3),
+        supports_textures: true,
+        own_view: None,
+        data: &data,
+        reloading: false,
+    };
+    for width in [1400.0_f32, 1000.0, 800.0, 640.0, 520.0, 440.0, 380.0, 340.0] {
+        let mut state = ModelPreviewState::default();
+        state.pose.on = true;
+        state.pose.follow(data.geometry_id);
+        state.pose.turns.insert(0, blam_tags::math::RealQuaternion::IDENTITY);
+        // Untextured, so the viewport draws rather than waiting on textures.
+        state.set_shading(crate::app::model_preview::ModelShading::Solid);
+        let context = egui::Context::default();
+        let mut card = egui::Rect::NOTHING;
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            let output = crate::app::run_ui_test(
+                &context,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(width + 40.0, 500.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let mut requests = super::layout::SetupRequests::default();
+                        ui.allocate_ui(Vec2::new(width, 480.0), |ui| {
+                            ui.set_width(width);
+                            card = ui.max_rect();
+                            super::layout::draw_preview_card(ui, &panel, &mut state, &mut requests, 460.0);
+                        });
+                    });
+                },
+            );
+            shapes = output.shapes;
+        }
+        // What the header paints: each label's and each icon's bounds.
+        let header = egui::Rect::from_min_size(card.min, Vec2::new(card.width(), super::layout::PREVIEW_HEADER_HEIGHT));
+        let mut pieces: Vec<egui::Rect> = Vec::new();
+        let mut labels = String::new();
+        for clipped in &shapes {
+            if let egui::Shape::Text(text) = &clipped.shape
+                && header.contains(text.visual_bounding_rect().center())
+            {
+                labels.push_str(text.galley.text());
+                labels.push('|');
+            }
+            let rect = match &clipped.shape {
+                egui::Shape::Text(text) => text.visual_bounding_rect(),
+                egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => mesh.calc_bounds(),
+                _ => continue,
+            };
+            // A hair's overlap at an edge is anti-aliasing, not a clash.
+            let rect = rect.shrink(1.0);
+            if rect.is_positive() && header.contains(rect.center()) {
+                pieces.push(rect);
+            }
+        }
+        assert!(pieces.len() > 3, "{width}: the header drew its controls");
+        // Nothing in the header is cut at its top or bottom, where a hovered
+        // button's outline stands a point past its frame.
+        for clipped in &shapes {
+            let rect = clipped.shape.visual_bounding_rect();
+            if rect.is_positive() && header.contains(rect.center()) {
+                let clip = clipped.clip_rect;
+                assert!(
+                    clip.top() <= rect.top() - 1.0 && clip.bottom() >= rect.bottom() + 1.0,
+                    "{width}: {rect:?} is cut by {clip:?}"
+                );
+            }
+        }
+        if width >= 1000.0 {
+            assert!(labels.contains("Refresh Model") && labels.contains("Pose"), "{width}: {labels}");
+        }
+        // Pose's tools ride in the viewport, not the header.
+        assert!(!labels.contains("Rotate"), "{width}: {labels}");
+        let strip = shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Rotate" => Some(text.visual_bounding_rect()),
+            _ => None,
+        });
+        let strip = strip.unwrap_or_else(|| panic!("{width}: no Rotate in the viewport"));
+        assert!(strip.top() > header.bottom() && strip.left() < card.left() + 200.0, "{width}: {strip:?}");
+        for (index, a) in pieces.iter().enumerate() {
+            assert!(a.min.x >= card.min.x - 1.0 && a.max.x <= card.max.x + 1.0, "{width}: {a:?} leaves the card {card:?}");
+            for b in &pieces[index + 1..] {
+                assert!(!a.intersects(*b), "{width}: {a:?} overlaps {b:?}");
+            }
+        }
     }
 }

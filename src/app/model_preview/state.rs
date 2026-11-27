@@ -56,6 +56,8 @@ pub(in crate::app) struct ModelPreviewState {
     /// Include reports carrying the import tool's non-critical flag.
     pub(in crate::app) show_non_critical_errors: bool,
     /// Draw the model skeleton over the preview, with hoverable bone names.
+    /// The hand pose: joints dragged in the viewport (`pose`).
+    pub(in crate::app) pose: super::pose::PoseEdit,
     pub(in crate::app) show_armature: bool,
     /// Draw the object's bounding sphere, for a tag that has one.
     pub(in crate::app) show_bounding_sphere: bool,
@@ -239,6 +241,7 @@ impl Default for ModelPreviewState {
             show_errors: false,
             show_non_critical_errors: false,
             show_armature: false,
+            pose: Default::default(),
             show_bounding_sphere: false,
             bounding_sphere: None,
             marker_filter: String::new(),

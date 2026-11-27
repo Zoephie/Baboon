@@ -263,7 +263,14 @@ pub(in crate::app::model_preview) fn load_ce_object(
             );
         },
     );
-    let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
+    // Named with its extension: a bare path is a later game's `render_model`
+    // to the Material Editor, which holds it to switch the shaders it names.
+    let mut data = model_preview_data(
+        entry.key.clone(),
+        format!("{reference}.gbxmodel"),
+        preview,
+        Vec::new(),
+    );
     data.ce.picks = Some(picks);
     data.ce.marker_picks = Some(marker_picks);
     // Game Shaders' alone (`TagReader::game_shaders`).

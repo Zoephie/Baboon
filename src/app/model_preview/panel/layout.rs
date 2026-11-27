@@ -3,11 +3,11 @@
 //! height; above it the viewport takes every point the Model Setup sidebar
 //! leaves, and the sidebar is as wide as its edge was last dragged.
 
-use super::super::super::ui_kit::button_icons::{ButtonIcon, icon_text_button};
+use super::super::super::ui_kit::button_icons::{ButtonIcon, icon_button, icon_text_button};
 use super::super::super::ui_kit::dock::{
     SidebarLimits, SidebarSplit, draw_sidebar_resize_handle, split_sidebar,
 };
-use super::super::super::ui_kit::style::{foundation_group_edge, subtle_dark};
+use super::super::super::ui_kit::style::{foundation_group_edge, subtle_dark, text_dark};
 use super::super::super::{GameId, TagEntry, TagNameIndex};
 use super::super::{
     FieldEditContext, MAX_MODEL_SETUP_WIDTH, MIN_MODEL_SETUP_WIDTH, ModelPreviewData,
@@ -452,15 +452,32 @@ pub(in crate::app::model_preview) fn draw_setup_cards(
 /// The room between the setup panel's border and its cards.
 pub(in crate::app) const SETUP_PANEL_PADDING: f32 = 8.0;
 
-/// The Model Preview card's header. Right to left: the View and Shading
-/// menus, then Refresh Model. At the left, the model and armature
+/// How much of the Model Preview card's header a narrow card keeps, widest
+/// first: each step gives up more to fit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HeaderFit {
+    /// Every control with its label.
+    Full,
+    /// The right group's View, Shading and Refresh Model as icons.
+    Compact,
+    /// As Compact, with the model toggles folded into the Other menu.
+    Folded,
+}
+
+/// The Model Preview card's header. Right to left: the snapshot, View and
+/// Shading menus, then Refresh Model. At the left, the model and armature
 /// toggles, or the card's title for a tag with none, then the Other menu.
+/// The two groups are measured first, and a card too narrow for both gives
+/// up labels, then the toggles ([`HeaderFit`]), rather than overlap them.
 pub(in crate::app::model_preview) fn draw_preview_header(
     ui: &mut Ui,
     panel: &PreviewPanel<'_>,
     state: &mut ModelPreviewState,
     requests: &mut SetupRequests,
 ) {
+    state.bounding_sphere = object_bounding_sphere(panel.tag, panel.source_game);
+    let fit = header_fit(ui, panel, state);
+    let compact = fit != HeaderFit::Full;
     // Right of the View menu, as the header lays out from the right.
     super::snapshot::draw_snapshot_controls(ui, state);
     draw_model_view_settings_menu(
@@ -469,32 +486,108 @@ pub(in crate::app::model_preview) fn draw_preview_header(
         state,
         panel.supports_textures,
         panel.own_view,
+        compact,
     );
     // Right of Refresh Model, as the header lays out from the right.
-    if icon_text_button(ui, ButtonIcon::Refresh, "Refresh Model", true)
-        .on_hover_text("Load the model again from its tags.")
-        .clicked()
-    {
+    draw_refresh_button(ui, state, requests, compact);
+    // What the menus leave, from the header's left edge. Even narrower than
+    // the folded header fits, what doesn't fit is cut off, not drawn over
+    // the menus.
+    let left = ui.available_rect_before_wrap();
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(left)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| {
+            // Cut at the sides only: a hovered button's outline stands out
+            // past the row's top and bottom.
+            let clip = ui.clip_rect();
+            ui.set_clip_rect(egui::Rect::from_x_y_ranges(left.x_range(), clip.y_range()).intersect(clip));
+            match fit {
+                HeaderFit::Folded => {
+                    let mut toggles = |ui: &mut Ui, state: &mut ModelPreviewState| draw_header_toggles(ui, panel, state);
+                    draw_model_other_menu(ui, panel.data, state, Some(&mut toggles));
+                }
+                HeaderFit::Full | HeaderFit::Compact => {
+                    if !draw_header_toggles(ui, panel, state) {
+                        section_title(ui, MODEL_PREVIEW_TITLE);
+                    }
+                    draw_model_other_menu(ui, panel.data, state, None);
+                }
+            }
+        },
+    );
+}
+
+/// The header's model and armature toggles; false for a tag with none.
+fn draw_header_toggles(ui: &mut Ui, panel: &PreviewPanel<'_>, state: &mut ModelPreviewState) -> bool {
+    draw_model_layer_toggles(
+        ui,
+        panel.tag,
+        panel.data,
+        state,
+        panel.own_view,
+        panel.source_game,
+        !panel.data.preview.nodes.is_empty(),
+    )
+}
+
+fn draw_refresh_button(ui: &mut Ui, state: &mut ModelPreviewState, requests: &mut SetupRequests, compact: bool) {
+    const TIP: &str = "Load the model again from its tags.";
+    let response = if compact {
+        icon_button(ui, ButtonIcon::Refresh, "Refresh Model", true, text_dark())
+            .on_hover_text(format!("Refresh Model\n{TIP}"))
+    } else {
+        icon_text_button(ui, ButtonIcon::Refresh, "Refresh Model", true).on_hover_text(TIP)
+    };
+    if response.clicked() {
         state.invalidate_load();
         requests.reload = true;
     }
-    state.bounding_sphere = object_bounding_sphere(panel.tag, panel.source_game);
-    // What the menus leave, from the header's left edge.
-    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        let toggles = draw_model_layer_toggles(
-            ui,
-            panel.tag,
-            panel.data,
-            state,
-            panel.own_view,
-            panel.source_game,
-            !panel.data.preview.nodes.is_empty(),
+}
+
+/// The widest [`HeaderFit`] whose two groups fit the header side by side,
+/// each group drawn first where nothing shows and nothing can be clicked,
+/// to measure it.
+fn header_fit(ui: &mut Ui, panel: &PreviewPanel<'_>, state: &mut ModelPreviewState) -> HeaderFit {
+    let available = ui.available_width();
+    let gap = ui.spacing().item_spacing.x;
+    let mut measure = |salt: &str, draw: &mut dyn FnMut(&mut Ui, &mut ModelPreviewState)| {
+        // Far off the page, so its widgets lie under nothing real.
+        let far = egui::Rect::from_min_size(egui::pos2(-100_000.0, -100_000.0), egui::vec2(10_000.0, 100.0));
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt(salt)
+                .max_rect(far)
+                .layout(egui::Layout::left_to_right(egui::Align::Center))
+                .invisible()
+                .sizing_pass(),
         );
-        if !toggles {
+        draw(&mut child, state);
+        child.min_rect().width()
+    };
+    let right = |compact: bool| {
+        move |ui: &mut Ui, state: &mut ModelPreviewState| {
+            super::snapshot::draw_snapshot_controls(ui, state);
+            draw_model_view_settings_menu(ui, panel.data, state, panel.supports_textures, panel.own_view, compact);
+            draw_refresh_button(ui, state, &mut SetupRequests::default(), compact);
+        }
+    };
+    let right_full = measure("header_measure_right_full", &mut right(false));
+    let right_compact = measure("header_measure_right_compact", &mut right(true));
+    let left_full = measure("header_measure_left", &mut |ui, state| {
+        if !draw_header_toggles(ui, panel, state) {
             section_title(ui, MODEL_PREVIEW_TITLE);
         }
-        draw_model_other_menu(ui, panel.data, state);
+        draw_model_other_menu(ui, panel.data, state, None);
     });
+    if right_full + gap + left_full <= available {
+        HeaderFit::Full
+    } else if right_compact + gap + left_full <= available {
+        HeaderFit::Compact
+    } else {
+        HeaderFit::Folded
+    }
 }
 
 /// What the preview panel and its tab call themselves, by tag group. Only

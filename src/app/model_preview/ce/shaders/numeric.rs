@@ -25,7 +25,10 @@ impl CeNumeric {
     fn number(&self, outputs: &[f32; 4]) -> i32 {
         // Eight images mean a different output from the usual ten.
         let output = outputs[if self.count == 8 { 3 } else { 0 }];
-        ((output * self.limit as f32 + 0.5).floor() as i32).clamp(0, self.limit)
+        // A limit below zero (a definitions set reading the byte as signed)
+        // counts nothing, rather than panicking `clamp`.
+        let limit = self.limit.max(0);
+        ((output * limit as f32 + 0.5).floor() as i32).clamp(0, limit)
     }
 
     /// The pass's numeric digits, if it is a numeric display's.

@@ -256,6 +256,45 @@ impl PreviewCamera {
         }
     }
 
+    /// The point under `pos` on screen at the same depth as `beside`: on
+    /// the plane through `beside` facing the camera. [`Self::project`]
+    /// undone at that depth.
+    pub(in crate::app::model_preview) fn unproject_beside(
+        &self,
+        pos: egui::Pos2,
+        beside: [f32; 3],
+    ) -> [f32; 3] {
+        let offset = [0, 1, 2].map(|axis| (beside[axis] - self.center[axis]) * self.scale);
+        let depth = self.rotate_vector(offset)[1];
+        let fit = self.rect.width().min(self.rect.height()) / (self.radius * 2.2).max(0.001);
+        let w = (1.0 + depth * self.inverse_eye()).max(PERSPECTIVE_NEAR_FRACTION);
+        let from_center = pos - self.rect.center();
+        let view = [from_center.x * w / fit, depth, -from_center.y * w / fit];
+        let world = unrotate_view_vector(self.yaw, self.pitch, view);
+        std::array::from_fn(|axis| self.center[axis] + world[axis] / self.scale.max(1e-6))
+    }
+
+    /// The line of sight under `pos`: a point on it and its direction, away
+    /// from the eye.
+    pub(in crate::app::model_preview) fn ray(&self, pos: egui::Pos2) -> ([f32; 3], [f32; 3]) {
+        let near = self.unproject_beside(pos, self.center);
+        let forward = unrotate_view_vector(self.yaw, self.pitch, [0.0, 1.0, 0.0]);
+        let reach = self.radius.max(1e-3) / self.scale.max(1e-6);
+        let deeper: [f32; 3] = std::array::from_fn(|axis| self.center[axis] + forward[axis] * reach);
+        let far = self.unproject_beside(pos, deeper);
+        let span: [f32; 3] = std::array::from_fn(|axis| far[axis] - near[axis]);
+        let length = span.iter().map(|value| value * value).sum::<f32>().sqrt().max(1e-9);
+        (near, span.map(|value| value / length))
+    }
+
+    /// How many points on screen a world unit spans at `point`, across the
+    /// view.
+    pub(in crate::app::model_preview) fn points_per_unit(&self, point: [f32; 3]) -> f32 {
+        let right = unrotate_view_vector(self.yaw, self.pitch, [1.0, 0.0, 0.0]);
+        let beside: [f32; 3] = std::array::from_fn(|axis| point[axis] + right[axis]);
+        (self.project(beside).pos - self.project(point).pos).length()
+    }
+
     /// Eye distance from the orbit point in scaled view units; see
     /// [`PERSPECTIVE_FOV_Y`].
     pub(in crate::app::model_preview) fn eye_distance(&self) -> f32 {
@@ -441,6 +480,38 @@ mod tests {
         let (level, level_at_a_fixed_scale) = widest(500.0);
         assert!((tiny - level).abs() < 1.0, "{tiny} {level}");
         assert!(tiny_at_a_fixed_scale * 1000.0 < level_at_a_fixed_scale);
+    }
+
+    /// A point put back on screen where it was taken off lands where the
+    /// pointer was, at the depth of the point beside it, in either
+    /// projection: what a dragged joint follows.
+    #[test]
+    fn a_point_unprojected_beside_another_projects_back_under_the_pointer() {
+        for perspective in [false, true] {
+            let camera = PreviewCamera { yaw: 0.7, pitch: -0.3, ..camera(1.6, perspective) };
+            let beside = [0.4, -0.2, 0.9];
+            let pos = camera.rect.center() + Vec2::new(37.0, -21.0);
+            let point = camera.unproject_beside(pos, beside);
+            let back = camera.project(point).pos;
+            assert!((back - pos).length() < 1e-2, "{perspective}: {back:?} {pos:?}");
+            let depth = |p: [f32; 3]| camera.rotate_vector([0, 1, 2].map(|axis| p[axis] - camera.center[axis]))[1];
+            assert!((depth(point) - depth(beside)).abs() < 1e-4, "on the plane through it");
+        }
+    }
+
+    /// The line of sight under a point on screen passes through every
+    /// point that projects there, in either projection.
+    #[test]
+    fn the_line_of_sight_passes_through_what_projects_under_the_pointer() {
+        for perspective in [false, true] {
+            let camera = PreviewCamera { yaw: -0.4, pitch: 0.5, ..camera(1.3, perspective) };
+            let point = [0.3, 0.6, -0.2];
+            let (origin, direction) = camera.ray(camera.project(point).pos);
+            let offset: [f32; 3] = std::array::from_fn(|axis| point[axis] - origin[axis]);
+            let along = (0..3).map(|axis| offset[axis] * direction[axis]).sum::<f32>();
+            let off = (0..3).map(|axis| (offset[axis] - direction[axis] * along).powi(2)).sum::<f32>().sqrt();
+            assert!(off < 1e-3, "{perspective}: {off}");
+        }
     }
 
     fn camera(scale: f32, perspective: bool) -> PreviewCamera {

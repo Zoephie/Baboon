@@ -1212,6 +1212,14 @@ fn a_gbxmodel_previews_itself() {
     let data = load(&tag, "objects/thing/thing.gbxmodel", None).expect("the gbxmodel previews");
     assert_eq!(data.source_key, "file:objects/thing/thing.gbxmodel");
     assert_eq!(data.render_model_path, "objects/thing/thing.gbxmodel");
+    assert_eq!(
+        crate::app::editor::render_model_reference(&data.render_model_path),
+        Some((
+            u32::from_be_bytes(*b"mod2"),
+            "objects\\thing\\thing".to_owned()
+        )),
+        "the Material Editor holds the gbxmodel itself"
+    );
     assert!(data.variants.is_empty());
     assert!(data.scenario_bsps.is_empty());
     assert_one_triangle(&data.preview);
@@ -1259,7 +1267,16 @@ fn a_halo_ce_object_previews_the_gbxmodel_it_names() {
     let data = load(&scenery, "objects/thing/thing.scenery", Some(&source))
         .expect("the referenced gbxmodel previews");
     assert_eq!(data.source_key, "file:objects/thing/thing.scenery");
-    assert_eq!(data.render_model_path, "objects\\thing\\thing");
+    // With its extension, so the Material Editor holds the gbxmodel, not a
+    // `render_model` of that name, and its shader reference row can switch it.
+    assert_eq!(data.render_model_path, "objects\\thing\\thing.gbxmodel");
+    assert_eq!(
+        crate::app::editor::render_model_reference(&data.render_model_path),
+        Some((
+            u32::from_be_bytes(*b"mod2"),
+            "objects\\thing\\thing".to_owned()
+        )),
+    );
     assert_one_triangle(&data.preview);
 
     reference(

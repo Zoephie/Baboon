@@ -5,7 +5,7 @@
 use super::super::ui_kit::style::foundation_input_edge;
 use super::{
     MAX_PREVIEW_SCALE, ModelPreviewData, ModelPreviewState, PreviewCamera, armature_node_matrices,
-    armature_node_positions,
+    armature_node_positions, pose_beneath,
     build_frame, min_preview_scale, model_gl_failure, paint_model_gl, preview_background,
     preview_center_radius, preview_clock, unrotate_view_vector, viewport_wheel_zoom,
 };
@@ -19,6 +19,7 @@ pub(in crate::app::model_preview) use bounds::*;
 mod errors;
 pub(in crate::app::model_preview) use errors::*;
 mod markers;
+mod pose_gizmo;
 pub(in crate::app::model_preview) use markers::*;
 mod screen;
 pub(in crate::app::model_preview) use screen::*;
@@ -54,9 +55,12 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
         state.focus[1] += moved[1];
         state.focus[2] += moved[2];
     };
+    state.pose.follow(data.geometry_id);
+    let wheel = viewport_wheel_zoom(ui, &response);
+    let posing = state.pose.on && pose_drag(ui, &response, data, state, rect, wheel);
     if response.dragged_by(egui::PointerButton::Middle) {
         pan_world(state, response.drag_delta());
-    } else if response.dragged_by(egui::PointerButton::Primary) {
+    } else if response.dragged_by(egui::PointerButton::Primary) && !posing {
         let delta = response.drag_delta();
         if ui.input(|i| i.modifiers.shift) {
             pan_world(state, delta);
@@ -65,7 +69,9 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
             state.pitch = (state.pitch + delta.y * 0.01).clamp(-1.45, 1.45);
         }
     }
-    if let Some(scroll) = viewport_wheel_zoom(ui, &response) {
+    let camera_moving = !posing && (response.dragged() || wheel.is_some());
+    let camera_settling = camera_settling(ui, response.id, camera_moving);
+    if let Some(scroll) = wheel.filter(|_| !posing) {
         let least = min_preview_scale(&data.preview);
         let old_scale = state.scale.clamp(least, MAX_PREVIEW_SCALE);
         let new_scale = (old_scale * (scroll / 450.0).exp()).clamp(least, MAX_PREVIEW_SCALE);
@@ -161,7 +167,7 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
         draw_bounding_sphere(&painter, &camera, sphere.about_root(root.as_ref()));
     }
 
-    if state.show_armature {
+    if state.show_armature || state.pose.on {
         let positions = armature_node_positions(data, state);
         let projected = positions
             .iter()
@@ -189,8 +195,16 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
                 );
                 painter.line_segment([parent, joint], Stroke::new(1.5_f32, ARMATURE_COLOR));
             }
-            painter.circle_filled(joint, 2.5, Color32::WHITE);
-            painter.circle_stroke(joint, 2.5, Stroke::new(1.0_f32, Color32::BLACK));
+            // Posing, joints are bigger targets, the ones selected marked,
+            // the active one, which carries the gizmo, larger.
+            let picked = state.pose.on && state.pose.is_selected(index);
+            let active = state.pose.on && state.pose.selected == Some(index);
+            if state.pose.on && state.pose.pins.contains_key(&index) {
+                painter.circle_stroke(joint, 7.0, Stroke::new(2.0_f32, PIN_COLOR));
+            }
+            let radius = if active { 5.5 } else if state.pose.on { 4.0 } else { 2.5 };
+            painter.circle_filled(joint, radius, if picked { ARMATURE_COLOR } else { Color32::WHITE });
+            painter.circle_stroke(joint, radius, Stroke::new(1.0_f32, Color32::BLACK));
             if let Some(distance) = hover_pos.map(|pos| screen_edge_length(pos, joint))
                 && distance <= 6.0
                 && hovered.is_none_or(|(_, _, closest)| distance < closest)
@@ -198,7 +212,62 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
                 hovered = Some((index, joint, distance));
             }
         }
+        // The selected joint's move gizmo, but while it twists.
+        let twisting = state.pose.dragging.is_some_and(|drag| drag.twist);
+        // A move under way keeps to the axes it began with; otherwise the
+        // gizmo runs along the active joint's axes as they now are.
+        let drawn_axes = match state.pose.dragging {
+            Some(drag) if drag.lock.is_some() => drag.axes,
+            _ => state.pose.selected.map_or(super::pose::GLOBAL_AXES, |joint| gizmo_axes(data, state, joint)),
+        };
+        if state.pose.on
+            && !twisting
+            && let Some(gizmo) = state
+                .pose
+                .selected
+                .and_then(|joint| positions.get(joint))
+                .and_then(|&joint| pose_gizmo::PoseGizmo::at(&camera, joint, &drawn_axes))
+        {
+            match state.pose.gizmo {
+                super::pose::GizmoMode::Move => {
+                    let lit = match state.pose.dragging {
+                        Some(drag) => drag.lock,
+                        None => hover_pos.and_then(|pos| gizmo.hit(pos)),
+                    };
+                    gizmo.draw(&painter, lit);
+                }
+                super::pose::GizmoMode::Rotate => {
+                    if let Some(rings) = state
+                        .pose
+                        .selected
+                        .and_then(|joint| positions.get(joint))
+                        .and_then(|&joint| pose_gizmo::PoseRings::at(&camera, joint, &drawn_axes))
+                    {
+                        let lit = match state.pose.dragging {
+                            Some(drag) => drag.ring.map(|ring| ring.axis),
+                            None => hover_pos.and_then(|pos| rings.hit(pos)).map(|hit| hit.axis),
+                        };
+                        rings.draw(&painter, lit);
+                    }
+                }
+                super::pose::GizmoMode::Scale => {
+                    if let Some(joint) = state.pose.selected
+                        && let Some(circle) = positions.get(joint).and_then(|&at| pose_gizmo::PoseScale::at(&camera, at))
+                    {
+                        let lit = match state.pose.dragging {
+                            Some(drag) => drag.scale.is_some(),
+                            None => hover_pos.is_some_and(|pos| circle.hit(pos)),
+                        };
+                        circle.draw(&painter, lit, state.pose.scale_of(joint));
+                    }
+                }
+            }
+        }
+        // The joint under the pointer names itself, but while a joint is
+        // posed or the camera moves.
         if let Some((index, position, _)) = hovered
+            && state.pose.dragging.is_none()
+            && !camera_settling
             && let Some(node) = data.preview.nodes.get(index)
         {
             draw_preview_hover_label(
@@ -242,6 +311,361 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
         }
     }
     keep_snapshot_source(ui, state, shown, rect, painter.layer_id(), helpers_from);
+}
+
+/// A gizmo handle a press takes.
+enum Handle {
+    Move(super::pose::Lock),
+    /// A ring, and its radius on screen.
+    Ring(pose_gizmo::RingHit, f32),
+    /// The scale circle, and the joint on screen.
+    Scale(egui::Pos2),
+}
+
+/// The gizmo's axes on `joint`: the model's, or, with Local on, the
+/// joint's own as it is posed.
+fn gizmo_axes(data: &ModelPreviewData, state: &ModelPreviewState, joint: usize) -> super::pose::Axes {
+    if !state.pose.local {
+        return super::pose::GLOBAL_AXES;
+    }
+    armature_node_matrices(data, state)
+        .get(joint)
+        .map_or(super::pose::GLOBAL_AXES, super::pose::axes_of)
+}
+
+/// The handle of `mode`'s gizmo about `joint`, along `axes`, under
+/// `pointer`.
+fn gizmo_handle(
+    camera: &PreviewCamera,
+    mode: super::pose::GizmoMode,
+    joint: [f32; 3],
+    axes: &super::pose::Axes,
+    pointer: egui::Pos2,
+) -> Option<Handle> {
+    match mode {
+        super::pose::GizmoMode::Move => pose_gizmo::PoseGizmo::at(camera, joint, axes)?.hit(pointer).map(Handle::Move),
+        super::pose::GizmoMode::Rotate => pose_gizmo::PoseRings::at(camera, joint, axes)?
+            .hit(pointer)
+            .map(|hit| Handle::Ring(hit, pose_gizmo::RING)),
+        super::pose::GizmoMode::Scale => {
+            let circle = pose_gizmo::PoseScale::at(camera, joint)?;
+            circle.hit(pointer).then_some(Handle::Scale(circle.centre))
+        }
+    }
+}
+
+/// How long after the camera last moved the joints' names stay hidden, so
+/// a zoom's separate wheel ticks don't flash a name between them.
+const CAMERA_SETTLE_SECONDS: f64 = 0.25;
+
+/// Whether the viewport's camera is moving (`moving`: orbiting, panning or
+/// zooming this pass) or moved within [`CAMERA_SETTLE_SECONDS`], the
+/// joint under the pointer then left unnamed: a name flicking past each
+/// joint the view sweeps over is noise.
+fn camera_settling(ui: &Ui, viewport: egui::Id, moving: bool) -> bool {
+    let id = viewport.with("camera_moved_at");
+    let now = ui.input(|i| i.time);
+    if moving {
+        ui.ctx().data_mut(|data| data.insert_temp(id, now));
+        return true;
+    }
+    let Some(moved_at) = ui.ctx().data(|data| data.get_temp::<f64>(id)) else {
+        return false;
+    };
+    let left = CAMERA_SETTLE_SECONDS - (now - moved_at);
+    if left > 0.0 {
+        // Name it once the camera has settled, though nothing else moves.
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
+        return true;
+    }
+    false
+}
+
+/// The most nodes any joint has above it: the longest chain a drag can
+/// turn.
+pub(super) fn deepest_chain(nodes: &[super::RenderModelPreviewNode]) -> usize {
+    (0..nodes.len())
+        .map(|joint| super::pose::chain_above(nodes, joint, nodes.len()).len())
+        .max()
+        .unwrap_or(0)
+}
+
+/// A pinned joint's ring.
+const PIN_COLOR: Color32 = Color32::from_rgb(255, 140, 40);
+
+/// How near a joint, in points, a press must land to pick it while posing.
+const POSE_PICK_DISTANCE: f32 = 8.0;
+
+/// Pose mode's input. A drag started on a joint carries it across the plane
+/// through it facing the camera, turning the chain above it (`]` or the
+/// wheel up lengthening it meanwhile, `[` or the wheel down shortening
+/// it, for a trackpad as for a mouse); on the root it moves the
+/// whole skeleton; with Alt held it twists the joint about its bone. A
+/// double-click on a joint pins or unpins it, and every drag ends by holding
+/// the pins. Whether a pose drag is under way, which the orbit and zoom then
+/// leave alone.
+fn pose_drag(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+    rect: egui::Rect,
+    wheel: Option<f32>,
+) -> bool {
+    use super::pose::{PoseDrag, RingGrab, ScaleGrab, chain_above, moved_with, hold_pins, reach, reach_held, resolve_limits, rotate, twist};
+    let joint_at = |state: &ModelPreviewState, pointer: egui::Pos2| {
+        let camera = PreviewCamera::new(data, state, rect);
+        armature_node_positions(data, state)
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &position)| {
+                let projected = camera.project(position);
+                projected.in_front.then(|| (index, screen_edge_length(pointer, projected.pos)))
+            })
+            .filter(|&(_, distance)| distance <= POSE_PICK_DISTANCE)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(index, _)| index)
+    };
+    let shift = ui.input(|i| i.modifiers.shift);
+    // A click on a joint selects it alone, putting the gizmo on it; with
+    // Shift, adds it to the selection or takes it out. A click anywhere
+    // else (but the gizmo's own handles) lets the selection go.
+    if response.clicked()
+        && let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
+    {
+        let on_handle = state.pose.selected.is_some_and(|joint| {
+            let camera = PreviewCamera::new(data, state, rect);
+            armature_node_positions(data, state)
+                .get(joint)
+                .is_some_and(|&at| gizmo_handle(&camera, state.pose.gizmo, at, &gizmo_axes(data, state, joint), pointer).is_some())
+        });
+        if !on_handle {
+            match (joint_at(state, pointer), shift) {
+                (Some(joint), true) => state.pose.toggle_selected(joint),
+                (None, true) => {}
+                (joint, false) => state.pose.select_only(joint),
+            }
+        }
+    }
+    // A double-click on a joint pins or unpins it; with Shift, selects it
+    // and everything below it. Taken after the two clicks it is made of.
+    if response.double_clicked()
+        && let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
+        && let Some(joint) = joint_at(state, pointer)
+    {
+        state.pose.follow(data.geometry_id);
+        if shift {
+            state.pose.select_below(&data.preview.nodes, joint);
+        } else {
+            let at = armature_node_positions(data, state)[joint];
+            state.pose.toggle_pin(joint, at);
+            state.pose.select_only(Some(joint));
+        }
+    }
+    if response.drag_started_by(egui::PointerButton::Primary) {
+        let pointer = ui.input(|i| i.pointer.press_origin());
+        let alt = ui.input(|i| i.modifiers.alt);
+        let positions = armature_node_positions(data, state);
+        // The selected joint's gizmo first: a handle locks the drag.
+        let camera = PreviewCamera::new(data, state, rect);
+        let handle = state
+            .pose
+            .selected
+            .filter(|_| !alt)
+            .and_then(|joint| {
+                let axes = gizmo_axes(data, state, joint);
+                Some((joint, gizmo_handle(&camera, state.pose.gizmo, *positions.get(joint)?, &axes, pointer?)?))
+            });
+        let axes = state.pose.selected.map_or(super::pose::GLOBAL_AXES, |joint| gizmo_axes(data, state, joint));
+        state.pose.dragging = match handle {
+            Some((joint, Handle::Move(lock))) => Some(PoseDrag {
+                // Where on the line or plane the press took the handle.
+                grabbed: pointer
+                    .and_then(|pointer| {
+                        let (origin, direction) = camera.ray(pointer);
+                        lock.target(positions[joint], origin, direction, &axes)
+                    })
+                    .map_or([0.0; 3], |at| std::array::from_fn(|axis| at[axis] - positions[joint][axis])),
+                joint,
+                twist: false,
+                lock: Some(lock),
+                anchor: positions[joint],
+                held: positions[joint],
+                ring: None,
+                scale: None,
+                axes,
+            }),
+            Some((joint, Handle::Ring(hit, radius))) => Some(PoseDrag {
+                joint,
+                twist: false,
+                lock: None,
+                anchor: positions[joint],
+                held: positions[joint],
+                ring: pointer.map(|pointer| RingGrab {
+                    axis: hit.axis,
+                    press: [pointer.x, pointer.y],
+                    tangent: [hit.tangent.x, hit.tangent.y],
+                    radius,
+                    turned: 0.0,
+                }),
+                scale: None,
+                axes,
+                grabbed: [0.0; 3],
+            }),
+            Some((joint, Handle::Scale(centre))) => Some(PoseDrag {
+                joint,
+                twist: false,
+                lock: None,
+                anchor: positions[joint],
+                held: positions[joint],
+                ring: None,
+                scale: pointer.map(|pointer| ScaleGrab {
+                    centre: [centre.x, centre.y],
+                    press: (pointer - centre).length(),
+                    from: state.pose.scale_of(joint),
+                }),
+                axes,
+                grabbed: [0.0; 3],
+            }),
+            None => pointer.and_then(|pointer| joint_at(state, pointer)).map(|joint| {
+                // A drag on a selected joint takes the selection with it.
+                if state.pose.is_selected(joint) {
+                    state.pose.activate(joint);
+                } else {
+                    state.pose.select_only(Some(joint));
+                }
+                PoseDrag { joint, twist: alt, lock: None, anchor: positions[joint], held: positions[joint], ring: None, scale: None, axes, grabbed: [0.0; 3] }
+            }),
+        };
+    }
+    if !response.dragged_by(egui::PointerButton::Primary) {
+        state.pose.dragging = None;
+        return false;
+    }
+    let Some(drag) = state.pose.dragging else {
+        return false;
+    };
+    let nodes = &data.preview.nodes;
+    let limits = if state.pose.limits {
+        resolve_limits(nodes, &data.preview.joint_limits)
+    } else {
+        Vec::new()
+    };
+    let base = pose_beneath(data, state);
+    if base.is_empty() {
+        return true;
+    }
+    // The gizmo's scale, turn and twist take every selected joint, each
+    // about its own origin, nested ones adding up (a hand's finger joints
+    // curl together).
+    let joints = state.pose.joints();
+    if let Some(grab) = drag.scale {
+        if let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) {
+            let ratio = grab.scale([pointer.x, pointer.y]) / state.pose.scale_of(drag.joint);
+            for &joint in &joints {
+                state.pose.set_scale(joint, state.pose.scale_of(joint) * ratio);
+            }
+        }
+    } else if let Some(ring) = drag.ring {
+        if let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) {
+            let angle = ring.angle([pointer.x, pointer.y]);
+            // With Local on, each joint turns about that axis of its own.
+            for &joint in &joints {
+                let along = gizmo_axes(data, state, joint)[ring.axis.min(2)];
+                rotate(nodes, &base, &mut state.pose, joint, along, angle - ring.turned, &limits);
+            }
+            if let Some(grab) = state.pose.dragging.as_mut().and_then(|drag| drag.ring.as_mut()) {
+                grab.turned = angle;
+            }
+        }
+    } else if drag.twist {
+        // A point across is a hundredth of a radian.
+        let angle = response.drag_delta().x * 0.01;
+        for &joint in &joints {
+            twist(nodes, &base, &mut state.pose, joint, angle, &limits);
+        }
+    } else {
+        // `]`, `[` or the wheel lengthen or shorten the chain a node at a
+        // time, up to the deepest chain the skeleton has.
+        let most = deepest_chain(nodes);
+        let (longer, shorter) = ui.ctx().input_mut(|input| {
+            (
+                input.consume_key(egui::Modifiers::NONE, egui::Key::CloseBracket),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::OpenBracket),
+            )
+        });
+        for more in [wheel.map(|scrolled| scrolled > 0.0), longer.then_some(true), shorter.then_some(false)]
+            .into_iter()
+            .flatten()
+        {
+            state.pose.step_chain(more, most);
+        }
+        let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) else {
+            return true;
+        };
+        let camera = PreviewCamera::new(data, state, rect);
+        let matrices = armature_node_matrices(data, state);
+        let Some(joint) = matrices.get(drag.joint).map(|matrix| matrix.translation()) else {
+            return true;
+        };
+        let target = match drag.lock {
+            Some(lock) => {
+                let (origin, direction) = camera.ray(pointer);
+                // Edge on, the line or plane picks nothing: the joint waits.
+                let Some(target) = lock.target(drag.anchor, origin, direction, &drag.axes) else {
+                    return true;
+                };
+                std::array::from_fn(|axis| target[axis] - drag.grabbed[axis])
+            }
+            None => camera.unproject_beside(pointer, joint),
+        };
+        // The others the move takes along, as they stand before it.
+        let others: Vec<(usize, [f32; 3])> = {
+            let positions = armature_node_positions(data, state);
+            moved_with(nodes, &joints, drag.joint)
+                .into_iter()
+                .filter_map(|joint| Some((joint, *positions.get(joint)?)))
+                .collect()
+        };
+        let chain = chain_above(nodes, drag.joint, state.pose.chain);
+        if chain.is_empty() {
+            // The root: the whole skeleton moves with it.
+            for axis in 0..3 {
+                state.pose.offset[axis] += target[axis] - joint[axis];
+            }
+        } else {
+            if drag.lock.is_some() {
+                let held = reach_held(nodes, &base, &mut state.pose, drag.joint, &chain, (drag.held, target), &limits);
+                if let Some(dragging) = state.pose.dragging.as_mut() {
+                    dragging.held = held;
+                }
+            } else {
+                reach(nodes, &base, &mut state.pose, drag.joint, &chain, target, &limits);
+            }
+        }
+        // The others move as far as the dragged joint did, each through its
+        // own chain; moving the root moved them all already.
+        if !chain.is_empty() {
+            let reached = armature_node_positions(data, state)[drag.joint];
+            let delta: [f32; 3] = std::array::from_fn(|axis| reached[axis] - joint[axis]);
+            for &(other, from) in &others {
+                let chain = chain_above(nodes, other, state.pose.chain);
+                if !chain.is_empty() {
+                    let target = std::array::from_fn(|axis| from[axis] + delta[axis]);
+                    reach(nodes, &base, &mut state.pose, other, &chain, target, &limits);
+                }
+            }
+        }
+        // A pinned joint moved is pinned where it is moved to.
+        let positions = armature_node_positions(data, state);
+        for moved in std::iter::once(drag.joint).chain(others.iter().map(|&(other, _)| other)) {
+            if state.pose.pins.contains_key(&moved) {
+                state.pose.pins.insert(moved, positions[moved]);
+            }
+        }
+    }
+    hold_pins(nodes, &base, &mut state.pose, Some(drag.joint), &limits);
+    true
 }
 
 /// Keep what this pass drew, the frame and the helpers painted over it from

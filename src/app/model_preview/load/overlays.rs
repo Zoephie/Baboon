@@ -47,6 +47,9 @@ pub(in crate::app::model_preview) fn hlmt_physics_overlay(
     let skeleton = model_skeleton(&reader.source, model_tag);
     let built = build_physics_preview(&physics, skeleton.as_ref().map(|s| s.nodes()));
     built
-        .map(Some)
+        .map(|mut preview| {
+            preview.joint_limits = super::super::pose::read_joint_limits(&physics, reader.source.game());
+            Some(preview)
+        })
         .map_err(|error| format!("{reference}.physics_model: {error}"))
 }

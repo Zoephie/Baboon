@@ -38,7 +38,11 @@ pub(in crate::app::model_preview) fn draw_model_viewport_with_stats(
         );
         crate::app::shell::loading::paint_loading_rings(ui, rect);
     } else {
+        let origin = ui.cursor().min;
         draw_model_viewport(ui, data, state, desired_size);
+        if state.pose.on && !data.preview.nodes.is_empty() {
+            draw_pose_strip(ui, data, state, egui::Rect::from_min_size(origin, desired_size));
+        }
     }
     let footer_width = ui.available_width().max(desired_size.x);
     let (footer_rect, _) = ui.allocate_exact_size(
@@ -303,4 +307,30 @@ mod tests {
         };
         assert_eq!(super::render_counts(&preview), (3, 1));
     }
+}
+
+/// Pose mode's tools, in a strip in the viewport's top-left corner while
+/// posing, by the model they act on rather than in the crowded header.
+/// Drawn after the viewport, so a click on a tool is the tool's, not the
+/// viewport's; cut off at the viewport's edge in a very narrow card.
+fn draw_pose_strip(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState, viewport: egui::Rect) {
+    let mut strip = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt("pose_strip")
+            .max_rect(viewport.shrink(8.0))
+            .layout(egui::Layout::left_to_right(egui::Align::Min)),
+    );
+    strip.set_clip_rect(viewport.intersect(ui.clip_rect()));
+    egui::Frame::NONE
+        .fill(crate::app::ui_kit::style::foundation_group_bg())
+        .stroke(Stroke::new(1.0_f32, crate::app::ui_kit::style::foundation_group_edge()))
+        .corner_radius(5)
+        .inner_margin(4)
+        .show(&mut strip, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let most_chain = crate::app::model_preview::viewport::deepest_chain(&data.preview.nodes);
+                super::view_menu::draw_pose_tools(ui, state, !data.preview.joint_limits.is_empty(), most_chain);
+            });
+        });
 }

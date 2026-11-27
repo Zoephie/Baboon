@@ -397,6 +397,18 @@ fn a_numeric_pass_shows_its_digit_of_its_place() {
     };
     assert!(timer(0).shows(&outputs));
     assert!(!timer(3).shows(&outputs));
+    // The limit is a byte to 255: half of it rounds to 128.
+    let wide = |value, place| CeNumeric {
+        limit: 255,
+        ..digit(value, place)
+    };
+    assert!(wide(8, 0).shows(&outputs) && wide(2, 1).shows(&outputs) && wide(1, 2).shows(&outputs));
+    // One read as signed, 255 as -1, counts nothing rather than panicking.
+    let signed = CeNumeric {
+        limit: -1,
+        ..digit(0, 0)
+    };
+    assert!(signed.shows(&outputs) && signed.shows(&[1.0, 0.0, 0.0, 0.0]));
 }
 
 #[test]
