@@ -322,22 +322,25 @@ pub(in crate::app::model_preview) fn signed_bytes(
 }
 
 /// `upload_image` with an sRGB format, for the curve the card decodes.
+/// `mips` are the levels past `image` as its bitmap stores them: none at
+/// all for a bitmap built without mips (its `max mipmap level` of 1), which
+/// the game samples at its one level however small it draws. `None`
+/// generates a chain, for an image no bitmap stores levels of.
 pub(in crate::app::model_preview) unsafe fn upload_image_linear(
     gl: &glow::Context,
     image: &Image,
     texels: ImageTexels,
-    mips: &[Image],
+    mips: Option<&[Image]>,
     sampler: Option<Sampler>,
 ) -> Option<glow::NativeTexture> {
     // GL reads as much as the size says, whatever the slice holds.
     if !image.whole() {
         return None;
     }
-    let mips = if mips.iter().all(Image::whole) {
-        mips
-    } else {
-        &[]
-    };
+    // A stored level cut short generates the chain instead.
+    let mips = mips.filter(|mips| mips.iter().all(Image::whole));
+    let stored = mips.is_some();
+    let mips = mips.unwrap_or_default();
     let (format, kind) = match texels {
         ImageTexels::Linear => (glow::RGBA8, glow::UNSIGNED_BYTE),
         ImageTexels::Srgb => (glow::SRGB8_ALPHA8, glow::UNSIGNED_BYTE),
@@ -348,7 +351,6 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
     // them, the max level set below stops sampling at the last, so generating
     // the chain first only to write over it was most of an upload's time. A
     // volume takes no stored mips, and always generates.
-    let stored = !mips.is_empty();
     let finish = |target, generate: bool| unsafe {
         if generate {
             gl.generate_mipmap(target);
@@ -399,7 +401,7 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
                         );
                     }
                 }
-                if !mips.is_empty() {
+                if stored {
                     gl.tex_parameter_i32(
                         glow::TEXTURE_2D,
                         glow::TEXTURE_MAX_LEVEL,
@@ -450,7 +452,7 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
                         }
                     }
                 }
-                if !mips.is_empty() {
+                if stored {
                     gl.tex_parameter_i32(
                         glow::TEXTURE_CUBE_MAP,
                         glow::TEXTURE_MAX_LEVEL,
@@ -487,5 +489,41 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
             }
         }
         Some(texture)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flat(side: usize) -> Image {
+        Image::Flat(TextureImage {
+            rgba: vec![255; side * side * 4].into(),
+            width: side,
+            height: side,
+            repeat_x: true,
+            repeat_y: true,
+            scale: [1.0, 1.0],
+        })
+    }
+
+    /// A bitmap built without mips goes up as its one level, which the
+    /// sampler then reads however small it draws (the elite's eyes in the
+    /// head's diffuse); with none stored, a chain is generated; and the
+    /// levels a bitmap stores are the last.
+    #[test]
+    fn a_bitmap_without_mips_samples_its_one_level() {
+        let gl = crate::app::model_preview::harness::gl::headless_gl();
+        let max_level = |mips: Option<&[Image]>| unsafe {
+            let texture = upload_image_linear(&gl, &flat(8), ImageTexels::Linear, mips, None).unwrap();
+            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            let level = gl.get_tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL);
+            gl.bind_texture(glow::TEXTURE_2D, None);
+            gl.delete_texture(texture);
+            level
+        };
+        assert_eq!(max_level(Some(&[])), 0, "stored without mips: one level");
+        assert_eq!(max_level(Some(&[flat(4), flat(2), flat(1)])), 3, "its stored levels");
+        assert!(max_level(None) >= 3, "none stored: generated");
     }
 }

@@ -65,7 +65,7 @@ pub(in crate::app::model_preview) unsafe fn h4_flare_images(
                         gl,
                         image,
                         *texels,
-                        mips,
+                        mips.as_deref().map(Vec::as_slice),
                         Some(sampler),
                     )
                 })

@@ -25,7 +25,7 @@ pub(in crate::app::model_preview) struct Gen3SlotTextures {
     pub(super) materials: Vec<HashMap<String, glow::NativeTexture>>,
     /// The textures `materials` bind, by the image, mips, texels and sampler
     /// each was made from, kept across uploads (see `TexturePool`).
-    pool: crate::app::model_preview::renderer::TexturePool<(usize, usize, ImageTexels, Option<crate::app::model_preview::common::image::Sampler>), Arc<Image>>,
+    pool: crate::app::model_preview::renderer::TexturePool<(usize, Option<usize>, ImageTexels, Option<crate::app::model_preview::common::image::Sampler>), Arc<Image>>,
     /// The shield's noise, by uniform.
     pub(super) shield: HashMap<String, glow::NativeTexture>,
     /// Each of the game's own object lights' gels, of `id`.
@@ -256,7 +256,7 @@ impl Gen3State {
                     gl,
                     &texture.image,
                     texture.texels,
-                    &texture.mips,
+                    texture.mips.as_deref().map(Vec::as_slice),
                     texture.sampler,
                 ) {
                     uploaded.shield.insert(texture.uniform.clone(), found);
@@ -268,7 +268,7 @@ impl Gen3State {
                         gl,
                         &texture.image,
                         texture.texels,
-                        &texture.mips,
+                        texture.mips.as_deref().map(Vec::as_slice),
                         texture.sampler,
                     ) {
                         uploaded.shield.insert(texture.uniform.clone(), found);
@@ -279,7 +279,7 @@ impl Gen3State {
                 .light_gels(frame)
                 .into_iter()
                 .map(|gel| {
-                    gel.and_then(|gel| upload_image_linear(gl, gel, ImageTexels::Srgb, &[], None))
+                    gel.and_then(|gel| upload_image_linear(gl, gel, ImageTexels::Srgb, None, None))
                 })
                 .collect();
             // One texture per image, sampled one way, however many materials
@@ -289,8 +289,8 @@ impl Gen3State {
             // frame of an animated map goes up without them.
             let pool = &mut uploaded.pool;
             pool.begin();
-            let mut upload = |image: &Arc<Image>, texels, mips: &[Image], sampler| {
-                let key = (Arc::as_ptr(image) as usize, mips.len(), texels, sampler);
+            let mut upload = |image: &Arc<Image>, texels, mips: Option<&[Image]>, sampler| {
+                let key = (Arc::as_ptr(image) as usize, mips.map(<[Image]>::len), texels, sampler);
                 pool.get(key, || Arc::clone(image), || upload_image_linear(gl, image, texels, mips, sampler))
             };
             for textures in frame.textures.iter().flat_map(|textures| textures.iter()) {
@@ -299,12 +299,12 @@ impl Gen3State {
                     for texture in &material.textures {
                         let image = &texture.image;
                         if let Some(uploaded) =
-                            upload(image, texture.texels, &texture.mips, texture.sampler)
+                            upload(image, texture.texels, texture.mips.as_deref().map(Vec::as_slice), texture.sampler)
                         {
                             map.insert(texture.uniform.clone(), uploaded);
                         }
                         for (at, image) in texture.frames.iter().enumerate() {
-                            if let Some(uploaded) = upload(image, texture.texels, &[], texture.sampler)
+                            if let Some(uploaded) = upload(image, texture.texels, None, texture.sampler)
                             {
                                 map.insert(frame_key(&texture.uniform, at), uploaded);
                             }

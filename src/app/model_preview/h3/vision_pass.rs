@@ -169,7 +169,7 @@ impl H3Game {
                 let Some((image, texels, mips)) = vision.mask() else {
                     return;
                 };
-                self.vision_mask = upload_image_linear(gl, image, *texels, mips, None);
+                self.vision_mask = upload_image_linear(gl, image, *texels, mips.as_deref().map(Vec::as_slice), None);
             }
             let (Some(program), Some(mask)) = (self.vision_program, self.vision_mask) else {
                 return;

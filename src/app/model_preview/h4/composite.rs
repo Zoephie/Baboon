@@ -72,7 +72,7 @@ impl H4Game {
                     filter: BitmapFilterMode::Bilinear,
                 };
                 let uploaded = image.and_then(|image| {
-                    upload_image_linear(gl, image, ImageTexels::Linear, &[], Some(sampler))
+                    upload_image_linear(gl, image, ImageTexels::Linear, None, Some(sampler))
                 });
                 self.grading = image.cloned().zip(uploaded);
             }

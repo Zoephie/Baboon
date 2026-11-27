@@ -19,8 +19,9 @@ pub(crate) struct Gen3Texture {
     pub(crate) uniform: String,
     pub(crate) image: Arc<Image>,
     pub(crate) texels: ImageTexels,
-    /// The levels past `image`, as the bitmap stores them.
-    pub(crate) mips: Arc<Vec<Image>>,
+    /// The levels past `image`, as the bitmap stores them (none for one
+    /// built without mips); `None` to generate them.
+    pub(crate) mips: Option<Arc<Vec<Image>>>,
     /// What the tag asks of the sampler; none for the engine's own textures.
     pub(crate) sampler: Option<Sampler>,
     /// The bitmap's other images, in order with `image` standing at its index,
