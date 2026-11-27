@@ -280,7 +280,9 @@ pub(crate) fn translate_with(
     translate_full(program, entry, stage, arguments, &[])
 }
 
-fn translate_full(
+/// [`translate_with`] and [`translate_with_integer_inputs`] at once: an
+/// effect pass's `arguments`, and the inputs fed as integers.
+pub(crate) fn translate_full(
     program: &Program,
     entry: &str,
     stage: Stage,

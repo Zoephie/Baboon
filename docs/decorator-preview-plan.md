@@ -248,7 +248,10 @@ See the proposals that accompany this plan.
 - Reach: Game Shaders through `shaders\decorators\*`, with `decorators\decorators.h` shimmed (the
   alpha test, 0.5) and the packed `POSITION1` fed as an integer. Its LOD models, decimation and
   stipple cross-fade are not drawn yet.
-- Halo 4, Halo 2, Halo CE: to do.
+- Halo 4: Game Shaders through each `explicit_shaders\decorators\*.material_shader`'s own
+  source, its `RGBk` output decoded and exposed as its other passes are; positions at the vertex
+  compression's constant scale of 5 (`|q|² = scale / 5`). LODs, decimation and stipple as Reach.
+- Halo 2, Halo CE: to do.
 
 ## Seen in the preview, not yet explained
 

@@ -22,21 +22,36 @@
 //!   full sun), a spare byte, the motion byte and the type index;
 //! - `NORMAL1`, four `SNORM8` read `.wzyx`: the rotation, scaled as Halo 3's;
 //! - `COLOR1`, four `UNORM8`: the baked light, as Halo 3's.
+//!
+//! Halo 4's ([`InstanceLayout::Halo4`]) are Reach's, but for the rotation's
+//! scale and the light. Its `compress_placement` (360 0x82df2500) scales the
+//! rotation by `√scale / √5`, clamping the scale to 5, so the vertex
+//! compression's constant scale is 5 where Halo 3's and Reach's is 2; and its
+//! light is `RGBk`, `rgb · k · 31.875` (`UnpackRGBk`).
 
 use super::Placement;
 
 /// One packed instance's size.
 pub(crate) const INSTANCE_BYTES: usize = 16;
 
-/// The largest scale a quaternion of `UNORM8`s carries: `|q|² = scale / 2`
-/// must stay within 1. Reach's `compress_placement` clamps to it too.
-const LARGEST_SCALE: f32 = 2.0;
-
 /// Which game's shader the instances are packed for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InstanceLayout {
     Halo3,
     Reach,
+    Halo4,
+}
+
+impl InstanceLayout {
+    /// The vertex compression's constant scale, which a rotation of `|q|² =
+    /// scale / this` multiplies back: the largest scale a byte quaternion
+    /// carries.
+    pub(crate) fn vertex_scale(self) -> f32 {
+        match self {
+            Self::Halo3 | Self::Reach => 2.0,
+            Self::Halo4 => 5.0,
+        }
+    }
 }
 
 /// A placement in full sun, as Reach's sun term reads it (`> 1` lights it).
@@ -75,7 +90,7 @@ pub(crate) fn pack(
     // Halo 3 scales whole steps of a `uint16`; Reach unpacks to 0..1 first.
     let steps = match layout {
         InstanceLayout::Halo3 => 65_535.0,
-        InstanceLayout::Reach => 1.0,
+        InstanceLayout::Reach | InstanceLayout::Halo4 => 1.0,
     };
     let scale: [f32; 3] =
         std::array::from_fn(|axis| ((high[axis] - low[axis]) / steps).max(f32::MIN_POSITIVE));
@@ -93,7 +108,8 @@ pub(crate) fn pack(
         {
             let motion = (placement.motion.clamp(0.0, 1.0) * 255.0).round() as u8;
             let type_byte = type_index.min(255) as u8;
-            let length = (placement.scale.clamp(0.0, LARGEST_SCALE) * 0.5).sqrt();
+            let most = layout.vertex_scale();
+            let length = (placement.scale.clamp(0.0, most) / most).sqrt();
             let rotation = placement.rotation.map(|component| component * length);
             let along = |axis: usize| (placement.position[axis] - low[axis]) / scale[axis];
             match layout {
@@ -108,7 +124,7 @@ pub(crate) fn pack(
                         packed.bytes.push(unorm8((component + 1.0) * 0.5));
                     }
                 }
-                InstanceLayout::Reach => {
+                InstanceLayout::Reach | InstanceLayout::Halo4 => {
                     let bits = |axis: usize, most: f32| {
                         (along(axis).clamp(0.0, 1.0) * most).round() as u32
                     };
@@ -121,13 +137,26 @@ pub(crate) fn pack(
                     packed.bytes.extend([w, z, y, x].map(snorm8));
                 }
             }
-            packed.bytes.extend_from_slice(&rgbe(light(placement)));
+            let light = light(placement);
+            packed.bytes.extend_from_slice(&match layout {
+                InstanceLayout::Halo3 | InstanceLayout::Reach => rgbe(light),
+                InstanceLayout::Halo4 => rgbk(light),
+            });
         }
         packed
             .types
             .push((first, packed.bytes.len() / INSTANCE_BYTES - first));
     }
     packed
+}
+
+/// `color` as `PackRGBk` writes it: `k`, the brightest channel rounded up
+/// to an eighth, over 31.875, and the channels over `k`.
+fn rgbk(color: [f32; 3]) -> [u8; 4] {
+    let brightest = color.iter().copied().fold(0.0_f32, f32::max);
+    let k = (brightest * 8.0 + 1.0).floor() / 8.0;
+    let [r, g, b] = color.map(|channel| unorm8(channel / k));
+    [r, g, b, unorm8(k / 31.875)]
 }
 
 fn snorm8(value: f32) -> u8 {
@@ -168,7 +197,13 @@ mod tests {
 
     fn unpack(layout: InstanceLayout, packed: &PackedInstances, index: usize) -> Read {
         let bytes = &packed.bytes[index * INSTANCE_BYTES..][..INSTANCE_BYTES];
-        let unit = (bytes[15] as f32 / 255.0 * 63.75 - 31.75).exp2();
+        let unit = match layout {
+            InstanceLayout::Halo3 | InstanceLayout::Reach => {
+                (bytes[15] as f32 / 255.0 * 63.75 - 31.75).exp2()
+            }
+            // `UnpackRGBk`.
+            InstanceLayout::Halo4 => bytes[15] as f32 / 255.0 * 31.875,
+        };
         let light = std::array::from_fn(|at| bytes[12 + at] as f32 / 255.0 * unit);
         let place = |unpacked: [f32; 3]| {
             std::array::from_fn(|axis| unpacked[axis] * packed.scale[axis] + packed.offset[axis])
@@ -187,7 +222,7 @@ mod tests {
                     sun: 0.0,
                 }
             }
-            InstanceLayout::Reach => {
+            InstanceLayout::Reach | InstanceLayout::Halo4 => {
                 // `UnpackUHEND3N`, then `.wzyx` of the aux bytes and the rotation.
                 let input = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
                 let unpacked = [
@@ -270,10 +305,16 @@ mod tests {
                 (read.quaternion[2] / read.quaternion[3] - (0.3_f32).tan()).abs() < 0.02,
                 "{layout:?}: the turn"
             );
-            // One exponent for all three: each channel is exact to a step of
-            // the brightest's, which the next quarter power of two above it sets.
+            // One scale for all three: each channel is exact to a step of the
+            // brightest's, which the next quarter power of two above it sets
+            // (RGBE), or the next eighth (RGBk).
             let expected = [0.16, 0.4, 2.4];
-            let step = ((2.4_f32.log2() * 4.0).ceil() / 4.0).exp2() / 255.0;
+            let step = match layout {
+                InstanceLayout::Halo4 => {
+                    ((2.4_f32 * 8.0 + 1.0).floor() / 8.0) / 255.0 + 2.4 / 255.0
+                }
+                _ => ((2.4_f32.log2() * 4.0).ceil() / 4.0).exp2() / 255.0,
+            };
             assert!(
                 read.light
                     .iter()

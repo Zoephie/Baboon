@@ -115,7 +115,8 @@ pub(in crate::app::model_preview) const INSTANCE_ATTRIBUTES: [(u32, &str); 7] = 
 fn inputs_of(layout: InstanceLayout) -> &'static [InstanceInput] {
     match layout {
         InstanceLayout::Halo3 => &HALO_3_INPUTS,
-        InstanceLayout::Reach => &REACH_INPUTS,
+        // Halo 4's read as Reach's.
+        InstanceLayout::Reach | InstanceLayout::Halo4 => &REACH_INPUTS,
     }
 }
 
@@ -123,13 +124,14 @@ fn inputs_of(layout: InstanceLayout) -> &'static [InstanceInput] {
 fn layout_of(game: Option<GameId>) -> InstanceLayout {
     match game {
         Some(GameId::HaloReach) => InstanceLayout::Reach,
+        Some(GameId::Halo4) => InstanceLayout::Halo4,
         _ => InstanceLayout::Halo3,
     }
 }
 
-/// One vertex of a type's mesh: its position at twice its size, which with
-/// a compression scale of 1 is the game's constant compression scale of 2,
-/// then its texcoord and normal.
+/// One vertex of a type's mesh: its position scaled by the layout's vertex
+/// scale, which with a compression scale of 1 is the game's constant
+/// compression scale (2, Halo 4's 5), then its texcoord and normal.
 const VERTEX_FLOATS: usize = 8;
 
 /// The ground a placement's colour leans toward by its ground tint: the
@@ -222,13 +224,15 @@ impl DecoratorBuffers {
         let [Some(position), texcoord, normal] = locations else {
             return false;
         };
+        self.layout = layout_of(game);
+        let vertex_scale = self.layout.vertex_scale();
         let mut vertices: Vec<f32> = Vec::new();
         self.meshes.clear();
         for mesh in &set.meshes {
             let first = (vertices.len() / VERTEX_FLOATS) as i32;
             for &index in &mesh.indices {
                 let index = index as usize;
-                vertices.extend(mesh.positions[index].map(|value| value * 2.0));
+                vertices.extend(mesh.positions[index].map(|value| value * vertex_scale));
                 vertices.extend(mesh.texcoords[index]);
                 vertices.extend(mesh.normals[index]);
             }
@@ -236,7 +240,6 @@ impl DecoratorBuffers {
                 .push((first, (vertices.len() / VERTEX_FLOATS) as i32 - first));
         }
         let light = baked_light();
-        self.layout = layout_of(game);
         self.packed = pack(
             self.layout,
             &set.placements,

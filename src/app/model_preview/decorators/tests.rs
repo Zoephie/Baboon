@@ -94,6 +94,13 @@ fn every_reach_set_reads() {
     every_set_reads(GameId::HaloReach);
 }
 
+/// With `BLAM_TEST_H4EK`: as [`every_halo_3_set_reads`], Halo 4's sets.
+#[test]
+#[ignore = "reads every Halo 4 decorator set; run by hand"]
+fn every_halo_4_set_reads() {
+    every_set_reads(GameId::Halo4);
+}
+
 fn every_set_reads(game: GameId) {
     let Some(source) = kit_source(game) else {
         return;
