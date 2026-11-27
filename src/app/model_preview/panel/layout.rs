@@ -485,6 +485,7 @@ pub(in crate::app) fn preview_panel_title(group_tag: u32) -> &'static str {
         b"sbsp" => "Structure BSP",
         b"scnr" => "Scenario Geometry",
         b"dctr" | b"DECR" => "Decorator Set",
+        b"dobc" => "Detail Objects",
         _ => "Model Preview",
     }
 }

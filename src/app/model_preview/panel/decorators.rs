@@ -79,6 +79,17 @@ fn draw_set_rows(ui: &mut Ui, set: &DecoratorSet) {
         draw_rows(ui, &rows);
         return;
     }
+    if let Some(collection) = &set.halo_ce {
+        let offset = format!("{} wu", collection.z_offset);
+        draw_rows(
+            ui,
+            &[
+                ("Sprite plate", collection.plate_path.as_str()),
+                ("Z offset", offset.as_str()),
+            ],
+        );
+        return;
+    }
     let shader = set.shader.map_or("unknown", |shader| shader.name());
     let wind = match (
         &set.wind,

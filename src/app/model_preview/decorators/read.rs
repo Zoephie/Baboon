@@ -80,6 +80,7 @@ pub(in crate::app::model_preview) fn read_decorator_set(
         meshes,
         layout: Default::default(),
         halo2: None,
+        halo_ce: None,
         placements: Vec::new(),
     })
 }

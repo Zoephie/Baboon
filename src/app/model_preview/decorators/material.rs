@@ -47,8 +47,39 @@ pub(in crate::app::model_preview) fn resolve_decorator_material(
     if path.is_empty() {
         return MaterialTextures::failed("this decorator set names no texture");
     }
+    let mut textures = cutout(reader, &path, caches);
+    if textures.error.is_none() && reader.game_shaders() {
+        match game_material(reader, set, &path, caches) {
+            Ok(material) => textures.gen3 = Some(Arc::new(material)),
+            Err(error) => textures.game_shaders_error = Some(error),
+        }
+    }
+    textures
+}
+
+/// A detail object collection's sprite plate, cut out by its alpha: the game
+/// blends it by its alpha (`_rasterizer_detail_objects_begin`), which Solid
+/// and Textured, drawing opaque, cut out on instead.
+pub(in crate::app::model_preview) fn resolve_detail_object_material(
+    reader: &TagReader,
+    collection: &TagFile,
+    caches: &mut ResolveCaches,
+) -> MaterialTextures {
+    let path = collection
+        .root()
+        .read_tag_ref_path("sprite plate")
+        .map(|path| path.trim().to_owned())
+        .unwrap_or_default();
+    if path.is_empty() {
+        return MaterialTextures::failed("this detail object collection names no sprite plate");
+    }
+    cutout(reader, &path, caches)
+}
+
+/// The bitmap at `path` as the base map and the map that cuts it out.
+fn cutout(reader: &TagReader, path: &str, caches: &mut ResolveCaches) -> MaterialTextures {
     let binding = SlotBitmap {
-        path: path.clone(),
+        path: path.to_owned(),
         image_index: 0,
         repeat_x: true,
         repeat_y: true,
@@ -60,12 +91,6 @@ pub(in crate::app::model_preview) fn resolve_decorator_material(
     let mut textures = MaterialTextures::default();
     textures.slots[TextureSlot::Base as usize] = Some(image.clone());
     textures.slots[TextureSlot::AlphaTest as usize] = Some(image);
-    if reader.game_shaders() {
-        match game_material(reader, set, &path, caches) {
-            Ok(material) => textures.gen3 = Some(Arc::new(material)),
-            Err(error) => textures.game_shaders_error = Some(error),
-        }
-    }
     textures
 }
 

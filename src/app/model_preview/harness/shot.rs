@@ -236,6 +236,7 @@ fn object_kind(kind: &str) -> (&'static str, &'static [u8; 4]) {
         "projectile" => ("projectile", b"proj"),
         "imposter" => ("imposter_model", b"impo"),
         "decorator_set" => ("decorator_set", b"dctr"),
+        "detail_object_collection" => ("detail_object_collection", b"dobc"),
         _ => ("biped", b"bipd"),
     }
 }

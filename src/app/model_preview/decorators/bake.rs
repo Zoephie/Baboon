@@ -9,6 +9,7 @@ use super::super::{
     RenderModelPreviewRegion, RenderModelPreviewVertex,
 };
 use super::DecoratorSet;
+use super::halo_ce::{bake_halo_ce, scatter_halo_ce};
 use super::halo2::{bake_halo_2, scatter_halo_2};
 use super::layout::rotate;
 use super::layout::{Layout, scatter};
@@ -127,21 +128,28 @@ pub(in crate::app::model_preview) fn relayout(data: &mut ModelPreviewData, layou
     };
     let mut set = (**set).clone();
     set.layout = layout;
-    let mut preview = match set.halo2.take() {
-        Some(halo2) => {
-            let mut halo2 = (*halo2).clone();
-            halo2.records = scatter_halo_2(&halo2, layout);
-            let preview = bake_halo_2(&halo2);
-            set.halo2 = Some(Arc::new(halo2));
-            preview
-        }
-        None => {
-            set.placements = scatter(&set, layout);
-            let Some(material) = data.preview.materials.first().cloned() else {
-                return;
-            };
-            bake_placements(&set, material)
-        }
+    let material = data.preview.materials.first().cloned();
+    let mut preview = if let Some(halo2) = set.halo2.take() {
+        let mut halo2 = (*halo2).clone();
+        halo2.records = scatter_halo_2(&halo2, layout);
+        let preview = bake_halo_2(&halo2);
+        set.halo2 = Some(Arc::new(halo2));
+        preview
+    } else if let Some(collection) = set.halo_ce.take() {
+        let Some(material) = material else {
+            return;
+        };
+        let mut collection = (*collection).clone();
+        collection.instances = scatter_halo_ce(&collection, layout);
+        let preview = bake_halo_ce(&collection, material);
+        set.halo_ce = Some(Arc::new(collection));
+        preview
+    } else {
+        let Some(material) = material else {
+            return;
+        };
+        set.placements = scatter(&set, layout);
+        bake_placements(&set, material)
     };
     preview.game = data.preview.game;
     preview.generation = data.preview.generation;
