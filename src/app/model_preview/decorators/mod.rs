@@ -107,6 +107,9 @@ pub(crate) struct DecoratorType {
     /// The render model instance placement its `mesh` names.
     pub mesh_name: String,
     pub random_rotation: bool,
+    /// Reach's and Halo 4's `align random` without `align to normal`, which
+    /// the game takes first: its up turned to a random direction.
+    pub align_random: bool,
     pub scale: [f32; 2],
     /// In degrees.
     pub tilt: [f32; 2],

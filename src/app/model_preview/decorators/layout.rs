@@ -8,8 +8,9 @@
 //! in its range, a random mix of its three colours and a ground tint in its
 //! range. Halo 3's placement is Sapien's, which no database here holds, and
 //! its placements in the kit's levels land within the same ranges. The
-//! ground here is flat, so aligning to its normal changes nothing; `align
-//! random` and `rotate x axis down` are not applied, their maths unread.
+//! ground here is flat, so aligning to its normal changes nothing, nor does
+//! `rotate x axis down`, which turns the model's x down the ground's slope.
+//! Reach's and Halo 4's `align random` turns up to a random direction.
 
 use super::super::particles::Random;
 use super::{DecoratorSet, Placement};
@@ -91,10 +92,15 @@ pub(in crate::app::model_preview) fn scatter(set: &DecoratorSet, layout: Layout)
         };
         let tilt = random.range(kind.tilt[0], kind.tilt[1]).to_radians();
         let tilt_axis = random.range(0.0, std::f32::consts::TAU);
-        let rotation = multiply(
+        let mut rotation = multiply(
             about([tilt_axis.cos(), tilt_axis.sin(), 0.0], tilt),
             about([0.0, 0.0, 1.0], spin),
         );
+        // Then up turned to the ground's normal (on flat ground, up), or to
+        // a random direction.
+        if kind.align_random {
+            rotation = multiply(up_to(random_direction(&mut random)), rotation);
+        }
         let scale = random.range(kind.scale[0], kind.scale[1]);
         let motion = random.range(kind.wind[0], kind.wind[1]);
         let tint = mix(kind.colors, &mut random);
@@ -140,6 +146,31 @@ fn mix(colors: [[f32; 3]; 3], random: &mut Random) -> [f32; 3] {
     std::array::from_fn(|channel| {
         colors[0][channel] * w + colors[1][channel] * u + colors[2][channel] * v
     })
+}
+
+/// A direction picked evenly over the sphere (`_random_direction3d`).
+fn random_direction(random: &mut Random) -> [f32; 3] {
+    let z = random.range(-1.0, 1.0);
+    let around = random.range(0.0, std::f32::consts::TAU);
+    let ring = (1.0 - z * z).max(0.0).sqrt();
+    [ring * around.cos(), ring * around.sin(), z]
+}
+
+/// The least turn of up onto the unit `direction`
+/// (`quaternion_from_unit_vectors`); straight down, half a turn about x.
+fn up_to(direction: [f32; 3]) -> [f32; 4] {
+    let [x, y, z] = direction;
+    // up × direction, and up · direction.
+    let axis = [-y, x, 0.0];
+    let length = (x * x + y * y).sqrt();
+    if length < 1e-6 {
+        return if z > 0.0 {
+            [0.0, 0.0, 0.0, 1.0]
+        } else {
+            about([1.0, 0.0, 0.0], std::f32::consts::PI)
+        };
+    }
+    about(axis.map(|value| value / length), z.clamp(-1.0, 1.0).acos())
 }
 
 /// The turn by `angle` radians about the unit `axis`, `[x, y, z, w]`.
@@ -252,5 +283,27 @@ mod tests {
             placements,
             "a seed lays the same patch every time"
         );
+    }
+
+    /// Up turned onto a direction lands on it.
+    #[test]
+    fn up_turns_onto_any_direction() {
+        let mut random = Random(5);
+        for _ in 0..50 {
+            let direction = random_direction(&mut random);
+            let length = direction
+                .iter()
+                .map(|value| value * value)
+                .sum::<f32>()
+                .sqrt();
+            assert!((length - 1.0).abs() < 1e-4);
+            let turned = rotate(up_to(direction), [0.0, 0.0, 1.0]);
+            assert!(
+                (0..3).all(|axis| (turned[axis] - direction[axis]).abs() < 1e-4),
+                "{direction:?} {turned:?}"
+            );
+        }
+        let down = rotate(up_to([0.0, 0.0, -1.0]), [0.0, 0.0, 1.0]);
+        assert!((down[2] + 1.0).abs() < 1e-5);
     }
 }

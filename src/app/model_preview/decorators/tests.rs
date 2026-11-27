@@ -285,3 +285,43 @@ fn walk(root: &std::path::Path, extension: &str) -> Vec<std::path::PathBuf> {
     found.sort();
     found
 }
+
+/// With `BLAM_TEST_HREK`: Reach's dark rocks align at random, so even
+/// untilted their placements' up points every way, and the arid grass, which aligns to
+/// the ground's normal, stays upright within its tilt.
+#[test]
+fn reach_types_that_align_at_random_tumble() {
+    let Some(source) = kit_source(GameId::HaloReach) else {
+        return;
+    };
+    let reader = TagReader::with_game_shaders(&source, false);
+    let read = |path: &str| {
+        let tag = reader.load(path, "decorator_set", b"dctr").unwrap();
+        let mut set = super::read_decorator_set(&tag, Some(&reader), &mut Vec::new()).unwrap();
+        set.placements = super::scatter(&set, super::Layout::default());
+        set
+    };
+    let lowest_up = |set: &super::DecoratorSet| {
+        set.placements
+            .iter()
+            .map(|placement| super::layout::rotate(placement.rotation, [0.0, 0.0, 1.0])[2])
+            .fold(1.0_f32, f32::min)
+    };
+    let mut rocks = read("levels\\multi\\dlc\\shared\\decorators\\dlc_dark_rocks\\dlc_dark_rocks");
+    assert!(rocks.types.iter().all(|kind| kind.align_random));
+    // Their own tilt tumbles them too; with none, only the alignment can.
+    for kind in &mut rocks.types {
+        kind.tilt = [0.0; 2];
+    }
+    rocks.placements = super::scatter(&rocks, super::Layout::default());
+    assert!(lowest_up(&rocks) < 0.0, "some rocks land upside down");
+    for kind in &mut rocks.types {
+        kind.align_random = false;
+    }
+    rocks.placements = super::scatter(&rocks, super::Layout::default());
+    assert!(lowest_up(&rocks) > 0.999, "without it, untilted rocks stand upright");
+    let grass = read("levels\\shared\\decorators\\grass_arid\\grass_arid");
+    assert!(grass.types.iter().all(|kind| !kind.align_random));
+    let tilt = grass.types.iter().map(|kind| kind.tilt[1]).fold(0.0_f32, f32::max);
+    assert!(lowest_up(&grass) >= tilt.to_radians().cos() - 1e-4, "the grass keeps within its tilt");
+}

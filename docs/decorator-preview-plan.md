@@ -269,6 +269,8 @@ See the proposals that accompany this plan.
   `cull block size`, each game's level choice and decimation, and the stencil stipple from
   `default bitmaps[9]`. The gen3 decorators now draw their strips as the game does
   (`TRIANGLE_STRIP`, counting each strip from vertex 0 for `instance_data`).
+- Reach's and Halo 4's *align random*: a type's up turned to a random direction after its spin and
+  tilt, unless it also aligns to the normal, which the game takes first.
 
 ## Reach's and Halo 4's detail levels (researched 2026-11-27)
 
@@ -306,13 +308,15 @@ From Reach's 360 tag build (`render_decorators`, `c_decorator_lod_renderer`) che
   mask 15, GREATER_EQUAL (inverse LESS_EQUAL). A plain draw is skipped where its byte is 0 (255 for
   the inverse).
 
-## Seen in the preview, not yet explained
+## Seen in the preview, explained
 
 - Reach's `tree_pine_forge_gulch` (static billboard) is a card lying flat in its model (0.01 thick,
-  facing −Z, its height along +Y) with only *random rotation* and *align to normal*; it draws lying
-  on the ground. Something in the game stands it up; the research doesn't say what.
-- Halo 3's *still + sun light only* sets read the motion byte as the sun's intensity, which the
-  preview fills from the wind range; they draw near white.
+  facing −Z, its height along +Y) with only *random rotation* and *align to normal*. Nothing in
+  `place_randomized_decorator` stands it up: its spin is about up, its tilt within the type's
+  range, and *align to normal* turns the model's up to the ground's normal, which on flat ground is
+  up. *Rotate x axis down* (which it does not set) only turns the model's x down a slope. So on flat
+  ground the game lays it flat as the preview does. It would stand only where the brush paints it on
+  a steep face (inferred: no kit scenario places it).
 
 ## Not settled by the research
 
@@ -325,6 +329,11 @@ From Reach's 360 tag build (`render_decorators`, `c_decorator_lod_renderer`) che
   - how a level's build groups its decorators into cull blocks and sizes their spheres: the preview
     grids its patch by `cull block size` and bounds each cell's placements;
   - which screen corner the stipple's tile starts from (the preview tiles from GL's, bottom left).
+  - whether Halo 3's lightmapper writes a sun visibility into a *still + sun light only* set's motion
+    byte, which that shader reads as the sun's strength (`motion_scale * sun_color * N·L`). The
+    scenario keeps the brush's motion, 0 for every sun set's wind range (Citadel's 192 snowy pines all
+    store 0), and the kit's BSPs leave the instance buffer to the cache build, so the preview packs the
+    brush's motion and those sets take no sun; they draw by their baked light alone.
 - **Halo 2:** what the lightmapper writes into the placement's accuracy float.
 - **Halo CE:** Sapien's random seed (the preview picks its own); the exact UV weights of its ground
   sample (irrelevant without a level).

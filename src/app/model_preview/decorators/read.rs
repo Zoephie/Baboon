@@ -43,7 +43,7 @@ pub(in crate::app::model_preview) fn read_decorator_set(
         .collect();
     let types: Vec<DecoratorType> = elements(root, "decorator types")
         .iter()
-        .map(|element| read_type(*element, &instance_names))
+        .map(|element| read_type(*element, &instance_names, LodRule::of(game).is_some()))
         .collect();
     if types.is_empty() {
         return Err("This decorator set has no decorator types.".to_owned());
@@ -204,7 +204,10 @@ fn read_stipple(reader: &TagReader) -> Option<Stipple> {
     })
 }
 
-fn read_type(element: TagStruct<'_>, instance_names: &[String]) -> DecoratorType {
+/// A type; `placed_by_the_game` for Reach and Halo 4, whose placement
+/// (`place_randomized_decorator`) reads `align random` (Halo 3's is
+/// Sapien's, unread).
+fn read_type(element: TagStruct<'_>, instance_names: &[String], placed_by_the_game: bool) -> DecoratorType {
     let real = |name: &str| element.read_real(name).unwrap_or(0.0);
     let range = |low: &str, high: &str| [real(low), real(high)];
     let mesh_name = usize::try_from(element.read_int_any("mesh").unwrap_or(-1))
@@ -215,6 +218,9 @@ fn read_type(element: TagStruct<'_>, instance_names: &[String]) -> DecoratorType
     DecoratorType {
         mesh_name,
         random_rotation: has_flag(element, "flags", "random rotation"),
+        align_random: placed_by_the_game
+            && has_flag(element, "flags", "align random")
+            && !has_flag(element, "flags", "align to normal"),
         scale: range("scale min", "scale max"),
         tilt: range("tilt min", "tilt max"),
         wind: range("wind min", "wind max"),
