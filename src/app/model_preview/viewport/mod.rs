@@ -263,19 +263,10 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
                 }
             }
         }
-        // Dragging, the joint names itself and how many nodes above it turn.
-        if let Some(drag) = state.pose.dragging
-            && let (Some(&Some(position)), Some(node)) =
-                (projected.get(drag.joint), data.preview.nodes.get(drag.joint))
-        {
-            let turning = if state.pose.chain == 1 { "1 node".to_owned() } else { format!("{} nodes", state.pose.chain) };
-            draw_preview_hover_label(
-                &painter,
-                position + Vec2::new(7.0, -7.0),
-                &format!("{} · turning {turning} (scroll to change)", node.name),
-                ARMATURE_COLOR,
-            );
-        } else if let Some((index, position, _)) = hovered
+        // The joint under the pointer names itself, but while a joint is
+        // posed or the camera moves.
+        if let Some((index, position, _)) = hovered
+            && state.pose.dragging.is_none()
             && !camera_settling
             && let Some(node) = data.preview.nodes.get(index)
         {
@@ -390,6 +381,15 @@ fn camera_settling(ui: &Ui, viewport: egui::Id, moving: bool) -> bool {
     false
 }
 
+/// The most nodes any joint has above it: the longest chain a drag can
+/// turn.
+pub(super) fn deepest_chain(nodes: &[super::RenderModelPreviewNode]) -> usize {
+    (0..nodes.len())
+        .map(|joint| super::pose::chain_above(nodes, joint, nodes.len()).len())
+        .max()
+        .unwrap_or(0)
+}
+
 /// A pinned joint's ring.
 const PIN_COLOR: Color32 = Color32::from_rgb(255, 140, 40);
 
@@ -397,8 +397,9 @@ const PIN_COLOR: Color32 = Color32::from_rgb(255, 140, 40);
 const POSE_PICK_DISTANCE: f32 = 8.0;
 
 /// Pose mode's input. A drag started on a joint carries it across the plane
-/// through it facing the camera, turning the chain above it (the wheel
-/// lengthening or shortening the chain meanwhile); on the root it moves the
+/// through it facing the camera, turning the chain above it (`]` or the
+/// wheel up lengthening it meanwhile, `[` or the wheel down shortening
+/// it, for a trackpad as for a mouse); on the root it moves the
 /// whole skeleton; with Alt held it twists the joint about its bone. A
 /// double-click on a joint pins or unpins it, and every drag ends by holding
 /// the pins. Whether a pose drag is under way, which the orbit and zoom then
@@ -584,13 +585,20 @@ fn pose_drag(
             twist(nodes, &base, &mut state.pose, joint, angle, &limits);
         }
     } else {
-        // The wheel lengthens or shortens the chain a node at a time.
-        if let Some(scrolled) = wheel {
-            state.pose.chain = if scrolled > 0.0 {
-                state.pose.chain + 1
-            } else {
-                state.pose.chain.saturating_sub(1).max(1)
-            };
+        // `]`, `[` or the wheel lengthen or shorten the chain a node at a
+        // time, up to the deepest chain the skeleton has.
+        let most = deepest_chain(nodes);
+        let (longer, shorter) = ui.ctx().input_mut(|input| {
+            (
+                input.consume_key(egui::Modifiers::NONE, egui::Key::CloseBracket),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::OpenBracket),
+            )
+        });
+        for more in [wheel.map(|scrolled| scrolled > 0.0), longer.then_some(true), shorter.then_some(false)]
+            .into_iter()
+            .flatten()
+        {
+            state.pose.step_chain(more, most);
         }
         let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) else {
             return true;
@@ -626,8 +634,6 @@ fn pose_drag(
                 state.pose.offset[axis] += target[axis] - joint[axis];
             }
         } else {
-            // A chain longer than the joint has ancestors stops at the root.
-            state.pose.chain = state.pose.chain.min(chain.len());
             if drag.lock.is_some() {
                 let held = reach_held(nodes, &base, &mut state.pose, drag.joint, &chain, (drag.held, target), &limits);
                 if let Some(dragging) = state.pose.dragging.as_mut() {

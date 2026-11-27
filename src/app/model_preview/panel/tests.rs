@@ -2383,6 +2383,99 @@ fn a_joints_name_waits_for_the_camera_to_settle() {
     assert!(frame(&mut state, vec![]).1, "settled, it is named again");
 }
 
+/// During a drag, `[` takes a node from the chain and `]` adds one back,
+/// for a trackpad with no wheel, up to the most above the joint; nothing is
+/// labelled while the joint is dragged.
+#[test]
+fn brackets_change_how_many_joints_follow_a_drag_and_no_label_shows() {
+    use crate::app::model_preview::{PreviewCamera, RenderModelPreviewNode, armature_node_positions};
+    let worlds = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.8, 0.0, 0.0]];
+    let locals = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.4, 0.0, -0.3]];
+    let nodes = (0..3)
+        .map(|index| RenderModelPreviewNode {
+            name: format!("node {index}"),
+            parent: index as i16 - 1,
+            bind_rotation: [0.0, 0.0, 0.0, 1.0],
+            bind_translation: locals[index],
+            inverse_bind: [
+                [1.0, 0.0, 0.0, -worlds[index][0]],
+                [0.0, 1.0, 0.0, -worlds[index][1]],
+                [0.0, 0.0, 1.0, -worlds[index][2]],
+            ],
+        })
+        .collect();
+    let preview = RenderModelPreview {
+        nodes,
+        bounds_min: [-1.0; 3],
+        bounds_max: [1.0; 3],
+        ..Default::default()
+    };
+    let data = model_preview_data("test".into(), "test".into(), preview, vec![]);
+    let mut state = ModelPreviewState::default();
+    state.pose.on = true;
+    let context = egui::Context::default();
+    let mut time = 0.0;
+    let mut rect = egui::Rect::NOTHING;
+    // A pass, and whether it labelled anything.
+    let mut frame = |state: &mut ModelPreviewState, events: Vec<egui::Event>| {
+        time += 1.0 / 60.0;
+        let output = crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(500.0, 400.0))),
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(400.0, 300.0));
+                    crate::app::model_preview::viewport::draw_model_viewport(ui, &data, state, rect.size());
+                });
+            },
+        );
+        let labelled = output.shapes.iter().any(|clipped| {
+            matches!(&clipped.shape, egui::Shape::Text(text) if text.galley.text().starts_with("node"))
+        });
+        (rect, labelled)
+    };
+    let key = |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut state, vec![]);
+    let (rect, _) = frame(&mut state, vec![]);
+    let camera = PreviewCamera::new(&data, &state, rect);
+    let hand = camera.project(armature_node_positions(&data, &state)[2]).pos;
+    for step in 1..=4 {
+        frame(&mut state, vec![egui::Event::PointerMoved(rect.center() + (hand - rect.center()) * (step as f32 / 4.0))]);
+    }
+    assert!(frame(&mut state, vec![]).1, "hovered, the hand is named");
+    frame(&mut state, vec![button(hand, true)]);
+    let mut at = hand;
+    for _ in 0..3 {
+        at += Vec2::new(0.0, -3.0);
+        frame(&mut state, vec![egui::Event::PointerMoved(at)]);
+    }
+    assert!(state.pose.dragging.is_some(), "the hand is dragged");
+    at += Vec2::new(0.0, -3.0);
+    assert!(!frame(&mut state, vec![egui::Event::PointerMoved(at)]).1, "dragged, nothing is labelled");
+    assert_eq!(state.pose.chain, 2);
+    at += Vec2::new(0.0, -3.0);
+    frame(&mut state, vec![egui::Event::PointerMoved(at), key(egui::Key::OpenBracket)]);
+    assert_eq!(state.pose.chain, 1, "[ takes one");
+    at += Vec2::new(0.0, -3.0);
+    frame(&mut state, vec![egui::Event::PointerMoved(at), key(egui::Key::CloseBracket)]);
+    at += Vec2::new(0.0, -3.0);
+    frame(&mut state, vec![egui::Event::PointerMoved(at), key(egui::Key::CloseBracket)]);
+    assert_eq!(state.pose.chain, 2, "] adds one back, no more than the two above the hand");
+    frame(&mut state, vec![button(at, false)]);
+}
+
 /// With `BLAM_TEST_H3EK`: the Model Preview card's header fits its width,
 /// from wide down to narrow: no two of its labels or icons overlap, and
 /// none leaves the card. Posing, the header carries its most.

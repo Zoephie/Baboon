@@ -35,8 +35,11 @@ follows like a puppet, over the bind pose or over an animation.
    turns the joint's parent so the joint follows the pointer across the plane through it facing the
    camera; Reset pose. Turns are kept in each node's parent frame, so they ride an animation.
 2. **Drag a chain (done).** A drag moves the joint with the chain above it (Blender's Auto IK): two
-   nodes to begin with, as the graphs' limb chains run effector to grandparent, the wheel adding or
-   taking one while dragging. FABRIK places the chain, straightening it toward a target out of reach;
+   nodes to begin with, as the graphs' limb chains run effector to grandparent. Follow in the pose
+   strip sets how many (− and +, up to the deepest chain the skeleton has); while dragging, `]` or
+   the wheel up adds one and `[` or the wheel down takes one, the keys for a trackpad, where
+   scrolling while holding a drag is awkward. A drag shows no label (it once named the joint and
+   the count beside it). FABRIK places the chain, straightening it toward a target out of reach;
    each node then takes the least swing that lands its child, root first, adding no twist. Damped
    least squares was tried first: it crawled near full extension, and with lighter damping it folded
    the chain backward.

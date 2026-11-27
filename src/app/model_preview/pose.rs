@@ -43,7 +43,9 @@ pub(crate) struct PoseEdit {
     pub selection: BTreeSet<usize>,
     /// The drag under way: the joint dragged.
     pub dragging: Option<PoseDrag>,
-    /// How many nodes above a dragged joint turn: its parent alone at 1.
+    /// How many nodes above a dragged joint turn to follow it: its parent
+    /// alone at 1. Set in the pose strip, or while dragging with `[` and
+    /// `]` or the wheel; a joint with fewer above it turns all it has.
     pub chain: usize,
     /// Whether the physics model's joint limits hold.
     pub limits: bool,
@@ -256,6 +258,12 @@ impl PoseEdit {
     /// the pose beneath.
     pub(crate) fn is_posed(&self) -> bool {
         !self.turns.is_empty() || !self.scales.is_empty() || self.offset != [0.0; 3]
+    }
+
+    /// One more node above a dragged joint turning to follow it, or one
+    /// fewer, from 1 to `most`.
+    pub(crate) fn step_chain(&mut self, more: bool, most: usize) {
+        self.chain = if more { self.chain + 1 } else { self.chain.saturating_sub(1) }.clamp(1, most.max(1));
     }
 
     /// `joint`'s scale over the scale beneath: 1 unscaled.
@@ -1246,6 +1254,21 @@ mod tests {
         // along local x picks a point on the model's y line through it.
         let target = Lock::Axis(0).target([0.0; 3], [0.3, 0.5, 5.0], [0.0, 0.0, -1.0], &axes).unwrap();
         assert!(near(target, [0.0, 0.5, 0.0]), "{target:?}");
+    }
+
+    /// The chain steps a node at a time, never below 1 nor past the most
+    /// the skeleton has.
+    #[test]
+    fn the_chain_steps_between_one_and_the_most() {
+        let mut edit = PoseEdit::default();
+        assert_eq!(edit.chain, DEFAULT_CHAIN);
+        edit.step_chain(true, 3);
+        edit.step_chain(true, 3);
+        assert_eq!(edit.chain, 3);
+        for _ in 0..5 {
+            edit.step_chain(false, 3);
+        }
+        assert_eq!(edit.chain, 1);
     }
 
     /// Shift+click adds a joint and makes it active, and again takes it

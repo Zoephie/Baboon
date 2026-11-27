@@ -329,7 +329,8 @@ fn draw_pose_strip(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPrevie
         .show(&mut strip, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                super::view_menu::draw_pose_tools(ui, state, !data.preview.joint_limits.is_empty());
+                let most_chain = crate::app::model_preview::viewport::deepest_chain(&data.preview.nodes);
+                super::view_menu::draw_pose_tools(ui, state, !data.preview.joint_limits.is_empty(), most_chain);
             });
         });
 }

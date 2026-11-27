@@ -476,14 +476,20 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
 /// ([`draw_pose_tools`]).
 fn draw_pose_toggle(ui: &mut Ui, state: &mut ModelPreviewState) {
     ui.selectable_label(state.pose.on, "Pose").on_hover_text(
-        "Drag a joint to pose the skeleton, over the bind pose or the animation playing; scroll while dragging to turn more or fewer nodes above it.\nClick a joint for its gizmo: drag an arrow to move it along that axis alone, a square to move it within that plane.\nShift-click to select more joints, which the gizmo then moves, turns or scales together; Shift-double-click to select a joint and everything below it.\nAlt-drag a joint to twist it about its bone. Drag the root to move the whole skeleton.\nDouble-click a joint to pin it where it stands.\nDragging anywhere else still orbits.",
+        "Drag a joint to pose the skeleton, over the bind pose or the animation playing; the joints above it bend to follow (how many is Follow, in the viewport's corner; [ and ] or scroll while dragging).\nClick a joint for its gizmo: drag an arrow to move it along that axis alone, a square to move it within that plane.\nShift-click to select more joints, which the gizmo then moves, turns or scales together; Shift-double-click to select a joint and everything below it.\nAlt-drag a joint to twist it about its bone. Drag the root to move the whole skeleton.\nDouble-click a joint to pin it where it stands.\nDragging anywhere else still orbits.",
     ).clicked().then(|| state.pose.on = !state.pose.on);
 }
 
 /// Pose mode's tools, in the viewport's corner while posing: Limits for a
 /// model whose physics model limits its joints, the gizmo's Move, Rotate
-/// and Scale, its Global or Local axes, and once anything is posed, the button that undoes it.
-pub(in crate::app::model_preview) fn draw_pose_tools(ui: &mut Ui, state: &mut ModelPreviewState, limited: bool) {
+/// and Scale, how many joints follow a dragged one (up to `most_chain`),
+/// its Global or Local axes, and once anything is posed, the button that undoes it.
+pub(in crate::app::model_preview) fn draw_pose_tools(
+    ui: &mut Ui,
+    state: &mut ModelPreviewState,
+    limited: bool,
+    most_chain: usize,
+) {
     if limited {
         ui.selectable_label(state.pose.limits, "Limits")
             .on_hover_text("Keep the joints the physics model limits (shoulders, hips, elbows, knees, head) within their ragdoll limits")
@@ -499,6 +505,18 @@ pub(in crate::app::model_preview) fn draw_pose_tools(ui: &mut Ui, state: &mut Mo
         if ui.selectable_label(state.pose.gizmo == mode, label).on_hover_text(tip).clicked() {
             state.pose.gizmo = mode;
         }
+    }
+    // How many joints above a dragged one bend to follow it, for a moving
+    // drag; `[` and `]` or the wheel change it during one.
+    ui.separator();
+    const FOLLOW: &str = "How many joints above a dragged joint bend to follow it.\nWhile dragging: [ for fewer, ] for more, or scroll.";
+    ui.label("Follow").on_hover_text(FOLLOW);
+    if ui.add_enabled(state.pose.chain > 1, egui::Button::new("−")).on_hover_text("Fewer joints follow ([ while dragging)").clicked() {
+        state.pose.step_chain(false, most_chain);
+    }
+    ui.label(state.pose.chain.to_string()).on_hover_text(FOLLOW);
+    if ui.add_enabled(state.pose.chain < most_chain, egui::Button::new("+")).on_hover_text("More joints follow (] while dragging)").clicked() {
+        state.pose.step_chain(true, most_chain);
     }
     // Scaling is the same along every axis: no axes to pick.
     if state.pose.gizmo != GizmoMode::Scale {
