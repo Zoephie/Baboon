@@ -102,6 +102,8 @@ pub(in crate::app::model_preview) struct ShotOptions {
     pub(in crate::app::model_preview) without_material: Option<String>,
     /// Draw the parts of the material `highlight` would name by this alone.
     pub(in crate::app::model_preview) only_material: Option<String>,
+    /// A decorator set's patch and its cards' settings.
+    pub(in crate::app::model_preview) decorator_layout: crate::app::model_preview::decorators::Layout,
 }
 
 impl ShotOptions {
@@ -141,6 +143,7 @@ impl ShotOptions {
             highlight: None,
             without_material: None,
             only_material: None,
+            decorator_layout: Default::default(),
         }
     }
 
@@ -206,6 +209,7 @@ impl ShotOptions {
             highlight: None,
             without_material: None,
             only_material: None,
+            decorator_layout: Default::default(),
         }
     }
 }
@@ -235,6 +239,8 @@ fn object_kind(kind: &str) -> (&'static str, &'static [u8; 4]) {
         "effect_scenery" => ("effect_scenery", b"efsc"),
         "projectile" => ("projectile", b"proj"),
         "imposter" => ("imposter_model", b"impo"),
+        "decorator_set" => ("decorator_set", b"dctr"),
+        "detail_object_collection" => ("detail_object_collection", b"dobc"),
         _ => ("biped", b"bipd"),
     }
 }
@@ -308,6 +314,7 @@ pub(in crate::app::model_preview) fn shot_frame(source: &TagSource, shot: &Shot,
         weapon: options.weapon.clone(),
         secondary_weapon: options.secondary_weapon.clone(),
         equippable: None,
+        decorator_layout: options.decorator_layout,
         ..Default::default()
     };
     let mut data = load_model_preview(&tag, &entry, &names, Some(source), &settings).unwrap();
@@ -879,6 +886,264 @@ fn halo_3s_self_shadow_reads_its_own_normals_after_another_gen3_preview() {
         before == after,
         "Halo 3's shadow read another pipeline's normals"
     );
+}
+
+/// With `BLAM_TEST_H3EK`: Game Shaders draw a Halo 3 decorator set through
+/// its own explicit shader, instanced: the Isolation dead grass, whose
+/// `wind + dynamic lights` sways, moves between two times, and the
+/// Bunkerworld crapweed, `still + dynamic lights`, does not.
+#[test]
+fn a_halo_3_decorator_set_sways_only_in_the_wind() {
+    let Some(halo3) = super::kit::kit_source(GameId::Halo3) else {
+        return;
+    };
+    let shot = |model: &str| Shot {
+        model: model.to_owned(),
+        shaders: true,
+        lights: false,
+        yaw: 0.6,
+        pitch: 0.12,
+        kind: Some("decorator_set".to_owned()),
+    };
+    let at = |time: f32| ShotOptions {
+        time,
+        ..ShotOptions::new(GameId::Halo3)
+    };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let grass = shot("levels\\shared\\decorators\\outskirts_tall_grass\\isolation_deadgrass");
+    let still = shot("levels\\dlc\\bunkerworld\\decorators\\crapweed");
+    let [grass_before, grass_after, still_before, still_after] = [(&grass, 0.0), (&grass, 2.5), (&still, 0.0), (&still, 2.5)]
+        .map(|(shot, time)| render(&gl, &mut renderer, &halo3, shot, &at(time)).pixels);
+    let drawn = |pixels: &[u8]| pixels.chunks(4).filter(|pixel| pixel[..3] != grass_before[..3]).count();
+    assert!(drawn(&grass_before) > 10_000 && drawn(&still_before) > 10_000, "both sets drew");
+    let moved = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(a, b)| a[..3] != b[..3]).count();
+    assert!(moved(&grass_before, &grass_after) > 10_000, "the wind moved the grass");
+    assert_eq!(moved(&still_before, &still_after), 0, "nothing moved the still set");
+}
+
+/// With `BLAM_TEST_HREK`: Reach's decorators draw through Reach's own
+/// shaders, their positions packed in one `uint` each: the M70 gorse,
+/// `billboard + wind + dynamic lights`, sways, and the M20 rocks, `solid
+/// mesh + dynamic lights`, hold still.
+#[test]
+fn a_reach_decorator_set_sways_only_in_the_wind() {
+    let Some(reach) = super::kit::kit_source(GameId::HaloReach) else {
+        return;
+    };
+    let shot = |model: &str| Shot {
+        model: model.to_owned(),
+        shaders: true,
+        lights: false,
+        yaw: 0.6,
+        pitch: 0.2,
+        kind: Some("decorator_set".to_owned()),
+    };
+    let at = |time: f32| ShotOptions {
+        time,
+        ..ShotOptions::new(GameId::HaloReach)
+    };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let gorse = shot("levels\\shared\\decorators\\gorse_bush\\gorse_bush_m70");
+    let rocks = shot("levels\\shared\\decorators\\rock_small_m20\\rock_small_m20");
+    let [gorse_before, gorse_after, rocks_before, rocks_after] = [(&gorse, 0.0), (&gorse, 2.5), (&rocks, 0.0), (&rocks, 2.5)]
+        .map(|(shot, time)| render(&gl, &mut renderer, &reach, shot, &at(time)).pixels);
+    let drawn = |pixels: &[u8]| pixels.chunks(4).filter(|pixel| pixel[..3] != gorse_before[..3]).count();
+    assert!(drawn(&gorse_before) > 10_000 && drawn(&rocks_before) > 10_000, "both sets drew");
+    let moved = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(a, b)| a[..3] != b[..3]).count();
+    assert!(moved(&gorse_before, &gorse_after) > 5_000, "the wind moved the gorse");
+    assert_eq!(moved(&rocks_before, &rocks_after), 0, "nothing moved the rocks");
+}
+
+/// With `BLAM_TEST_H4EK`: Halo 4's decorators draw through the source their
+/// `material_shader`s carry, their `RGBk` read back: `bush_a`, `billboard +
+/// wind + dynamic lights`, sways, and the crash site's rocks, `solid mesh +
+/// dynamic lights`, hold still.
+#[test]
+fn a_halo_4_decorator_set_sways_only_in_the_wind() {
+    let Some(halo4) = super::kit::kit_source(GameId::Halo4) else {
+        return;
+    };
+    let shot = |model: &str| Shot {
+        model: model.to_owned(),
+        shaders: true,
+        lights: false,
+        yaw: 0.6,
+        pitch: 0.2,
+        kind: Some("decorator_set".to_owned()),
+    };
+    let at = |time: f32| ShotOptions {
+        time,
+        ..ShotOptions::new(GameId::Halo4)
+    };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let bush = shot("environments\\shared\\decorators\\bush_a\\bush_a");
+    let rocks = shot("environments\\shared\\decorators\\crash\\crash_rock_med\\crash_rock_med");
+    let [bush_before, bush_after, rocks_before, rocks_after] = [(&bush, 0.0), (&bush, 2.5), (&rocks, 0.0), (&rocks, 2.5)]
+        .map(|(shot, time)| render(&gl, &mut renderer, &halo4, shot, &at(time)).pixels);
+    let drawn = |pixels: &[u8]| pixels.chunks(4).filter(|pixel| pixel[..3] != bush_before[..3]).count();
+    assert!(drawn(&bush_before) > 10_000 && drawn(&rocks_before) > 10_000, "both sets drew");
+    let moved = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(a, b)| a[..3] != b[..3]).count();
+    assert!(moved(&bush_before, &bush_after) > 5_000, "the wind moved the bush");
+    assert_eq!(moved(&rocks_before, &rocks_after), 0, "nothing moved the rocks");
+}
+
+/// With `BLAM_TEST_HREK`: Reach's arid grass cross-fades between its levels
+/// with the Distance card's fade on. Up close it draws its nearest level
+/// whole either way; stood back into its first cross-fade (6 to 10 units
+/// past each block) the fade changes the picture; and the shown level, with
+/// the fade off, swaps the model drawn.
+#[test]
+fn reach_decorators_cross_fade_between_levels() {
+    let Some(reach) = super::kit::kit_source(GameId::HaloReach) else {
+        return;
+    };
+    let shot = Shot {
+        model: "levels\\shared\\decorators\\grass_arid\\grass_arid".to_owned(),
+        shaders: true,
+        lights: false,
+        yaw: 0.6,
+        pitch: 0.3,
+        kind: Some("decorator_set".to_owned()),
+    };
+    let layout = |fade: bool, level: usize| crate::app::model_preview::decorators::Layout {
+        fade,
+        level,
+        sway: false,
+        ..Default::default()
+    };
+    let at = |scale: f32, fade: bool, level: usize| ShotOptions {
+        scale: Some(scale),
+        decorator_layout: layout(fade, level),
+        ..ShotOptions::new(GameId::HaloReach)
+    };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let mut pixels = |options: &ShotOptions| render(&gl, &mut renderer, &reach, &shot, options).pixels;
+    let differ = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(a, b)| a[..3] != b[..3]).count();
+    let near = [pixels(&at(8.0, false, 0)), pixels(&at(8.0, true, 0))];
+    let background = near[0][..3].to_vec();
+    let drawn = near[0].chunks(4).filter(|pixel| pixel[..3] != background[..]).count();
+    assert!(drawn > 10_000, "the grass drew: {drawn}");
+    assert_eq!(differ(&near[0], &near[1]), 0, "up close the fade changes nothing");
+    let far = [pixels(&at(0.5, false, 0)), pixels(&at(0.5, true, 0))];
+    assert!(differ(&far[0], &far[1]) > 500, "stood back, the levels cross-fade");
+    let level_3 = pixels(&at(8.0, false, 2));
+    // `DECORATOR_SHOT_DIR`: each picture as a PNG, to look at.
+    if let Some(dir) = std::env::var_os("DECORATOR_SHOT_DIR") {
+        let named = [("near_off", &near[0]), ("near_on", &near[1]), ("far_off", &far[0]), ("far_on", &far[1]), ("level_3", &level_3)];
+        for (name, image) in named {
+            let row = SHOT_SIZE[0] as usize * 4;
+            let upright: Vec<u8> = image.chunks_exact(row).rev().flatten().copied().collect();
+            let image = image::RgbaImage::from_raw(SHOT_SIZE[0], SHOT_SIZE[1], upright).unwrap();
+            image.save(std::path::Path::new(&dir).join(format!("grass_arid_{name}.png"))).unwrap();
+        }
+    }
+    assert!(differ(&near[0], &level_3) > 1_000, "the shown level swaps the model");
+}
+
+/// With `BLAM_TEST_H4EK`: Halo 4's juniper swaps levels with the fade on:
+/// up close its nearest whole either way, stood back another level.
+#[test]
+fn halo_4_decorators_swap_levels_with_distance() {
+    let Some(halo4) = super::kit::kit_source(GameId::Halo4) else {
+        return;
+    };
+    let shot = Shot {
+        model: "levels\\multi\\ca_gore_valley\\decorators\\ca_longbow_juniper_bush\\ca_longbow_juniper_bush".to_owned(),
+        shaders: true,
+        lights: false,
+        yaw: 0.6,
+        pitch: 0.3,
+        kind: Some("decorator_set".to_owned()),
+    };
+    let at = |scale: f32, fade: bool| ShotOptions {
+        scale: Some(scale),
+        decorator_layout: crate::app::model_preview::decorators::Layout {
+            fade,
+            sway: false,
+            ..Default::default()
+        },
+        ..ShotOptions::new(GameId::Halo4)
+    };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let mut pixels = |options: &ShotOptions| render(&gl, &mut renderer, &halo4, &shot, options).pixels;
+    let differ = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(a, b)| a[..3] != b[..3]).count();
+    let near = [pixels(&at(8.0, false)), pixels(&at(8.0, true))];
+    let background = near[0][..3].to_vec();
+    assert!(near[0].chunks(4).filter(|pixel| pixel[..3] != background[..]).count() > 10_000, "the juniper drew");
+    assert_eq!(differ(&near[0], &near[1]), 0, "up close the fade changes nothing");
+    let far = [pixels(&at(0.5, false)), pixels(&at(0.5, true))];
+    assert!(differ(&far[0], &far[1]) > 200, "stood back, another level draws");
+}
+
+/// With `BLAM_TEST_H2EK`: Halo 2's screen-facing decorators turn to the eye
+/// through their own vertex shader, translated: with Game Shaders the grass
+/// field covers as much of the picture from two headings a quarter-turn
+/// apart, and without them, baked facing one way, it all but vanishes edge-on
+/// from one of them.
+#[test]
+fn halo_2_decorators_turn_to_the_eye_with_game_shaders() {
+    let Some(halo2) = super::kit::kit_source(GameId::Halo2) else {
+        return;
+    };
+    let shot = |shaders: bool, yaw: f32| Shot {
+        model: "scenarios\\decorators\\grass\\grass_field\\grass_field".to_owned(),
+        shaders,
+        lights: false,
+        yaw,
+        pitch: 0.05,
+        kind: Some("decorator_set".to_owned()),
+    };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let options = ShotOptions::new(GameId::Halo2);
+    let mut covered = |shaders: bool, yaw: f32| {
+        let pixels = render(&gl, &mut renderer, &halo2, &shot(shaders, yaw), &options).pixels;
+        let background = pixels[..3].to_vec();
+        pixels.chunks(4).filter(|pixel| pixel[..3] != background[..]).count() as f32
+    };
+    let ratio = |a: f32, b: f32| a.min(b) / a.max(b).max(1.0);
+    let turning = ratio(covered(true, 0.0), covered(true, std::f32::consts::FRAC_PI_2));
+    let baked = ratio(covered(false, 0.0), covered(false, std::f32::consts::FRAC_PI_2));
+    assert!(turning > 0.6, "with Game Shaders the quads face the eye from both: {turning}");
+    assert!(baked < 0.4, "baked one way, they go edge-on from one: {baked}");
+}
+
+/// With `BLAM_TEST_HCEEK`: Halo CE's viewer-facing detail objects turn
+/// about the vertical to the eye through the kit's own vertex shader,
+/// translated: with Game Shaders the grass field covers as much of the
+/// picture from two headings a quarter-turn apart, and without them, baked
+/// facing one way, it all but vanishes edge-on from one of them.
+#[test]
+fn halo_ce_detail_objects_turn_to_the_eye_with_game_shaders() {
+    let Some(halo_ce) = super::kit::kit_source(GameId::HaloCe) else {
+        return;
+    };
+    let shot = |shaders: bool, yaw: f32| Shot {
+        model: "effects\\detail_objects\\grass_field\\grass_field".to_owned(),
+        shaders,
+        lights: false,
+        yaw,
+        pitch: 0.05,
+        kind: Some("detail_object_collection".to_owned()),
+    };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let options = ShotOptions::new(GameId::HaloCe);
+    let mut covered = |shaders: bool, yaw: f32| {
+        let pixels = render(&gl, &mut renderer, &halo_ce, &shot(shaders, yaw), &options).pixels;
+        let background = pixels[..3].to_vec();
+        pixels.chunks(4).filter(|pixel| pixel[..3] != background[..]).count() as f32
+    };
+    let ratio = |a: f32, b: f32| a.min(b) / a.max(b).max(1.0);
+    let turning = ratio(covered(true, 0.0), covered(true, std::f32::consts::FRAC_PI_2));
+    let baked = ratio(covered(false, 0.0), covered(false, std::f32::consts::FRAC_PI_2));
+    assert!(turning > 0.6, "with Game Shaders they face the eye from both: {turning}");
+    assert!(baked < 0.4, "baked one way, they go edge-on from one: {baked}");
 }
 
 /// The gen3 pipelines share one set of targets: a Reach frame after a Halo 3

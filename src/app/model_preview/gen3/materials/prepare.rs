@@ -47,6 +47,7 @@ pub(in crate::app::model_preview) fn prepare_gen3_material(
         animations: Vec::new(),
         shield: None,
         fringe: None,
+        decorator: false,
     };
     if compiled.blend == Gen3Blend::Opaque {
         material.shield = gen3_shield(reader, caches);

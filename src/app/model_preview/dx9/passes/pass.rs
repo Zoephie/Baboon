@@ -98,6 +98,9 @@ pub(crate) struct Dx9DrawTexture {
 #[derive(Debug, Clone)]
 pub(crate) struct Dx9DrawPass {
     pub(crate) stage: Dx9VertexStage,
+    /// The vertex stage's own source, where it is translated rather than
+    /// written out by `stage` (`Dx9VertexStage::Decorator`).
+    pub(crate) vertex_source: Option<std::sync::Arc<str>>,
     pub(crate) fragment: String,
     pub(crate) blend: Option<Dx9Blend>,
     pub(crate) depth: Dx9Depth,
@@ -148,6 +151,7 @@ impl Dx9DrawPass {
     ) -> Self {
         Self {
             stage,
+            vertex_source: None,
             fragment,
             blend: None,
             depth,

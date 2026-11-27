@@ -115,6 +115,9 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) scenario_bsp_selection: std::collections::BTreeSet<usize>,
     /// The selection the cached `data` was built for.
     pub(in crate::app) loaded_scenario_selection: std::collections::BTreeSet<usize>,
+    /// Decorator sets only: the patch their placements fill. Changing it lays
+    /// the patch out again in place, with no load.
+    pub(in crate::app) decorator_layout: super::decorators::Layout,
     pub(in crate::app) render_mode: ModelRenderMode,
     pub(in crate::app) show_backfaces: bool,
     /// Draw materials through the game's own passes.
@@ -261,6 +264,7 @@ impl Default for ModelPreviewState {
             overlays_loaded: false,
             scenario_bsp_selection: std::collections::BTreeSet::new(),
             loaded_scenario_selection: std::collections::BTreeSet::new(),
+            decorator_layout: Default::default(),
             render_mode: ModelRenderMode::Textured,
             show_backfaces: false,
             game_shaders: false,

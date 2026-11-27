@@ -149,6 +149,8 @@ pub(in crate::app::model_preview) struct ModelGpuSlot {
     pub(in crate::app::model_preview) cheap_texture: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) strip_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     pub(in crate::app::model_preview) particle_textures: Vec<[Option<glow::NativeTexture>; 4]>,
+    /// An opened decorator set's meshes and placements, for Game Shaders.
+    pub(in crate::app::model_preview) decorators: Option<super::super::decorators::DecoratorBuffers>,
 }
 
 impl ModelGpuSlot {
@@ -204,6 +206,7 @@ impl ModelGpuSlot {
                 cheap_texture: None,
                 strip_textures: Vec::new(),
                 particle_textures: Vec::new(),
+                decorators: None,
             })
         }
     }

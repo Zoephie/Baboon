@@ -108,6 +108,7 @@ mod tests {
             animations: Vec::new(),
             shield: None,
             fringe: None,
+            decorator: false,
         };
         let foliage = Some(u32::from_be_bytes(*b"rmfl"));
         let reach = material(Gen3MaterialDialect::Reach);

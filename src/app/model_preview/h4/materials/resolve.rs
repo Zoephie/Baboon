@@ -319,6 +319,7 @@ pub(in crate::app::model_preview) fn resolve_h4_material(
                 change_colors: Vec::new(),
                 animations: Vec::new(),
                 shield: None,
+                decorator: false,
             };
             let mut submit_frames = Vec::new();
             let passes = [h3.albedo.as_ref(), Some(&lit), h3.fringe.as_ref()];

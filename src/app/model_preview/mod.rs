@@ -31,6 +31,7 @@ mod ce;
 pub(crate) mod cloth;
 mod common;
 mod data;
+mod decorators;
 pub(in crate::app) mod dx9;
 pub(in crate::app) mod effects;
 mod frame;

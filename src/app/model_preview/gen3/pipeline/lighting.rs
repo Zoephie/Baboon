@@ -9,7 +9,7 @@ use eframe::glow::HasContext as _;
 
 /// `c_geometry_sampler::m_default_lightprobe_sample`, the first nine terms of
 /// each channel: the light of an object with no level around it.
-pub(super) const DEFAULT_PROBE: [[f32; 9]; 3] = [
+pub(in crate::app::model_preview) const DEFAULT_PROBE: [[f32; 9]; 3] = [
     [
         1.89376, -1.44314, 0.19557, 0.51599, -0.30808, -0.04173, -0.46665, 0.29195, 0.10501,
     ],
@@ -62,20 +62,7 @@ pub(in crate::app::model_preview) fn dominant_light(
         .sqrt()
         .max(1e-6);
     let [x, y, z] = toward.map(|value| value / length);
-    // `sh_eval_direction`, in the probe's order.
-    let (first, second) = (0.488_603, 0.546_274);
-    let root = 3f32.sqrt();
-    let eval = [
-        0.282_095,
-        -first * y,
-        first * z,
-        -first * x,
-        second * 2.0 * x * y,
-        -second * 2.0 * y * z,
-        second * (3.0 * z * z - 1.0) / root,
-        -second * 2.0 * x * z,
-        second * (x * x - y * y),
-    ];
+    let eval = sh_eval_direction([x, y, z]);
     let denominator = eval
         .iter()
         .map(|value| value * value)
@@ -103,6 +90,24 @@ pub(in crate::app::model_preview) fn dominant_light(
         [intensity[0], intensity[1], intensity[2], 1.0],
         contrast,
     )
+}
+
+/// `sh_eval_direction`: the probe's nine terms toward the unit `direction`,
+/// in the probe's order.
+pub(in crate::app::model_preview) fn sh_eval_direction([x, y, z]: [f32; 3]) -> [f32; 9] {
+    let (first, second) = (0.488_603, 0.546_274);
+    let root = 3f32.sqrt();
+    [
+        0.282_095,
+        -first * y,
+        first * z,
+        -first * x,
+        second * 2.0 * x * y,
+        -second * 2.0 * y * z,
+        second * (3.0 * z * z - 1.0) / root,
+        -second * 2.0 * x * z,
+        second * (x * x - y * y),
+    ]
 }
 
 pub(in crate::app::model_preview) fn gen3_shadow_alpha(contrast: f32) -> f32 {

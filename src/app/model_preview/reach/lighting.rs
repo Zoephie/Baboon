@@ -201,8 +201,9 @@ pub(in crate::app::model_preview) fn reach_frame_value(
             floats([x, y, z, 0.0])
         }
         // `set_lightmap_analytical_light_constants`: at full intensity, with
-        // no rain to dim it.
-        "k_ps_analytical_light_intensity" => {
+        // no rain to dim it. The vertex stage's twin (`hlsl_constant_global_list`
+        // 245) holds the same light, which Reach's decorators read as their sun.
+        "k_ps_analytical_light_intensity" | "v_analytical_light_intensity" => {
             let [r, g, b] = lighting().intensity;
             floats([r, g, b, 0.0])
         }

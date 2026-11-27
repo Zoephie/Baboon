@@ -227,6 +227,8 @@ fn number_code(text: &str) -> Code {
 struct Emitter<'a> {
     program: &'a Program,
     stage: Stage,
+    /// Vertex input semantics fed as integers ([`translate_with_integer_inputs`]).
+    integer_inputs: &'a [&'a str],
     scopes: Vec<HashMap<Arc<str>, Code>>,
     functions: HashMap<usize, String>,
     function_text: Vec<String>,
@@ -253,6 +255,19 @@ pub(crate) fn translate(program: &Program, entry: &str, stage: Stage) -> Result<
     translate_with(program, entry, stage, &[])
 }
 
+/// [`translate`] for a vertex stage whose `integer_inputs` (semantics,
+/// upper case, `POSITION1`) the caller's buffer holds as integers: an input
+/// HLSL types as an integer arrives as one, its bits intact, where every
+/// other arrives as a float. A packed `uint` past 24 bits is not a float.
+pub(crate) fn translate_with_integer_inputs(
+    program: &Program,
+    entry: &str,
+    stage: Stage,
+    integer_inputs: &[&str],
+) -> Result<Translated, String> {
+    translate_full(program, entry, stage, &[], integer_inputs)
+}
+
 /// [`translate`] for an effect pass that compiles `entry` with `arguments`:
 /// its `uniform` parameters take them in order, as fxc binds them. With
 /// none, they are left as [`translate`] leaves them, unset.
@@ -262,6 +277,18 @@ pub(crate) fn translate_with(
     stage: Stage,
     arguments: &[Expression],
 ) -> Result<Translated, String> {
+    translate_full(program, entry, stage, arguments, &[])
+}
+
+/// [`translate_with`] and [`translate_with_integer_inputs`] at once: an
+/// effect pass's `arguments`, and the inputs fed as integers.
+pub(crate) fn translate_full(
+    program: &Program,
+    entry: &str,
+    stage: Stage,
+    arguments: &[Expression],
+    integer_inputs: &[&str],
+) -> Result<Translated, String> {
     let index = program
         .functions
         .iter()
@@ -270,6 +297,7 @@ pub(crate) fn translate_with(
     let mut emitter = Emitter {
         program,
         stage,
+        integer_inputs,
         scopes: Vec::new(),
         functions: HashMap::new(),
         function_text: Vec::new(),
@@ -312,6 +340,18 @@ pub(crate) fn translate_with(
     source.push_str("}\n");
     source.push_str(&main);
     Ok(Translated { source, uniforms: emitter.uniforms, textures: emitter.textures, attributes })
+}
+
+/// How many times `identifier` appears in `text` as a whole word.
+fn identifier_count(text: &str, identifier: &str) -> usize {
+    let word = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+    text.match_indices(identifier)
+        .filter(|(at, _)| {
+            let before = text.as_bytes().get(at.wrapping_sub(1)).copied();
+            let after = text.as_bytes().get(at + identifier.len()).copied();
+            !before.is_some_and(word) && !after.is_some_and(word)
+        })
+        .count()
 }
 
 /// A system value semantic with its index 0 written out (`SV_Position0`, as
@@ -1755,6 +1795,13 @@ impl Emitter<'_> {
         let mut after = String::new();
         let binds = !arguments.is_empty();
         let mut arguments = arguments.iter();
+        // The entry as written, to tell which of its inputs it reads.
+        let entry_text = self
+            .function_text
+            .iter()
+            .find(|text| text.contains(&format!(" {symbol}(")))
+            .cloned()
+            .unwrap_or_default();
         for (at, parameter) in function.parameters.iter().enumerate() {
             let ty = self.resolved(&parameter.variable)?;
             let local = format!("hlsl_p{at}");
@@ -1769,7 +1816,13 @@ impl Emitter<'_> {
             if parameter.direction != Direction::In {
                 self.wire_output(&ty, parameter.variable.semantic.as_deref(), &local, &mut header, &mut after)?;
             }
-            if parameter.direction != Direction::Out {
+            // A vertex input the entry never reads is no attribute: Halo 2's
+            // asm-converted shaders declare every input of the vertex they
+            // were written for, past the 16 a stage can have.
+            let unread = self.stage == Stage::Vertex
+                && parameter.direction == Direction::In
+                && identifier_count(&entry_text, &format!("l_{}", parameter.variable.name)) <= 1;
+            if parameter.direction != Direction::Out && !unread {
                 self.wire_input(
                     &ty,
                     parameter.variable.semantic.as_deref(),
@@ -1823,12 +1876,15 @@ impl Emitter<'_> {
             (Stage::Vertex, "SV_VERTEXID") => "gl_VertexID".to_owned(),
             (Stage::Vertex, "SV_INSTANCEID") => "gl_InstanceID".to_owned(),
             (Stage::Vertex, _) => {
-                // The preview's vertices are all floats, whatever HLSL calls them.
+                // The preview's vertices are all floats, whatever HLSL calls
+                // them, but for the integers a caller says it feeds.
                 let glsl = format!("a_{upper}");
-                let attribute = with_scalar(ty, Scalar::Float);
+                let integer = matches!(scalar_of(ty), Some(Scalar::Int | Scalar::Uint))
+                    && self.integer_inputs.contains(&upper.as_str());
+                let attribute = if integer { ty.clone() } else { with_scalar(ty, Scalar::Float) };
                 header.push_str(&format!("in {} {glsl};\n", glsl_base(&attribute)));
                 attributes.push(Interface { semantic: upper.clone(), glsl: glsl.clone(), ty: attribute });
-                if attribute_is_float(ty) { glsl } else { format!("{}({glsl})", glsl_base(ty)) }
+                if integer || attribute_is_float(ty) { glsl } else { format!("{}({glsl})", glsl_base(ty)) }
             }
             (Stage::Pixel, _) => {
                 let glsl = varying_name(&upper);
@@ -2111,6 +2167,33 @@ mod tests {
         assert_eq!(translated.attributes[0].semantic, "POSITION");
         assert!(translated.source.contains("gl_Position = hlsl_result.p;"), "{}", translated.source);
         assert!(translated.source.contains("out vec2 v_TEXCOORD0;"), "{}", translated.source);
+    }
+
+    /// An input the entry never reads is no attribute; one it reads is, even
+    /// one whose name another's begins with.
+    #[test]
+    fn a_vertex_input_the_entry_never_reads_is_no_attribute() {
+        let source = "float4 main_vs(float4 position : POSITION0, float4 position_unused : TEXCOORD5, float4 color : COLOR0) : SV_Position { return position; }\n";
+        let translated = glsl(source, "main_vs", Stage::Vertex);
+        assert!(translated.source.contains("in vec4 a_POSITION0;"), "{}", translated.source);
+        assert!(!translated.source.contains("a_TEXCOORD5") && !translated.source.contains("a_COLOR0"), "{}", translated.source);
+        assert_eq!(identifier_count("l_a l_ab (l_a)", "l_a"), 2);
+    }
+
+    /// An integer input arrives as a float, converted, unless the caller
+    /// feeds it as an integer: Reach's packed decorator position needs all
+    /// 32 of its bits.
+    #[test]
+    fn an_integer_input_is_an_integer_only_where_the_caller_feeds_one() {
+        let source = "float4 main_vs(uint packed : POSITION1, uint4 aux : COLOR2) : SV_Position { return float4(packed & 2047, aux.x, 0, 1); }\n";
+        let mut include = |_: &str, _: &str| None;
+        let tokens = Preprocessor::new(&[], &mut include).run(source).unwrap();
+        let program = parse(&tokens).unwrap();
+        let fed = translate_with_integer_inputs(&program, "main_vs", Stage::Vertex, &["POSITION1"]).unwrap();
+        assert!(fed.source.contains("in uint a_POSITION1;"), "{}", fed.source);
+        assert!(fed.source.contains("in vec4 a_COLOR2;"), "only what the caller names: {}", fed.source);
+        let plain = translate(&program, "main_vs", Stage::Vertex).unwrap();
+        assert!(plain.source.contains("in float a_POSITION1;"), "{}", plain.source);
     }
 
     #[test]

@@ -344,6 +344,8 @@ pub(in crate::app::model_preview) struct PreviewLoadSettings {
     /// Halo CE's and Halo 2's level of detail, lowest first; `None` for the
     /// highest.
     pub(in crate::app::model_preview) detail_level: Option<usize>,
+    /// A decorator set's patch (`model_preview::decorators`).
+    pub(in crate::app::model_preview) decorator_layout: super::super::decorators::Layout,
 }
 
 /// A load of everything, Game Shaders' share too, as a test reads it.
@@ -359,6 +361,7 @@ impl Default for PreviewLoadSettings {
             game_shaders: true,
             kit_root: None,
             detail_level: None,
+            decorator_layout: Default::default(),
         }
     }
 }
@@ -386,6 +389,7 @@ impl PreviewLoadSettings {
             game_shaders: state.game_shaders,
             kit_root: None,
             detail_level: state.detail_level,
+            decorator_layout: state.decorator_layout,
         }
     }
 }

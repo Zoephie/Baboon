@@ -390,10 +390,11 @@ pub(in crate::app::model_preview) fn shadow_passes() -> Vec<(Dx9Layer, Dx9DrawPa
 
 /// The streams the games' models carry beside their vertices, in the order
 /// the slot uploads them.
-pub(in crate::app::model_preview) fn vertex_streams() -> [&'static dyn VertexStream; 2] {
+pub(in crate::app::model_preview) fn vertex_streams() -> [&'static dyn VertexStream; 3] {
     [
         &super::super::h2::prt::H2PrtStream,
         &super::super::gen3::prt::Gen3PrtStream,
+        &super::super::decorators::DecoratorStream,
     ]
 }
 
@@ -427,6 +428,12 @@ pub(in crate::app::model_preview) fn resolve_own_shader(
     material: &RenderModelPreviewMaterial,
     caches: &mut ResolveCaches,
 ) -> Option<MaterialTextures> {
+    if group == super::DECORATOR_SET_GROUP {
+        return Some(super::super::decorators::resolve_decorator_material(reader, shader, caches));
+    }
+    if group == super::DETAIL_OBJECT_COLLECTION_GROUP {
+        return Some(super::super::decorators::resolve_detail_object_material(reader, shader, caches));
+    }
     if group == *b"mat " {
         return Some(super::super::h4::materials::resolve_h4_material(
             reader, shader, caches,
@@ -442,9 +449,20 @@ pub(in crate::app::model_preview) fn resolve_own_shader(
                 caches,
             ))
         }
-        blam_tags::game::Game::Halo2 if group == *b"shad" => Some(
-            super::super::h2::shader::resolve::resolve_h2_shader(reader, shader, caches),
-        ),
+        blam_tags::game::Game::Halo2 if group == *b"shad" => {
+            let mut textures = super::super::h2::shader::resolve::resolve_h2_shader(
+                reader,
+                shader,
+                caches,
+                material.h2.decorator,
+            );
+            // `decorator_tex` alpha-tests its base map at 128, and the decal
+            // templates blend by its alpha: a decorator cuts out on it.
+            if material.h2.decorator.is_some() && textures.slots[super::super::TextureSlot::AlphaTest as usize].is_none() {
+                textures.slots[super::super::TextureSlot::AlphaTest as usize] = textures.slots[super::super::TextureSlot::Base as usize].clone();
+            }
+            Some(textures)
+        }
         _ => None,
     }
 }

@@ -8,6 +8,8 @@ use super::{H2_PRT_REGISTERS, model_vertex_prelude};
 impl Dx9VertexStage {
     fn outputs(self) -> &'static str {
         match self {
+            // Its pass carries its whole translated source instead.
+            Self::Decorator(_) | Self::DetailObject(_) => "",
             Self::Default => {
                 "v_tc0.xy = vec2(row(0, uv), row(1, uv));
     v_tc1.xy = vec2(row(2, uv), row(3, uv));
