@@ -212,13 +212,19 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
         }
         // The selected joint's move gizmo, but while it twists.
         let twisting = state.pose.dragging.is_some_and(|drag| drag.twist);
+        // A move under way keeps to the axes it began with; otherwise the
+        // gizmo runs along the active joint's axes as they now are.
+        let drawn_axes = match state.pose.dragging {
+            Some(drag) if drag.lock.is_some() => drag.axes,
+            _ => state.pose.selected.map_or(super::pose::GLOBAL_AXES, |joint| gizmo_axes(data, state, joint)),
+        };
         if state.pose.on
             && !twisting
             && let Some(gizmo) = state
                 .pose
                 .selected
                 .and_then(|joint| positions.get(joint))
-                .and_then(|&joint| pose_gizmo::PoseGizmo::at(&camera, joint))
+                .and_then(|&joint| pose_gizmo::PoseGizmo::at(&camera, joint, &drawn_axes))
         {
             match state.pose.gizmo {
                 super::pose::GizmoMode::Move => {
@@ -233,7 +239,7 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
                         .pose
                         .selected
                         .and_then(|joint| positions.get(joint))
-                        .and_then(|&joint| pose_gizmo::PoseRings::at(&camera, joint))
+                        .and_then(|&joint| pose_gizmo::PoseRings::at(&camera, joint, &drawn_axes))
                     {
                         let lit = match state.pose.dragging {
                             Some(drag) => drag.ring.map(|ring| ring.axis),
@@ -322,11 +328,29 @@ enum Handle {
     Scale(egui::Pos2),
 }
 
-/// The handle of `mode`'s gizmo about `joint` under `pointer`.
-fn gizmo_handle(camera: &PreviewCamera, mode: super::pose::GizmoMode, joint: [f32; 3], pointer: egui::Pos2) -> Option<Handle> {
+/// The gizmo's axes on `joint`: the model's, or, with Local on, the
+/// joint's own as it is posed.
+fn gizmo_axes(data: &ModelPreviewData, state: &ModelPreviewState, joint: usize) -> super::pose::Axes {
+    if !state.pose.local {
+        return super::pose::GLOBAL_AXES;
+    }
+    armature_node_matrices(data, state)
+        .get(joint)
+        .map_or(super::pose::GLOBAL_AXES, super::pose::axes_of)
+}
+
+/// The handle of `mode`'s gizmo about `joint`, along `axes`, under
+/// `pointer`.
+fn gizmo_handle(
+    camera: &PreviewCamera,
+    mode: super::pose::GizmoMode,
+    joint: [f32; 3],
+    axes: &super::pose::Axes,
+    pointer: egui::Pos2,
+) -> Option<Handle> {
     match mode {
-        super::pose::GizmoMode::Move => pose_gizmo::PoseGizmo::at(camera, joint)?.hit(pointer).map(Handle::Move),
-        super::pose::GizmoMode::Rotate => pose_gizmo::PoseRings::at(camera, joint)?
+        super::pose::GizmoMode::Move => pose_gizmo::PoseGizmo::at(camera, joint, axes)?.hit(pointer).map(Handle::Move),
+        super::pose::GizmoMode::Rotate => pose_gizmo::PoseRings::at(camera, joint, axes)?
             .hit(pointer)
             .map(|hit| Handle::Ring(hit, pose_gizmo::RING)),
         super::pose::GizmoMode::Scale => {
@@ -382,7 +406,7 @@ fn pose_drag(
             let camera = PreviewCamera::new(data, state, rect);
             armature_node_positions(data, state)
                 .get(joint)
-                .is_some_and(|&at| gizmo_handle(&camera, state.pose.gizmo, at, pointer).is_some())
+                .is_some_and(|&at| gizmo_handle(&camera, state.pose.gizmo, at, &gizmo_axes(data, state, joint), pointer).is_some())
         });
         if !on_handle {
             match (joint_at(state, pointer), shift) {
@@ -417,9 +441,20 @@ fn pose_drag(
             .pose
             .selected
             .filter(|_| !alt)
-            .and_then(|joint| Some((joint, gizmo_handle(&camera, state.pose.gizmo, *positions.get(joint)?, pointer?)?)));
+            .and_then(|joint| {
+                let axes = gizmo_axes(data, state, joint);
+                Some((joint, gizmo_handle(&camera, state.pose.gizmo, *positions.get(joint)?, &axes, pointer?)?))
+            });
+        let axes = state.pose.selected.map_or(super::pose::GLOBAL_AXES, |joint| gizmo_axes(data, state, joint));
         state.pose.dragging = match handle {
             Some((joint, Handle::Move(lock))) => Some(PoseDrag {
+                // Where on the line or plane the press took the handle.
+                grabbed: pointer
+                    .and_then(|pointer| {
+                        let (origin, direction) = camera.ray(pointer);
+                        lock.target(positions[joint], origin, direction, &axes)
+                    })
+                    .map_or([0.0; 3], |at| std::array::from_fn(|axis| at[axis] - positions[joint][axis])),
                 joint,
                 twist: false,
                 lock: Some(lock),
@@ -427,6 +462,7 @@ fn pose_drag(
                 held: positions[joint],
                 ring: None,
                 scale: None,
+                axes,
             }),
             Some((joint, Handle::Ring(hit, radius))) => Some(PoseDrag {
                 joint,
@@ -442,6 +478,8 @@ fn pose_drag(
                     turned: 0.0,
                 }),
                 scale: None,
+                axes,
+                grabbed: [0.0; 3],
             }),
             Some((joint, Handle::Scale(centre))) => Some(PoseDrag {
                 joint,
@@ -455,6 +493,8 @@ fn pose_drag(
                     press: (pointer - centre).length(),
                     from: state.pose.scale_of(joint),
                 }),
+                axes,
+                grabbed: [0.0; 3],
             }),
             None => pointer.and_then(|pointer| joint_at(state, pointer)).map(|joint| {
                 // A drag on a selected joint takes the selection with it.
@@ -463,7 +503,7 @@ fn pose_drag(
                 } else {
                     state.pose.select_only(Some(joint));
                 }
-                PoseDrag { joint, twist: alt, lock: None, anchor: positions[joint], held: positions[joint], ring: None, scale: None }
+                PoseDrag { joint, twist: alt, lock: None, anchor: positions[joint], held: positions[joint], ring: None, scale: None, axes, grabbed: [0.0; 3] }
             }),
         };
     }
@@ -498,8 +538,10 @@ fn pose_drag(
     } else if let Some(ring) = drag.ring {
         if let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) {
             let angle = ring.angle([pointer.x, pointer.y]);
+            // With Local on, each joint turns about that axis of its own.
             for &joint in &joints {
-                rotate(nodes, &base, &mut state.pose, joint, ring.axis, angle - ring.turned, &limits);
+                let along = gizmo_axes(data, state, joint)[ring.axis.min(2)];
+                rotate(nodes, &base, &mut state.pose, joint, along, angle - ring.turned, &limits);
             }
             if let Some(grab) = state.pose.dragging.as_mut().and_then(|drag| drag.ring.as_mut()) {
                 grab.turned = angle;
@@ -532,10 +574,10 @@ fn pose_drag(
             Some(lock) => {
                 let (origin, direction) = camera.ray(pointer);
                 // Edge on, the line or plane picks nothing: the joint waits.
-                let Some(target) = lock.target(drag.anchor, origin, direction) else {
+                let Some(target) = lock.target(drag.anchor, origin, direction, &drag.axes) else {
                     return true;
                 };
-                target
+                std::array::from_fn(|axis| target[axis] - drag.grabbed[axis])
             }
             None => camera.unproject_beside(pointer, joint),
         };

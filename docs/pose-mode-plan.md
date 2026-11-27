@@ -106,6 +106,14 @@ follows like a puppet, over the bind pose or over an animation.
    bones. Dragging the root still moves the whole skeleton. No box select: a plain drag on empty
    space orbits.
 
+10. **Global or local axes (done).** Global and Local in the pose strip (not shown for Scale,
+    which has no axes) pick whether the gizmo runs along the model's axes or the active joint's
+    own, its posed world transform's x, y and z. A move keeps to the axes it began with while the
+    chain moves the joint under them; a ring turns each selected joint about that axis of its
+    own, so fingers curl about their own hinges. A locked move also now keeps the joint as far
+    behind the pointer as the press took the handle: it used to jump to the point under the
+    pointer, so taking an arrow near its tip threw the joint most of an arrow's length.
+
 ## Research
 
 FABRIK (Aristidou & Lasenby) works in joint positions and needs a twist rule when turned back into

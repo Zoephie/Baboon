@@ -482,7 +482,7 @@ fn draw_pose_toggle(ui: &mut Ui, state: &mut ModelPreviewState) {
 
 /// Pose mode's tools, in the viewport's corner while posing: Limits for a
 /// model whose physics model limits its joints, the gizmo's Move, Rotate
-/// and Scale, and once anything is posed, the button that undoes it.
+/// and Scale, its Global or Local axes, and once anything is posed, the button that undoes it.
 pub(in crate::app::model_preview) fn draw_pose_tools(ui: &mut Ui, state: &mut ModelPreviewState, limited: bool) {
     if limited {
         ui.selectable_label(state.pose.limits, "Limits")
@@ -499,6 +499,19 @@ pub(in crate::app::model_preview) fn draw_pose_tools(ui: &mut Ui, state: &mut Mo
         if ui.selectable_label(state.pose.gizmo == mode, label).on_hover_text(tip).clicked() {
             state.pose.gizmo = mode;
         }
+    }
+    // Scaling is the same along every axis: no axes to pick.
+    if state.pose.gizmo != GizmoMode::Scale {
+        ui.separator();
+        for (local, label, tip) in [
+            (false, "Global", "The gizmo runs along the model's axes: x forward, y left, z up"),
+            (true, "Local", "The gizmo runs along the selected joint's own axes, as it is posed; each selected joint turns about its own"),
+        ] {
+            if ui.selectable_label(state.pose.local == local, label).on_hover_text(tip).clicked() {
+                state.pose.local = local;
+            }
+        }
+        ui.separator();
     }
     let posed = state.pose.is_posed() || !state.pose.pins.is_empty();
     if posed && ui.button("Reset pose").on_hover_text("Undo every joint posed, scaled or pinned by hand").clicked() {

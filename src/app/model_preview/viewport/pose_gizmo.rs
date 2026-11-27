@@ -1,5 +1,5 @@
 //! Pose mode's gizmo on the selected joint, in the model's axes (x forward
-//! red, y left green, z up blue). To move it: an arrow per axis to drag the
+//! red, y left green, z up blue) or the joint's own. To move it: an arrow per axis to drag the
 //! joint along that axis alone, and a square per plane between two of them
 //! to drag it within that plane; the joint itself still drags across the
 //! plane facing the camera. To rotate it: a ring per axis, round which a
@@ -7,7 +7,7 @@
 //! screen, which a drag outward grows and inward shrinks.
 
 use super::super::PreviewCamera;
-use super::super::pose::Lock;
+use super::super::pose::{Axes, Lock};
 use eframe::egui::{self, Color32, Pos2, Shape, Stroke, Vec2};
 
 /// How long an arrow is on screen, in points, whatever the zoom.
@@ -40,9 +40,9 @@ pub(super) struct PoseGizmo {
 }
 
 impl PoseGizmo {
-    /// The gizmo at `joint`, seen through `camera`; none where the joint is
-    /// behind the eye.
-    pub(super) fn at(camera: &PreviewCamera, joint: [f32; 3]) -> Option<Self> {
+    /// The gizmo at `joint` along `axes`, seen through `camera`; none where
+    /// the joint is behind the eye.
+    pub(super) fn at(camera: &PreviewCamera, joint: [f32; 3], axes: &Axes) -> Option<Self> {
         let projected = camera.project(joint);
         if !projected.in_front {
             return None;
@@ -52,10 +52,12 @@ impl PoseGizmo {
             return None;
         }
         let length = ARROW / per_unit;
-        let along = |axes: &[(usize, f32)]| {
+        let along = |along_axes: &[(usize, f32)]| {
             let mut point = joint;
-            for &(axis, share) in axes {
-                point[axis] += length * share;
+            for &(axis, share) in along_axes {
+                for (coordinate, unit) in point.iter_mut().zip(axes[axis]) {
+                    *coordinate += length * share * unit;
+                }
             }
             camera.project(point).pos
         };
@@ -188,8 +190,8 @@ pub(super) struct RingHit {
 }
 
 impl PoseRings {
-    /// The rings about `joint`, seen through `camera`.
-    pub(super) fn at(camera: &PreviewCamera, joint: [f32; 3]) -> Option<Self> {
+    /// The rings about `joint` along `axes`, seen through `camera`.
+    pub(super) fn at(camera: &PreviewCamera, joint: [f32; 3], axes: &Axes) -> Option<Self> {
         if !camera.project(joint).in_front {
             return None;
         }
@@ -204,9 +206,9 @@ impl PoseRings {
             (0..RING_POINTS)
                 .map(|index| {
                     let t = std::f32::consts::TAU * index as f32 / RING_POINTS as f32;
-                    let mut point = joint;
-                    point[u] += radius * t.cos();
-                    point[v] += radius * t.sin();
+                    let point: [f32; 3] = std::array::from_fn(|coordinate| {
+                        joint[coordinate] + radius * (t.cos() * axes[u][coordinate] + t.sin() * axes[v][coordinate])
+                    });
                     // Nearer the eye than the joint: on the near half.
                     let toward: f32 = (0..3)
                         .map(|axis| (point[axis] - joint[axis]) * eye[axis])

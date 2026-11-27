@@ -49,6 +49,9 @@ pub(crate) struct PoseEdit {
     pub limits: bool,
     /// What the selected joint's gizmo does.
     pub gizmo: GizmoMode,
+    /// Whether the gizmo runs along the active joint's own axes, as it is
+    /// posed, rather than the model's.
+    pub local: bool,
     /// Each pinned joint and where it was pinned, in model space.
     pub pins: BTreeMap<usize, [f32; 3]>,
     /// How far the skeleton's roots are moved, in model space.
@@ -76,6 +79,13 @@ pub(crate) struct PoseDrag {
     pub ring: Option<RingGrab>,
     /// The scale gizmo's circle it was taken by, which scales it instead.
     pub scale: Option<ScaleGrab>,
+    /// The gizmo's axes as the drag began, which a lock keeps to while the
+    /// joint moves under them.
+    pub axes: Axes,
+    /// How far from the joint, along a lock's line or plane, the press took
+    /// the handle: the joint keeps that far behind the pointer, rather than
+    /// jumping to it.
+    pub grabbed: [f32; 3],
 }
 
 /// The scale gizmo's circle taken by a drag: the joint scales by the
@@ -142,30 +152,50 @@ pub(crate) enum GizmoMode {
     Scale,
 }
 
+/// The gizmo's three axes, x, y and z, each a unit vector in model space.
+pub(crate) type Axes = [[f32; 3]; 3];
+
+/// The model's own axes: x forward, y left, z up.
+pub(crate) const GLOBAL_AXES: Axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+/// A node's own axes as it is posed: its world transform's x, y and z,
+/// as each node's frame runs forward, left, up.
+pub(crate) fn axes_of(matrix: &Matrix4) -> Axes {
+    std::array::from_fn(|axis| {
+        let column: [f32; 3] = std::array::from_fn(|row| matrix.m[row][axis]);
+        let length = norm(column);
+        if length < 1e-9 {
+            GLOBAL_AXES[axis]
+        } else {
+            column.map(|value| value / length)
+        }
+    })
+}
+
 /// What a gizmo handle holds a dragged joint to, in model space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Lock {
-    /// Along one axis: 0 x, 1 y, 2 z.
+    /// Along one of the gizmo's axes: 0 x, 1 y, 2 z.
     Axis(usize),
-    /// Within the plane square to one axis: 2 the xy plane, 1 xz, 0 yz.
+    /// Within the plane square to one of them: 2 the xy plane, 1 xz, 0 yz.
     Plane(usize),
 }
 
 impl Lock {
     /// The point the pointer's line of sight (`origin`, `direction`) picks
-    /// under this lock, for a joint that began at `anchor`: the nearest
-    /// point of the axis through it, or where the line meets the plane
-    /// through it. None where the line runs along the axis or the plane.
+    /// under this lock in `axes`, for a joint that began at `anchor`: the
+    /// nearest point of the axis through it, or where the line meets the
+    /// plane through it. None where the line runs along the axis or the
+    /// plane.
     pub(crate) fn target(
         self,
         anchor: [f32; 3],
         origin: [f32; 3],
         direction: [f32; 3],
+        axes: &Axes,
     ) -> Option<[f32; 3]> {
         let dot = |a: [f32; 3], b: [f32; 3]| a.iter().zip(&b).map(|(a, b)| a * b).sum::<f32>();
-        let unit = |axis: usize| {
-            std::array::from_fn::<f32, 3, _>(|index| f32::from(u8::from(index == axis)))
-        };
+        let unit = |axis: usize| axes[axis];
         let from_origin = sub(anchor, origin);
         match self {
             Lock::Axis(axis) => {
@@ -213,6 +243,7 @@ impl Default for PoseEdit {
             chain: DEFAULT_CHAIN,
             limits: true,
             gizmo: GizmoMode::Move,
+            local: false,
             pins: BTreeMap::new(),
             offset: [0.0; 3],
             geometry: 0,
@@ -251,6 +282,7 @@ impl PoseEdit {
                 chain: self.chain,
                 limits: self.limits,
                 gizmo: self.gizmo,
+                local: self.local,
                 geometry,
                 ..Self::default()
             };
@@ -467,15 +499,15 @@ pub(crate) fn twist(
     }
 }
 
-/// Turn `joint` by `angle` radians about model axis `axis` (0 x, 1 y, 2 z),
-/// carrying what hangs below it: the rotate gizmo's ring. Its limit, if
-/// any, holds.
+/// Turn `joint` by `angle` radians about `axis`, a unit vector in model
+/// space, carrying what hangs below it: the rotate gizmo's ring. Its limit,
+/// if any, holds.
 pub(crate) fn rotate(
     nodes: &[RenderModelPreviewNode],
     base: &[Matrix4],
     edit: &mut PoseEdit,
     joint: usize,
-    axis: usize,
+    axis: [f32; 3],
     angle: f32,
     limits: &[ResolvedLimit],
 ) {
@@ -484,7 +516,7 @@ pub(crate) fn rotate(
     if matrices.get(joint).is_none() {
         return;
     }
-    let along = [FORWARD, LEFT, UP][axis.min(2)];
+    let along = RealVector3d { i: axis[0], j: axis[1], k: axis[2] };
     let parent = usize::try_from(nodes[joint].parent).ok();
     edit.turn_by(
         joint,
@@ -1202,6 +1234,20 @@ mod tests {
         (0..3).all(|axis| (a[axis] - b[axis]).abs() < 1e-4)
     }
 
+    /// A node turned a quarter about up has its x along the model's y and
+    /// its y along the model's −x; an axis lock in its axes runs along them.
+    #[test]
+    fn local_axes_are_the_nodes_own_and_a_lock_keeps_to_them() {
+        let quarter = RealQuaternion { i: 0.0, j: 0.0, k: std::f32::consts::FRAC_1_SQRT_2, w: std::f32::consts::FRAC_1_SQRT_2 };
+        let matrix = Matrix4::from_loc_rot_scale(point([1.0, 2.0, 3.0]), quarter, 2.0);
+        let axes = axes_of(&matrix);
+        assert!(near(axes[0], [0.0, 1.0, 0.0]) && near(axes[1], [-1.0, 0.0, 0.0]) && near(axes[2], [0.0, 0.0, 1.0]), "{axes:?}");
+        // Looking down from above at a point off to the side: the lock
+        // along local x picks a point on the model's y line through it.
+        let target = Lock::Axis(0).target([0.0; 3], [0.3, 0.5, 5.0], [0.0, 0.0, -1.0], &axes).unwrap();
+        assert!(near(target, [0.0, 0.5, 0.0]), "{target:?}");
+    }
+
     /// Shift+click adds a joint and makes it active, and again takes it
     /// out, the active falling to another; Shift+double-click takes a
     /// joint and all below it; a plain click selects one alone.
@@ -1247,7 +1293,7 @@ mod tests {
         let (nodes, base) = chain();
         let mut edit = PoseEdit::default();
         for joint in [1, 2] {
-            rotate(&nodes, &base, &mut edit, joint, 2, std::f32::consts::FRAC_PI_2, &[]);
+            rotate(&nodes, &base, &mut edit, joint, GLOBAL_AXES[2], std::f32::consts::FRAC_PI_2, &[]);
         }
         let mut matrices = base.clone();
         apply(&nodes, &mut matrices, &edit);
@@ -1903,28 +1949,28 @@ mod tests {
         // Looking down -y from above the anchor, offset in x and z.
         let (origin, direction) = ([1.5, 10.0, 3.25], [0.0, -1.0, 0.0]);
         assert!(near(
-            Lock::Axis(0).target(anchor, origin, direction).unwrap(),
+            Lock::Axis(0).target(anchor, origin, direction, &GLOBAL_AXES).unwrap(),
             [1.5, 2.0, 3.0]
         ));
         assert!(near(
-            Lock::Axis(2).target(anchor, origin, direction).unwrap(),
+            Lock::Axis(2).target(anchor, origin, direction, &GLOBAL_AXES).unwrap(),
             [1.0, 2.0, 3.25]
         ));
         assert!(
-            Lock::Axis(1).target(anchor, origin, direction).is_none(),
+            Lock::Axis(1).target(anchor, origin, direction, &GLOBAL_AXES).is_none(),
             "along the sight"
         );
         assert!(near(
-            Lock::Plane(1).target(anchor, origin, direction).unwrap(),
+            Lock::Plane(1).target(anchor, origin, direction, &GLOBAL_AXES).unwrap(),
             [1.5, 2.0, 3.25]
         ));
         assert!(
-            Lock::Plane(2).target(anchor, origin, direction).is_none(),
+            Lock::Plane(2).target(anchor, origin, direction, &GLOBAL_AXES).is_none(),
             "edge on"
         );
         let slanted = [0.0, -0.6, -0.8];
         let hit = Lock::Plane(2)
-            .target(anchor, [0.0, 6.0, 11.0], slanted)
+            .target(anchor, [0.0, 6.0, 11.0], slanted, &GLOBAL_AXES)
             .unwrap();
         assert!(
             (hit[2] - 3.0).abs() < 1e-5,
@@ -2071,7 +2117,7 @@ mod tests {
             &base,
             &mut edit,
             1,
-            2,
+            GLOBAL_AXES[2],
             std::f32::consts::FRAC_PI_2,
             &[],
         );
