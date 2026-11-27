@@ -49,7 +49,8 @@ const MODEL_LIGHT: [f32; 3] = [0.0, 0.0, -1.0];
 /// make this.
 const MODEL_ACCURACY: f32 = 0.35;
 
-/// A placement's lightmap colour, which a level's lightmap gives it.
+/// A placement's lightmap colour, which a level's lightmap gives it, at
+/// the Lighting card's level of 1.
 const LIGHTMAP_COLOR: f32 = 0.5;
 
 /// The classification of its vertex shader a class draws through
@@ -71,14 +72,14 @@ fn slot_of(kind: ClassKind) -> DecoratorSlot {
 /// on its own its tint is white and its lightmap colour mid-grey, which the
 /// decorator pixel shaders' doubling (`2 · T0 · D0`) leaves the texture's
 /// own colour.
-fn placement_color(permutation: &Permutation, record: &Record) -> [f32; 3] {
+fn placement_color(permutation: &Permutation, record: &Record, light: f32) -> [f32; 3] {
     let along = f32::from(record.tint) / 7.0;
     let [first, second] = permutation.tints;
     let (base_tint, lightmap_tint) = (permutation.base_map_tint, permutation.lightmap_tint);
     std::array::from_fn(|channel| {
         let tint = (1.0 - along) * first[channel] + second[channel] * along;
         let base = tint * (base_tint + (1.0 - base_tint));
-        let lightmap = LIGHTMAP_COLOR * lightmap_tint + (1.0 - lightmap_tint) * 0.5;
+        let lightmap = LIGHTMAP_COLOR * light * lightmap_tint + (1.0 - lightmap_tint) * 0.5;
         base * lightmap
     })
 }
@@ -93,7 +94,7 @@ fn vertex_color(color: [f32; 3]) -> [f32; 4] {
 /// `set`'s records as a model: a region per permutation, a batch per
 /// permutation (per placement for a model, whose constants are its own),
 /// each drawn with its shader through its class's vertex shader.
-pub(in crate::app::model_preview) fn bake_halo_2(set: &Halo2Set) -> RenderModelPreview {
+pub(in crate::app::model_preview) fn bake_halo_2(set: &Halo2Set, light: f32) -> RenderModelPreview {
     let mut preview = RenderModelPreview {
         bounds_min: [f32::INFINITY; 3],
         bounds_max: [f32::NEG_INFINITY; 3],
@@ -138,13 +139,17 @@ pub(in crate::app::model_preview) fn bake_halo_2(set: &Halo2Set) -> RenderModelP
                         index_count,
                         ..Default::default()
                     });
-                    preview.batches.len() - 1
+                    let at = preview.batches.len() - 1;
+                    if let Some(rate) = permutation.fade {
+                        preview.h2.decorator_fade.insert(at, rate);
+                    }
+                    at
                 })
             };
             for record in set.records.iter().filter(|record| {
                 record.class == class_index && record.permutation == permutation_index
             }) {
-                let color = placement_color(permutation, record);
+                let color = placement_color(permutation, record, light);
                 let mut built = Built::default();
                 match kind {
                     ClassKind::Model => model(set, permutation, record, color, &mut built),

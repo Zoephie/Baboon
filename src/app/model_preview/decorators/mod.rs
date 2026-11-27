@@ -71,6 +71,8 @@ pub(crate) struct DecoratorSet {
     pub wave: [f32; 4],
     /// `shaded dark` and `shaded bright`: the shaded shader's `contrast`.
     pub shaded: [f32; 2],
+    /// Halo 3's and ODST's `start fade` and `end fade`.
+    pub fade_range: Option<[f32; 2]>,
     /// The wind it sways in: the globals' default.
     pub wind: Option<std::sync::Arc<WindDefinition>>,
     pub types: Vec<DecoratorType>,
@@ -138,7 +140,7 @@ pub(crate) struct Placement {
 impl DecoratorSet {
     /// Whether its shader moves it on the clock: the wind's, or the waves'.
     pub(crate) fn moves(&self) -> bool {
-        self.shader.is_some_and(DecoratorShader::moves)
+        self.layout.sway && self.shader.is_some_and(DecoratorShader::moves)
     }
 
     /// How many of type `index` the patch stands.

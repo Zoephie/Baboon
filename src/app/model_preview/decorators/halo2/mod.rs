@@ -123,6 +123,10 @@ pub(crate) struct Permutation {
     /// to 1 as the game holds them.
     pub base_map_tint: f32,
     pub lightmap_tint: f32,
+    /// `fade distance`'s rate, `c53.x` (`0xE979C4`): a decorator shrinks to
+    /// nothing between `2 / k` and `3 / k` from the eye. `None` for an option
+    /// this build does not know, which does not fade.
+    pub fade: Option<f32>,
 }
 
 /// One `raw vertices` element.

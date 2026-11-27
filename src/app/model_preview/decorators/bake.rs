@@ -132,7 +132,7 @@ pub(in crate::app::model_preview) fn relayout(data: &mut ModelPreviewData, layou
     let mut preview = if let Some(halo2) = set.halo2.take() {
         let mut halo2 = (*halo2).clone();
         halo2.records = scatter_halo_2(&halo2, layout);
-        let preview = bake_halo_2(&halo2);
+        let preview = bake_halo_2(&halo2, layout.light);
         set.halo2 = Some(Arc::new(halo2));
         preview
     } else if let Some(collection) = set.halo_ce.take() {

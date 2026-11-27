@@ -45,26 +45,106 @@ pub(in crate::app::model_preview) fn draw_decorator_cards(
             }
         }
     }
-    if setup_section(
-        ui,
-        "Layout",
-        state.decorator_layout != Layout::default(),
-        |ui, part| {
-            if part == BoxPart::Body {
-                draw_layout_rows(ui, set, &mut state.decorator_layout);
-            }
-        },
-    ) {
-        state.decorator_layout = Layout::default();
+    let layout = &mut state.decorator_layout;
+    let default = Layout::default();
+    let patch_changed =
+        (layout.size, layout.count, layout.seed) != (default.size, default.count, default.seed);
+    if setup_section(ui, "Layout", patch_changed, |ui, part| {
+        if part == BoxPart::Body {
+            draw_layout_rows(ui, set, layout);
+        }
+    }) {
+        (layout.size, layout.count, layout.seed) = (default.size, default.count, default.seed);
     }
+    if setup_section(ui, "Distance", layout.fade != default.fade, |ui, part| {
+        if part == BoxPart::Body {
+            draw_distance_rows(ui, set, layout);
+        }
+    }) {
+        layout.fade = default.fade;
+    }
+    if setup_section(ui, "Lighting", layout.light != default.light, |ui, part| {
+        if part == BoxPart::Body {
+            draw_lighting_rows(ui, layout);
+        }
+    }) {
+        layout.light = default.light;
+    }
+    if set.shader.is_some_and(|shader| shader.moves()) {
+        if setup_section(ui, "Wind", layout.sway != default.sway, |ui, part| {
+            if part == BoxPart::Body {
+                draw_wind_rows(ui, set, layout);
+            }
+        }) {
+            layout.sway = default.sway;
+        }
+    }
+}
+
+/// Whether the game's fade with distance draws, and over what distances.
+fn draw_distance_rows(ui: &mut Ui, set: &DecoratorSet, layout: &mut Layout) {
+    let mut rows = CardRows::default();
+    rows.row(ui, |ui| {
+        ui.baboon_checkbox(&mut layout.fade, "Fade with distance");
+    });
+    let note = if set.halo2.is_some() {
+        "Each permutation shrinks away by its fade distance: close by 8 world units, medium by 16, far by 24.".to_owned()
+    } else if let Some(collection) = &set.halo_ce {
+        let ranges: Vec<String> = collection
+            .types
+            .iter()
+            .map(|kind| format!("{} {}–{}", kind.name, kind.near_fade, kind.far_fade))
+            .collect();
+        format!(
+            "Each type fades out between its near and far fade distance: {}.",
+            ranges.join(", ")
+        )
+    } else if let Some([start, end]) = set.fade_range {
+        format!("The set dissolves between its start and end fade, {start} and {end} world units.")
+    } else {
+        "This game cross-fades between its levels-of-detail models, which the preview doesn't draw yet.".to_owned()
+    };
+    ui.label(RichText::new(note).color(subtle_dark()).small());
+}
+
+/// How bright the light a level would bake into each decorator is.
+fn draw_lighting_rows(ui: &mut Ui, layout: &mut Layout) {
+    let width = name_column_width(ui, ["Light"], ui.available_width().max(1.0));
+    let mut rows = CardRows::default();
+    rows.row(ui, |ui| {
+        name_cell(ui, "Light", width);
+        ui.add(egui::Slider::new(&mut layout.light, 0.0..=2.0).fixed_decimals(2))
+            .on_hover_text("The light a level's lightmap would bake into each decorator, as a share of the preview's stand-in for it");
+    });
+}
+
+/// Whether the wind (or a wavy set's waves) moves the set, and which wind.
+fn draw_wind_rows(ui: &mut Ui, set: &DecoratorSet, layout: &mut Layout) {
+    let mut rows = CardRows::default();
+    rows.row(ui, |ui| {
+        ui.baboon_checkbox(&mut layout.sway, "Sway");
+    });
+    let note = if set.shader.is_some_and(|shader| shader.moves_in_the_wind()) {
+        let wind = set
+            .wind
+            .as_ref()
+            .map_or("none, as the globals name no default wind", |wind| {
+                wind.path.as_str()
+            });
+        format!("The globals' default wind: {wind}")
+    } else {
+        "Its waves run on the preview's clock, by the set's own wavelength, speed and frequency."
+            .to_owned()
+    };
+    ui.label(RichText::new(note).color(subtle_dark()).small());
 }
 
 fn type_region(set: &DecoratorSet, index: usize) -> String {
     super::super::decorators::type_name(index, &set.types[index].mesh_name)
 }
 
-/// What the set draws with, a row each: its shader, its sides, its texture
-/// and the wind it sways in.
+/// What the set draws with, a row each: its shader, its sides and its
+/// texture.
 fn draw_set_rows(ui: &mut Ui, set: &DecoratorSet) {
     // Halo 2's permutations each name a shader of the set's, and nothing sways.
     if let Some(halo2) = &set.halo2 {
@@ -96,22 +176,11 @@ fn draw_set_rows(ui: &mut Ui, set: &DecoratorSet) {
         return;
     }
     let shader = set.shader.map_or("unknown", |shader| shader.name());
-    let wind = match (
-        &set.wind,
-        set.shader.is_some_and(|shader| shader.moves_in_the_wind()),
-    ) {
-        (_, false) => None,
-        (Some(wind), true) => Some(wind.path.as_str()),
-        (None, true) => Some("none: the globals name no default wind"),
-    };
-    let mut rows: Vec<(&str, &str)> = vec![
+    let rows: Vec<(&str, &str)> = vec![
         ("Render shader", shader),
         ("Sides", if set.two_sided { "both" } else { "front" }),
         ("Texture", set.texture.as_str()),
     ];
-    if let Some(wind) = wind {
-        rows.push(("Wind", wind));
-    }
     draw_rows(ui, &rows);
 }
 

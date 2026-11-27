@@ -104,6 +104,14 @@ fn read_permutation(element: TagStruct<'_>) -> Permutation {
             .read_real("lightmap tint percentage")
             .unwrap_or(0.0)
             .clamp(0.0, 1.0),
+        fade: element
+            .read_enum_option("fade distance")
+            .and_then(|name| match name.as_str() {
+                "close" => Some(0.375),
+                "medium" => Some(0.1875),
+                "far" => Some(0.125),
+                _ => None,
+            }),
     }
 }
 

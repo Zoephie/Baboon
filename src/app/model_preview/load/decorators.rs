@@ -77,7 +77,7 @@ pub(super) fn load_halo_2_decorator_set(
             ..Default::default()
         })
         .collect();
-    let mut preview = bake_halo_2(&halo2);
+    let mut preview = bake_halo_2(&halo2, layout.light);
     if preview.batches.is_empty() {
         return Err("This decorator set's permutations have nothing to draw.".to_owned());
     }

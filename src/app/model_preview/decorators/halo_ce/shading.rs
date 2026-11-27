@@ -185,6 +185,8 @@ const EYE_XFORM: usize = 27;
 pub(in crate::app::model_preview) fn halo_ce_vertex_constants(
     frame: &ModelGpuFrame,
     collection: &HaloCeCollection,
+    // Whether the Distance card's fade is on.
+    fade: bool,
 ) -> Vec<[f32; 4]> {
     use super::super::super::gen3::pipeline::view_projection;
     use super::super::super::{eye_position, unrotate_view_vector};
@@ -212,7 +214,7 @@ pub(in crate::app::model_preview) fn halo_ce_vertex_constants(
         .enumerate()
         .take(EYE_XFORM - TYPE_DATA)
     {
-        constants[TYPE_DATA + index] = type_data(collection, kind);
+        constants[TYPE_DATA + index] = type_data(collection, kind, fade);
     }
     constants[EYE_XFORM] = axis([1.0, 0.0, 0.0]);
     constants[EYE_XFORM + 1] = axis([0.0, 0.0, 1.0]);
@@ -224,9 +226,9 @@ pub(in crate::app::model_preview) fn halo_ce_vertex_constants(
 }
 
 /// `c19 + type`: its fade, `(far − depth) / (far − near)` as `depth · y + x`
-/// (none at all where far is no further than near), and its sequence's first
-/// image's size in texels times its `size`.
-fn type_data(collection: &HaloCeCollection, kind: &DetailType) -> [f32; 4] {
+/// (none at all where far is no further than near, and whole with the fade
+/// off), and its sequence's first image's size in texels times its `size`.
+fn type_data(collection: &HaloCeCollection, kind: &DetailType, fade: bool) -> [f32; 4] {
     let image = collection
         .plate
         .sequences
@@ -236,10 +238,10 @@ fn type_data(collection: &HaloCeCollection, kind: &DetailType) -> [f32; 4] {
         .copied()
         .unwrap_or([0.0; 2]);
     let span = kind.far_fade - kind.near_fade;
-    let (scale, offset) = if span > 0.0 {
-        (-1.0 / span, kind.far_fade / span)
-    } else {
-        (0.0, 0.0)
+    let (scale, offset) = match (fade, span > 0.0) {
+        (false, _) => (0.0, 1.0),
+        (true, true) => (-1.0 / span, kind.far_fade / span),
+        (true, false) => (0.0, 0.0),
     };
     [offset, scale, image[0] * kind.size, image[1] * kind.size]
 }
@@ -258,6 +260,8 @@ const GROUND_COLOR: f32 = 0.5;
 pub(in crate::app::model_preview) fn detail_object_color(
     kind: &DetailType,
     along: f32,
+    // The Lighting card's level, of the ground light's stand-in.
+    light: f32,
 ) -> [f32; 3] {
     let mixed = if kind.hsv {
         hsv_mix(kind.colors, along, kind.more_colors)
@@ -268,7 +272,7 @@ pub(in crate::app::model_preview) fn detail_object_color(
     };
     let [ambient_alpha, ambient @ ..] = kind.ambient;
     let color: [f32; 3] = std::array::from_fn(|channel| {
-        let base = ambient[channel] * ambient_alpha + (1.0 - ambient_alpha) * GROUND_LIGHT;
+        let base = ambient[channel] * ambient_alpha + (1.0 - ambient_alpha) * GROUND_LIGHT * light;
         let tint = (mixed[channel]
             * ((1.0 - kind.color_override) * GROUND_COLOR + kind.color_override))
             .min(1.0);
@@ -367,6 +371,25 @@ mod tests {
         let [r, g, _] = rgb565([0.5, 0.5, 0.0]);
         assert!(r < 0.5 && (r - 0.5).abs() < 8.0 / 255.0, "{r}");
         assert!(g <= 0.5 && (g - 0.5).abs() < 4.0 / 255.0, "{g}");
+    }
+
+    /// A type fades between its near and far fade distance with the fade on,
+    /// and stays whole with it off.
+    #[test]
+    fn a_types_fade_follows_the_distance_card() {
+        let kind = DetailType {
+            near_fade: 3.0,
+            far_fade: 8.0,
+            ..Default::default()
+        };
+        let collection = HaloCeCollection {
+            types: vec![kind.clone()],
+            ..Default::default()
+        };
+        let [offset, scale, ..] = type_data(&collection, &kind, true);
+        assert!((3.0 * scale + offset - 1.0).abs() < 1e-5 && (8.0 * scale + offset).abs() < 1e-5);
+        let [offset, scale, ..] = type_data(&collection, &kind, false);
+        assert_eq!((offset, scale), (1.0, 0.0));
     }
 
     /// A translated pixel stage takes what the vertex stage writes whole and

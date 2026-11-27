@@ -239,7 +239,7 @@ impl DecoratorBuffers {
             self.meshes
                 .push((first, (vertices.len() / VERTEX_FLOATS) as i32 - first));
         }
-        let light = baked_light();
+        let light = baked_light().map(|channel| channel * set.layout.light);
         self.packed = pack(
             self.layout,
             &set.placements,
@@ -346,8 +346,7 @@ pub(in crate::app::model_preview) fn decorator_value(
     match name {
         "instance_compression_offset" => floats(offset),
         "instance_compression_scale" => floats(scale),
-        // No fade: the distance the game fades over is the Distance card's.
-        "LOD_constants" => floats([0.0, 1.0, 0.0, 0.0]),
+        "LOD_constants" => floats(lod_constants(set)),
         "translucency" => floats(set.translucency),
         "wave_flow" => floats(set.wave),
         "contrast" => floats([set.shaded[0], set.shaded[1], 0.0, 0.0]),
@@ -358,13 +357,34 @@ pub(in crate::app::model_preview) fn decorator_value(
         "sun_direction" => floats(SUN_DIRECTION),
         "sun_color" => floats(SUN_COLOR),
         "wind_data" | "wind_data2" => {
+            // Held still, the wind stands as it does before it first blows.
+            let clock = if set.layout.sway {
+                buffers.wind
+            } else {
+                WindClock::default()
+            };
             let [data, data2] = match &set.wind {
-                Some(wind) => buffers.wind.constants(wind),
-                None => [[0.0; 4], [0.0, 0.0, 0.0, buffers.wind.time]],
+                Some(wind) => clock.constants(wind),
+                None => [[0.0; 4], [0.0, 0.0, 0.0, clock.time]],
             };
             floats(if name == "wind_data" { data } else { data2 })
         }
         _ => None,
+    }
+}
+
+/// Halo 3's and ODST's `LOD_constants` (`render_decorators`): with the fade
+/// on, `(0.7 / (S − E), 1 − S · 0.7 / (S − E))` for its start and end fade
+/// `S` and `E` (at the throttles' and field of view's own scale of 1), so a
+/// decorator is whole to `S` and dissolves through the alpha test by `E`;
+/// off, or with no range, whole everywhere.
+fn lod_constants(set: &DecoratorSet) -> [f32; 4] {
+    match set.fade_range.filter(|_| set.layout.fade) {
+        Some([start, end]) if start < end => {
+            let scale = 0.7 / (start - end);
+            [scale, 1.0 - start * scale, 0.0, 0.0]
+        }
+        _ => [0.0, 1.0, 0.0, 0.0],
     }
 }
 
@@ -392,4 +412,47 @@ fn placement_light(placement: &Placement, light: [f32; 3]) -> [f32; 3] {
             + (GROUND[channel] - placement.tint[channel]) * placement.ground_tint;
         tint * light[channel]
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{DecoratorSet, DecoratorShader, Layout};
+    use super::lod_constants;
+
+    /// Halo 3's fade: whole at its start fade, at the alpha test's 0.3 at
+    /// its end fade; whole everywhere with the fade off, or with no range.
+    #[test]
+    fn the_fade_runs_from_whole_to_the_alpha_test() {
+        let mut set = DecoratorSet {
+            fade_range: Some([12.0, 14.0]),
+            layout: Layout {
+                fade: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let [x, y, ..] = lod_constants(&set);
+        let fade = |distance: f32| (distance * x + y).clamp(0.0, 1.0);
+        assert!(
+            (fade(12.0) - 1.0).abs() < 1e-5 && (fade(14.0) - 0.3).abs() < 1e-5 && fade(5.0) == 1.0
+        );
+        set.layout.fade = false;
+        assert_eq!(lod_constants(&set), [0.0, 1.0, 0.0, 0.0]);
+        set.layout.fade = true;
+        set.fade_range = Some([14.0, 14.0]);
+        assert_eq!(lod_constants(&set), [0.0, 1.0, 0.0, 0.0]);
+    }
+
+    /// A wind set moves on the clock while it sways, and holds still when it
+    /// doesn't.
+    #[test]
+    fn a_set_held_still_does_not_move() {
+        let mut set = DecoratorSet {
+            shader: Some(DecoratorShader::WindDynamicLights),
+            ..Default::default()
+        };
+        assert!(set.moves());
+        set.layout.sway = false;
+        assert!(!set.moves());
+    }
 }

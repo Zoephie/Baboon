@@ -263,6 +263,9 @@ See the proposals that accompany this plan.
   type and corner in `COLOR1`), the vertex shaders' `c[]` tables, Sapien's colour in RGB565, and the
   game's alpha blend.
 
+- Cards: Decorator Set, Types, Layout, Distance (the game's fade, toggled), Lighting (the stand-in
+  light's level), Wind (sway). Left: Reach's and Halo 4's LOD models, decimation and stipple.
+
 ## Seen in the preview, not yet explained
 
 - Reach's `tree_pine_forge_gulch` (static billboard) is a card lying flat in its model (0.01 thick,

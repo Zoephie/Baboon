@@ -75,6 +75,10 @@ pub(in crate::app::model_preview) fn read_decorator_set(
         ]
         .map(real),
         shaded: ["shaded dark", "shaded bright"].map(real),
+        fade_range: root
+            .read_real("start fade")
+            .zip(root.read_real("end fade"))
+            .map(|(start, end)| [start, end]),
         wind: WindDefinition::default_for(reader).map(std::sync::Arc::new),
         types,
         meshes,

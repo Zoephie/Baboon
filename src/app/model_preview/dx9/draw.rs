@@ -601,6 +601,15 @@ impl RenderCore {
                         }
                         .apply(gl);
                     }
+                    // A Halo 2 decorator's fade, with the Distance card's on:
+                    // `SCALE = clamp(3 − distance · k, 0, 1)` (`c53`).
+                    if let Some(rate) = frame.preview.h2.decorator_fade.get(&batch_index)
+                        && matches!(pass.stage, Dx9VertexStage::Decorator(_))
+                        && frame.preview.decorators.as_ref().is_some_and(|set| set.layout.fade)
+                    {
+                        let location = program.location(gl, "c[53]");
+                        gl.uniform_4_f32(location.as_ref(), *rate, 3.0, 0.0, 1.0);
+                    }
                     // A Halo 2 decorator model's placement: its own constants.
                     if let Some(rigid) = frame.preview.h2.decorator_rigid.get(&batch_index)
                         && matches!(pass.stage, Dx9VertexStage::Decorator(_))
@@ -643,11 +652,11 @@ impl RenderCore {
                 let location = program.location(gl, "c");
                 gl.uniform_4_f32_slice(location.as_ref(), constants.as_flattened());
             }
-            if let (Dx9VertexStage::DetailObject(_), Some(collection)) = (
-                pass.stage,
-                frame.preview.decorators.as_ref().and_then(|set| set.halo_ce.as_ref()),
-            ) {
-                let constants = crate::app::model_preview::decorators::halo_ce_vertex_constants(frame, collection);
+            if let (Dx9VertexStage::DetailObject(_), Some(set)) = (pass.stage, frame.preview.decorators.as_ref())
+                && let Some(collection) = &set.halo_ce
+            {
+                let constants =
+                    crate::app::model_preview::decorators::halo_ce_vertex_constants(frame, collection, set.layout.fade);
                 let location = program.location(gl, "c");
                 gl.uniform_4_f32_slice(location.as_ref(), constants.as_flattened());
             }

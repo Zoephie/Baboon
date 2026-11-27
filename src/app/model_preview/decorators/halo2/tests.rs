@@ -92,7 +92,7 @@ fn every_halo_2_set_reads() {
                 let mut notes = Vec::new();
                 let mut set = super::read_halo_2_set(&tag, Some(&reader), &mut notes)?;
                 set.records = super::scatter_halo_2(&set, Default::default());
-                let built = super::bake_halo_2(&set);
+                let built = super::bake_halo_2(&set, 1.0);
                 Ok::<_, String>((notes, built.batches.len()))
             }));
             match read {
@@ -112,4 +112,45 @@ fn every_halo_2_set_reads() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// With `BLAM_TEST_H2EK`: each batch keeps its permutation's fade rate, and
+/// the Lighting card's level brightens or darkens the colour a placement's
+/// shader reads.
+#[test]
+fn a_halo_2_bake_keeps_fades_and_follows_the_light() {
+    let Some(source) = kit_source(GameId::Halo2) else {
+        return;
+    };
+    let reader = TagReader::with_game_shaders(&source, false);
+    let tag = reader
+        .load(
+            "scenarios\\decorators\\grass\\grass_field\\grass_field",
+            "decorator_set",
+            b"DECR",
+        )
+        .unwrap();
+    let mut set = super::read_halo_2_set(&tag, Some(&reader), &mut Vec::new()).unwrap();
+    set.records = super::scatter_halo_2(&set, Default::default());
+    let lit = super::bake_halo_2(&set, 1.0);
+    assert_eq!(
+        lit.h2.decorator_fade.len(),
+        lit.batches.len(),
+        "every batch's permutation names a fade"
+    );
+    assert!(
+        lit.h2
+            .decorator_fade
+            .values()
+            .all(|rate| [0.375, 0.1875, 0.125].contains(rate))
+    );
+    let dim = super::bake_halo_2(&set, 0.5);
+    let brightness = |preview: &super::super::super::RenderModelPreview| {
+        preview
+            .decorator_stream
+            .iter()
+            .map(|vertex| vertex.color[0])
+            .sum::<f32>()
+    };
+    assert!(brightness(&dim) < brightness(&lit));
 }

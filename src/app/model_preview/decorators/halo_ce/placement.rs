@@ -61,7 +61,7 @@ pub(in crate::app::model_preview) fn scatter_halo_ce(
             ((random.bits() as usize % sprites) & 0xF) % sprites
         };
         // Sapien's one draw of its colour's place between least and most.
-        let color = detail_object_color(&collection.types[type_index], random.next());
+        let color = detail_object_color(&collection.types[type_index], random.next(), layout.light);
         instances.push(Instance {
             type_index,
             frame,

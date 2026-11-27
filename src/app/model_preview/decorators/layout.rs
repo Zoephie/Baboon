@@ -14,7 +14,7 @@
 use super::super::particles::Random;
 use super::{DecoratorSet, Placement};
 
-/// What the patch is filled with.
+/// What the patch is filled with, and how its stand-ins for a level draw it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Layout {
     /// The patch's edge, in world units, centred on the origin.
@@ -22,6 +22,13 @@ pub(crate) struct Layout {
     /// How many decorators it tries to stand.
     pub count: usize,
     pub seed: u32,
+    /// Whether the game's fade with distance draws (the Distance card).
+    pub fade: bool,
+    /// How bright the light a level would bake into each decorator is, as a
+    /// share of the stand-in's (the Lighting card).
+    pub light: f32,
+    /// Whether the wind sways what its shader sways (the Wind card).
+    pub sway: bool,
 }
 
 impl Default for Layout {
@@ -30,6 +37,9 @@ impl Default for Layout {
             size: 4.0,
             count: 250,
             seed: 1,
+            fade: false,
+            light: 1.0,
+            sway: true,
         }
     }
 }
@@ -210,6 +220,7 @@ mod tests {
             size: 20.0,
             count: 400,
             seed: 3,
+            ..Default::default()
         };
         let placements = scatter(&set, layout);
         let count = |type_index| {

@@ -63,4 +63,6 @@ pub(crate) struct H2Features {
     pub liquids: Vec<super::h2::liquid::H2LiquidAt>,
     /// Each model placement's constants (`c203` to `c207`), by batch.
     pub decorator_rigid: std::collections::BTreeMap<usize, [[f32; 4]; 5]>,
+    /// Each batch's permutation's fade rate (`c53.x`), by batch.
+    pub decorator_fade: std::collections::BTreeMap<usize, f32>,
 }
