@@ -124,9 +124,32 @@ rotations; CCD favours the joints nearest the effector; damped least squares (Bu
 effectors and unreachable targets stably and takes per-joint weights. Blender's Auto IK sets the
 chain by length while dragging; Unreal's Full Body IK is position-based with per-bone stiffness.
 
+## Joint limits in each game (settled 2026-11-27)
+
+Read in Reach's and Halo 4's symbolled Xbox 360 debug builds beside Halo 3's:
+
+- **Reach and Halo 4 hand Havok every range as the tag has it** (`create_constraint`, Reach
+  0x83178580, Halo 4 0x83322CC0), the twist and plane each held within a quarter turn either side
+  of straight, the cone the larger of its ends' sizes, short of a half turn. Halo 3 negates the
+  plane and hinge ranges. Their tags carry the same signs (elbows −75° to 15° in Reach, −70° to
+  15° in Halo 3), so read Halo 3's way, Reach's and Halo 4's elbows and knees bent backward and
+  their legs splayed inward. A limited hinge takes forward rather than left as its reference in
+  Reach and Halo 4, which leaves the angle as it was.
+- **The other games, by trying their characters**: Halo 2's elbows and knees, and ODST's elbows,
+  knees and hips, bend the way they bend read Halo 3's way. Halo 2's plane ranges are read so too
+  but unproven: its hips' frames don't show a leg's splay plainly in the plane angle.
+- **Halo 2's ragdolls and all of Halo 4's constraints name the child first** (thigh, then pelvis;
+  calf, then thigh). Havok's body A is always `node a`, and the limit is on B's frame against A's
+  either way; the preview now turns whichever of the two hangs below the other.
+- **The twist's sign**: Havok measures the twist as it measures the hinge
+  (`hkInternalConstraintUtils_inlineCalcRelativeAngle` beside `buildJacobianFromAngLimitAtom`:
+  both the other way about the axis from the right hand). The twist had been held in the
+  right-handed measure, mirroring it; Halo 4's twists run 0° to 10° or 15°, one-sided.
+- Kit tests try every game's stock character: elbows and knees bend 50° their way unhindered and
+  are held back bent 40° the other; legs splay outward but not across, the pelvis unmoved.
+
 ## Not settled
 
-- The sign of a ragdoll joint's twist in Havok's terms. It rarely matters: every Halo 3 character's
-  twist range is symmetric, and all but 2 of Reach's 89.
-- Halo 2's, Reach's and Halo 4's constraint builds: only Halo 3's was read. Their tags share the
-  field names and hold the same degree ranges.
+- Halo 2 Anniversary's multiplayer (Halo 4's engine) and Campaign Evolved (Reach's tags) are read
+  Reach's and Halo 4's way, unread and untried: no kit here has their characters.
+- Halo 2's plane ranges, as above.

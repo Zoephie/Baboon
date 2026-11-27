@@ -22,6 +22,7 @@
 use super::RenderModelPreviewNode;
 use super::common::fields::elements;
 use blam_tags::math::{Matrix4, RealQuaternion, RealVector3d};
+use crate::core::game::GameId;
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -502,7 +503,7 @@ pub(crate) fn twist(
         parent.and_then(|parent| matrices.get(parent)),
         about(axis, angle),
     );
-    for limit in limits.iter().filter(|limit| limit.b == joint) {
+    for limit in limits.iter().filter(|limit| limit.moving == joint) {
         hold(nodes, base, edit, limit);
     }
 }
@@ -531,7 +532,7 @@ pub(crate) fn rotate(
         parent.and_then(|parent| matrices.get(parent)),
         about(along, angle),
     );
-    for limit in limits.iter().filter(|limit| limit.b == joint) {
+    for limit in limits.iter().filter(|limit| limit.moving == joint) {
         hold(nodes, base, edit, limit);
     }
 }
@@ -603,7 +604,7 @@ pub(crate) fn reach(
     // The chain's joints that a limit holds, each against its other side.
     let held: Vec<&ResolvedLimit> = limits
         .iter()
-        .filter(|limit| chain.contains(&limit.b))
+        .filter(|limit| chain.contains(&limit.moving))
         .collect();
     // Placed, then held to its limits, which may leave the joint short of
     // the target: placed again from there, a few times over.
@@ -663,10 +664,16 @@ fn refine(
             if distance(effector, target) < 1e-5 * reach_length {
                 return;
             }
-            let limit = held.iter().find(|limit| limit.b == node);
+            let limit = held.iter().find(|limit| limit.moving == node);
             let turn = match limit.map(|limit| (limit, limit.kind)) {
                 Some((limit, LimitKind::Hinge { .. })) => {
-                    let axis = (matrices[limit.a].decompose().1 * limit.frame_a) * UP;
+                    // The hinge's axis, as the side that stays holds it.
+                    let (still, frame) = if limit.moving == limit.b {
+                        (limit.a, limit.frame_a)
+                    } else {
+                        (limit.b, limit.frame_b)
+                    };
+                    let axis = (matrices[still].decompose().1 * frame) * UP;
                     let axis = [axis.i, axis.j, axis.k];
                     let flat = |point: [f32; 3]| {
                         let offset = sub(point, at);
@@ -909,6 +916,11 @@ pub(crate) enum LimitKind {
 pub(crate) struct ResolvedLimit {
     pub a: usize,
     pub b: usize,
+    /// The one of the two a hold turns: whichever hangs below the other.
+    /// Halo 3 and Reach name the parent `node a`, but Halo 2's ragdolls and
+    /// all of Halo 4's name the child first (thigh, then pelvis); the limit
+    /// is on B's frame against A's either way, as Havok takes it.
+    pub moving: usize,
     pub frame_a: RealQuaternion,
     pub frame_b: RealQuaternion,
     pub kind: LimitKind,
@@ -928,9 +940,12 @@ pub(crate) fn resolve_limits(
     let mut resolved: Vec<ResolvedLimit> = limits
         .iter()
         .filter_map(|limit| {
+            let (a, b) = (find(&limit.a)?, find(&limit.b)?);
+            let moving = if descends(nodes, a, b) && a != b { a } else { b };
             Some(ResolvedLimit {
-                a: find(&limit.a)?,
-                b: find(&limit.b)?,
+                a,
+                b,
+                moving,
                 frame_a: limit.frame_a,
                 frame_b: limit.frame_b,
                 kind: limit.kind,
@@ -938,14 +953,43 @@ pub(crate) fn resolve_limits(
         })
         .collect();
     // Parents first, so a joint is held before what hangs below it.
-    resolved.sort_by_key(|limit| limit.b);
+    resolved.sort_by_key(|limit| limit.moving);
     resolved
 }
 
-/// The physics model's ragdoll and limited hinge constraints, read by name.
-/// The tag holds degrees; `create_constraint` hands Havok the twist as it
-/// is, the cone's larger end, and the plane's and hinge's ranges negated.
-pub(in crate::app::model_preview) fn read_joint_limits(physics: &TagFile) -> Vec<JointLimit> {
+/// How a game's `c_havok_component::create_constraint` hands a physics
+/// model's joint ranges to Havok.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LimitReading {
+    /// Halo 3 (0x1803206F0, Ares `havok_component.cpp`): the twist as the
+    /// tag has it, the cone the larger of its two ends, the plane's and the
+    /// hinge's ranges negated. Halo 2's and ODST's elbows, knees and hips
+    /// bend the way they bend read so.
+    Negated,
+    /// Reach (X360 0x83178580) and Halo 4 (0x83322CC0): every range as the
+    /// tag has it, the twist and plane each held to a quarter turn either
+    /// side of straight, the cone the larger of its two ends' sizes, short
+    /// of a half turn. Read Halo 3's way their elbows and knees would bend
+    /// backward and their legs splay inward.
+    AsTagged,
+}
+
+impl LimitReading {
+    /// Halo 2 Anniversary's multiplayer (Halo 4's engine) and Campaign
+    /// Evolved (Reach's tags) are taken as Halo 4's and Reach's: neither's
+    /// code was read, nor its characters tried.
+    fn of(game: Option<GameId>) -> Self {
+        match game {
+            Some(GameId::HaloReach | GameId::Halo4 | GameId::Halo2Amp | GameId::CampaignEvolved) => Self::AsTagged,
+            _ => Self::Negated,
+        }
+    }
+}
+
+/// The physics model's ragdoll and limited hinge constraints, read by name,
+/// each range as `game` hands it to Havok ([`LimitReading`]). The tag holds
+/// degrees.
+pub(in crate::app::model_preview) fn read_joint_limits(physics: &TagFile, game: Option<GameId>) -> Vec<JointLimit> {
     let root = physics.root();
     let names: Vec<String> = elements(root, "nodes")
         .iter()
@@ -955,27 +999,39 @@ pub(in crate::app::model_preview) fn read_joint_limits(physics: &TagFile) -> Vec
         |holder: &TagStruct<'_>, name: &str| holder.read_real(name).unwrap_or(0.0).to_radians();
     let ordered = |low: f32, high: f32| [low.min(high), low.max(high)];
     let negated = |low: f32, high: f32| ordered(-low, -high);
+    // Reach's and Halo 4's: a quarter turn at most either side of straight,
+    // the least never past straight, nor the most short of it.
+    let quarter = std::f32::consts::FRAC_PI_2;
+    let straddling = |low: f32, high: f32| {
+        let [low, high] = ordered(low, high);
+        [low.min(0.0).max(-quarter), high.min(quarter).max(0.0)]
+    };
+    let reading = LimitReading::of(game);
     let mut limits = Vec::new();
     for constraint in elements(root, "ragdoll constraints") {
-        let kind = LimitKind::Ragdoll {
-            twist: ordered(
-                real(&constraint, "min twist"),
-                real(&constraint, "max twist"),
-            ),
-            cone: real(&constraint, "min cone").max(real(&constraint, "max cone")),
-            plane: negated(
-                real(&constraint, "min plane"),
-                real(&constraint, "max plane"),
-            ),
+        let range = |low: &str, high: &str| (real(&constraint, low), real(&constraint, high));
+        let (twist, cone, plane) = (range("min twist", "max twist"), range("min cone", "max cone"), range("min plane", "max plane"));
+        let kind = match reading {
+            LimitReading::Negated => LimitKind::Ragdoll {
+                twist: ordered(twist.0, twist.1),
+                cone: cone.0.max(cone.1),
+                plane: negated(plane.0, plane.1),
+            },
+            LimitReading::AsTagged => LimitKind::Ragdoll {
+                twist: straddling(twist.0, twist.1),
+                cone: cone.0.abs().max(cone.1.abs()).min(std::f32::consts::PI - 1e-4),
+                plane: straddling(plane.0, plane.1),
+            },
         };
         limits.extend(read_bodies(&constraint, &names, kind));
     }
     for constraint in elements(root, "limited hinge constraints") {
+        let (low, high) = (real(&constraint, "limit min angle"), real(&constraint, "limit max angle"));
         let kind = LimitKind::Hinge {
-            angle: negated(
-                real(&constraint, "limit min angle"),
-                real(&constraint, "limit max angle"),
-            ),
+            angle: match reading {
+                LimitReading::Negated => negated(low, high),
+                LimitReading::AsTagged => ordered(low, high),
+            },
         };
         limits.extend(read_bodies(&constraint, &names, kind));
     }
@@ -1033,16 +1089,33 @@ fn hold(
         LimitKind::Ragdoll { twist, cone, plane } => hold_ragdoll(relative, twist, cone, plane),
         LimitKind::Hinge { angle } => hold_hinge(relative, angle),
     };
-    // The world turn that carries B's frame onto the held one.
-    let wanted = (turn_a * held).normalized();
-    let turn = (wanted * frame_b.conjugate()).normalized();
+    set_relative(nodes, &matrices, edit, limit, (turn_a, frame_b), held);
+}
+
+/// Turn `limit`'s moving node so B's frame stands at `held` in A's, from
+/// A's and B's frames in the world now (`frames`): B turned onto `A · held`
+/// where B moves, A onto `B · held⁻¹` where A does.
+fn set_relative(
+    nodes: &[RenderModelPreviewNode],
+    matrices: &[Matrix4],
+    edit: &mut PoseEdit,
+    limit: &ResolvedLimit,
+    (frame_a, frame_b): (RealQuaternion, RealQuaternion),
+    held: RealQuaternion,
+) {
+    let turn = if limit.moving == limit.b {
+        (frame_a * held).normalized() * frame_b.conjugate()
+    } else {
+        (frame_b * held.conjugate()).normalized() * frame_a.conjugate()
+    }
+    .normalized();
     if (turn.w.abs() - 1.0).abs() < 1e-7 {
         return;
     }
-    let parent = usize::try_from(nodes[limit.b].parent)
+    let parent = usize::try_from(nodes[limit.moving].parent)
         .ok()
         .and_then(|parent| matrices.get(parent).copied());
-    edit.turn_by(limit.b, parent.as_ref(), turn);
+    edit.turn_by(limit.moving, parent.as_ref(), turn);
 }
 
 const FORWARD: RealVector3d = RealVector3d {
@@ -1077,7 +1150,11 @@ fn hold_ragdoll(
     let twist_angle = (2.0 * twisted.i.atan2(twisted.w) + std::f32::consts::PI)
         .rem_euclid(std::f32::consts::TAU)
         - std::f32::consts::PI;
-    let twist_angle = twist_angle.clamp(twist[0], twist[1]);
+    // Havok measures the twist as it does the hinge, the other way about
+    // forward from the right hand (`hkInternalConstraintUtils_
+    // inlineCalcRelativeAngle`, atan2 of `(m × ref B) · ref A` over
+    // `ref B · ref A`): its range holds that measure.
+    let twist_angle = -(-twist_angle).clamp(twist[0], twist[1]);
     // Off the plane square to left. Havok measures the angle away from left,
     // the other way to the angle toward it, as with the hinge: in its terms
     // the game's negated range lets each of the Chief's legs splay outward
@@ -1148,12 +1225,7 @@ fn seed_hinge(
     if hinge_angle(relative) * side >= HINGE_SEED {
         return;
     }
-    let wanted = (turn_a * about(UP, -side * HINGE_SEED)).normalized();
-    let turn = (wanted * frame_b.conjugate()).normalized();
-    let parent = usize::try_from(nodes[limit.b].parent)
-        .ok()
-        .and_then(|parent| matrices.get(parent).copied());
-    edit.turn_by(limit.b, parent.as_ref(), turn);
+    set_relative(nodes, &matrices, edit, limit, (turn_a, frame_b), about(UP, -side * HINGE_SEED));
 }
 
 /// A frame relative to its other side's, kept to a limited hinge: only its
@@ -1254,6 +1326,169 @@ mod tests {
         // along local x picks a point on the model's y line through it.
         let target = Lock::Axis(0).target([0.0; 3], [0.3, 0.5, 5.0], [0.0, 0.0, -1.0], &axes).unwrap();
         assert!(near(target, [0.0, 0.5, 0.0]), "{target:?}");
+    }
+
+    /// Havok measures a ragdoll's twist the other way about forward from the
+    /// right hand, as it does a hinge's angle: in a range of 0 to 10°, a
+    /// right-handed twist of −8° is within, one of +8° is held at none.
+    #[test]
+    fn a_ragdolls_twist_is_held_in_havoks_measure() {
+        let degrees = |value: f32| value.to_radians();
+        let twist_of = |turn: RealQuaternion| 2.0 * turn.i.atan2(turn.w);
+        let range = [0.0, degrees(10.0)];
+        let quarter = std::f32::consts::FRAC_PI_2;
+        let kept = hold_ragdoll(about(FORWARD, degrees(-8.0)), range, quarter, [-quarter, quarter]);
+        assert!((twist_of(kept) - degrees(-8.0)).abs() < 1e-4, "{}", twist_of(kept).to_degrees());
+        let stopped = hold_ragdoll(about(FORWARD, degrees(8.0)), range, quarter, [-quarter, quarter]);
+        assert!(twist_of(stopped).abs() < 1e-4, "{}", twist_of(stopped).to_degrees());
+    }
+
+    /// Each game's stock character, where its kit is set, as the kit tests
+    /// name them: its physics model and render model.
+    fn stock_characters() -> Vec<(GameId, &'static str)> {
+        vec![
+            (GameId::Halo2, "objects\\characters\\masterchief\\masterchief"),
+            (GameId::Halo3, "objects\\characters\\masterchief\\masterchief"),
+            (GameId::Halo3Odst, "objects\\characters\\marine\\marine"),
+            (GameId::HaloReach, "objects\\characters\\spartans\\spartans"),
+            (GameId::Halo4, "objects\\characters\\storm_masterchief\\storm_masterchief"),
+        ]
+    }
+
+    /// A stock character's nodes, bind pose and limits, read as its game
+    /// reads them; none without the game's kit.
+    fn stock_limits(game: GameId, path: &str) -> Option<(Vec<RenderModelPreviewNode>, Vec<Matrix4>, Vec<ResolvedLimit>)> {
+        use crate::app::model_preview::harness::kit::{kit_preview, kit_root, kit_source};
+        use crate::app::model_preview::load::TagReader;
+        use crate::app::model_preview::{ModelPreviewState, pose_beneath};
+        let (root, source) = (kit_root(game)?, kit_source(game)?);
+        let physics = TagReader::new(&source).load(path, "physics_model", b"phmo").ok()?;
+        let data = kit_preview(&root, game, path, "render_model", b"mode");
+        let base = pose_beneath(&data, &ModelPreviewState::default());
+        let limits = resolve_limits(&data.preview.nodes, &read_joint_limits(&physics, Some(game)));
+        Some((data.preview.nodes.clone(), base, limits))
+    }
+
+    /// `node` turned by `angle` about the world `axis`, over `edit`.
+    fn turned(nodes: &[RenderModelPreviewNode], base: &[Matrix4], edit: &mut PoseEdit, node: usize, axis: RealVector3d, angle: f32) {
+        let mut matrices = base.to_vec();
+        apply(nodes, &mut matrices, edit);
+        let parent = usize::try_from(nodes[node].parent).ok().map(|parent| matrices[parent]);
+        edit.turn_by(node, parent.as_ref(), about(axis, angle));
+    }
+
+    /// With the kits set: every stock character's elbows and knees, read as
+    /// its game reads them, bend the way they bend (an elbow bringing the
+    /// hand forward, a knee taking the foot back) as far as 50° unhindered,
+    /// and bent 40° the other way are held back. Reach and Halo 4 hand
+    /// Havok their tags' ranges as they are, Halo 3 its negated; read
+    /// Halo 3's way, Reach's and Halo 4's joints bent backward. Halo 4 names
+    /// each joint's child first, which the hold turns, not the parent.
+    #[test]
+    fn every_games_elbows_and_knees_bend_the_way_they_bend() {
+        let mut tried = 0;
+        for (game, path) in stock_characters() {
+            let Some((nodes, base, limits)) = stock_limits(game, path) else { continue };
+            for limit in &limits {
+                let LimitKind::Hinge { .. } = limit.kind else { continue };
+                let name = nodes[limit.moving].name.to_ascii_lowercase();
+                let forward = if name.contains("forearm") { 1.0 } else if name.contains("calf") { -1.0 } else { continue };
+                let moving = limit.moving;
+                let still = if moving == limit.b { limit.a } else { limit.b };
+                let far = (0..nodes.len())
+                    .filter(|&node| node != moving && descends(&nodes, node, moving))
+                    .max_by(|&x, &y| {
+                        distance(base[x].translation(), base[moving].translation())
+                            .total_cmp(&distance(base[y].translation(), base[moving].translation()))
+                    })
+                    .unwrap();
+                let still_frame = if still == limit.a { limit.frame_a } else { limit.frame_b };
+                let axis = (base[still].decompose().1 * still_frame) * UP;
+                // Which way round about the axis bends it as it bends.
+                let mut probe = PoseEdit::default();
+                turned(&nodes, &base, &mut probe, moving, axis, 0.1);
+                let mut probed = base.clone();
+                apply(&nodes, &mut probed, &probe);
+                let natural = (probed[far].translation()[0] - base[far].translation()[0]).signum() * forward;
+                let bend = |edit: &PoseEdit| {
+                    let mut matrices = base.clone();
+                    apply(&nodes, &mut matrices, edit);
+                    let fa = matrices[limit.a].decompose().1 * limit.frame_a;
+                    let fb = matrices[limit.b].decompose().1 * limit.frame_b;
+                    hinge_angle((fa.conjugate() * fb).normalized())
+                };
+                let mut with = PoseEdit::default();
+                turned(&nodes, &base, &mut with, moving, axis, natural * 50f32.to_radians());
+                let unheld = bend(&with);
+                hold(&nodes, &base, &mut with, limit);
+                assert!(
+                    (bend(&with) - unheld).abs() < 1f32.to_radians(),
+                    "{game:?} {name}: bent 50° the way it bends, held from {:.1}° to {:.1}°",
+                    unheld.to_degrees(),
+                    bend(&with).to_degrees()
+                );
+                let mut against = PoseEdit::default();
+                turned(&nodes, &base, &mut against, moving, axis, -natural * 40f32.to_radians());
+                let unheld = bend(&against);
+                hold(&nodes, &base, &mut against, limit);
+                assert!(
+                    (bend(&against) - unheld).abs() > 10f32.to_radians(),
+                    "{game:?} {name}: bent 40° backward, left at {:.1}°",
+                    bend(&against).to_degrees()
+                );
+                tried += 1;
+            }
+        }
+        if tried > 0 {
+            assert!(tried >= 4, "the elbows and knees were found: {tried}");
+        }
+    }
+
+    /// With the kits set: Halo 3's, ODST's, Reach's and Halo 4's stock
+    /// characters' legs splay outward 17° unhindered, and swung 17° inward
+    /// across the other leg are held back; the pelvis stays put either way,
+    /// though Halo 4 names the thigh first.
+    #[test]
+    fn every_games_legs_splay_outward_not_across() {
+        for (game, path) in stock_characters().into_iter().filter(|(game, _)| *game != GameId::Halo2) {
+            let Some((nodes, base, limits)) = stock_limits(game, path) else { continue };
+            let mut hips = 0;
+            for limit in &limits {
+                let LimitKind::Ragdoll { .. } = limit.kind else { continue };
+                let name = nodes[limit.moving].name.to_ascii_lowercase();
+                if !name.contains("thigh") {
+                    continue;
+                }
+                let still = if limit.moving == limit.b { limit.a } else { limit.b };
+                // Outward: the left leg toward +y, the right toward -y.
+                let outward = if name.contains("l_") { 1.0 } else { -1.0 };
+                let plane = |edit: &PoseEdit| {
+                    let mut matrices = base.clone();
+                    apply(&nodes, &mut matrices, edit);
+                    let fa = matrices[limit.a].decompose().1 * limit.frame_a;
+                    let fb = matrices[limit.b].decompose().1 * limit.frame_b;
+                    let direction = (fa.conjugate() * fb).normalized() * FORWARD;
+                    (-direction.j.clamp(-1.0, 1.0).asin(), matrices[still].translation())
+                };
+                let splay = 0.3;
+                let mut out = PoseEdit::default();
+                turned(&nodes, &base, &mut out, limit.moving, FORWARD, outward * splay);
+                let (unheld, _) = plane(&out);
+                hold(&nodes, &base, &mut out, limit);
+                let (held, still_at) = plane(&out);
+                assert!((held - unheld).abs() < 1f32.to_radians(), "{game:?} {name}: splayed outward, held from {unheld} to {held}");
+                assert!(near(still_at, base[still].translation()), "{game:?} {name}: the pelvis stays");
+                let mut across = PoseEdit::default();
+                turned(&nodes, &base, &mut across, limit.moving, FORWARD, -outward * splay);
+                let (unheld, _) = plane(&across);
+                hold(&nodes, &base, &mut across, limit);
+                let (held, still_at) = plane(&across);
+                assert!((held - unheld).abs() > 5f32.to_radians(), "{game:?} {name}: swung across, left at {held}");
+                assert!(near(still_at, base[still].translation()), "{game:?} {name}: the pelvis stays");
+                hips += 1;
+            }
+            assert_eq!(hips, 2, "{game:?}: both hips");
+        }
     }
 
     /// The chain steps a node at a time, never below 1 nor past the most
@@ -1736,7 +1971,7 @@ mod tests {
                 b"phmo",
             )
             .unwrap();
-        let limits = read_joint_limits(&physics);
+        let limits = read_joint_limits(&physics, Some(GameId::Halo3));
         let count = |hinge: bool| {
             limits
                 .iter()
@@ -1923,7 +2158,7 @@ mod tests {
             b"mode",
         );
         let nodes = &data.preview.nodes;
-        let limits = resolve_limits(nodes, &read_joint_limits(&physics));
+        let limits = resolve_limits(nodes, &read_joint_limits(&physics, Some(GameId::Halo3)));
         let find = |name: &str| nodes.iter().position(|node| node.name == name).unwrap();
         let mut state = ModelPreviewState::default();
         state.pose.follow(data.geometry_id);
@@ -2029,7 +2264,7 @@ mod tests {
             b"mode",
         );
         let nodes = &data.preview.nodes;
-        let limits = resolve_limits(nodes, &read_joint_limits(&physics));
+        let limits = resolve_limits(nodes, &read_joint_limits(&physics, Some(GameId::Halo3)));
         let hand = nodes.iter().position(|node| node.name == "l_hand").unwrap();
         for limited in [false, true] {
             let mut state = ModelPreviewState::default();
@@ -2092,7 +2327,7 @@ mod tests {
             b"mode",
         );
         let nodes = &data.preview.nodes;
-        let limits = resolve_limits(nodes, &read_joint_limits(&physics));
+        let limits = resolve_limits(nodes, &read_joint_limits(&physics, Some(GameId::Halo3)));
         let find = |name: &str| nodes.iter().position(|node| node.name == name).unwrap();
         let (thigh, foot) = (find("l_thigh"), find("l_foot"));
         let hip = limits
