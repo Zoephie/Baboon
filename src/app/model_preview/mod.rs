@@ -51,6 +51,7 @@ pub(in crate::app) mod materials;
 pub(in crate::app) mod material_editor;
 mod panel;
 pub(crate) mod particles;
+pub(crate) mod pose;
 mod reach;
 mod renderer;
 mod selection;

@@ -256,6 +256,24 @@ impl PreviewCamera {
         }
     }
 
+    /// The point under `pos` on screen at the same depth as `beside`: on
+    /// the plane through `beside` facing the camera. [`Self::project`]
+    /// undone at that depth.
+    pub(in crate::app::model_preview) fn unproject_beside(
+        &self,
+        pos: egui::Pos2,
+        beside: [f32; 3],
+    ) -> [f32; 3] {
+        let offset = [0, 1, 2].map(|axis| (beside[axis] - self.center[axis]) * self.scale);
+        let depth = self.rotate_vector(offset)[1];
+        let fit = self.rect.width().min(self.rect.height()) / (self.radius * 2.2).max(0.001);
+        let w = (1.0 + depth * self.inverse_eye()).max(PERSPECTIVE_NEAR_FRACTION);
+        let from_center = pos - self.rect.center();
+        let view = [from_center.x * w / fit, depth, -from_center.y * w / fit];
+        let world = unrotate_view_vector(self.yaw, self.pitch, view);
+        std::array::from_fn(|axis| self.center[axis] + world[axis] / self.scale.max(1e-6))
+    }
+
     /// Eye distance from the orbit point in scaled view units; see
     /// [`PERSPECTIVE_FOV_Y`].
     pub(in crate::app::model_preview) fn eye_distance(&self) -> f32 {
@@ -441,6 +459,23 @@ mod tests {
         let (level, level_at_a_fixed_scale) = widest(500.0);
         assert!((tiny - level).abs() < 1.0, "{tiny} {level}");
         assert!(tiny_at_a_fixed_scale * 1000.0 < level_at_a_fixed_scale);
+    }
+
+    /// A point put back on screen where it was taken off lands where the
+    /// pointer was, at the depth of the point beside it, in either
+    /// projection: what a dragged joint follows.
+    #[test]
+    fn a_point_unprojected_beside_another_projects_back_under_the_pointer() {
+        for perspective in [false, true] {
+            let camera = PreviewCamera { yaw: 0.7, pitch: -0.3, ..camera(1.6, perspective) };
+            let beside = [0.4, -0.2, 0.9];
+            let pos = camera.rect.center() + Vec2::new(37.0, -21.0);
+            let point = camera.unproject_beside(pos, beside);
+            let back = camera.project(point).pos;
+            assert!((back - pos).length() < 1e-2, "{perspective}: {back:?} {pos:?}");
+            let depth = |p: [f32; 3]| camera.rotate_vector([0, 1, 2].map(|axis| p[axis] - camera.center[axis]))[1];
+            assert!((depth(point) - depth(beside)).abs() < 1e-4, "on the plane through it");
+        }
     }
 
     fn camera(scale: f32, perspective: bool) -> PreviewCamera {

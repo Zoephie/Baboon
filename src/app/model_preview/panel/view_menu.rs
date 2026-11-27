@@ -439,10 +439,24 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
         toggle(ui, ModelLayer::Armature, true, None);
     }
     apply_layer_actions(state, &drawn);
+    if has_armature {
+        draw_pose_toggle(ui, state);
+    }
     if state.overlays_pending && (state.show_collision || state.show_physics) {
         ui.spinner();
     }
     true
+}
+
+/// Pose mode, which drags joints rather than orbiting when a drag starts on
+/// one, and once anything is posed, the button that undoes it.
+fn draw_pose_toggle(ui: &mut Ui, state: &mut ModelPreviewState) {
+    ui.selectable_label(state.pose.on, "Pose").on_hover_text(
+        "Drag a joint to pose the skeleton, over the bind pose or the animation playing.\nDragging anywhere else still orbits.",
+    ).clicked().then(|| state.pose.on = !state.pose.on);
+    if state.pose.is_posed() && ui.button("Reset pose").on_hover_text("Undo every joint posed by hand").clicked() {
+        state.pose.reset();
+    }
 }
 
 /// One of the header's model toggles.

@@ -54,9 +54,11 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
         state.focus[1] += moved[1];
         state.focus[2] += moved[2];
     };
+    state.pose.follow(data.geometry_id);
+    let posing = state.pose.on && pose_drag(ui, &response, data, state, rect);
     if response.dragged_by(egui::PointerButton::Middle) {
         pan_world(state, response.drag_delta());
-    } else if response.dragged_by(egui::PointerButton::Primary) {
+    } else if response.dragged_by(egui::PointerButton::Primary) && !posing {
         let delta = response.drag_delta();
         if ui.input(|i| i.modifiers.shift) {
             pan_world(state, delta);
@@ -161,7 +163,7 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
         draw_bounding_sphere(&painter, &camera, sphere.about_root(root.as_ref()));
     }
 
-    if state.show_armature {
+    if state.show_armature || state.pose.on {
         let positions = armature_node_positions(data, state);
         let projected = positions
             .iter()
@@ -189,8 +191,11 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
                 );
                 painter.line_segment([parent, joint], Stroke::new(1.5_f32, ARMATURE_COLOR));
             }
-            painter.circle_filled(joint, 2.5, Color32::WHITE);
-            painter.circle_stroke(joint, 2.5, Stroke::new(1.0_f32, Color32::BLACK));
+            // Posing, joints are bigger targets, the one picked marked.
+            let picked = state.pose.on && state.pose.selected == Some(index);
+            let radius = if state.pose.on { 4.0 } else { 2.5 };
+            painter.circle_filled(joint, radius, if picked { ARMATURE_COLOR } else { Color32::WHITE });
+            painter.circle_stroke(joint, radius, Stroke::new(1.0_f32, Color32::BLACK));
             if let Some(distance) = hover_pos.map(|pos| screen_edge_length(pos, joint))
                 && distance <= 6.0
                 && hovered.is_none_or(|(_, _, closest)| distance < closest)
@@ -242,6 +247,67 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
         }
     }
     keep_snapshot_source(ui, state, shown, rect, painter.layer_id(), helpers_from);
+}
+
+/// How near a joint, in points, a press must land to pick it while posing.
+const POSE_PICK_DISTANCE: f32 = 8.0;
+
+/// Pose mode's drag: one started on a joint drags it, turning its parent so
+/// it follows the pointer across the plane through it facing the camera.
+/// Whether a pose drag is under way, which the orbit then leaves alone.
+fn pose_drag(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+    rect: egui::Rect,
+) -> bool {
+    use super::pose::{PoseDrag, swing};
+    if response.drag_started_by(egui::PointerButton::Primary) {
+        let camera = PreviewCamera::new(data, state, rect);
+        let pointer = ui.input(|i| i.pointer.press_origin());
+        let picked = pointer.and_then(|pointer| {
+            armature_node_positions(data, state)
+                .iter()
+                .enumerate()
+                .filter_map(|(index, &position)| {
+                    let projected = camera.project(position);
+                    projected.in_front.then(|| (index, screen_edge_length(pointer, projected.pos)))
+                })
+                .filter(|&(_, distance)| distance <= POSE_PICK_DISTANCE)
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(index, _)| index)
+        });
+        state.pose.dragging = picked.and_then(|joint| {
+            state.pose.selected = Some(joint);
+            let turned = usize::try_from(data.preview.nodes.get(joint)?.parent).ok()?;
+            Some(PoseDrag { joint, turned })
+        });
+    }
+    if !response.dragged_by(egui::PointerButton::Primary) {
+        state.pose.dragging = None;
+        return false;
+    }
+    let Some(drag) = state.pose.dragging else {
+        return false;
+    };
+    let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) else {
+        return true;
+    };
+    let camera = PreviewCamera::new(data, state, rect);
+    let matrices = armature_node_matrices(data, state);
+    let (Some(joint), Some(turned)) = (matrices.get(drag.joint), matrices.get(drag.turned)) else {
+        return true;
+    };
+    let (joint, pivot) = (joint.translation(), turned.translation());
+    let target = camera.unproject_beside(pointer, joint);
+    if let Some(turn) = swing(pivot, joint, target) {
+        let parent = usize::try_from(data.preview.nodes[drag.turned].parent)
+            .ok()
+            .and_then(|parent| matrices.get(parent));
+        state.pose.turn_by(drag.turned, parent, turn);
+    }
+    true
 }
 
 /// Keep what this pass drew, the frame and the helpers painted over it from

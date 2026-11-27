@@ -4,7 +4,7 @@ use super::super::{
     MAX_PREVIEW_BONES, ModelPreviewData, ModelPreviewState, RenderModelPreviewNode,
 };
 use super::playback::{PreviewAnimationEntry, sampled_frames};
-use super::pose::{blend_transforms, quat};
+use super::pose::blend_transforms;
 use blam_tags::math::{Matrix4, RealPoint3d, RealQuaternion, RealVector3d};
 
 /// Which nodes a variant's `muted nodes` hold: each named node and its whole
@@ -81,50 +81,75 @@ pub(in crate::app::model_preview) fn animation_skinning_rows(
     data: &ModelPreviewData,
     state: &ModelPreviewState,
 ) -> Option<Vec<[f32; 4]>> {
-    let playback = &state.animation;
-    if playback.stopped {
-        return None;
-    }
-    let pose = playback.pose.as_ref()?;
-    let nodes = &data.preview.nodes;
-    if nodes.is_empty() || nodes.len() > MAX_PREVIEW_BONES || pose.frames.is_empty() {
-        return None;
-    }
-
-    let (frame_a, frame_b, blend) = sampled_frames(playback, pose.frames.len());
-    let (frame_a, frame_b) = (&pose.frames[frame_a], &pose.frames[frame_b]);
-
-    let muted = variant_muted_nodes(data, state);
-    let world = world_pose(nodes, |index, node| {
-        if muted[index] {
-            bind_transform(node)
-        } else {
-            blend_transforms(frame_a.get(index), frame_b.get(index), blend, node)
-        }
-    });
-    let mut matrices: Vec<Matrix4> = world.iter().copied().map(world_matrix).collect();
-    let inverse_binds: Vec<Matrix4> = nodes.iter().map(inverse_bind_matrix).collect();
-    apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
-    // `biped_postprocess_node_matrices` (X360 0x84B1A738): the IK set, then
-    // the chains.
-    let frames = sampled_frames(playback, pose.frames.len());
-    for solver in &pose.solvers {
-        solver.solve(
-            &data.preview.gen3.ik_markers,
-            nodes,
-            &inverse_binds,
-            &mut matrices,
-            frames,
-        );
-    }
-    let mut rows: Vec<[f32; 4]> = Vec::with_capacity(nodes.len() * 3);
-    for (matrix, inverse_bind) in matrices.iter().zip(&inverse_binds) {
-        let skin = *matrix * *inverse_bind;
+    let matrices = posed_node_matrices(data, state)?;
+    let mut rows: Vec<[f32; 4]> = Vec::with_capacity(matrices.len() * 3);
+    for (matrix, node) in matrices.iter().zip(&data.preview.nodes) {
+        let skin = *matrix * inverse_bind_matrix(node);
         rows.push(skin.m[0]);
         rows.push(skin.m[1]);
         rows.push(skin.m[2]);
     }
     Some(rows)
+}
+
+/// Each node's world transform as the preview poses it: the animation's
+/// frame with the game's IK (`biped_postprocess_node_matrices`, X360
+/// 0x84B1A738: the weapon's, the IK set, then the chains), or the bind pose
+/// without one, and the hand pose laid over either. `None` while nothing
+/// moves a node from its bind pose.
+pub(in crate::app::model_preview) fn posed_node_matrices(
+    data: &ModelPreviewData,
+    state: &ModelPreviewState,
+) -> Option<Vec<Matrix4>> {
+    let nodes = &data.preview.nodes;
+    if nodes.is_empty() || nodes.len() > MAX_PREVIEW_BONES {
+        return None;
+    }
+    let playback = &state.animation;
+    let animated = (!playback.stopped)
+        .then_some(playback.pose.as_ref())
+        .flatten()
+        .filter(|pose| !pose.frames.is_empty());
+    let posed = state.pose.geometry == data.geometry_id && state.pose.is_posed();
+    if animated.is_none() && !posed {
+        return None;
+    }
+    let mut matrices: Vec<Matrix4> = match animated {
+        Some(pose) => {
+            let frames = sampled_frames(playback, pose.frames.len());
+            let (frame_a, frame_b) = (&pose.frames[frames.0], &pose.frames[frames.1]);
+            // A muted node holds its bind pose.
+            let muted = variant_muted_nodes(data, state);
+            let world = world_pose(nodes, |index, node| {
+                if muted[index] {
+                    bind_transform(node)
+                } else {
+                    blend_transforms(frame_a.get(index), frame_b.get(index), frames.2, node)
+                }
+            });
+            let mut matrices: Vec<Matrix4> = world.into_iter().map(world_matrix).collect();
+            let inverse_binds: Vec<Matrix4> = nodes.iter().map(inverse_bind_matrix).collect();
+            apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
+            for solver in &pose.solvers {
+                solver.solve(
+                    &data.preview.gen3.ik_markers,
+                    nodes,
+                    &inverse_binds,
+                    &mut matrices,
+                    frames,
+                );
+            }
+            matrices
+        }
+        None => world_pose(nodes, |_, node| bind_transform(node))
+            .into_iter()
+            .map(world_matrix)
+            .collect(),
+    };
+    if posed {
+        super::super::pose::apply(nodes, &mut matrices, &state.pose);
+    }
+    Some(matrices)
 }
 
 /// What a Halo 2 unit's weapons lay over the clip at `index` of `clips`.
@@ -204,8 +229,8 @@ pub(in crate::app::model_preview) fn armature_node_positions(
         .collect()
 }
 
-/// Each node's world transform as the preview poses it: the bind pose, or the
-/// animation's frame with its IK, as the armature is drawn.
+/// Each node's world transform as the preview poses it, as the armature is
+/// drawn: [`posed_node_matrices`], or the bind pose.
 pub(in crate::app::model_preview) fn armature_node_matrices(
     data: &ModelPreviewData,
     state: &ModelPreviewState,
@@ -214,44 +239,10 @@ pub(in crate::app::model_preview) fn armature_node_matrices(
     if nodes.is_empty() || nodes.len() > MAX_PREVIEW_BONES {
         return Vec::new();
     }
-
-    let sampled_frames = (!state.animation.stopped)
-        .then_some(state.animation.pose.as_ref())
-        .flatten()
-        .and_then(|pose| {
-            if pose.frames.is_empty() {
-                return None;
-            }
-            let (a, b, blend) = sampled_frames(&state.animation, pose.frames.len());
-            Some((&pose.frames[a], &pose.frames[b], blend))
-        });
-
-    // A muted node holds its bind pose, as the skinned mesh does.
-    let muted = variant_muted_nodes(data, state);
-    let world = world_pose(nodes, |index, node| match sampled_frames {
-        Some(_) if muted[index] => bind_transform(node),
-        Some((a, b, blend)) => blend_transforms(a.get(index), b.get(index), blend, node),
-        None => (
-            quat(node.bind_rotation),
-            RealVector3d {
-                i: node.bind_translation[0],
-                j: node.bind_translation[1],
-                k: node.bind_translation[2],
-            },
-            1.0,
-        ),
-    });
-    let mut matrices: Vec<Matrix4> = world.iter().copied().map(world_matrix).collect();
-    if sampled_frames.is_some() {
-        let inverse_binds: Vec<_> = nodes.iter().map(inverse_bind_matrix).collect();
-        apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
-        if let Some(pose) = state.animation.pose.as_ref() {
-            let frames = self::sampled_frames(&state.animation, pose.frames.len());
-            let markers = &data.preview.gen3.ik_markers;
-            for solver in &pose.solvers {
-                solver.solve(markers, nodes, &inverse_binds, &mut matrices, frames);
-            }
-        }
-    }
-    matrices
+    posed_node_matrices(data, state).unwrap_or_else(|| {
+        world_pose(nodes, |_, node| bind_transform(node))
+            .into_iter()
+            .map(world_matrix)
+            .collect()
+    })
 }
