@@ -18,6 +18,8 @@ const MODELS: &[(&str, GameId, &str, &str)] = &[
     ("BLAM_TEST_HREK", GameId::HaloReach, "objects\\characters\\spartans\\spartans", "biped"),
     ("BLAM_TEST_HREK", GameId::HaloReach, "objects\\vehicles\\human\\warthog\\warthog", "vehicle"),
     ("BLAM_TEST_H4EK", GameId::Halo4, "objects\\characters\\storm_masterchief\\storm_masterchief", "biped"),
+    // A hologram: its own surface, bloom and combine.
+    ("BLAM_TEST_H4EK", GameId::Halo4, "objects\\characters\\storm_cortana\\storm_cortana", "biped"),
 ];
 
 /// The kit source for `variable`'s game, when it is set.

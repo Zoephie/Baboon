@@ -28,8 +28,18 @@ pub(in crate::app::model_preview) struct H4Game {
     pub(super) shadow_programs: Option<[Option<glow::NativeProgram>; 3]>,
     /// The hologram surfaces and the screen materials' bitmaps.
     pub(super) surfaces: Option<super::holograms::H4Holograms>,
-    /// The bloom chain, the view's and the holograms'.
+    /// The view's bloom chain.
     pub(super) bloom: Option<super::bloom::H4Bloom>,
+    /// The holograms' own bloom chain: kept apart from the view's, so a
+    /// snapshot's held view bloom (`RenderCore::held_bloom`) survives the
+    /// holograms building theirs.
+    pub(super) hologram_bloom: Option<super::bloom::H4Bloom>,
+    /// The holograms' bloom the last draw built, which a held draw reads
+    /// its window of (`hologram_window`).
+    pub(super) held_hologram_bloom: Option<glow::NativeTexture>,
+    /// A held draw's window of `held_hologram_bloom`, at its size, and the
+    /// program that copies it.
+    pub(super) hologram_window: Option<(glow::NativeProgram, crate::app::model_preview::gl::target::ColorTarget)>,
     /// The colour grading lookup and the image it was uploaded from. Holding
     /// the image keeps its address from going to a later preview's, so a new
     /// load always uploads its own.
