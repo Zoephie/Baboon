@@ -11,7 +11,7 @@ use super::super::common::image::{ImageTexels, Sampler};
 use super::super::common::fields::{elements, has_flag, has_flag_labelled};
 use super::super::common::image::Image;
 use super::super::functions::FunctionValues;
-use crate::core::hlsl::emit::{Stage, Translated, translate};
+use crate::core::hlsl::emit::{Stage, Translated};
 use crate::core::hlsl::parse::{TextureKind, Type, parse};
 use crate::core::hlsl::pre::Preprocessor;
 use crate::core::source::TagSource;

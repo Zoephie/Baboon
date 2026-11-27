@@ -113,4 +113,10 @@ pub(in crate::app) enum Dx9VertexStage {
     /// `model_active_camouflage.vsh`: the view-space normal, and how far the
     /// surface bends the frame behind it at this distance.
     CeActiveCamo,
+    /// A Halo 2 decorator's classification of its vertex shader, translated
+    /// from the tag's own source, which the pass carries (`vertex_source`).
+    Decorator(super::super::super::h2::shader::decorator_stage::DecoratorSlot),
+    /// A Halo CE detail object's, translated from the kit's own source,
+    /// which the pass carries.
+    DetailObject(super::super::super::decorators::DetailFacing),
 }

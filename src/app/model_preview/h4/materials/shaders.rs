@@ -15,7 +15,7 @@ use std::sync::Arc;
 use super::super::super::common::fields::elements;
 use super::super::super::gen3::shaders::Gen3Pass;
 use crate::app::model_preview::h4::shield::{DEPTH_DECODE, WORLD_SCALE};
-use crate::core::hlsl::emit::{Stage, Translated, translate_with};
+use crate::core::hlsl::emit::{Stage, Translated, translate_full, translate_with};
 use crate::core::hlsl::parse::{Program, parse};
 use crate::core::hlsl::parse::{Scalar, Type};
 use crate::core::hlsl::pre::{Lines, Preprocessor, Token};
@@ -154,6 +154,18 @@ pub(crate) fn translate_pass(
     pass: &str,
     stage: Stage,
 ) -> Result<Translated, String> {
+    translate_pass_feeding(program, technique, pass, stage, &[])
+}
+
+/// [`translate_pass`], with the vertex inputs `integer_inputs` names fed as
+/// integers (`translate_full`).
+pub(crate) fn translate_pass_feeding(
+    program: &Program,
+    technique: &str,
+    pass: &str,
+    stage: Stage,
+    integer_inputs: &[&str],
+) -> Result<Translated, String> {
     let stage_name = match stage {
         Stage::Vertex => "vs",
         Stage::Pixel => "ps",
@@ -173,7 +185,7 @@ pub(crate) fn translate_pass(
     let shader = program
         .pass_function(technique, pass, stage_name)
         .ok_or_else(|| format!("no {stage_name} in {technique}/{pass}"))?;
-    translate_with(program, &shader.function, stage, &shader.arguments)
+    translate_full(program, &shader.function, stage, &shader.arguments, integer_inputs)
 }
 
 /// One stage of the `index`th technique's `pass`, for an explicit shader

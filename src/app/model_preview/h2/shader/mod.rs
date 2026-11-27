@@ -25,6 +25,7 @@ mod stages;
 mod template;
 pub(in crate::app::model_preview) use passes::*;
 mod constants;
+pub(in crate::app::model_preview) mod decorator_stage;
 pub(in crate::app::model_preview) use constants::*;
 #[cfg(test)]
 mod tests;

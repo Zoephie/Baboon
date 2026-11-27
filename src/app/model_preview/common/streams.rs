@@ -13,6 +13,9 @@ pub(in crate::app::model_preview) enum VertexStreamKind {
     Dx9Prt,
     /// The gen3 shaders' baked coefficients.
     Gen3Prt,
+    /// Halo 2's decorators' and Halo CE's detail objects' placements, for
+    /// their vertex shaders.
+    Decorator,
 }
 
 /// A stream a game's models carry beside their vertices.

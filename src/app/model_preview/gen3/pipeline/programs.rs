@@ -7,10 +7,13 @@ use eframe::glow::HasContext as _;
 use std::sync::Arc;
 
 /// Which attributes of the preview's vertex each semantic reads.
-const ATTRIBUTES: [(&str, &str); 7] = [
+const ATTRIBUTES: [(&str, &str); 9] = [
     ("a_POSITION", "a_position"),
+    // Reach's decorators name their index: `POSITION0` is `POSITION`.
+    ("a_POSITION0", "a_position"),
     ("a_TEXCOORD0", "a_texcoord"),
     ("a_NORMAL", "a_normal"),
+    ("a_NORMAL0", "a_normal"),
     ("a_TANGENT", "a_tangent"),
     ("a_BINORMAL", "a_binormal"),
     ("a_BLENDINDICES", "a_node_indices"),
@@ -108,6 +111,7 @@ unsafe fn link_pass(
             }
         }
         attributes.extend(PRT_ATTRIBUTES.into_iter().zip(PRT_NAMES));
+        attributes.extend(crate::app::model_preview::decorators::INSTANCE_ATTRIBUTES);
         match super::super::super::gl::link::link(gl, &stages, &attributes) {
             Ok(program) => Ok(Rc::new(Gen3Program {
                 linked: Linked::new(program),

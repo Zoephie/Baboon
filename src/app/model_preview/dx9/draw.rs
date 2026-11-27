@@ -351,7 +351,11 @@ impl RenderCore {
         for pass in passes {
             let key = (pass.stage, pass.fragment.clone());
             if !self.dx9.pass_programs.contains_key(&key) {
-                let vertex = pass.stage.source(PASS_GLSL_VERSION);
+                // A stage translated from its tag's source carries it whole.
+                let vertex = match &pass.vertex_source {
+                    Some(source) => source.to_string(),
+                    None => pass.stage.source(PASS_GLSL_VERSION),
+                };
                 let linked =
                     unsafe { link_pass_program(gl, self.program, &vertex, &pass.fragment) };
                 let program = linked
@@ -597,6 +601,23 @@ impl RenderCore {
                         }
                         .apply(gl);
                     }
+                    // A Halo 2 decorator's fade, with the Distance card's on:
+                    // `SCALE = clamp(3 − distance · k, 0, 1)` (`c53`).
+                    if let Some(rate) = frame.preview.h2.decorator_fade.get(&batch_index)
+                        && matches!(pass.stage, Dx9VertexStage::Decorator(_))
+                        && frame.preview.decorators.as_ref().is_some_and(|set| set.layout.fade)
+                    {
+                        let location = program.location(gl, "c[53]");
+                        gl.uniform_4_f32(location.as_ref(), *rate, 3.0, 0.0, 1.0);
+                    }
+                    // A Halo 2 decorator model's placement: its own constants.
+                    if let Some(rigid) = frame.preview.h2.decorator_rigid.get(&batch_index)
+                        && matches!(pass.stage, Dx9VertexStage::Decorator(_))
+                    {
+                        let at = crate::app::model_preview::decorators::HALO_2_RIGID_CONSTANTS;
+                        let location = program.location(gl, &format!("c[{at}]"));
+                        gl.uniform_4_f32_slice(location.as_ref(), rigid.as_flattened());
+                    }
                     dx9_pass_state(pass).apply(gl);
                     gl.draw_elements(
                         glow::TRIANGLES,
@@ -626,6 +647,19 @@ impl RenderCore {
     ) {
         unsafe {
             own.bind_own_lights(gl, frame, material, program, pass);
+            if matches!(pass.stage, Dx9VertexStage::Decorator(_)) {
+                let constants = crate::app::model_preview::decorators::halo_2_vertex_constants(frame);
+                let location = program.location(gl, "c");
+                gl.uniform_4_f32_slice(location.as_ref(), constants.as_flattened());
+            }
+            if let (Dx9VertexStage::DetailObject(_), Some(set)) = (pass.stage, frame.preview.decorators.as_ref())
+                && let Some(collection) = &set.halo_ce
+            {
+                let constants =
+                    crate::app::model_preview::decorators::halo_ce_vertex_constants(frame, collection, set.layout.fade);
+                let location = program.location(gl, "c");
+                gl.uniform_4_f32_slice(location.as_ref(), constants.as_flattened());
+            }
             if matches!(
                 pass.stage,
                 Dx9VertexStage::ShadowCaster | Dx9VertexStage::ShadowMask

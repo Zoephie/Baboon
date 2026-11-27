@@ -1,0 +1,574 @@
+//! A set's placements on the GPU for Game Shaders: each type's mesh, and the
+//! instances packed as the decorator shader reads them, drawn instanced the
+//! way `c_structure_renderer::render_decorators` draws a type: its mesh once
+//! per placement.
+
+use super::super::ModelGpuFrame;
+use super::super::common::camera::{ModelGpuCamera, PERSPECTIVE_FOV_Y, eye_position};
+use super::super::gen3::pipeline::{DEFAULT_PROBE, dominant_light, sh_eval_direction};
+use super::super::gen3::shaders::Gen3Value;
+use super::super::gl::buffer::slice_bytes;
+use super::instances::{INSTANCE_BYTES, InstanceLayout, PackedInstances, pack};
+use super::lod::{self, Block, LevelDraw};
+use super::stipple::StippleWriter;
+use super::wind::WindClock;
+use super::{DecoratorSet, Placement};
+use crate::core::game::GameId;
+use eframe::glow;
+use eframe::glow::HasContext as _;
+
+/// One input of a packed instance (`instances`), as GL reads it.
+struct InstanceInput {
+    /// Past the preview's own seven attributes, which it numbers itself from
+    /// 0, and short of the PRT streams' 11 to 15.
+    location: u32,
+    name: &'static str,
+    components: i32,
+    kind: u32,
+    normalized: bool,
+    /// Fed as an integer (`translate_with_integer_inputs`), its bits intact.
+    integer: bool,
+    offset: i32,
+}
+
+/// Halo 3's and ODST's: `TEXCOORD1` to `3`, the position as whole `uint16`
+/// steps (the translated shader reads them as floats), the rotation and the
+/// light.
+const HALO_3_INPUTS: [InstanceInput; 3] = [
+    InstanceInput {
+        location: 8,
+        name: "a_TEXCOORD1",
+        components: 4,
+        kind: glow::UNSIGNED_SHORT,
+        normalized: false,
+        integer: false,
+        offset: 0,
+    },
+    InstanceInput {
+        location: 9,
+        name: "a_TEXCOORD2",
+        components: 4,
+        kind: glow::UNSIGNED_BYTE,
+        normalized: true,
+        integer: false,
+        offset: 8,
+    },
+    InstanceInput {
+        location: 10,
+        name: "a_TEXCOORD3",
+        components: 4,
+        kind: glow::UNSIGNED_BYTE,
+        normalized: true,
+        integer: false,
+        offset: 12,
+    },
+];
+
+/// Reach's: the packed position, the aux bytes, the rotation and the light.
+const REACH_INPUTS: [InstanceInput; 4] = [
+    InstanceInput {
+        location: 7,
+        name: "a_POSITION1",
+        components: 1,
+        kind: glow::UNSIGNED_INT,
+        normalized: false,
+        integer: true,
+        offset: 0,
+    },
+    InstanceInput {
+        location: 8,
+        name: "a_COLOR2",
+        components: 4,
+        kind: glow::UNSIGNED_BYTE,
+        normalized: false,
+        integer: false,
+        offset: 4,
+    },
+    InstanceInput {
+        location: 9,
+        name: "a_NORMAL1",
+        components: 4,
+        kind: glow::BYTE,
+        normalized: true,
+        integer: false,
+        offset: 8,
+    },
+    InstanceInput {
+        location: 10,
+        name: "a_COLOR1",
+        components: 4,
+        kind: glow::UNSIGNED_BYTE,
+        normalized: true,
+        integer: false,
+        offset: 12,
+    },
+];
+
+/// Every instance input's location, which a pass links its name to.
+pub(in crate::app::model_preview) const INSTANCE_ATTRIBUTES: [(u32, &str); 7] = [
+    (HALO_3_INPUTS[0].location, HALO_3_INPUTS[0].name),
+    (HALO_3_INPUTS[1].location, HALO_3_INPUTS[1].name),
+    (HALO_3_INPUTS[2].location, HALO_3_INPUTS[2].name),
+    (REACH_INPUTS[0].location, REACH_INPUTS[0].name),
+    (REACH_INPUTS[1].location, REACH_INPUTS[1].name),
+    (REACH_INPUTS[2].location, REACH_INPUTS[2].name),
+    (REACH_INPUTS[3].location, REACH_INPUTS[3].name),
+];
+
+fn inputs_of(layout: InstanceLayout) -> &'static [InstanceInput] {
+    match layout {
+        InstanceLayout::Halo3 => &HALO_3_INPUTS,
+        // Halo 4's read as Reach's.
+        InstanceLayout::Reach | InstanceLayout::Halo4 => &REACH_INPUTS,
+    }
+}
+
+/// The layout `game`'s shader reads; Halo 3's for any other.
+fn layout_of(game: Option<GameId>) -> InstanceLayout {
+    match game {
+        Some(GameId::HaloReach) => InstanceLayout::Reach,
+        Some(GameId::Halo4) => InstanceLayout::Halo4,
+        _ => InstanceLayout::Halo3,
+    }
+}
+
+/// One vertex of a type's mesh: its position scaled by the layout's vertex
+/// scale, which with a compression scale of 1 is the game's constant
+/// compression scale (2, Halo 4's 5), then its texcoord and normal.
+const VERTEX_FLOATS: usize = 8;
+
+/// The ground a placement's colour leans toward by its ground tint: the
+/// level's, which a set on its own has none of.
+const GROUND: [f32; 3] = [0.5; 3];
+
+/// The sun the game sets before a level's sky gives its own
+/// (`render_decorators`): straight up, white.
+const SUN_DIRECTION: [f32; 4] = [0.0, 0.0, 1.0, 0.0];
+
+const SUN_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.0];
+
+/// A slot's decorator buffers, for the geometry `mesh_id` names.
+pub(in crate::app::model_preview) struct DecoratorBuffers {
+    mesh_id: u64,
+    vertex_array: glow::NativeVertexArray,
+    vertex_buffer: glow::NativeBuffer,
+    instance_buffer: glow::NativeBuffer,
+    /// Each level's types' first strip vertex and vertex count, by level and
+    /// then by type.
+    meshes: Vec<Vec<(i32, i32)>>,
+    packed: PackedInstances,
+    /// The cull blocks the placements are packed by: none where the game
+    /// picks no levels, all of them one block.
+    blocks: Vec<Block>,
+    layout: InstanceLayout,
+    /// The main program's `a_position`, `a_texcoord` and `a_normal`.
+    locations: [Option<u32>; 3],
+    /// What writes the stipple's pattern, made the first time a fade asks.
+    stipple: Option<StippleWriter>,
+    /// The wind, run on to the frame being drawn.
+    wind: WindClock,
+}
+
+/// `tan(fov / 2)` of the preview's lens, which the game's level distances
+/// scale by; a snapshot's tiles keep the whole picture's.
+fn lens() -> f32 {
+    (PERSPECTIVE_FOV_Y * 0.5).tan()
+}
+
+impl DecoratorBuffers {
+    /// `held`, built for `frame`'s set if it holds another's, with its wind
+    /// run on to the frame's time, and the stipple's pattern in the bound
+    /// target's stencil where the set's levels fade. `None` without a set, or
+    /// when GL refuses the buffers. `positions` are the main program's
+    /// attribute locations for `a_position`, `a_texcoord` and `a_normal`,
+    /// which a pass links the decorator's `POSITION`, `TEXCOORD0` and
+    /// `NORMAL` to.
+    pub(in crate::app::model_preview) unsafe fn sync<'a>(
+        held: &'a mut Option<Self>,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        locations: [Option<u32>; 3],
+    ) -> Option<&'a mut Self> {
+        let set = frame.preview.decorators.as_ref()?;
+        if held
+            .as_ref()
+            .is_none_or(|buffers| buffers.mesh_id != frame.mesh_id)
+        {
+            let built = match held.take() {
+                Some(mut buffers) => {
+                    unsafe { buffers.upload(gl, frame.mesh_id, frame.preview.game, set, locations) }
+                        .then_some(buffers)
+                }
+                None => unsafe { Self::new(gl) }.and_then(|mut buffers| {
+                    unsafe { buffers.upload(gl, frame.mesh_id, frame.preview.game, set, locations) }
+                        .then_some(buffers)
+                }),
+            };
+            *held = built;
+        }
+        let buffers = held.as_mut()?;
+        if buffers.locations != locations && locations[0].is_some() {
+            unsafe { buffers.relocate(gl, locations) };
+        }
+        if let Some(wind) = &set.wind {
+            buffers.wind.advance(wind, frame.time);
+        } else {
+            buffers.wind.time = frame.time;
+        }
+        if let (Some(detail), Some(stipple), true) =
+            (&set.detail, &set.stipple, set.layout.fade && frame.camera.perspective > 0.0)
+        {
+            if buffers.stipple.is_none() {
+                buffers.stipple = unsafe { StippleWriter::new(gl) };
+            }
+            if let Some(writer) = &mut buffers.stipple {
+                let (test, _) = lod::stipple(detail.rule, 1.0, false);
+                unsafe { writer.write(gl, stipple, test.mask, frame.time) };
+            }
+        }
+        Some(buffers)
+    }
+
+    unsafe fn new(gl: &glow::Context) -> Option<Self> {
+        unsafe {
+            Some(Self {
+                mesh_id: 0,
+                vertex_array: gl.create_vertex_array().ok()?,
+                vertex_buffer: gl.create_buffer().ok()?,
+                instance_buffer: gl.create_buffer().ok()?,
+                meshes: Vec::new(),
+                packed: PackedInstances::default(),
+                blocks: Vec::new(),
+                layout: InstanceLayout::Halo3,
+                locations: [None; 3],
+                stipple: None,
+                wind: WindClock::default(),
+            })
+        }
+    }
+
+    /// Upload every level's strips and the packed placements, and lay out
+    /// the vertex array; whether the main program has the attributes to lay
+    /// out.
+    unsafe fn upload(
+        &mut self,
+        gl: &glow::Context,
+        mesh_id: u64,
+        game: Option<GameId>,
+        set: &DecoratorSet,
+        locations: [Option<u32>; 3],
+    ) -> bool {
+        let [Some(_), ..] = locations else {
+            return false;
+        };
+        self.locations = locations;
+        self.layout = layout_of(game);
+        let vertex_scale = self.layout.vertex_scale();
+        let mut vertices: Vec<f32> = Vec::new();
+        self.meshes.clear();
+        for model in 0..set.level_count() {
+            let mut level = Vec::new();
+            for mesh in set.level_meshes(model).unwrap_or_default() {
+                let first = (vertices.len() / VERTEX_FLOATS) as i32;
+                // A restart would join two strips; no kit decorator has one.
+                for &index in mesh.strip.iter().filter(|&&index| index != u32::MAX) {
+                    let index = index as usize;
+                    vertices.extend(mesh.positions[index].map(|value| value * vertex_scale));
+                    vertices.extend(mesh.texcoords[index]);
+                    vertices.extend(mesh.normals[index]);
+                }
+                level.push((first, (vertices.len() / VERTEX_FLOATS) as i32 - first));
+            }
+            self.meshes.push(level);
+        }
+        let (block_of, blocks) = match &set.detail {
+            Some(detail) => lod::blocks(&set.placements, detail.block_size),
+            None => (Vec::new(), Vec::new()),
+        };
+        let light = baked_light().map(|channel| channel * set.layout.light);
+        self.packed = pack(
+            self.layout,
+            &set.placements,
+            |placement| placement_light(placement, light),
+            set.types.len(),
+            &block_of,
+            blocks.len(),
+        );
+        self.blocks = blocks;
+        self.mesh_id = mesh_id;
+        self.wind = WindClock::default();
+        unsafe {
+            gl.bind_vertex_array(Some(self.vertex_array));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                slice_bytes(&vertices),
+                glow::STATIC_DRAW,
+            );
+            for location in locations.into_iter().flatten() {
+                gl.enable_vertex_attrib_array(location);
+            }
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.instance_buffer));
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &self.packed.bytes, glow::STATIC_DRAW);
+            // Another game's set may have had the array before.
+            for (location, _) in INSTANCE_ATTRIBUTES {
+                gl.disable_vertex_attrib_array(location);
+            }
+            for input in inputs_of(self.layout) {
+                gl.enable_vertex_attrib_array(input.location);
+                gl.vertex_attrib_divisor(input.location, 1);
+            }
+            gl.bind_vertex_array(None);
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
+        }
+        true
+    }
+
+    /// Draw type `type_index` of `set` once per placement of it, from
+    /// `camera`: in each cull block, the levels the game would draw there
+    /// with the Distance card's fade on, each through its stipple; otherwise
+    /// the level the card shows, whole. `instance_data` is the program's
+    /// uniform of that name, which says how much of a strip draws.
+    pub(in crate::app::model_preview) unsafe fn draw(
+        &self,
+        gl: &glow::Context,
+        set: &DecoratorSet,
+        type_index: usize,
+        camera: &ModelGpuCamera,
+        instance_data: Option<&glow::NativeUniformLocation>,
+    ) {
+        // Orthographic views have no eye to measure a distance from.
+        let eye = (camera.perspective > 0.0).then(|| eye_position(camera));
+        let detail = set.detail.as_ref().filter(|_| set.layout.fade).zip(eye);
+        let stippled = set.stipple.is_some();
+        let mut stenciled = false;
+        unsafe {
+            gl.bind_vertex_array(Some(self.vertex_array));
+            for block in 0..self.blocks.len().max(1) {
+                let Some((first_instance, instances)) = self.packed.range(block, type_index) else {
+                    continue;
+                };
+                if instances == 0 {
+                    continue;
+                }
+                let draws: Vec<(usize, Option<LevelDraw>)> = match (detail, self.blocks.get(block)) {
+                    (Some((detail, eye)), Some(bounds)) => lod::choose(detail, bounds, eye, lens())
+                        .into_iter()
+                        // Without the pattern, only the nearer of two.
+                        .filter(|draw| stippled || !draw.inverse)
+                        .filter_map(|draw| Some((detail.slots[draw.slot].model?, Some(draw))))
+                        .collect(),
+                    _ => vec![(set.shown_level(), None)],
+                };
+                for (model, draw) in draws {
+                    let Some(&(first, count)) = self.meshes.get(model).and_then(|level| level.get(type_index))
+                    else {
+                        continue;
+                    };
+                    let (kept, data) = lod::instance_data(count.max(0) as usize, draw.map_or([1.0; 2], |draw| draw.keep));
+                    if count <= 2 || kept <= 2 {
+                        continue;
+                    }
+                    match (draw.filter(|_| stippled), &set.detail) {
+                        (Some(draw), Some(detail)) => {
+                            let (test, draws) = lod::stipple(detail.rule, draw.fade, draw.inverse);
+                            if draw.skippable && !draws {
+                                continue;
+                            }
+                            gl.enable(glow::STENCIL_TEST);
+                            gl.stencil_func(test.function, test.reference, test.mask);
+                            gl.stencil_mask(0);
+                            gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
+                            stenciled = true;
+                        }
+                        _ => gl.disable(glow::STENCIL_TEST),
+                    }
+                    gl.uniform_4_f32(instance_data, data[0], data[1], data[2], data[3]);
+                    self.point(gl, first, first_instance);
+                    gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, kept as i32, instances as i32);
+                }
+            }
+            if stenciled {
+                gl.disable(glow::STENCIL_TEST);
+                gl.stencil_mask(!0);
+                gl.stencil_func(glow::ALWAYS, 0, !0);
+            }
+            gl.bind_vertex_array(None);
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
+        }
+    }
+
+    /// Read the strips through another program's attribute locations.
+    unsafe fn relocate(&mut self, gl: &glow::Context, locations: [Option<u32>; 3]) {
+        unsafe {
+            gl.bind_vertex_array(Some(self.vertex_array));
+            for location in self.locations.into_iter().flatten() {
+                gl.disable_vertex_attrib_array(location);
+            }
+            for location in locations.into_iter().flatten() {
+                gl.enable_vertex_attrib_array(location);
+            }
+            gl.bind_vertex_array(None);
+        }
+        self.locations = locations;
+    }
+
+    /// Point the vertex array at the strip from vertex `first` and the
+    /// instances from `first_instance`: the shader counts each strip's
+    /// vertices from 0, as the game's `instance_data` does.
+    unsafe fn point(&self, gl: &glow::Context, first: i32, first_instance: usize) {
+        let stride = (VERTEX_FLOATS * size_of::<f32>()) as i32;
+        let [position, texcoord, normal] = self.locations;
+        unsafe {
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+            for (location, size, offset) in [(position, 3, 0), (texcoord, 2, 12), (normal, 3, 20)] {
+                if let Some(location) = location {
+                    gl.vertex_attrib_pointer_f32(location, size, glow::FLOAT, false, stride, first * stride + offset);
+                }
+            }
+            let base = (first_instance * INSTANCE_BYTES) as i32;
+            let stride = INSTANCE_BYTES as i32;
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.instance_buffer));
+            for input in inputs_of(self.layout) {
+                let offset = base + input.offset;
+                if input.integer {
+                    gl.vertex_attrib_pointer_i32(input.location, input.components, input.kind, stride, offset);
+                } else {
+                    gl.vertex_attrib_pointer_f32(
+                        input.location,
+                        input.components,
+                        input.kind,
+                        input.normalized,
+                        stride,
+                        offset,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// What the decorator shader reads of the set, by uniform: its placements'
+/// compression, its own shading values, the sun and the wind. `None` for a
+/// uniform the engine's globals give.
+pub(in crate::app::model_preview) fn decorator_value(
+    set: &DecoratorSet,
+    buffers: &DecoratorBuffers,
+    name: &str,
+) -> Option<Gen3Value> {
+    let floats = |value: [f32; 4]| Some(Gen3Value::Floats(value));
+    let [offset, scale] =
+        [buffers.packed.offset, buffers.packed.scale].map(|[x, y, z]| [x, y, z, 1.0]);
+    match name {
+        "instance_compression_offset" => floats(offset),
+        "instance_compression_scale" => floats(scale),
+        "LOD_constants" => floats(lod_constants(set)),
+        "translucency" => floats(set.translucency),
+        "wave_flow" => floats(set.wave),
+        "contrast" => floats([set.shaded[0], set.shaded[1], 0.0, 0.0]),
+        // Reach's `setup_wetness_constants_special_objects(view, 1)`, which
+        // `render_single_pass_lighting` calls before the decorators: dry, 1
+        // in all but `y` (1.3 × the exposure), which they don't read.
+        "k_ps_wetness_coefficients" => floats([1.0; 4]),
+        "sun_direction" => floats(SUN_DIRECTION),
+        "sun_color" => floats(SUN_COLOR),
+        "wind_data" | "wind_data2" => {
+            // Held still, the wind stands as it does before it first blows.
+            let clock = if set.layout.sway {
+                buffers.wind
+            } else {
+                WindClock::default()
+            };
+            let [data, data2] = match &set.wind {
+                Some(wind) => clock.constants(wind),
+                None => [[0.0; 4], [0.0, 0.0, 0.0, clock.time]],
+            };
+            floats(if name == "wind_data" { data } else { data2 })
+        }
+        _ => None,
+    }
+}
+
+/// Halo 3's and ODST's `LOD_constants` (`render_decorators`): with the fade
+/// on, `(0.7 / (S − E), 1 − S · 0.7 / (S − E))` for its start and end fade
+/// `S` and `E` (at the throttles' and field of view's own scale of 1), so a
+/// decorator is whole to `S` and dissolves through the alpha test by `E`;
+/// off, or with no range, whole everywhere.
+fn lod_constants(set: &DecoratorSet) -> [f32; 4] {
+    match set.fade_range.filter(|_| set.layout.fade) {
+        Some([start, end]) if start < end => {
+            let scale = 0.7 / (start - end);
+            [scale, 1.0 - start * scale, 0.0, 0.0]
+        }
+        _ => [0.0, 1.0, 0.0, 0.0],
+    }
+}
+
+/// The light a level's lightmap would bake into a decorator, which the
+/// preview's own probe stands in for: the game's bake reads the lightmap's
+/// probe toward its dominant light.
+fn baked_light() -> [f32; 3] {
+    let (direction, _, _) = dominant_light(&DEFAULT_PROBE);
+    let basis = sh_eval_direction([direction[0], direction[1], direction[2]]);
+    DEFAULT_PROBE.map(|channel| {
+        channel
+            .iter()
+            .zip(basis)
+            .map(|(a, b)| a * b)
+            .sum::<f32>()
+            .max(0.0)
+    })
+}
+
+/// A placement's baked colour: its tint leaning toward the ground by its
+/// ground tint, lit.
+fn placement_light(placement: &Placement, light: [f32; 3]) -> [f32; 3] {
+    std::array::from_fn(|channel| {
+        let tint = placement.tint[channel]
+            + (GROUND[channel] - placement.tint[channel]) * placement.ground_tint;
+        tint * light[channel]
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{DecoratorSet, DecoratorShader, Layout};
+    use super::lod_constants;
+
+    /// Halo 3's fade: whole at its start fade, at the alpha test's 0.3 at
+    /// its end fade; whole everywhere with the fade off, or with no range.
+    #[test]
+    fn the_fade_runs_from_whole_to_the_alpha_test() {
+        let mut set = DecoratorSet {
+            fade_range: Some([12.0, 14.0]),
+            layout: Layout {
+                fade: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let [x, y, ..] = lod_constants(&set);
+        let fade = |distance: f32| (distance * x + y).clamp(0.0, 1.0);
+        assert!(
+            (fade(12.0) - 1.0).abs() < 1e-5 && (fade(14.0) - 0.3).abs() < 1e-5 && fade(5.0) == 1.0
+        );
+        set.layout.fade = false;
+        assert_eq!(lod_constants(&set), [0.0, 1.0, 0.0, 0.0]);
+        set.layout.fade = true;
+        set.fade_range = Some([14.0, 14.0]);
+        assert_eq!(lod_constants(&set), [0.0, 1.0, 0.0, 0.0]);
+    }
+
+    /// A wind set moves on the clock while it sways, and holds still when it
+    /// doesn't.
+    #[test]
+    fn a_set_held_still_does_not_move() {
+        let mut set = DecoratorSet {
+            shader: Some(DecoratorShader::WindDynamicLights),
+            ..Default::default()
+        };
+        assert!(set.moves());
+        set.layout.sway = false;
+        assert!(!set.moves());
+    }
+}

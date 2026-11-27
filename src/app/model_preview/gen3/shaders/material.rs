@@ -64,6 +64,9 @@ pub(crate) struct Gen3Material {
     pub(crate) change_colors: Vec<(String, usize)>,
     pub(crate) animations: Vec<Gen3Animation>,
     pub(crate) shield: Option<Arc<Gen3Shield>>,
+    /// A decorator set's: `lit` is drawn instanced, a type's mesh once per
+    /// placement of the set (`model_preview::decorators`).
+    pub(crate) decorator: bool,
 }
 
 /// A material's dialect, with what only Halo 4's carry: its per-draw

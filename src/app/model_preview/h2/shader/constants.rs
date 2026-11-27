@@ -105,9 +105,18 @@ pub(in crate::app) fn prepare_draw_pass(
     specular_brightness: f32,
     mut bitmap: impl FnMut(&str, SamplerKind) -> Option<std::sync::Arc<Image>>,
     scale: impl Fn(&str) -> [f32; 2],
+    // A stage translated from the vertex shader's own source, in place of
+    // the one `pass` names written out.
+    vertex: Option<(Dx9VertexStage, std::sync::Arc<str>)>,
 ) -> Result<Dx9DrawPass, String> {
-    let stage = Dx9VertexStage::from_path(&pass.vertex_shader)
-        .ok_or_else(|| format!("No vertex stage for {}", pass.vertex_shader))?;
+    let (stage, vertex_source) = match vertex {
+        Some((stage, source)) => (stage, Some(source)),
+        None => (
+            Dx9VertexStage::from_path(&pass.vertex_shader)
+                .ok_or_else(|| format!("No vertex stage for {}", pass.vertex_shader))?,
+            None,
+        ),
+    };
     let options = PixelShaderOptions {
         cases,
         alpha_test: pass.alpha_test,
@@ -118,6 +127,7 @@ pub(in crate::app) fn prepare_draw_pass(
     let vertex = vertex_constants(pass, stage, specular_brightness, &scale);
     Ok(Dx9DrawPass {
         stage,
+        vertex_source,
         fragment: translated.glsl,
         blend: pass.blend,
         depth: pass.depth,

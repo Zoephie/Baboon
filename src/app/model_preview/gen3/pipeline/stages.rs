@@ -14,6 +14,7 @@ use super::{
     Gen3ShieldSettings, Gen3State, Gen3Value, SpriteStage, TextureKind, camera_view_frame,
     layered_distance, model_draw_range,
 };
+use crate::app::model_preview::decorators::{DecoratorBuffers, decorator_value};
 use crate::app::model_preview::gen3;
 use crate::app::model_preview::gl::blit::blit_depth;
 use eframe::glow;
@@ -124,6 +125,12 @@ impl Gen3State {
         unsafe {
             self.with_program(core, gl, pass, |state, this, program| {
                 gl.use_program(Some(program.program));
+                // A decorator set's meshes and placements, its wind run on.
+                if material.decorator {
+                    let locations = ["a_position", "a_texcoord", "a_normal"]
+                        .map(|name| gl.get_attrib_location(this.program, name));
+                    DecoratorBuffers::sync(&mut this.slots[slot].decorators, gl, frame, locations);
+                }
                 let size = state
                     .targets
                     .as_ref()
@@ -212,8 +219,14 @@ impl Gen3State {
                     let light = state
                         .hooks
                         .light_value(material, name, &state.inline_lights);
+                    let decorator = material
+                        .decorator
+                        .then(|| Some((frame.preview.decorators.as_ref()?, this.slots[slot].decorators.as_ref()?)))
+                        .flatten()
+                        .and_then(|(set, buffers)| decorator_value(set, buffers, name));
                     let mut value = change_color
                         .or(light)
+                        .or(decorator)
                         .or_else(|| (state.frame_values)(frame, name, size, state.stops))
                         .or_else(|| {
                             draw_values
@@ -368,12 +381,24 @@ impl Gen3State {
                     .materials
                     .get(batch.material_index as usize)
                     .map(|known| known.shader_group);
-                let two_sided =
-                    !frame.show_backfaces && state.hooks.two_sided(material, pass, group);
+                let set = frame.preview.decorators.as_ref().filter(|_| material.decorator);
+                let two_sided = !frame.show_backfaces
+                    && (state.hooks.two_sided(material, pass, group) || set.is_some_and(|set| set.two_sided));
                 if two_sided {
                     gl.disable(glow::CULL_FACE);
                 }
                 match range {
+                    // A type's mesh, once per placement.
+                    _ if set.is_some() => {
+                        let drawn = set.and_then(|set| set.type_of_region(&batch.region_name));
+                        if let (Some(type_index), Some(buffers), Some(set)) =
+                            (drawn, this.slots[slot].decorators.as_ref(), set)
+                        {
+                            let instance_data = program.location(gl, "instance_data");
+                            buffers.draw(gl, set, type_index, &frame.camera, instance_data.as_ref());
+                            gl.bind_vertex_array(Some(this.slots[slot].vertex_array));
+                        }
+                    }
                     Some((offset, count)) if !pass.fullscreen => {
                         gl.draw_elements(glow::TRIANGLES, count, glow::UNSIGNED_INT, offset);
                     }

@@ -138,7 +138,7 @@ fn rows_and_constants_come_from_the_pass() {
                    float4 c1 : register(C1);\nfloat4 c2 : register(C2);\n\
                    float4 main(\n)\n{\n    return c1 * c2;\n}\n";
     let drawn =
-        prepare_draw_pass(&pass, psh, HashMap::new(), 1.0, |_, _| None, |_| [4.0, 8.0]).unwrap();
+        prepare_draw_pass(&pass, psh, HashMap::new(), 1.0, |_, _| None, |_| [4.0, 8.0], None).unwrap();
     assert_eq!(drawn.stage, Dx9VertexStage::Default);
     assert_eq!(drawn.channels, [true, true, true, false]);
     assert_eq!(
@@ -198,6 +198,7 @@ fn tint_color_and_brightness_share_a_register() {
         1.0,
         |_, _| None,
         |_| [1.0, 1.0],
+        None,
     )
     .unwrap();
     assert_eq!(drawn.tint_facing, [0.5, 0.0, 0.25, 0.8]);
@@ -487,6 +488,7 @@ fn brute_hair_resolves_from_the_kit() {
             })))
         },
         |_| [1.0, 1.0],
+        None,
     )
     .unwrap();
     assert_eq!(

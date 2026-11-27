@@ -17,6 +17,7 @@ pub(in crate::app::model_preview) fn shadow_pass(
 ) -> Dx9DrawPass {
     Dx9DrawPass {
         stage,
+        vertex_source: None,
         fragment,
         blend: None,
         depth_bias: 0.0,

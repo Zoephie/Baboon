@@ -1,6 +1,8 @@
 //! Halo 2's shaders resolved over their templates' defaults to the passes and
 //! textures the preview draws.
 
+use super::decorator_stage::{DecoratorSlot, decorator_vertex_source, is_decorator_vertex_shader};
+use super::super::super::dx9::stage::Dx9VertexStage;
 use super::super::super::common::fields::has_flag;
 use super::super::super::dx9::passes::{Dx9DrawPass, Dx9Layer, animation_function};
 use super::super::super::materials::{
@@ -34,6 +36,8 @@ pub(in crate::app::model_preview) struct H2ResolveCaches {
     /// The kit's `global shader`, read at most once; see
     /// [`prepare_h2_camo_passes`].
     pub(in crate::app::model_preview) camo_shader: Option<Option<Arc<TagFile>>>,
+    /// Decorator vertex stages, translated, by vertex shader and slot.
+    pub(in crate::app::model_preview) decorator_stages: HashMap<(String, DecoratorSlot), Result<Arc<str>, String>>,
 }
 
 /// A Halo 2 `shader_template`'s parameters by name, plus whether it alpha
@@ -53,6 +57,8 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
     reader: &TagReader,
     shader: &TagFile,
     caches: &mut ResolveCaches,
+    // A decorator's: which classification of its vertex shader draws it.
+    decorator: Option<DecoratorSlot>,
 ) -> MaterialTextures {
     let root = shader.root();
     let template = root
@@ -128,6 +134,7 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
             layer,
             has_texaccum,
             None,
+            decorator,
         );
     }
     if !has_flag(root, "flags", "no active camo") {
@@ -210,6 +217,7 @@ fn prepare_h2_camo_passes(
         Dx9Layer::ActiveCamo,
         false,
         bump,
+        None,
     )
 }
 
@@ -245,14 +253,22 @@ fn prepare_h2_passes(
     layer: Dx9Layer,
     has_texaccum: bool,
     camo_bump: Option<String>,
+    decorator: Option<DecoratorSlot>,
 ) -> Vec<Dx9DrawPass> {
     let TagSource::LooseFolder { root, .. } = &reader.source else {
         return Vec::new();
     };
     let load =
         |path: &str, extension: &str, group: &[u8; 4]| reader.load(path, extension, group).ok();
+    // A decorator's lightmap pass (`lightmap\\decorator`) has one
+    // implementation, which the decorator renderer draws, where an object's
+    // takes the second or third.
+    let implementation = match (decorator, layer) {
+        (Some(_), Dx9Layer::Lightmap | Dx9Layer::ObjectLightmap) => 0,
+        _ => layer.implementation(),
+    };
     let mut passes =
-        match resolve_h2_layer_passes(shader, load, layer.tag_name(), layer.implementation()) {
+        match resolve_h2_layer_passes(shader, load, layer.tag_name(), implementation) {
             Ok(passes) => passes,
             Err(error) => {
                 eprintln!("model preview: {error}");
@@ -302,6 +318,27 @@ fn prepare_h2_passes(
             }
         };
         let psh = String::from_utf8_lossy(&bytes);
+        // A decorator draws through its class's classification of its vertex
+        // shader, translated from the tag.
+        let vertex = match decorator.filter(|_| is_decorator_vertex_shader(&pass.vertex_shader)) {
+            Some(slot) => {
+                let key = (pass.vertex_shader.to_ascii_lowercase(), slot);
+                let source = caches
+                    .h2
+                    .decorator_stages
+                    .entry(key)
+                    .or_insert_with(|| decorator_vertex_source(reader, &pass.vertex_shader, slot))
+                    .clone();
+                match source {
+                    Ok(source) => Some((Dx9VertexStage::Decorator(slot), source)),
+                    Err(error) => {
+                        eprintln!("model preview: {error}");
+                        return Vec::new();
+                    }
+                }
+            }
+            None => None,
+        };
         let drawn = prepare_draw_pass(
             pass,
             &psh,
@@ -322,6 +359,7 @@ fn prepare_h2_passes(
                     template.and_then(|template| template.parameters.get(name)),
                 )
             },
+            vertex,
         );
         match drawn {
             Ok(drawn) => prepared.push(drawn),
