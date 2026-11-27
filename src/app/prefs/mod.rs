@@ -272,6 +272,11 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             .and_then(Value::as_str)
             .and_then(crate::app::model_preview::ModelPreviewBackground::from_str)
             .unwrap_or(crate::app::model_preview::ModelPreviewBackground::Theme),
+        model_preview_shading: value
+            .get("model_preview_shading")
+            .and_then(Value::as_str)
+            .and_then(crate::app::model_preview::ModelShading::from_str)
+            .unwrap_or(crate::app::model_preview::ModelShading::Textured),
         model_preview_snapshot_scale: value
             .get("model_preview_snapshot_scale")
             .and_then(Value::as_f64)
@@ -921,6 +926,7 @@ fn prefs_to_value(
     });
     value["model_preview_background"] = json!(prefs.model_preview_background.as_str());
     value["model_preview_snapshot_scale"] = json!(prefs.model_preview_snapshot_scale);
+    value["model_preview_shading"] = json!(prefs.model_preview_shading.as_str());
     value["model_preview_unsaved_edits"] = json!(prefs.model_preview_unsaved_edits);
     let view = &prefs.bitmap_preview_view;
     value["bitmap_preview_sidebar_width"] = json!(view.sidebar_width);

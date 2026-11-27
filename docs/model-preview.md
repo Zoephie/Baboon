@@ -26,7 +26,7 @@ A Reach or Halo 2 Anniversary model whose `.model` names an **imposter** (the lo
 
 ### Shading
 
-The **Shading** menu picks how the surfaces are drawn:
+The **Shading** menu picks how the surfaces are drawn. The last one picked is remembered: every preview opens on it, this session and the next.
 
 - **Wireframe** — edges only.
 - **Solid** — plain shaded surfaces.

@@ -6339,6 +6339,43 @@ mod tests {
         }
     }
 
+    /// The shading last picked from the Shading menu is kept, and a preview
+    /// opens on it; a preview made later of another model opens on Game
+    /// Shaders too, without the menu. Only a pick is kept: a preview drawing
+    /// Solid because its game draws no textures doesn't change it.
+    #[test]
+    fn the_preview_opens_on_the_shading_last_picked() {
+        use crate::app::model_preview::ModelShading;
+        let mut h = Harness::new();
+        let _kit = model_preview_pane(&mut h);
+        idle(&mut h);
+        assert_eq!(h.app.model.prefs.model_preview_shading, ModelShading::Textured, "Textured to begin with");
+        // The menu's button pads its label.
+        let menu = h.painted_rects.iter().find(|(text, _)| text.trim() == "Textured").map(|(_, rect)| *rect).expect("the Shading menu");
+        h.click_at(menu.center());
+        idle(&mut h);
+        h.click("Game Shaders", 0);
+        idle(&mut h);
+        assert_eq!(h.app.model.prefs.model_preview_shading, ModelShading::GameShaders, "the pick kept");
+
+        // A preview made afresh (as for another tag) opens on it.
+        let id = h.app.model.kits[0].id;
+        let key = h.app.views[id].caches.model_previews.keys().next().unwrap().clone();
+        h.app.views[id].caches.model_previews.insert(
+            key.clone(),
+            crate::app::model_preview::state::ModelPreviewState::loaded_empty_for_test(&key),
+        );
+        idle(&mut h);
+        assert_eq!(h.app.views[id].caches.model_previews[&key].shading(), ModelShading::GameShaders, "opens on it");
+
+        // A game's own fallback isn't a pick.
+        if let Some(state) = h.app.views[id].caches.model_previews.get_mut(&key) {
+            state.set_shading(ModelShading::Solid);
+        }
+        idle(&mut h);
+        assert_eq!(h.app.model.prefs.model_preview_shading, ModelShading::GameShaders, "kept as picked");
+    }
+
     /// The centre of the rightmost `text` painted on `label`'s row.
     fn rightmost_on_row(h: &Harness, label: &str, text: &str) -> egui::Pos2 {
         let row = h

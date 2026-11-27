@@ -186,6 +186,12 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) snapshot: super::snapshot::SnapshotPhase,
     /// What a snapshot has to say, for the status bar.
     pub(in crate::app) snapshot_message: Option<String>,
+    /// The shading the preferences keep has been taken, once, as the
+    /// preview was made.
+    pub(in crate::app) shading_from_prefs: bool,
+    /// A shading was picked from the menu this pass, for the preferences to
+    /// keep. A game's own fallback (Solid where it draws no textures) isn't.
+    pub(in crate::app) shading_picked: bool,
     /// What keeps the materials as the Material Editor's shaders have them.
     pub(in crate::app) material_live: super::material_editor::MaterialLive,
 }
@@ -284,6 +290,8 @@ impl Default for ModelPreviewState {
             snapshot_source: None,
             snapshot: Default::default(),
             snapshot_message: None,
+            shading_from_prefs: false,
+            shading_picked: false,
             material_live: Default::default(),
         }
     }
@@ -528,6 +536,20 @@ impl ModelShading {
 
     pub(in crate::app) fn uses_textures(self) -> bool {
         matches!(self, Self::Textured | Self::GameShaders)
+    }
+
+    /// The name the preferences keep it by.
+    pub(in crate::app) fn as_str(self) -> &'static str {
+        match self {
+            Self::Wireframe => "wireframe",
+            Self::Solid => "solid",
+            Self::Textured => "textured",
+            Self::GameShaders => "game_shaders",
+        }
+    }
+
+    pub(in crate::app) fn from_str(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|shading| shading.as_str() == name)
     }
 }
 
