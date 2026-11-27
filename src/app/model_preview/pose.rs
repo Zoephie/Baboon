@@ -55,6 +55,66 @@ pub(crate) struct PoseDrag {
     pub joint: usize,
     /// Twisting it about its bone, rather than moving it.
     pub twist: bool,
+    /// The gizmo handle it was taken by: none drags it across the plane
+    /// facing the camera.
+    pub lock: Option<Lock>,
+    /// Where the joint stood when the drag began, which a lock's line or
+    /// plane runs through.
+    pub anchor: [f32; 3],
+}
+
+/// What a gizmo handle holds a dragged joint to, in model space.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Lock {
+    /// Along one axis: 0 x, 1 y, 2 z.
+    Axis(usize),
+    /// Within the plane square to one axis: 2 the xy plane, 1 xz, 0 yz.
+    Plane(usize),
+}
+
+impl Lock {
+    /// The point the pointer's line of sight (`origin`, `direction`) picks
+    /// under this lock, for a joint that began at `anchor`: the nearest
+    /// point of the axis through it, or where the line meets the plane
+    /// through it. None where the line runs along the axis or the plane.
+    pub(crate) fn target(
+        self,
+        anchor: [f32; 3],
+        origin: [f32; 3],
+        direction: [f32; 3],
+    ) -> Option<[f32; 3]> {
+        let dot = |a: [f32; 3], b: [f32; 3]| a.iter().zip(&b).map(|(a, b)| a * b).sum::<f32>();
+        let unit = |axis: usize| {
+            std::array::from_fn::<f32, 3, _>(|index| f32::from(u8::from(index == axis)))
+        };
+        let from_origin = sub(anchor, origin);
+        match self {
+            Lock::Axis(axis) => {
+                // The nearest points of two lines: the axis and the sight.
+                let along = unit(axis);
+                let b = dot(along, direction);
+                let denominator = 1.0 - b * b;
+                if denominator < 1e-6 {
+                    return None;
+                }
+                let t = (b * dot(direction, from_origin) - dot(along, from_origin)) / denominator;
+                Some(std::array::from_fn(|index| {
+                    anchor[index] + along[index] * t
+                }))
+            }
+            Lock::Plane(normal) => {
+                let normal = unit(normal);
+                let facing = dot(direction, normal);
+                if facing.abs() < 1e-6 {
+                    return None;
+                }
+                let t = dot(from_origin, normal) / facing;
+                Some(std::array::from_fn(|index| {
+                    origin[index] + direction[index] * t
+                }))
+            }
+        }
+    }
 }
 
 /// A dragged joint's chain to begin with: its parent and grandparent, as
@@ -1442,5 +1502,43 @@ mod tests {
                 bent.to_degrees()
             );
         }
+    }
+
+    /// An axis lock keeps the target on the axis through the anchor, at the
+    /// point nearest the line of sight; a plane lock where the line meets
+    /// the plane.
+    #[test]
+    fn a_lock_holds_the_target_to_its_axis_or_plane() {
+        let anchor = [1.0, 2.0, 3.0];
+        // Looking down -y from above the anchor, offset in x and z.
+        let (origin, direction) = ([1.5, 10.0, 3.25], [0.0, -1.0, 0.0]);
+        assert!(near(
+            Lock::Axis(0).target(anchor, origin, direction).unwrap(),
+            [1.5, 2.0, 3.0]
+        ));
+        assert!(near(
+            Lock::Axis(2).target(anchor, origin, direction).unwrap(),
+            [1.0, 2.0, 3.25]
+        ));
+        assert!(
+            Lock::Axis(1).target(anchor, origin, direction).is_none(),
+            "along the sight"
+        );
+        assert!(near(
+            Lock::Plane(1).target(anchor, origin, direction).unwrap(),
+            [1.5, 2.0, 3.25]
+        ));
+        assert!(
+            Lock::Plane(2).target(anchor, origin, direction).is_none(),
+            "edge on"
+        );
+        let slanted = [0.0, -0.6, -0.8];
+        let hit = Lock::Plane(2)
+            .target(anchor, [0.0, 6.0, 11.0], slanted)
+            .unwrap();
+        assert!(
+            (hit[2] - 3.0).abs() < 1e-5,
+            "on the xy plane through the anchor: {hit:?}"
+        );
     }
 }

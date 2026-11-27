@@ -62,6 +62,12 @@ follows like a puppet, over the bind pose or over an animation.
    bind pose), and a finishing pass turns each node only as it can turn, a hinge about its own axis,
    since FABRIK bends in the plane of the joints, which a hinge's plane need not be.
 
+5. **A move gizmo (done).** Clicking a joint selects it and puts a gizmo on it in the model's axes
+   (x forward red, y left green, z up blue). Dragging an arrow moves the joint along that axis alone,
+   to the axis point nearest the pointer's line of sight; dragging a square moves it within that plane
+   (xy, xz or yz), where the line of sight meets it; the joint's own dot still drags across the plane
+   facing the camera. The chain solve and limits follow the locked target as before.
+
 ## Research
 
 FABRIK (Aristidou & Lasenby) works in joint positions and needs a twist rule when turned back into

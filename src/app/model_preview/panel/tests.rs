@@ -1775,3 +1775,96 @@ fn a_shipped_objects_bounding_sphere_holds_its_geometry() {
         );
     }
 }
+
+/// Pose mode's gizmo, driven through the viewport: a click on a joint
+/// selects it; a drag that starts on its x arrow moves it along x alone,
+/// though the pointer strays across the arrow too.
+#[test]
+fn a_drag_on_the_gizmos_x_arrow_moves_the_joint_along_x_alone() {
+    use crate::app::model_preview::{PreviewCamera, RenderModelPreviewNode, armature_node_positions};
+    // A bent arm: a root, an elbow up and out, a hand back down level.
+    let worlds = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.8, 0.0, 0.0]];
+    let locals = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.4, 0.0, -0.3]];
+    let nodes = (0..3)
+        .map(|index| RenderModelPreviewNode {
+            name: format!("node {index}"),
+            parent: index as i16 - 1,
+            bind_rotation: [0.0, 0.0, 0.0, 1.0],
+            bind_translation: locals[index],
+            inverse_bind: [
+                [1.0, 0.0, 0.0, -worlds[index][0]],
+                [0.0, 1.0, 0.0, -worlds[index][1]],
+                [0.0, 0.0, 1.0, -worlds[index][2]],
+            ],
+        })
+        .collect();
+    let preview = RenderModelPreview {
+        nodes,
+        bounds_min: [-1.0; 3],
+        bounds_max: [1.0; 3],
+        ..Default::default()
+    };
+    let data = model_preview_data("test".into(), "test".into(), preview, vec![]);
+    let mut state = ModelPreviewState::default();
+    state.pose.on = true;
+    let context = egui::Context::default();
+    let mut time = 0.0;
+    let mut rect = egui::Rect::NOTHING;
+    let mut frame = |state: &mut ModelPreviewState, events: Vec<egui::Event>| {
+        time += 1.0 / 60.0;
+        crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(500.0, 400.0))),
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(400.0, 300.0));
+                    crate::app::model_preview::viewport::draw_model_viewport(ui, &data, state, rect.size());
+                });
+            },
+        );
+        rect
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    // Slid onto a point over a few frames, as a pointer comes.
+    let slide = |frame: &mut dyn FnMut(&mut ModelPreviewState, Vec<egui::Event>) -> egui::Rect,
+                 state: &mut ModelPreviewState,
+                 from: egui::Pos2,
+                 to: egui::Pos2| {
+        for step in 1..=4 {
+            frame(state, vec![egui::Event::PointerMoved(from + (to - from) * (step as f32 / 4.0))]);
+        }
+    };
+    frame(&mut state, vec![]);
+    let rect = frame(&mut state, vec![]);
+    let camera = PreviewCamera::new(&data, &state, rect);
+    let hand = armature_node_positions(&data, &state)[2];
+    let at = camera.project(hand).pos;
+    slide(&mut frame, &mut state, rect.center(), at);
+    frame(&mut state, vec![button(at, true)]);
+    frame(&mut state, vec![button(at, false)]);
+    assert_eq!(state.pose.selected, Some(2), "a click selects the joint");
+    // Along the x arrow, most of the way out.
+    let length = 70.0 / camera.points_per_unit(hand);
+    let arrow = camera.project([hand[0] + length * 0.7, hand[1], hand[2]]).pos;
+    let along = (arrow - at).normalized();
+    let across = Vec2::new(-along.y, along.x);
+    slide(&mut frame, &mut state, at, arrow);
+    frame(&mut state, vec![button(arrow, true)]);
+    let to = arrow + along * 25.0 + across * 20.0;
+    slide(&mut frame, &mut state, arrow, to);
+    frame(&mut state, vec![button(to, false)]);
+    let moved = armature_node_positions(&data, &state)[2];
+    assert!((moved[0] - hand[0]).abs() > 0.01, "moved along x: {moved:?}");
+    assert!((moved[1] - hand[1]).abs() < 1e-3 && (moved[2] - hand[2]).abs() < 1e-3, "y and z held: {hand:?} → {moved:?}");
+}
