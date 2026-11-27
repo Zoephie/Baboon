@@ -4,10 +4,13 @@
 //! per placement.
 
 use super::super::ModelGpuFrame;
+use super::super::common::camera::{ModelGpuCamera, PERSPECTIVE_FOV_Y, eye_position};
 use super::super::gen3::pipeline::{DEFAULT_PROBE, dominant_light, sh_eval_direction};
 use super::super::gen3::shaders::Gen3Value;
 use super::super::gl::buffer::slice_bytes;
 use super::instances::{INSTANCE_BYTES, InstanceLayout, PackedInstances, pack};
+use super::lod::{self, Block, LevelDraw};
+use super::stipple::StippleWriter;
 use super::wind::WindClock;
 use super::{DecoratorSet, Placement};
 use crate::core::game::GameId;
@@ -150,20 +153,36 @@ pub(in crate::app::model_preview) struct DecoratorBuffers {
     vertex_array: glow::NativeVertexArray,
     vertex_buffer: glow::NativeBuffer,
     instance_buffer: glow::NativeBuffer,
-    /// Each type's first vertex and vertex count.
-    meshes: Vec<(i32, i32)>,
+    /// Each level's types' first strip vertex and vertex count, by level and
+    /// then by type.
+    meshes: Vec<Vec<(i32, i32)>>,
     packed: PackedInstances,
+    /// The cull blocks the placements are packed by: none where the game
+    /// picks no levels, all of them one block.
+    blocks: Vec<Block>,
     layout: InstanceLayout,
+    /// The main program's `a_position`, `a_texcoord` and `a_normal`.
+    locations: [Option<u32>; 3],
+    /// What writes the stipple's pattern, made the first time a fade asks.
+    stipple: Option<StippleWriter>,
     /// The wind, run on to the frame being drawn.
     wind: WindClock,
 }
 
+/// `tan(fov / 2)` of the preview's lens, which the game's level distances
+/// scale by; a snapshot's tiles keep the whole picture's.
+fn lens() -> f32 {
+    (PERSPECTIVE_FOV_Y * 0.5).tan()
+}
+
 impl DecoratorBuffers {
     /// `held`, built for `frame`'s set if it holds another's, with its wind
-    /// run on to the frame's time. `None` without a set, or when GL refuses
-    /// the buffers. `positions` are the main program's attribute locations
-    /// for `a_position`, `a_texcoord` and `a_normal`, which a pass links the
-    /// decorator's `POSITION`, `TEXCOORD0` and `NORMAL` to.
+    /// run on to the frame's time, and the stipple's pattern in the bound
+    /// target's stencil where the set's levels fade. `None` without a set, or
+    /// when GL refuses the buffers. `positions` are the main program's
+    /// attribute locations for `a_position`, `a_texcoord` and `a_normal`,
+    /// which a pass links the decorator's `POSITION`, `TEXCOORD0` and
+    /// `NORMAL` to.
     pub(in crate::app::model_preview) unsafe fn sync<'a>(
         held: &'a mut Option<Self>,
         gl: &glow::Context,
@@ -188,10 +207,24 @@ impl DecoratorBuffers {
             *held = built;
         }
         let buffers = held.as_mut()?;
+        if buffers.locations != locations && locations[0].is_some() {
+            unsafe { buffers.relocate(gl, locations) };
+        }
         if let Some(wind) = &set.wind {
             buffers.wind.advance(wind, frame.time);
         } else {
             buffers.wind.time = frame.time;
+        }
+        if let (Some(detail), Some(stipple), true) =
+            (&set.detail, &set.stipple, set.layout.fade && frame.camera.perspective > 0.0)
+        {
+            if buffers.stipple.is_none() {
+                buffers.stipple = unsafe { StippleWriter::new(gl) };
+            }
+            if let Some(writer) = &mut buffers.stipple {
+                let (test, _) = lod::stipple(detail.rule, 1.0, false);
+                unsafe { writer.write(gl, stipple, test.mask, frame.time) };
+            }
         }
         Some(buffers)
     }
@@ -205,14 +238,18 @@ impl DecoratorBuffers {
                 instance_buffer: gl.create_buffer().ok()?,
                 meshes: Vec::new(),
                 packed: PackedInstances::default(),
+                blocks: Vec::new(),
                 layout: InstanceLayout::Halo3,
+                locations: [None; 3],
+                stipple: None,
                 wind: WindClock::default(),
             })
         }
     }
 
-    /// Upload `set`'s meshes and packed placements, and lay out the vertex
-    /// array; whether the main program has the attributes to lay out.
+    /// Upload every level's strips and the packed placements, and lay out
+    /// the vertex array; whether the main program has the attributes to lay
+    /// out.
     unsafe fn upload(
         &mut self,
         gl: &glow::Context,
@@ -221,34 +258,45 @@ impl DecoratorBuffers {
         set: &DecoratorSet,
         locations: [Option<u32>; 3],
     ) -> bool {
-        let [Some(position), texcoord, normal] = locations else {
+        let [Some(_), ..] = locations else {
             return false;
         };
+        self.locations = locations;
         self.layout = layout_of(game);
         let vertex_scale = self.layout.vertex_scale();
         let mut vertices: Vec<f32> = Vec::new();
         self.meshes.clear();
-        for mesh in &set.meshes {
-            let first = (vertices.len() / VERTEX_FLOATS) as i32;
-            for &index in &mesh.indices {
-                let index = index as usize;
-                vertices.extend(mesh.positions[index].map(|value| value * vertex_scale));
-                vertices.extend(mesh.texcoords[index]);
-                vertices.extend(mesh.normals[index]);
+        for model in 0..set.level_count() {
+            let mut level = Vec::new();
+            for mesh in set.level_meshes(model).unwrap_or_default() {
+                let first = (vertices.len() / VERTEX_FLOATS) as i32;
+                // A restart would join two strips; no kit decorator has one.
+                for &index in mesh.strip.iter().filter(|&&index| index != u32::MAX) {
+                    let index = index as usize;
+                    vertices.extend(mesh.positions[index].map(|value| value * vertex_scale));
+                    vertices.extend(mesh.texcoords[index]);
+                    vertices.extend(mesh.normals[index]);
+                }
+                level.push((first, (vertices.len() / VERTEX_FLOATS) as i32 - first));
             }
-            self.meshes
-                .push((first, (vertices.len() / VERTEX_FLOATS) as i32 - first));
+            self.meshes.push(level);
         }
+        let (block_of, blocks) = match &set.detail {
+            Some(detail) => lod::blocks(&set.placements, detail.block_size),
+            None => (Vec::new(), Vec::new()),
+        };
         let light = baked_light().map(|channel| channel * set.layout.light);
         self.packed = pack(
             self.layout,
             &set.placements,
             |placement| placement_light(placement, light),
             set.types.len(),
+            &block_of,
+            blocks.len(),
         );
+        self.blocks = blocks;
         self.mesh_id = mesh_id;
         self.wind = WindClock::default();
-        let stride = (VERTEX_FLOATS * size_of::<f32>()) as i32;
         unsafe {
             gl.bind_vertex_array(Some(self.vertex_array));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
@@ -257,20 +305,8 @@ impl DecoratorBuffers {
                 slice_bytes(&vertices),
                 glow::STATIC_DRAW,
             );
-            gl.enable_vertex_attrib_array(position);
-            gl.vertex_attrib_pointer_f32(position, 3, glow::FLOAT, false, stride, 0);
-            for (location, size, offset) in [(texcoord, 2, 12), (normal, 3, 20)] {
-                if let Some(location) = location {
-                    gl.enable_vertex_attrib_array(location);
-                    gl.vertex_attrib_pointer_f32(
-                        location,
-                        size,
-                        glow::FLOAT,
-                        false,
-                        stride,
-                        offset,
-                    );
-                }
+            for location in locations.into_iter().flatten() {
+                gl.enable_vertex_attrib_array(location);
             }
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.instance_buffer));
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &self.packed.bytes, glow::STATIC_DRAW);
@@ -288,32 +324,115 @@ impl DecoratorBuffers {
         true
     }
 
-    /// Draw type `type_index`'s mesh once per placement of it.
-    pub(in crate::app::model_preview) unsafe fn draw(&self, gl: &glow::Context, type_index: usize) {
-        let (Some(&(first, count)), Some(&(first_instance, instances))) = (
-            self.meshes.get(type_index),
-            self.packed.types.get(type_index),
-        ) else {
-            return;
-        };
-        if count == 0 || instances == 0 {
-            return;
-        }
-        let base = (first_instance * INSTANCE_BYTES) as i32;
-        let stride = INSTANCE_BYTES as i32;
+    /// Draw type `type_index` of `set` once per placement of it, from
+    /// `camera`: in each cull block, the levels the game would draw there
+    /// with the Distance card's fade on, each through its stipple; otherwise
+    /// the level the card shows, whole. `instance_data` is the program's
+    /// uniform of that name, which says how much of a strip draws.
+    pub(in crate::app::model_preview) unsafe fn draw(
+        &self,
+        gl: &glow::Context,
+        set: &DecoratorSet,
+        type_index: usize,
+        camera: &ModelGpuCamera,
+        instance_data: Option<&glow::NativeUniformLocation>,
+    ) {
+        // Orthographic views have no eye to measure a distance from.
+        let eye = (camera.perspective > 0.0).then(|| eye_position(camera));
+        let detail = set.detail.as_ref().filter(|_| set.layout.fade).zip(eye);
+        let stippled = set.stipple.is_some();
+        let mut stenciled = false;
         unsafe {
             gl.bind_vertex_array(Some(self.vertex_array));
+            for block in 0..self.blocks.len().max(1) {
+                let Some((first_instance, instances)) = self.packed.range(block, type_index) else {
+                    continue;
+                };
+                if instances == 0 {
+                    continue;
+                }
+                let draws: Vec<(usize, Option<LevelDraw>)> = match (detail, self.blocks.get(block)) {
+                    (Some((detail, eye)), Some(bounds)) => lod::choose(detail, bounds, eye, lens())
+                        .into_iter()
+                        // Without the pattern, only the nearer of two.
+                        .filter(|draw| stippled || !draw.inverse)
+                        .filter_map(|draw| Some((detail.slots[draw.slot].model?, Some(draw))))
+                        .collect(),
+                    _ => vec![(set.shown_level(), None)],
+                };
+                for (model, draw) in draws {
+                    let Some(&(first, count)) = self.meshes.get(model).and_then(|level| level.get(type_index))
+                    else {
+                        continue;
+                    };
+                    let (kept, data) = lod::instance_data(count.max(0) as usize, draw.map_or([1.0; 2], |draw| draw.keep));
+                    if count <= 2 || kept <= 2 {
+                        continue;
+                    }
+                    match (draw.filter(|_| stippled), &set.detail) {
+                        (Some(draw), Some(detail)) => {
+                            let (test, draws) = lod::stipple(detail.rule, draw.fade, draw.inverse);
+                            if draw.skippable && !draws {
+                                continue;
+                            }
+                            gl.enable(glow::STENCIL_TEST);
+                            gl.stencil_func(test.function, test.reference, test.mask);
+                            gl.stencil_mask(0);
+                            gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
+                            stenciled = true;
+                        }
+                        _ => gl.disable(glow::STENCIL_TEST),
+                    }
+                    gl.uniform_4_f32(instance_data, data[0], data[1], data[2], data[3]);
+                    self.point(gl, first, first_instance);
+                    gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, kept as i32, instances as i32);
+                }
+            }
+            if stenciled {
+                gl.disable(glow::STENCIL_TEST);
+                gl.stencil_mask(!0);
+                gl.stencil_func(glow::ALWAYS, 0, !0);
+            }
+            gl.bind_vertex_array(None);
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
+        }
+    }
+
+    /// Read the strips through another program's attribute locations.
+    unsafe fn relocate(&mut self, gl: &glow::Context, locations: [Option<u32>; 3]) {
+        unsafe {
+            gl.bind_vertex_array(Some(self.vertex_array));
+            for location in self.locations.into_iter().flatten() {
+                gl.disable_vertex_attrib_array(location);
+            }
+            for location in locations.into_iter().flatten() {
+                gl.enable_vertex_attrib_array(location);
+            }
+            gl.bind_vertex_array(None);
+        }
+        self.locations = locations;
+    }
+
+    /// Point the vertex array at the strip from vertex `first` and the
+    /// instances from `first_instance`: the shader counts each strip's
+    /// vertices from 0, as the game's `instance_data` does.
+    unsafe fn point(&self, gl: &glow::Context, first: i32, first_instance: usize) {
+        let stride = (VERTEX_FLOATS * size_of::<f32>()) as i32;
+        let [position, texcoord, normal] = self.locations;
+        unsafe {
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+            for (location, size, offset) in [(position, 3, 0), (texcoord, 2, 12), (normal, 3, 20)] {
+                if let Some(location) = location {
+                    gl.vertex_attrib_pointer_f32(location, size, glow::FLOAT, false, stride, first * stride + offset);
+                }
+            }
+            let base = (first_instance * INSTANCE_BYTES) as i32;
+            let stride = INSTANCE_BYTES as i32;
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.instance_buffer));
             for input in inputs_of(self.layout) {
                 let offset = base + input.offset;
                 if input.integer {
-                    gl.vertex_attrib_pointer_i32(
-                        input.location,
-                        input.components,
-                        input.kind,
-                        stride,
-                        offset,
-                    );
+                    gl.vertex_attrib_pointer_i32(input.location, input.components, input.kind, stride, offset);
                 } else {
                     gl.vertex_attrib_pointer_f32(
                         input.location,
@@ -325,9 +444,6 @@ impl DecoratorBuffers {
                     );
                 }
             }
-            gl.draw_arrays_instanced(glow::TRIANGLES, first, count, instances as i32);
-            gl.bind_vertex_array(None);
-            gl.bind_buffer(glow::ARRAY_BUFFER, None);
         }
     }
 }

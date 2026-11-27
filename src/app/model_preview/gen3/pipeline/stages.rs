@@ -391,8 +391,11 @@ impl Gen3State {
                     // A type's mesh, once per placement.
                     _ if set.is_some() => {
                         let drawn = set.and_then(|set| set.type_of_region(&batch.region_name));
-                        if let (Some(type_index), Some(buffers)) = (drawn, this.slots[slot].decorators.as_ref()) {
-                            buffers.draw(gl, type_index);
+                        if let (Some(type_index), Some(buffers), Some(set)) =
+                            (drawn, this.slots[slot].decorators.as_ref(), set)
+                        {
+                            let instance_data = program.location(gl, "instance_data");
+                            buffers.draw(gl, set, type_index, &frame.camera, instance_data.as_ref());
                             gl.bind_vertex_array(Some(this.slots[slot].vertex_array));
                         }
                     }

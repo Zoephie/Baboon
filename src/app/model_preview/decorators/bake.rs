@@ -33,7 +33,8 @@ pub(in crate::app::model_preview) fn bake_placements(
         materials: vec![material],
         ..Default::default()
     };
-    for (type_index, (kind, mesh)) in set.types.iter().zip(&set.meshes).enumerate() {
+    let meshes = set.level_meshes(set.shown_level()).unwrap_or(&set.meshes);
+    for (type_index, (kind, mesh)) in set.types.iter().zip(meshes).enumerate() {
         let name = type_name(type_index, &kind.mesh_name);
         preview.regions.push(RenderModelPreviewRegion {
             name: name.clone(),

@@ -123,7 +123,10 @@ fn every_set_reads(game: GameId) {
             super::read_decorator_set(&tag, Some(&reader), &mut notes).map(|set| (set, notes))
         }));
         match read {
-            Ok(Ok((_, notes))) => {
+            Ok(Ok((set, notes))) => {
+                if let Some(problem) = strips_disagree(&source, &reference, &set) {
+                    failures.push(format!("{reference}: {problem}"));
+                }
                 if notes.iter().any(|note| note.contains("render shader")) {
                     failures.push(format!("{reference}: {notes:?}"));
                 } else if !notes.is_empty() {
@@ -141,6 +144,128 @@ fn every_set_reads(game: GameId) {
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// Where `set`'s strips disagree with the engine's own reading of its
+/// models' decorator meshes (`extract_decorator_subparts`): a type's
+/// triangles from its strip counted against the engine's for the same
+/// placement, and any strip restart, which the instanced draw cannot keep.
+fn strips_disagree(
+    source: &crate::core::source::TagSource,
+    reference: &str,
+    set: &super::DecoratorSet,
+) -> Option<String> {
+    let reader = TagReader::with_game_shaders(source, false);
+    let tag = reader.load(reference, "decorator_set", b"dctr").ok()?;
+    let root = tag.root();
+    let names = ["render model", "Base", "Lod2", "Lod3", "Lod4"];
+    let paths: Vec<String> = names
+        .iter()
+        .filter_map(|name| root.read_tag_ref_path(name))
+        .map(|path| path.trim().to_owned())
+        .filter(|path| !path.is_empty())
+        .collect();
+    let mut model = 0;
+    // A further level draws the nearest's subparts, whatever it names them.
+    let mut subparts: Option<Vec<Option<usize>>> = None;
+    for path in paths {
+        let Ok(tag) = reader.load(&path, "render_model", b"mode") else {
+            continue;
+        };
+        let Some(geometry) = blam_tags::render_model::extract_decorator_subparts(&tag) else {
+            continue;
+        };
+        let placements: Vec<String> = super::super::common::fields::elements(tag.root(), "instance placements")
+            .iter()
+            .map(|element| element.read_string_id("name").unwrap_or_default())
+            .collect();
+        let meshes = set.level_meshes(model)?;
+        model += 1;
+        let found = subparts.get_or_insert_with(|| {
+            set.types
+                .iter()
+                .map(|kind| placements.iter().position(|name| name.eq_ignore_ascii_case(&kind.mesh_name)))
+                .collect()
+        });
+        for ((kind, mesh), subpart) in set.types.iter().zip(meshes).zip(found.iter()) {
+            if mesh.strip.contains(&u32::MAX) {
+                return Some(format!("{path}: {} restarts its strip", kind.mesh_name));
+            }
+            let Some(engine) = subpart.and_then(|index| geometry.subpart_indices.get(index)) else {
+                continue;
+            };
+            if engine.len() != mesh.indices.len() {
+                return Some(format!(
+                    "{path}: {} has {} triangles from its strip, the engine {}",
+                    kind.mesh_name,
+                    mesh.indices.len() / 3,
+                    engine.len() / 3
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// With `BLAM_TEST_HREK`: Reach's arid grass names three levels and
+/// decimates the nearest. Its later two ranges are empty in the tag, so
+/// the postprocess gives them their own: 8 past the end before, starting a
+/// quarter of the way from it. Its pattern is the 2 × 2 dither, its
+/// throttle the default one-player 1.
+#[test]
+fn reach_levels_read_as_the_postprocess_leaves_them() {
+    let Some(source) = kit_source(GameId::HaloReach) else {
+        return;
+    };
+    let reader = TagReader::with_game_shaders(&source, false);
+    let tag = reader
+        .load("levels\\shared\\decorators\\grass_arid\\grass_arid", "decorator_set", b"dctr")
+        .unwrap();
+    let mut notes = Vec::new();
+    let set = super::read_decorator_set(&tag, Some(&reader), &mut notes).unwrap();
+    assert_eq!(set.level_count(), 3, "{notes:?}");
+    let detail = set.detail.as_ref().expect("Reach's levels");
+    assert_eq!(detail.last, 2);
+    let ranges: Vec<[f32; 2]> = detail.slots[..3].iter().map(|slot| [slot.start, slot.end]).collect();
+    assert_eq!(ranges, [[6.0, 10.0], [16.0, 18.0], [24.0, 26.0]]);
+    assert!(detail.decimation.on && detail.block_size == 3.0 && detail.throttle == 1.0);
+    for model in 0..3 {
+        assert!(set.level_meshes(model).unwrap().iter().all(|mesh| mesh.strip.len() > 2), "level {model}");
+    }
+    let stipple = set.stipple.as_ref().expect("default bitmaps[9]");
+    assert_eq!(stipple.size, [8, 8]);
+    assert_eq!(&stipple.values[..2], [0, 3]);
+    assert_eq!(&stipple.values[8..10], [2, 1]);
+}
+
+/// With `BLAM_TEST_H4EK`: Halo 4's juniper names all four levels, each
+/// range as the tag has it, and its pattern is the 4 × 4 Bayer dither.
+#[test]
+fn halo_4_levels_read_as_the_tag_has_them() {
+    let Some(source) = kit_source(GameId::Halo4) else {
+        return;
+    };
+    let reader = TagReader::with_game_shaders(&source, false);
+    let tag = reader
+        .load(
+            "levels\\multi\\ca_gore_valley\\decorators\\ca_longbow_juniper_bush\\ca_longbow_juniper_bush",
+            "decorator_set",
+            b"dctr",
+        )
+        .unwrap();
+    let mut notes = Vec::new();
+    let set = super::read_decorator_set(&tag, Some(&reader), &mut notes).unwrap();
+    assert_eq!(set.level_count(), 4, "{notes:?}");
+    let detail = set.detail.as_ref().expect("Halo 4's levels");
+    assert_eq!(detail.rule, super::lod::LodRule::Halo4);
+    let ranges: Vec<[f32; 2]> = detail.slots.iter().map(|slot| [slot.start, slot.end]).collect();
+    assert_eq!(ranges, [[4.0, 5.0], [8.0, 9.0], [12.0, 13.0], [15.0, 16.0]]);
+    assert!(detail.decimation.on);
+    let stipple = set.stipple.as_ref().expect("default bitmaps[9]");
+    let mut values = stipple.values.clone();
+    values.sort_unstable();
+    values.dedup();
+    assert_eq!(values, (0..16).collect::<Vec<u8>>());
 }
 
 /// Every file under `root` with the extension `extension`.

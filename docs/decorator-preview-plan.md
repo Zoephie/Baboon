@@ -246,11 +246,10 @@ See the proposals that accompany this plan.
 
 - Halo 3 and ODST: done (loader, layout, Solid/Textured, Game Shaders instanced, wind, cards).
 - Reach: Game Shaders through `shaders\decorators\*`, with `decorators\decorators.h` shimmed (the
-  alpha test, 0.5) and the packed `POSITION1` fed as an integer. Its LOD models, decimation and
-  stipple cross-fade are not drawn yet.
+  alpha test, 0.5) and the packed `POSITION1` fed as an integer.
 - Halo 4: Game Shaders through each `explicit_shaders\decorators\*.material_shader`'s own
   source, its `RGBk` output decoded and exposed as its other passes are; positions at the vertex
-  compression's constant scale of 5 (`|q|² = scale / 5`). LODs, decimation and stipple as Reach.
+  compression's constant scale of 5 (`|q|² = scale / 5`).
 - Halo 2: loader, records and geometry as the cache builder builds them; Solid/Textured with the
   `shad`s cut out on their base map; Game Shaders through the dx9 classifications of
   `decorator.vertex_shader`/`decorator_decal.vertex_shader`, translated (a `Decorator(slot)` DX9
@@ -264,7 +263,48 @@ See the proposals that accompany this plan.
   game's alpha blend.
 
 - Cards: Decorator Set, Types, Layout, Distance (the game's fade, toggled), Lighting (the stand-in
-  light's level), Wind (sway). Left: Reach's and Halo 4's LOD models, decimation and stipple.
+  light's level), Wind (sway).
+- Reach's and Halo 4's levels: every valid model read (a further level draws the nearest's subpart
+  by index, as its placements are named otherwise), the postprocess's repairs, cull blocks gridded by
+  `cull block size`, each game's level choice and decimation, and the stencil stipple from
+  `default bitmaps[9]`. The gen3 decorators now draw their strips as the game does
+  (`TRIANGLE_STRIP`, counting each strip from vertex 0 for `instance_data`).
+
+## Reach's and Halo 4's detail levels (researched 2026-11-27)
+
+From Reach's 360 tag build (`render_decorators`, `c_decorator_lod_renderer`) checked against MCC's
+`reach_tag_test`, and Halo 4's 360 `midnight_tag_debug` checked against MCC's `halo4_tag_test`.
+
+- **Postprocess** (both): the four render models are compacted to the valid ones, each moving its
+  transition with it. Then each valid level's `end` at or short of the last one's becomes the last
+  end + 8; a `start` short of the last end or past its own end becomes `(last end + 3 · end) / 4`;
+  `scale = −1 / max(end − start, 1e-4)`, `offset = 1 − start · scale`. Decimation's start and end
+  become a scale and offset the same way (`offset = −end · scale`).
+- **Blocks:** the game culls and picks a level per cull block (the level's decorators grouped by
+  `cull block size`, clamped to 0.5–100), by its bounding sphere.
+- **Reach:** `d = max(0, |eye − centre| − radius) · 1.7186729 · fov / throttle`, where `fov` is
+  `tan(fov / 2)` (1.7186729 makes 60° whole) and the throttle is the rasterizer globals' default
+  performance throttles' first element's `decorator fade dist scale` (0 draws none). A block is
+  culled where the last level's `d · scale + offset ≤ 0`. The first level `k` with
+  `f = d · scale + offset > 0` draws with the stipple at `min(f, 1)`; where that is short of whole and
+  a next level exists, the next draws with the inverse stipple. Level 0 with *use decimation* draws
+  only the strip's first `keep · count` vertices, `keep = min(1, x⁴ / √fov)` for
+  `x = max(0, d · scale + offset)` of the decimation, and fades out past the count kept 3 units
+  further (`instance_data = (count, kept, kept further, 0.5 / max(kept − kept further, 1))`, the
+  shader's `1 − saturate((vertex − z) · w)` through the alpha test).
+- **Halo 4:** the distance is to the block's centre, scaled by `throttle / max(0.785, 1.7186729 ·
+  fov)`. A block is culled past `(radius + end point3 · scale) · (1 − early cull)` (none where that
+  end is 0). Slot 0 with no end draws whole. Otherwise the first slot `k` the eye is short of the end
+  of draws at `1 − clamp((d − start) / (end − start))`, and the next with the inverse where the eye is
+  past its start. Decimation: `keep = min(1, max(decimate to / 100, clamp(max(d − start distance,
+  1e-10)^(−0.667 · speed) / √fov)))`, and 10 units further for the fade; with the kit's hidden
+  fields at 0 that keeps everything.
+- **Stipple:** `rasterizer_stipple_initialize` writes `default bitmaps[9]` into the stencil, one
+  texel a pixel: Reach's `dither_pattern4` (2 × 2: 0 3 / 2 1), Halo 4's `dither_pattern3` (4 × 4
+  Bayer, 0–15). `rasterizer_stipple_set_fade_byte(b, 160, inverse)` tests against it: Reach
+  `ref = (3b + 253) / 254` (0–4), mask 7, GREATER (inverse LESS_EQUAL); Halo 4 `ref = b >> 4`,
+  mask 15, GREATER_EQUAL (inverse LESS_EQUAL). A plain draw is skipped where its byte is 0 (255 for
+  the inverse).
 
 ## Seen in the preview, not yet explained
 
@@ -281,7 +321,10 @@ See the proposals that accompany this plan.
   - the random rotation axis in `place_randomized_decorator`;
   - whether PC samples the gust texture signed;
   - Reach's `early cull` (no read found);
-  - Halo 4's 5.0 compression constant.
+  - Halo 4's 5.0 compression constant;
+  - how a level's build groups its decorators into cull blocks and sizes their spheres: the preview
+    grids its patch by `cull block size` and bounds each cell's placements;
+  - which screen corner the stipple's tile starts from (the preview tiles from GL's, bottom left).
 - **Halo 2:** what the lightmapper writes into the placement's accuracy float.
 - **Halo CE:** Sapien's random seed (the preview picks its own); the exact UV weights of its ground
   sample (irrelevant without a level).

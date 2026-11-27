@@ -21,9 +21,11 @@ mod halo2;
 mod halo_ce;
 mod instances;
 mod layout;
+mod lod;
 mod material;
 mod read;
 mod shader;
+mod stipple;
 mod stream;
 mod wind;
 
@@ -40,6 +42,7 @@ pub(in crate::app::model_preview) use halo2::{
     read_halo_2_set, scatter_halo_2,
 };
 pub(in crate::app::model_preview) use layout::{Layout, scatter};
+pub(in crate::app::model_preview) use lod::DetailLevels;
 pub(in crate::app::model_preview) use material::{
     resolve_decorator_material, resolve_detail_object_material,
 };
@@ -76,8 +79,15 @@ pub(crate) struct DecoratorSet {
     /// The wind it sways in: the globals' default.
     pub wind: Option<std::sync::Arc<WindDefinition>>,
     pub types: Vec<DecoratorType>,
-    /// Each type's mesh, by type.
+    /// Each type's mesh, by type: the nearest level's.
     pub meshes: Vec<DecoratorMesh>,
+    /// Reach's and Halo 4's further levels' meshes, by type, in the order
+    /// their slots name them: model `n` is `levels[n − 1]`.
+    pub levels: Vec<Vec<DecoratorMesh>>,
+    /// Reach's and Halo 4's levels and how the game picks between them.
+    pub detail: Option<lod::DetailLevels>,
+    /// The pattern the game stipples its levels' cross-fade through.
+    pub stipple: Option<std::sync::Arc<Stipple>>,
     /// The patch [`Self::placements`] fill.
     pub layout: Layout,
     /// A Halo 2 set's own: its classes, models and placements. Its types
@@ -111,14 +121,23 @@ pub(crate) struct DecoratorType {
     pub placement_weight: Option<f32>,
 }
 
-/// One type's mesh: its subpart of the render model's decorator mesh, as a
-/// triangle list.
+/// One type's mesh: its subpart of the render model's decorator mesh, as the
+/// strip the game draws and as a triangle list.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DecoratorMesh {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub texcoords: Vec<[f32; 2]>,
+    /// The strip, `u32::MAX` where it restarts.
+    pub strip: Vec<u32>,
     pub indices: Vec<u32>,
+}
+
+/// The stipple pattern: a value a pixel, tiled over the screen.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Stipple {
+    pub size: [usize; 2],
+    pub values: Vec<u8>,
 }
 
 /// One decorator stood on the ground, as the game's placement keeps it.
@@ -138,6 +157,25 @@ pub(crate) struct Placement {
 }
 
 impl DecoratorSet {
+    /// Model `model`'s meshes, by type: 0 the nearest.
+    pub(crate) fn level_meshes(&self, model: usize) -> Option<&[DecoratorMesh]> {
+        match model {
+            0 => Some(&self.meshes),
+            _ => self.levels.get(model - 1).map(Vec::as_slice),
+        }
+    }
+
+    /// How many levels it has: 1 where the game has no others.
+    pub(crate) fn level_count(&self) -> usize {
+        1 + self.levels.len()
+    }
+
+    /// The level the layout draws whole: the Distance card's, within the
+    /// levels it has.
+    pub(crate) fn shown_level(&self) -> usize {
+        self.layout.level.min(self.level_count() - 1)
+    }
+
     /// Whether its shader moves it on the clock: the wind's, or the waves'.
     pub(crate) fn moves(&self) -> bool {
         self.layout.sway && self.shader.is_some_and(DecoratorShader::moves)

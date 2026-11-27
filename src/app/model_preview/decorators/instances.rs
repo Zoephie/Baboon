@@ -64,18 +64,36 @@ pub(crate) struct PackedInstances {
     /// `instance_compression_offset` and `_scale`.
     pub offset: [f32; 3],
     pub scale: [f32; 3],
-    /// Each type's first instance and count.
+    /// Each block's types' first instance and count, block by block:
+    /// `block · type count + type`.
     pub types: Vec<(usize, usize)>,
+    pub type_count: usize,
+}
+
+impl PackedInstances {
+    /// Block `block`'s type `type_index`'s first instance and count.
+    pub(crate) fn range(&self, block: usize, type_index: usize) -> Option<(usize, usize)> {
+        if type_index >= self.type_count {
+            return None;
+        }
+        self.types.get(block * self.type_count + type_index).copied()
+    }
 }
 
 /// `placements`, each lit by `light` (its baked colour), packed in order of
-/// type, for `type_count` types.
+/// block and then of type, for `type_count` types: `block_of` gives each
+/// placement's block of `block_count`, all of them one block where it is
+/// empty.
 pub(crate) fn pack(
     layout: InstanceLayout,
     placements: &[Placement],
     light: impl Fn(&Placement) -> [f32; 3],
     type_count: usize,
+    block_of: &[usize],
+    block_count: usize,
 ) -> PackedInstances {
+    let block = |index: usize| block_of.get(index).copied().unwrap_or(0);
+    let block_count = block_count.max(1);
     let mut low = [f32::INFINITY; 3];
     let mut high = [f32::NEG_INFINITY; 3];
     for placement in placements {
@@ -98,14 +116,23 @@ pub(crate) fn pack(
         bytes: Vec::with_capacity(placements.len() * INSTANCE_BYTES),
         offset: low,
         scale,
-        types: Vec::with_capacity(type_count),
+        types: Vec::with_capacity(type_count * block_count),
+        type_count,
     };
-    for type_index in 0..type_count {
+    let mut order: Vec<usize> = (0..placements.len())
+        .filter(|&index| placements[index].type_index < type_count && block(index) < block_count)
+        .collect();
+    order.sort_by_key(|&index| (block(index), placements[index].type_index));
+    let mut next = order.iter().peekable();
+    for group in 0..block_count * type_count {
         let first = packed.bytes.len() / INSTANCE_BYTES;
-        for placement in placements
-            .iter()
-            .filter(|placement| placement.type_index == type_index)
-        {
+        let (block_index, type_index) = (group / type_count, group % type_count);
+        while let Some(&&index) = next.peek() {
+            if (block(index), placements[index].type_index) != (block_index, type_index) {
+                break;
+            }
+            next.next();
+            let placement = &placements[index];
             let motion = (placement.motion.clamp(0.0, 1.0) * 255.0).round() as u8;
             let type_byte = type_index.min(255) as u8;
             let most = layout.vertex_scale();
@@ -280,6 +307,8 @@ mod tests {
                 &placements,
                 |placement| [0.2, 0.5, 3.0].map(|channel| channel * placement.scale),
                 2,
+                &[],
+                1,
             );
             assert_eq!(packed.types, vec![(0, 1), (1, 1)], "grouped by type");
             let read = unpack(layout, &packed, 1);
@@ -340,6 +369,8 @@ mod tests {
                 &[placement(0, [0.0; 3], 0.0, 5.0, 0.0)],
                 |_| [1.0; 3],
                 1,
+                &[],
+                1,
             );
             let read = unpack(layout, &packed, 0);
             assert!(
@@ -348,5 +379,22 @@ mod tests {
                 read.quaternion
             );
         }
+    }
+
+    /// Placements group by block, then by type within it.
+    #[test]
+    fn placements_pack_by_block_then_type() {
+        let placements = [
+            placement(1, [0.0; 3], 0.0, 1.0, 0.0),
+            placement(0, [1.0, 0.0, 0.0], 0.0, 1.0, 0.0),
+            placement(1, [2.0, 0.0, 0.0], 0.0, 1.0, 0.0),
+            placement(0, [3.0, 0.0, 0.0], 0.0, 1.0, 0.0),
+        ];
+        let packed = pack(InstanceLayout::Reach, &placements, |_| [1.0; 3], 2, &[1, 0, 0, 1], 2);
+        assert_eq!(packed.range(0, 0), Some((0, 1)));
+        assert_eq!(packed.range(0, 1), Some((1, 1)));
+        assert_eq!(packed.range(1, 0), Some((2, 1)));
+        assert_eq!(packed.range(1, 1), Some((3, 1)));
+        assert_eq!(packed.range(0, 2), None);
     }
 }

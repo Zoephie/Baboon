@@ -29,6 +29,9 @@ pub(crate) struct Layout {
     pub light: f32,
     /// Whether the wind sways what its shader sways (the Wind card).
     pub sway: bool,
+    /// Reach's and Halo 4's level drawn whole while the fade is off, and by
+    /// Solid and Textured: 0 the nearest (the Distance card).
+    pub level: usize,
 }
 
 impl Default for Layout {
@@ -40,6 +43,7 @@ impl Default for Layout {
             fade: false,
             light: 1.0,
             sway: true,
+            level: 0,
         }
     }
 }

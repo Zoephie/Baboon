@@ -56,12 +56,13 @@ pub(in crate::app::model_preview) fn draw_decorator_cards(
     }) {
         (layout.size, layout.count, layout.seed) = (default.size, default.count, default.seed);
     }
-    if setup_section(ui, "Distance", layout.fade != default.fade, |ui, part| {
+    let distance_changed = (layout.fade, layout.level) != (default.fade, default.level);
+    if setup_section(ui, "Distance", distance_changed, |ui, part| {
         if part == BoxPart::Body {
             draw_distance_rows(ui, set, layout);
         }
     }) {
-        layout.fade = default.fade;
+        (layout.fade, layout.level) = (default.fade, default.level);
     }
     if setup_section(ui, "Lighting", layout.light != default.light, |ui, part| {
         if part == BoxPart::Body {
@@ -87,6 +88,10 @@ fn draw_distance_rows(ui: &mut Ui, set: &DecoratorSet, layout: &mut Layout) {
     rows.row(ui, |ui| {
         ui.baboon_checkbox(&mut layout.fade, "Fade with distance");
     });
+    if let Some(detail) = &set.detail {
+        draw_level_rows(ui, &mut rows, set, detail, layout);
+        return;
+    }
     let note = if set.halo2.is_some() {
         "Each permutation shrinks away by its fade distance: close by 8 world units, medium by 16, far by 24.".to_owned()
     } else if let Some(collection) = &set.halo_ce {
@@ -102,8 +107,54 @@ fn draw_distance_rows(ui: &mut Ui, set: &DecoratorSet, layout: &mut Layout) {
     } else if let Some([start, end]) = set.fade_range {
         format!("The set dissolves between its start and end fade, {start} and {end} world units.")
     } else {
-        "This game cross-fades between its levels-of-detail models, which the preview doesn't draw yet.".to_owned()
+        "This set has no fade with distance.".to_owned()
     };
+    ui.label(RichText::new(note).color(subtle_dark()).small());
+}
+
+/// Reach's and Halo 4's levels: each model and the range it cross-fades to
+/// the next over, and the level drawn whole while the fade is off.
+fn draw_level_rows(
+    ui: &mut Ui,
+    rows: &mut CardRows,
+    set: &DecoratorSet,
+    detail: &super::super::decorators::DetailLevels,
+    layout: &mut Layout,
+) {
+    let name = |model: usize| {
+        let path = detail.models.get(model).map_or("", String::as_str);
+        let leaf = path.rsplit(['\\', '/']).next().unwrap_or(path);
+        format!("{}: {leaf}", model + 1)
+    };
+    let width = name_column_width(ui, ["Shown level"], ui.available_width().max(1.0));
+    rows.row(ui, |ui| {
+        name_cell(ui, "Shown level", width);
+        let shown = set.shown_level();
+        ui.add_enabled_ui(!layout.fade, |ui| {
+            crate::app::ui_kit::ValueComboBox::from_id_salt("decorator_shown_level")
+                .selected_text(name(shown))
+                .show_ui(ui, |ui| {
+                    for model in 0..set.level_count() {
+                        ui.selectable_value(&mut layout.level, model, name(model));
+                    }
+                });
+        })
+        .response
+        .on_hover_text("The level drawn whole while the fade is off, and by Solid and Textured");
+    });
+    let ranges: Vec<String> = detail.slots[..=detail.last]
+        .iter()
+        .enumerate()
+        .map(|(slot, range)| {
+            let next = if slot < detail.last { format!("level {}", slot + 2) } else { "nothing".to_owned() };
+            format!("{} to {next} over {}–{}", slot + 1, range.start, range.end)
+        })
+        .collect();
+    let decimation = if detail.decimation.on { " Level 1 thins out with distance by decimation." } else { "" };
+    let note = format!(
+        "With the fade on, each cull block picks its level by the eye's distance, cross-faded through the game's stipple: {}.{decimation} Game Shaders only, in perspective.",
+        ranges.join("; ")
+    );
     ui.label(RichText::new(note).color(subtle_dark()).small());
 }
 

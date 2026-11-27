@@ -102,6 +102,8 @@ pub(in crate::app::model_preview) struct ShotOptions {
     pub(in crate::app::model_preview) without_material: Option<String>,
     /// Draw the parts of the material `highlight` would name by this alone.
     pub(in crate::app::model_preview) only_material: Option<String>,
+    /// A decorator set's patch and its cards' settings.
+    pub(in crate::app::model_preview) decorator_layout: crate::app::model_preview::decorators::Layout,
 }
 
 impl ShotOptions {
@@ -141,6 +143,7 @@ impl ShotOptions {
             highlight: None,
             without_material: None,
             only_material: None,
+            decorator_layout: Default::default(),
         }
     }
 
@@ -206,6 +209,7 @@ impl ShotOptions {
             highlight: None,
             without_material: None,
             only_material: None,
+            decorator_layout: Default::default(),
         }
     }
 }
@@ -310,6 +314,7 @@ pub(in crate::app::model_preview) fn shot_frame(source: &TagSource, shot: &Shot,
         weapon: options.weapon.clone(),
         secondary_weapon: options.secondary_weapon.clone(),
         equippable: None,
+        decorator_layout: options.decorator_layout,
         ..Default::default()
     };
     let mut data = load_model_preview(&tag, &entry, &names, Some(source), &settings).unwrap();
@@ -983,6 +988,96 @@ fn a_halo_4_decorator_set_sways_only_in_the_wind() {
     let moved = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(a, b)| a[..3] != b[..3]).count();
     assert!(moved(&bush_before, &bush_after) > 5_000, "the wind moved the bush");
     assert_eq!(moved(&rocks_before, &rocks_after), 0, "nothing moved the rocks");
+}
+
+/// With `BLAM_TEST_HREK`: Reach's arid grass cross-fades between its levels
+/// with the Distance card's fade on. Up close it draws its nearest level
+/// whole either way; stood back into its first cross-fade (6 to 10 units
+/// past each block) the fade changes the picture; and the shown level, with
+/// the fade off, swaps the model drawn.
+#[test]
+fn reach_decorators_cross_fade_between_levels() {
+    let Some(reach) = super::kit::kit_source(GameId::HaloReach) else {
+        return;
+    };
+    let shot = Shot {
+        model: "levels\\shared\\decorators\\grass_arid\\grass_arid".to_owned(),
+        shaders: true,
+        lights: false,
+        yaw: 0.6,
+        pitch: 0.3,
+        kind: Some("decorator_set".to_owned()),
+    };
+    let layout = |fade: bool, level: usize| crate::app::model_preview::decorators::Layout {
+        fade,
+        level,
+        sway: false,
+        ..Default::default()
+    };
+    let at = |scale: f32, fade: bool, level: usize| ShotOptions {
+        scale: Some(scale),
+        decorator_layout: layout(fade, level),
+        ..ShotOptions::new(GameId::HaloReach)
+    };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let mut pixels = |options: &ShotOptions| render(&gl, &mut renderer, &reach, &shot, options).pixels;
+    let differ = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(a, b)| a[..3] != b[..3]).count();
+    let near = [pixels(&at(8.0, false, 0)), pixels(&at(8.0, true, 0))];
+    let background = near[0][..3].to_vec();
+    let drawn = near[0].chunks(4).filter(|pixel| pixel[..3] != background[..]).count();
+    assert!(drawn > 10_000, "the grass drew: {drawn}");
+    assert_eq!(differ(&near[0], &near[1]), 0, "up close the fade changes nothing");
+    let far = [pixels(&at(0.5, false, 0)), pixels(&at(0.5, true, 0))];
+    assert!(differ(&far[0], &far[1]) > 500, "stood back, the levels cross-fade");
+    let level_3 = pixels(&at(8.0, false, 2));
+    // `DECORATOR_SHOT_DIR`: each picture as a PNG, to look at.
+    if let Some(dir) = std::env::var_os("DECORATOR_SHOT_DIR") {
+        let named = [("near_off", &near[0]), ("near_on", &near[1]), ("far_off", &far[0]), ("far_on", &far[1]), ("level_3", &level_3)];
+        for (name, image) in named {
+            let row = SHOT_SIZE[0] as usize * 4;
+            let upright: Vec<u8> = image.chunks_exact(row).rev().flatten().copied().collect();
+            let image = image::RgbaImage::from_raw(SHOT_SIZE[0], SHOT_SIZE[1], upright).unwrap();
+            image.save(std::path::Path::new(&dir).join(format!("grass_arid_{name}.png"))).unwrap();
+        }
+    }
+    assert!(differ(&near[0], &level_3) > 1_000, "the shown level swaps the model");
+}
+
+/// With `BLAM_TEST_H4EK`: Halo 4's juniper swaps levels with the fade on:
+/// up close its nearest whole either way, stood back another level.
+#[test]
+fn halo_4_decorators_swap_levels_with_distance() {
+    let Some(halo4) = super::kit::kit_source(GameId::Halo4) else {
+        return;
+    };
+    let shot = Shot {
+        model: "levels\\multi\\ca_gore_valley\\decorators\\ca_longbow_juniper_bush\\ca_longbow_juniper_bush".to_owned(),
+        shaders: true,
+        lights: false,
+        yaw: 0.6,
+        pitch: 0.3,
+        kind: Some("decorator_set".to_owned()),
+    };
+    let at = |scale: f32, fade: bool| ShotOptions {
+        scale: Some(scale),
+        decorator_layout: crate::app::model_preview::decorators::Layout {
+            fade,
+            sway: false,
+            ..Default::default()
+        },
+        ..ShotOptions::new(GameId::Halo4)
+    };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let mut pixels = |options: &ShotOptions| render(&gl, &mut renderer, &halo4, &shot, options).pixels;
+    let differ = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(a, b)| a[..3] != b[..3]).count();
+    let near = [pixels(&at(8.0, false)), pixels(&at(8.0, true))];
+    let background = near[0][..3].to_vec();
+    assert!(near[0].chunks(4).filter(|pixel| pixel[..3] != background[..]).count() > 10_000, "the juniper drew");
+    assert_eq!(differ(&near[0], &near[1]), 0, "up close the fade changes nothing");
+    let far = [pixels(&at(0.5, false)), pixels(&at(0.5, true))];
+    assert!(differ(&far[0], &far[1]) > 200, "stood back, another level draws");
 }
 
 /// With `BLAM_TEST_H2EK`: Halo 2's screen-facing decorators turn to the eye
