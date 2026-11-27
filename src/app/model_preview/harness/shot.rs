@@ -916,6 +916,40 @@ fn a_halo_3_decorator_set_sways_only_in_the_wind() {
     assert_eq!(moved(&still_before, &still_after), 0, "nothing moved the still set");
 }
 
+/// With `BLAM_TEST_HREK`: Reach's decorators draw through Reach's own
+/// shaders, their positions packed in one `uint` each: the M70 gorse,
+/// `billboard + wind + dynamic lights`, sways, and the M20 rocks, `solid
+/// mesh + dynamic lights`, hold still.
+#[test]
+fn a_reach_decorator_set_sways_only_in_the_wind() {
+    let Some(reach) = super::kit::kit_source(GameId::HaloReach) else {
+        return;
+    };
+    let shot = |model: &str| Shot {
+        model: model.to_owned(),
+        shaders: true,
+        lights: false,
+        yaw: 0.6,
+        pitch: 0.2,
+        kind: Some("decorator_set".to_owned()),
+    };
+    let at = |time: f32| ShotOptions {
+        time,
+        ..ShotOptions::new(GameId::HaloReach)
+    };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let gorse = shot("levels\\shared\\decorators\\gorse_bush\\gorse_bush_m70");
+    let rocks = shot("levels\\shared\\decorators\\rock_small_m20\\rock_small_m20");
+    let [gorse_before, gorse_after, rocks_before, rocks_after] = [(&gorse, 0.0), (&gorse, 2.5), (&rocks, 0.0), (&rocks, 2.5)]
+        .map(|(shot, time)| render(&gl, &mut renderer, &reach, shot, &at(time)).pixels);
+    let drawn = |pixels: &[u8]| pixels.chunks(4).filter(|pixel| pixel[..3] != gorse_before[..3]).count();
+    assert!(drawn(&gorse_before) > 10_000 && drawn(&rocks_before) > 10_000, "both sets drew");
+    let moved = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(a, b)| a[..3] != b[..3]).count();
+    assert!(moved(&gorse_before, &gorse_after) > 5_000, "the wind moved the gorse");
+    assert_eq!(moved(&rocks_before, &rocks_after), 0, "nothing moved the rocks");
+}
+
 /// The gen3 pipelines share one set of targets: a Reach frame after a Halo 3
 /// one, at the same size, draws through the set Halo 3 made rather than a
 /// second, and hands it back.

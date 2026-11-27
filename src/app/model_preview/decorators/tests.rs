@@ -83,7 +83,19 @@ fn a_new_layout_lays_the_patch_out_again_in_place() {
 #[test]
 #[ignore = "reads every Halo 3 decorator set; run by hand"]
 fn every_halo_3_set_reads() {
-    let Some(source) = kit_source(GameId::Halo3) else {
+    every_set_reads(GameId::Halo3);
+}
+
+/// With `BLAM_TEST_HREK`: as [`every_halo_3_set_reads`], Reach's sets, whose
+/// render shader options Reach renamed.
+#[test]
+#[ignore = "reads every Reach decorator set; run by hand"]
+fn every_reach_set_reads() {
+    every_set_reads(GameId::HaloReach);
+}
+
+fn every_set_reads(game: GameId) {
+    let Some(source) = kit_source(game) else {
         return;
     };
     let crate::core::source::TagSource::LooseFolder { root, .. } = &source else {

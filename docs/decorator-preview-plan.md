@@ -242,6 +242,22 @@ the later games, the shader is fixed and the only material is the texture.
 
 See the proposals that accompany this plan.
 
+## Progress
+
+- Halo 3 and ODST: done (loader, layout, Solid/Textured, Game Shaders instanced, wind, cards).
+- Reach: Game Shaders through `shaders\decorators\*`, with `decorators\decorators.h` shimmed (the
+  alpha test, 0.5) and the packed `POSITION1` fed as an integer. Its LOD models, decimation and
+  stipple cross-fade are not drawn yet.
+- Halo 4, Halo 2, Halo CE: to do.
+
+## Seen in the preview, not yet explained
+
+- Reach's `tree_pine_forge_gulch` (static billboard) is a card lying flat in its model (0.01 thick,
+  facing −Z, its height along +Y) with only *random rotation* and *align to normal*; it draws lying
+  on the ground. Something in the game stands it up; the research doesn't say what.
+- Halo 3's *still + sun light only* sets read the motion byte as the sun's intensity, which the
+  preview fills from the wind range; they draw near white.
+
 ## Not settled by the research
 
 - **Gen3:**

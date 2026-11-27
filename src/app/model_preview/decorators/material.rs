@@ -8,9 +8,7 @@
 
 use super::super::common::fields::elements;
 use super::super::gen3::materials::gen3_image;
-use super::super::gen3::shaders::{
-    Gen3Blend, Gen3Material, Gen3MaterialDialect, Gen3Sources, Gen3Texture, RenderMethodDialect,
-};
+use super::super::gen3::shaders::{Gen3Blend, Gen3Material, Gen3Sources, Gen3Texture};
 use super::super::load::TagReader;
 use super::super::materials::{SlotBitmap, cached_bitmap};
 use super::super::{MaterialTextures, ResolveCaches, TextureSlot};
@@ -72,48 +70,40 @@ fn game_material(
     let sources = caches
         .gen3_sources
         .get_or_insert_with(|| Gen3Sources::new(&reader.source));
-    if sources.dialect() != RenderMethodDialect::Halo3 {
-        return Err("only Halo 3's and ODST's decorator shaders are translated yet".to_owned());
-    }
     let name = set.root().read_enum_option("render shader");
     let shader = match &name {
         Some(name) => DecoratorShader::from_option_name(name),
         None => Some(DecoratorShader::first_option(reader.source.game())),
     };
-    let file = shader
-        .and_then(DecoratorShader::halo_3_source)
-        .ok_or_else(|| {
-            format!(
-                "no Halo 3 decorator shader is named \"{}\"",
-                name.unwrap_or_default()
-            )
-        })?;
-    let lit = sources.explicit_pass(file)?;
-    let mut textures = vec![texture_of(
-        reader,
-        "LocalTexture_diffuse_texture",
-        texture,
-        caches,
-    )?];
-    if lit
-        .textures
-        .iter()
-        .any(|(name, _)| name == "LocalTexture_wind_texture")
-    {
+    let shader = shader.ok_or_else(|| {
+        format!(
+            "no decorator shader is named \"{}\"",
+            name.unwrap_or_default()
+        )
+    })?;
+    let lit = sources.decorator_pass(shader.source_file())?;
+    let dialect = sources.dialect().into();
+    // Each game names its samplers by its own scope: Halo 3's are local,
+    // Reach's wind texture global.
+    let sampler = |wanted: &str| {
+        lit.textures
+            .iter()
+            .map(|(name, _)| name)
+            .find(|name| name.ends_with(wanted))
+            .cloned()
+    };
+    let diffuse = sampler("diffuse_texture").ok_or("its shader samples no diffuse texture")?;
+    let mut textures = vec![texture_of(reader, &diffuse, texture, caches)?];
+    if let Some(wind) = sampler("wind_texture") {
         let gusts = WindDefinition::default_for(reader)
             .map(|wind| wind.gust_bitmap)
             .filter(|path| !path.is_empty())
             .or_else(|| default_bitmap(reader, DEFAULT_WIND_BITMAP))
             .ok_or("no gust noise for the wind")?;
-        textures.push(texture_of(
-            reader,
-            "LocalTexture_wind_texture",
-            &gusts,
-            caches,
-        )?);
+        textures.push(texture_of(reader, &wind, &gusts, caches)?);
     }
     Ok(Gen3Material {
-        dialect: Gen3MaterialDialect::Halo3,
+        dialect,
         albedo: None,
         lit,
         fringe: None,
