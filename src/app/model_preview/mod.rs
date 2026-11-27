@@ -86,6 +86,8 @@ pub(in crate::app) use panel::{
 };
 #[cfg(test)]
 pub(in crate::app) use panel::SETUP_PANEL_PADDING;
+#[cfg(test)]
+pub(in crate::app) use panel::snapshot_chevron_id;
 
 #[cfg(test)]
 use animation::PreviewAnimationPose;

@@ -733,6 +733,44 @@ fn dropdown_menu_button<R>(
     (response, inner)
 }
 
+/// A split button: `icon` and `label` on its main half, which does the
+/// button's own thing, and a chevron half joined to it that opens `contents`
+/// as a menu. Drawn in a right-to-left row, as the headers lay theirs out.
+/// Returns the main half's response, the chevron's, and what the menu
+/// returned, if open.
+pub(in crate::app) fn split_icon_dropdown_button<R>(
+    ui: &mut Ui,
+    icon: ButtonIcon,
+    label: &str,
+    enabled: bool,
+    contents: impl FnOnce(&mut Ui) -> R,
+) -> (egui::Response, egui::Response, Option<R>) {
+    let rounding = ui.visuals().widgets.inactive.corner_radius;
+    let outer = rounding.nw.max(rounding.ne);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        // Right to left: the chevron first, then the main half on its left.
+        let chevron = egui::Button::new("")
+            .min_size(Vec2::new(22.0, BUTTON_HEIGHT))
+            .corner_radius(egui::CornerRadius { nw: 0, sw: 0, ne: outer, se: outer });
+        let (chevron, menu) = dropdown_menu_button(ui, chevron, contents);
+        let rect = egui::Rect::from_center_size(chevron.rect.center(), Vec2::splat(BUTTON_ICON_SIZE));
+        paint_button_icon_at(ui, ButtonIcon::Down, rect, text_dark());
+        let image = button_icon_image(ui, icon, text_dark(), BUTTON_ICON_SIZE);
+        let main = ui.add_enabled(
+            enabled,
+            egui::Button::image_and_text(image, label)
+                .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
+                .corner_radius(egui::CornerRadius { nw: outer, sw: outer, ne: 0, se: 0 }),
+        );
+        // The seam between the halves.
+        let seam = egui::Rect::from_min_max(egui::pos2(chevron.rect.left(), chevron.rect.top() + 4.0), egui::pos2(chevron.rect.left(), chevron.rect.bottom() - 4.0));
+        ui.painter().vline(seam.left(), seam.y_range(), ui.visuals().widgets.noninteractive.bg_stroke);
+        (main, chevron, menu.map(|menu| menu.inner))
+    })
+    .inner
+}
+
 /// Shift only the popup anchor so its frame edge aligns with the real button.
 fn aligned_menu_custom_button<R>(
     ui: &mut Ui,

@@ -6217,8 +6217,10 @@ mod tests {
             h.painted_rects.iter().find(|(text, _)| text.trim() == needle).map(|(_, rect)| *rect)
         };
         let view = rect(&h, "View").expect("the View menu");
-        let scale = rect(&h, "1×").expect("the scale menu");
-        assert!(scale.left() > view.right() + 24.0, "room for the camera between: {view:?} {scale:?}");
+        let scale = rect(&h, "1×").expect("the camera, with its scale");
+        let chevron = h.ctx.data(|data| data.get_temp::<egui::Rect>(crate::app::model_preview::snapshot_chevron_id())).expect("its chevron");
+        assert!(scale.left() > view.right() + 16.0, "the camera right of View: {view:?} {scale:?}");
+        assert!(chevron.left() >= scale.right() && chevron.left() - scale.right() < 16.0, "one button: the chevron joined on its right");
         let id = h.app.model.kits[0].id;
         let key = h.app.views[id].caches.model_previews.keys().next().unwrap().clone();
         fn preview<'a>(h: &'a Harness, id: crate::app::kits::KitId, key: &str) -> &'a crate::app::model_preview::state::ModelPreviewState {
@@ -6226,8 +6228,8 @@ mod tests {
         }
         let points = preview(&h, id, &key).snapshot_source.as_ref().expect("the frame on screen kept").points;
 
-        // The camera, between the View menu and the scale menu.
-        h.click_at(egui::pos2(scale.left() - 18.0, scale.center().y));
+        // The camera half: the icon and its scale.
+        h.click_at(scale.center());
         let SnapshotPhase::Drawing(request) = &preview(&h, id, &key).snapshot else {
             panic!("asked for a snapshot")
         };
@@ -6244,12 +6246,12 @@ mod tests {
         // Past a gigabyte of image, the first press asks; the second copies.
         h.app.model.prefs.model_preview_snapshot_scale = 25.0;
         idle(&mut h);
-        let scale = rect(&h, "25×").expect("the scale menu at 25×");
-        h.click_at(egui::pos2(scale.left() - 18.0, scale.center().y));
+        let scale = rect(&h, "25×").expect("the camera at 25×");
+        h.click_at(scale.center());
         idle(&mut h);
         assert!(matches!(preview(&h, id, &key).snapshot, SnapshotPhase::Confirming(_)), "asks first");
         assert!(h.painted.iter().any(|text| text.contains("press the camera again")), "{:?}", h.painted);
-        h.click_at(egui::pos2(scale.left() - 18.0, scale.center().y));
+        h.click_at(scale.center());
         let SnapshotPhase::Drawing(request) = &preview(&h, id, &key).snapshot else {
             panic!("the second press copies")
         };
@@ -6268,12 +6270,20 @@ mod tests {
         let key = h.app.views[id].caches.model_previews.keys().next().unwrap().clone();
         let points = h.app.views[id].caches.model_previews[&key].snapshot_source.as_ref().unwrap().points;
         let ppp = h.ctx.pixels_per_point();
-        h.click("1×", 0);
-        idle(&mut h);
+        let open_menu = |h: &mut Harness| {
+            let chevron = h.ctx.data(|data| data.get_temp::<egui::Rect>(crate::app::model_preview::snapshot_chevron_id())).expect("the chevron");
+            h.click_at(chevron.center());
+            idle(h);
+        };
+        open_menu(&mut h);
         assert!(h.painted_contains("Snapshot scale"), "{:?}", h.painted);
+        let id_preview = h.app.views[id].caches.model_previews[&key].snapshot.busy();
+        assert!(!id_preview, "the chevron opens the menu; it copies nothing");
         let size = |scale: f32| [points.x, points.y].map(|edge| (edge * ppp * scale).round() as i32);
-        let [width, height] = size(1.0);
-        assert!(h.painted_contains(&format!("{width} × {height}")), "the size at 1×: {:?}", h.painted);
+        let shows = |h: &Harness, [width, height]: [i32; 2]| {
+            [width, height].iter().all(|edge| h.painted.iter().any(|text| text.trim() == edge.to_string()))
+        };
+        assert!(shows(&h, size(1.0)), "the size at 1×: {:?}", h.painted);
         let typed = |h: &mut Harness, text: &str| {
             let label = h.painted_rects.iter().find(|(painted, _)| painted.trim() == "Scale").map(|(_, rect)| *rect).unwrap();
             h.click_at(egui::pos2(label.right() + 40.0, label.center().y));
@@ -6284,16 +6294,45 @@ mod tests {
         };
         typed(&mut h, "25");
         assert_eq!(h.app.model.prefs.model_preview_snapshot_scale, 25.0, "past the slider, kept");
-        let [width, height] = size(25.0);
         if !h.painted_contains("Snapshot scale") {
-            h.click("25×", 0);
-            idle(&mut h);
+            open_menu(&mut h);
         }
-        assert!(h.painted.iter().any(|text| text.starts_with(&format!("{width} × {height}"))), "the size at 25×: {:?}", h.painted);
+        assert!(shows(&h, size(25.0)), "the size at 25×: {:?}", h.painted);
+        // The size boxes: a width typed sets the scale, the height following
+        // at the viewport's ratio; a height typed, the width.
+        let in_box = |h: &mut Harness, nth: usize, text: &str| {
+            if !h.painted_contains("Snapshot scale") {
+                open_menu(h);
+            }
+            let size = h.painted_rects.iter().find(|(painted, _)| painted.trim() == "Size").map(|(_, rect)| *rect).unwrap();
+            let times = h.painted_rects.iter().find(|(painted, rect)| painted.trim() == "×" && (rect.center().y - size.center().y).abs() < 6.0).map(|(_, rect)| *rect).unwrap();
+            let x = if nth == 0 { (size.right() + times.left()) / 2.0 } else { times.right() + 30.0 };
+            h.click_at(egui::pos2(x, size.center().y));
+            press_key(h, egui::Key::A, egui::Modifiers::COMMAND);
+            h.frame(vec![egui::Event::Text(text.to_owned())]);
+            press_key(h, egui::Key::Enter, egui::Modifiers::NONE);
+            idle(h);
+        };
+        let viewport = [points.x * ppp, points.y * ppp];
+        in_box(&mut h, 0, "2000");
+        let scale = h.app.model.prefs.model_preview_snapshot_scale;
+        assert!((scale - 2000.0 / viewport[0]).abs() < 1e-4, "the width sets the scale: {scale}");
+        assert!(h.painted.iter().any(|text| text.trim() == ((viewport[1] * scale).round() as i32).to_string()), "the height follows: {:?}", h.painted);
+        in_box(&mut h, 1, "500");
+        let scale = h.app.model.prefs.model_preview_snapshot_scale;
+        assert!((scale - 500.0 / viewport[1]).abs() < 1e-4, "the height sets the scale: {scale}");
+        assert!(h.painted.iter().any(|text| text.trim() == ((viewport[0] * scale).round() as i32).to_string()), "the width follows: {:?}", h.painted);
+        in_box(&mut h, 0, "12.5");
+        assert!(
+            (h.app.model.prefs.model_preview_snapshot_scale - scale).abs() < 1e-6,
+            "a fraction of a pixel refused: {} was {scale}",
+            h.app.model.prefs.model_preview_snapshot_scale
+        );
+        h.app.model.prefs.model_preview_snapshot_scale = 25.0;
+        idle(&mut h);
         for refused in ["0", "-2", "abc"] {
             if !h.painted_contains("Snapshot scale") {
-                h.click("25×", 0);
-                idle(&mut h);
+                open_menu(&mut h);
             }
             typed(&mut h, refused);
             assert_eq!(h.app.model.prefs.model_preview_snapshot_scale, 25.0, "{refused:?} refused");
