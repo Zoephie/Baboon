@@ -34,9 +34,12 @@ follows like a puppet, over the bind pose or over an animation.
 1. **Drag a joint (done).** A Pose toggle beside the armature toggle; a drag that starts on a joint
    turns the joint's parent so the joint follows the pointer across the plane through it facing the
    camera; Reset pose. Turns are kept in each node's parent frame, so they ride an animation.
-2. **Drag a chain.** A drag moves the joint with its chain above it (Blender's Auto IK), solved by
-   damped least squares over the chain's turns, stiffer toward the root; the chain length changed
-   with the wheel while dragging. Reach's and Halo 4's limbs by their graphs' IK chains.
+2. **Drag a chain (done).** A drag moves the joint with the chain above it (Blender's Auto IK): two
+   nodes to begin with, as the graphs' limb chains run effector to grandparent, the wheel adding or
+   taking one while dragging. FABRIK places the chain, straightening it toward a target out of reach;
+   each node then takes the least swing that lands its child, root first, adding no twist. Damped
+   least squares was tried first: it crawled near full extension, and with lighter damping it folded
+   the chain backward.
 3. **Joint limits.** The physics model's ragdoll and hinge limits held during the solve, with the
    axis meaning read from the game; joints without one stay free.
 4. **Pins and twist.** Pin joints the solve must hold (hands and feet planted while the body moves),

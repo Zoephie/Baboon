@@ -5,7 +5,7 @@
 use super::super::ui_kit::style::foundation_input_edge;
 use super::{
     MAX_PREVIEW_SCALE, ModelPreviewData, ModelPreviewState, PreviewCamera, armature_node_matrices,
-    armature_node_positions,
+    armature_node_positions, pose_beneath,
     build_frame, min_preview_scale, model_gl_failure, paint_model_gl, preview_background,
     preview_center_radius, preview_clock, unrotate_view_vector, viewport_wheel_zoom,
 };
@@ -55,7 +55,8 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
         state.focus[2] += moved[2];
     };
     state.pose.follow(data.geometry_id);
-    let posing = state.pose.on && pose_drag(ui, &response, data, state, rect);
+    let wheel = viewport_wheel_zoom(ui, &response);
+    let posing = state.pose.on && pose_drag(ui, &response, data, state, rect, wheel);
     if response.dragged_by(egui::PointerButton::Middle) {
         pan_world(state, response.drag_delta());
     } else if response.dragged_by(egui::PointerButton::Primary) && !posing {
@@ -67,7 +68,7 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
             state.pitch = (state.pitch + delta.y * 0.01).clamp(-1.45, 1.45);
         }
     }
-    if let Some(scroll) = viewport_wheel_zoom(ui, &response) {
+    if let Some(scroll) = wheel.filter(|_| !posing) {
         let least = min_preview_scale(&data.preview);
         let old_scale = state.scale.clamp(least, MAX_PREVIEW_SCALE);
         let new_scale = (old_scale * (scroll / 450.0).exp()).clamp(least, MAX_PREVIEW_SCALE);
@@ -203,7 +204,19 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
                 hovered = Some((index, joint, distance));
             }
         }
-        if let Some((index, position, _)) = hovered
+        // Dragging, the joint names itself and how many nodes above it turn.
+        if let Some(drag) = state.pose.dragging
+            && let (Some(&Some(position)), Some(node)) =
+                (projected.get(drag.joint), data.preview.nodes.get(drag.joint))
+        {
+            let turning = if state.pose.chain == 1 { "1 node".to_owned() } else { format!("{} nodes", state.pose.chain) };
+            draw_preview_hover_label(
+                &painter,
+                position + Vec2::new(7.0, -7.0),
+                &format!("{} · turning {turning} (scroll to change)", node.name),
+                ARMATURE_COLOR,
+            );
+        } else if let Some((index, position, _)) = hovered
             && let Some(node) = data.preview.nodes.get(index)
         {
             draw_preview_hover_label(
@@ -252,17 +265,19 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
 /// How near a joint, in points, a press must land to pick it while posing.
 const POSE_PICK_DISTANCE: f32 = 8.0;
 
-/// Pose mode's drag: one started on a joint drags it, turning its parent so
-/// it follows the pointer across the plane through it facing the camera.
-/// Whether a pose drag is under way, which the orbit then leaves alone.
+/// Pose mode's drag: one started on a joint carries it across the plane
+/// through it facing the camera, turning the chain above it; the wheel
+/// lengthens or shortens the chain meanwhile. Whether a pose drag is under
+/// way, which the orbit and zoom then leave alone.
 fn pose_drag(
     ui: &egui::Ui,
     response: &egui::Response,
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
     rect: egui::Rect,
+    wheel: Option<f32>,
 ) -> bool {
-    use super::pose::{PoseDrag, swing};
+    use super::pose::{PoseDrag, chain_above, reach};
     if response.drag_started_by(egui::PointerButton::Primary) {
         let camera = PreviewCamera::new(data, state, rect);
         let pointer = ui.input(|i| i.pointer.press_origin());
@@ -278,10 +293,9 @@ fn pose_drag(
                 .min_by(|a, b| a.1.total_cmp(&b.1))
                 .map(|(index, _)| index)
         });
-        state.pose.dragging = picked.and_then(|joint| {
+        state.pose.dragging = picked.map(|joint| {
             state.pose.selected = Some(joint);
-            let turned = usize::try_from(data.preview.nodes.get(joint)?.parent).ok()?;
-            Some(PoseDrag { joint, turned })
+            PoseDrag { joint }
         });
     }
     if !response.dragged_by(egui::PointerButton::Primary) {
@@ -291,22 +305,31 @@ fn pose_drag(
     let Some(drag) = state.pose.dragging else {
         return false;
     };
+    // The wheel lengthens or shortens the chain a node at a time.
+    if let Some(scrolled) = wheel {
+        state.pose.chain = if scrolled > 0.0 {
+            state.pose.chain + 1
+        } else {
+            state.pose.chain.saturating_sub(1).max(1)
+        };
+    }
     let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) else {
         return true;
     };
+    let chain = chain_above(&data.preview.nodes, drag.joint, state.pose.chain);
+    if chain.is_empty() {
+        return true;
+    }
+    // A chain longer than the joint has ancestors stops at the root.
+    state.pose.chain = state.pose.chain.min(chain.len());
     let camera = PreviewCamera::new(data, state, rect);
+    let base = pose_beneath(data, state);
     let matrices = armature_node_matrices(data, state);
-    let (Some(joint), Some(turned)) = (matrices.get(drag.joint), matrices.get(drag.turned)) else {
+    let Some(joint) = matrices.get(drag.joint) else {
         return true;
     };
-    let (joint, pivot) = (joint.translation(), turned.translation());
-    let target = camera.unproject_beside(pointer, joint);
-    if let Some(turn) = swing(pivot, joint, target) {
-        let parent = usize::try_from(data.preview.nodes[drag.turned].parent)
-            .ok()
-            .and_then(|parent| matrices.get(parent));
-        state.pose.turn_by(drag.turned, parent, turn);
-    }
+    let target = camera.unproject_beside(pointer, joint.translation());
+    reach(&data.preview.nodes, &base, &mut state.pose, drag.joint, &chain, target);
     true
 }
 
