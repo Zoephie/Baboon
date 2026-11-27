@@ -1778,7 +1778,8 @@ fn a_shipped_objects_bounding_sphere_holds_its_geometry() {
 
 /// Pose mode's gizmo, driven through the viewport: a click on a joint
 /// selects it; a drag that starts on its x arrow moves it along x alone,
-/// though the pointer strays across the arrow too.
+/// though the pointer strays across the arrow too; a click on empty space
+/// deselects it.
 #[test]
 fn a_drag_on_the_gizmos_x_arrow_moves_the_joint_along_x_alone() {
     use crate::app::model_preview::{PreviewCamera, RenderModelPreviewNode, armature_node_positions};
@@ -1867,4 +1868,10 @@ fn a_drag_on_the_gizmos_x_arrow_moves_the_joint_along_x_alone() {
     let moved = armature_node_positions(&data, &state)[2];
     assert!((moved[0] - hand[0]).abs() > 0.01, "moved along x: {moved:?}");
     assert!((moved[1] - hand[1]).abs() < 1e-3 && (moved[2] - hand[2]).abs() < 1e-3, "y and z held: {hand:?} → {moved:?}");
+    // A click on empty space lets the joint go.
+    let empty = rect.min + Vec2::new(12.0, 12.0);
+    slide(&mut frame, &mut state, to, empty);
+    frame(&mut state, vec![button(empty, true)]);
+    frame(&mut state, vec![button(empty, false)]);
+    assert_eq!(state.pose.selected, None, "a click on empty space deselects");
 }

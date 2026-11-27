@@ -326,12 +326,21 @@ fn pose_drag(
         state.pose.toggle_pin(joint, at);
         state.pose.selected = Some(joint);
     }
-    // A click on a joint selects it, putting the gizmo on it.
+    // A click on a joint selects it, putting the gizmo on it; anywhere else
+    // (but the gizmo's own handles) lets it go.
     if response.clicked()
         && let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
-        && let Some(joint) = joint_at(state, pointer)
     {
-        state.pose.selected = Some(joint);
+        let on_handle = state.pose.selected.is_some_and(|joint| {
+            let camera = PreviewCamera::new(data, state, rect);
+            armature_node_positions(data, state)
+                .get(joint)
+                .and_then(|&at| pose_gizmo::PoseGizmo::at(&camera, at))
+                .is_some_and(|gizmo| gizmo.hit(pointer).is_some())
+        });
+        if !on_handle {
+            state.pose.selected = joint_at(state, pointer);
+        }
     }
     if response.drag_started_by(egui::PointerButton::Primary) {
         let pointer = ui.input(|i| i.pointer.press_origin());

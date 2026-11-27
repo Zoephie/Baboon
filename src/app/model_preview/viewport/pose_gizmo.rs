@@ -78,7 +78,9 @@ impl PoseGizmo {
     /// The handle under `pointer`: a plane square first, as they lie
     /// between the arrows, then the nearest arrow.
     pub(super) fn hit(&self, pointer: Pos2) -> Option<Lock> {
-        if let Some(normal) = (0..3).find(|&normal| inside(&self.squares[normal], pointer)) {
+        if let Some(normal) =
+            (0..3).find(|&normal| self.shown(normal) && inside(&self.squares[normal], pointer))
+        {
             return Some(Lock::Plane(normal));
         }
         (0..3)
@@ -93,7 +95,7 @@ impl PoseGizmo {
 
     /// Paint it, `lit` the handle under the pointer or in use.
     pub(super) fn draw(&self, painter: &egui::Painter, lit: Option<Lock>) {
-        for normal in 0..3 {
+        for normal in (0..3).filter(|&normal| self.shown(normal)) {
             let color = if lit == Some(Lock::Plane(normal)) {
                 LIT
             } else {
@@ -134,6 +136,30 @@ impl PoseGizmo {
             ));
         }
     }
+}
+
+/// A plane square's least area on screen, in square points, to be drawn
+/// and taken (face on it is about 200): seen nearer edge on it is a sliver,
+/// whose outline's sharp corners egui mitres far out along the sliver, at
+/// 3 square points clean across the picture.
+const SQUARE_AREA: f32 = 40.0;
+
+impl PoseGizmo {
+    /// Whether the plane square to axis `normal` faces the eye enough to show.
+    fn shown(&self, normal: usize) -> bool {
+        area(&self.squares[normal]) >= SQUARE_AREA
+    }
+}
+
+/// The area of the quad `corners` on screen (the shoelace formula).
+fn area(corners: &[Pos2; 4]) -> f32 {
+    let twice: f32 = (0..4)
+        .map(|index| {
+            let (a, b) = (corners[index], corners[(index + 1) % 4]);
+            a.x * b.y - b.x * a.y
+        })
+        .sum();
+    twice.abs() * 0.5
 }
 
 /// Whether `point` lies in the convex quad `corners`, either winding.
@@ -207,5 +233,22 @@ mod tests {
             "the joint's own dot drags freely"
         );
         assert_eq!(gizmo.hit(Pos2::new(60.0, 160.0)), None);
+    }
+
+    /// A plane seen edge on is neither drawn nor taken: its square has
+    /// collapsed to a sliver.
+    #[test]
+    fn a_plane_seen_edge_on_is_left_out() {
+        let mut gizmo = gizmo();
+        assert!(gizmo.shown(1));
+        // Clear of the arrows, so only the square could take a press there.
+        gizmo.squares[1] = [
+            Pos2::new(117.0, 60.0),
+            Pos2::new(131.0, 60.2),
+            Pos2::new(131.0, 60.4),
+            Pos2::new(117.0, 60.2),
+        ];
+        assert!(!gizmo.shown(1));
+        assert_eq!(gizmo.hit(Pos2::new(124.0, 60.2)), None);
     }
 }
