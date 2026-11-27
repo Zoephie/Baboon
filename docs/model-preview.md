@@ -64,6 +64,12 @@ The arrow on its right opens a menu that sets the image's size as a **scale** of
 
 Heat haze, refraction and other effects that bend what is behind the model have nothing to bend over a transparent background, so they aren't in the image.
 
+## Decorator sets
+
+A Halo 3 or ODST `.decorator_set` opens in a **Decorator Set** preview. A level bakes where its decorators stand and how they are lit, so a set on its own has neither: the preview stands its types on a 4-unit patch of flat ground, 250 tries' worth, filled the way the game's brush fills one. Each decorator gets a type (by its placement weight, where the game has one), a spot kept its type's minimum distance from the others of its type, a random spin if the type rotates at random, and a tilt, hover and scale from the type's ranges. The patch is the same every time it opens. The ground is flat, so *align to normal* changes nothing, and *align random* and *rotate x axis down* aren't applied yet.
+
+Each type is a region of its own in the sidebar. A type whose mesh its render model no longer has draws nothing, as in the game, and the footer says which. For now the set draws in Solid and Textured: its texture, cut out by its alpha. A two-sided set draws each face's back too. Game Shaders, the wind, and the set's own cards come next; see `docs/decorator-preview-plan.md`.
+
 ## The footer
 
 The footer counts the model's own vertices and triangles, leaving out the collision, physics and imposter geometry drawn with it. While **LOD Model** is ticked it counts the LOD model's instead. When part of the preview was left out, or a material drew without its textures, it says so there; hover the note for why.

@@ -55,6 +55,8 @@ pub(crate) struct RenderModelPreview {
     pub instances: RenderModelInstances,
     /// Antennas, on the markers of the opened object.
     pub antennas: Vec<antennas::Antenna>,
+    /// An opened decorator set, whose placements its batches bake.
+    pub decorators: Option<Arc<super::decorators::DecoratorSet>>,
     /// Halo 2's own features.
     pub h2: h2::H2Features,
     /// What more than one gen3 game shares.

@@ -1,0 +1,89 @@
+//! Decorator sets: the grass, flowers and rocks a level scatters by the
+//! thousand, previewed on a patch of ground of their own.
+//!
+//! Halo 3, ODST, Reach and Halo 4 share one design. A set names a render
+//! model whose one mesh holds a subpart per decorator type, a texture that is
+//! its only material, and the explicit shader its `render shader` chooses.
+//! The game draws each type as one strip, instanced per placement.
+//!
+//! A level bakes where its decorators stand and how they are lit, so a set on
+//! its own has neither. The preview lays them out the way the game's brush
+//! does ([`layout`]), from the ranges each type gives. See
+//! `docs/decorator-preview-plan.md`.
+//!
+//! Every flag and enum is read by its option name from the tag's own layout.
+//! Layouts add and drop options: the newer Halo 3 maps' sets have a third
+//! render flag, and Reach renamed every `render shader` option.
+
+mod bake;
+mod layout;
+mod material;
+mod read;
+mod shader;
+
+pub(in crate::app::model_preview) use bake::bake_placements;
+pub(in crate::app::model_preview) use layout::{Layout, scatter};
+pub(in crate::app::model_preview) use material::resolve_decorator_material;
+pub(in crate::app::model_preview) use read::read_decorator_set;
+
+#[cfg(test)]
+mod tests;
+
+/// A decorator set, as the preview draws it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DecoratorSet {
+    /// `render two sided`: drawn with no culling.
+    pub two_sided: bool,
+    pub types: Vec<DecoratorType>,
+    /// Each type's mesh, by type.
+    pub meshes: Vec<DecoratorMesh>,
+    /// Where the preview stands each decorator.
+    pub placements: Vec<Placement>,
+}
+
+/// One `decorator types` element: which mesh it draws, and the ranges the
+/// brush picks each placement's look from.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DecoratorType {
+    /// The render model instance placement its `mesh` names.
+    pub mesh_name: String,
+    pub random_rotation: bool,
+    pub scale: [f32; 2],
+    /// In degrees.
+    pub tilt: [f32; 2],
+    pub wind: [f32; 2],
+    /// `color 0`, `color 1` and `color 2`, which a placement mixes.
+    pub colors: [[f32; 3]; 3],
+    pub ground_tint: [f32; 2],
+    pub hover: [f32; 2],
+    pub minimum_distance: f32,
+    /// Reach's and Halo 4's `placement weight`; Halo 3's types have none, and
+    /// are picked evenly.
+    pub placement_weight: Option<f32>,
+}
+
+/// One type's mesh: its subpart of the render model's decorator mesh, as a
+/// triangle list.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DecoratorMesh {
+    pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    pub texcoords: Vec<[f32; 2]>,
+    pub indices: Vec<u32>,
+}
+
+/// One decorator stood on the ground, as the game's placement keeps it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Placement {
+    pub type_index: usize,
+    pub position: [f32; 3],
+    /// A unit quaternion, `[x, y, z, w]`.
+    pub rotation: [f32; 4],
+    pub scale: f32,
+    /// How far the wind moves it, from the type's wind range.
+    pub motion: f32,
+    /// The type's three colours mixed at random.
+    pub tint: [f32; 3],
+    /// How far its colour leans toward the ground's.
+    pub ground_tint: f32,
+}

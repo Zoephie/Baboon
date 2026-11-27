@@ -427,6 +427,9 @@ pub(in crate::app::model_preview) fn resolve_own_shader(
     material: &RenderModelPreviewMaterial,
     caches: &mut ResolveCaches,
 ) -> Option<MaterialTextures> {
+    if group == super::DECORATOR_SET_GROUP {
+        return Some(super::super::decorators::resolve_decorator_material(reader, shader, caches));
+    }
     if group == *b"mat " {
         return Some(super::super::h4::materials::resolve_h4_material(
             reader, shader, caches,

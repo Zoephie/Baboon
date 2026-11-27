@@ -27,6 +27,8 @@ pub(in crate::app::model_preview) use guard::{feature, feature_into};
 mod detail;
 mod stand_in;
 mod imposter;
+mod decorators;
+pub(in crate::app::model_preview) use decorators::DECORATOR_SET_GROUP;
 pub(in crate::app) use stand_in::StandIn;
 pub(in crate::app) use detail::DetailLevels;
 mod render_model;
@@ -95,6 +97,10 @@ fn load_tag_preview(
     }
     if &group == b"impo" {
         return imposter::load_imposter_tag(model_tag, entry);
+    }
+    if group == DECORATOR_SET_GROUP {
+        let layout = super::decorators::Layout::default();
+        return decorators::load_decorator_set(model_tag, entry, names, reader, layout);
     }
     if let Some(result) = load_own_object(model_tag, entry, reader, settings) {
         return result;

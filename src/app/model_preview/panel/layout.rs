@@ -481,6 +481,7 @@ pub(in crate::app) fn preview_panel_title(group_tag: u32) -> &'static str {
         b"phmo" => "Physics Model",
         b"sbsp" => "Structure BSP",
         b"scnr" => "Scenario Geometry",
+        b"dctr" => "Decorator Set",
         _ => "Model Preview",
     }
 }

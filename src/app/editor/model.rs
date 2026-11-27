@@ -93,6 +93,7 @@ pub(in crate::app) fn is_previewable_geometry_group(group_tag: u32, names: &TagN
                 (b"sbsp", "scenario_structure_bsp"),
                 (b"scnr", "scenario"),
                 (b"impo", "imposter_model"),
+                (b"dctr", "decorator_set"),
             ],
         )
 }

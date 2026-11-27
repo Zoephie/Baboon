@@ -221,13 +221,12 @@ the later games, the shader is fixed and the only material is the texture.
    - Sapien's colour formula and RGB565 truncation, over a stand-in lightmap level and ground
      colour;
    - its lattice and density for the Scatter layout, one type per patch.
-8. **Definitions fixes:**
-   - Halo 3's decorator type flags lack bit 2 ("don't render on low settings", used by 6 kit
-     tags).
-   - Halo 2's `scenario_decorators_resource` groups call byte 1 `decorator_type` and byte 2
-     `shader index`; they are the class and permutation index.
-
-   Edited in the group JSON directly.
+8. **Options by name, never by number.** Tags carry their own layouts, and layouts add and drop
+   options (the newer Halo 3 maps' sets have a third render flag, "don't render on low settings";
+   type flag bits differ between layouts). Every flag and enum is read by its option name from the
+   tag's own layout (`has_flag`, `read_enum_name`), `render shader` into a typed variant by name.
+   An unknown name gets a notice, not a guess. So no definitions change is needed; Halo 2's
+   `groups` bytes 1 and 2 are the class and permutation index whatever the tool calls them.
 9. **Docs and tests.**
    - A shot test per game over kit sets, in each variant: wind moving with time, wavy, shaded,
      LOD stipple, a Halo 2 sprite and decal set, and a CE grass collection.
