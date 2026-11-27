@@ -9,6 +9,7 @@ use super::super::{
     RenderModelPreviewRegion, RenderModelPreviewVertex,
 };
 use super::DecoratorSet;
+use super::halo2::{bake_halo_2, scatter_halo_2};
 use super::layout::rotate;
 use super::layout::{Layout, scatter};
 use std::sync::Arc;
@@ -126,11 +127,22 @@ pub(in crate::app::model_preview) fn relayout(data: &mut ModelPreviewData, layou
     };
     let mut set = (**set).clone();
     set.layout = layout;
-    set.placements = scatter(&set, layout);
-    let Some(material) = data.preview.materials.first().cloned() else {
-        return;
+    let mut preview = match set.halo2.take() {
+        Some(halo2) => {
+            let mut halo2 = (*halo2).clone();
+            halo2.records = scatter_halo_2(&halo2, layout);
+            let preview = bake_halo_2(&halo2);
+            set.halo2 = Some(Arc::new(halo2));
+            preview
+        }
+        None => {
+            set.placements = scatter(&set, layout);
+            let Some(material) = data.preview.materials.first().cloned() else {
+                return;
+            };
+            bake_placements(&set, material)
+        }
     };
-    let mut preview = bake_placements(&set, material);
     preview.game = data.preview.game;
     preview.generation = data.preview.generation;
     preview.decorators = Some(Arc::new(set));

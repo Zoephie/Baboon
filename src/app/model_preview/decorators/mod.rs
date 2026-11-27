@@ -17,6 +17,7 @@
 
 mod bake;
 mod gpu;
+mod halo2;
 mod instances;
 mod layout;
 mod material;
@@ -27,6 +28,9 @@ mod wind;
 pub(in crate::app::model_preview) use bake::{PERMUTATION, bake_placements, relayout, type_name};
 pub(in crate::app::model_preview) use gpu::{
     DecoratorBuffers, INSTANCE_ATTRIBUTES, decorator_value,
+};
+pub(in crate::app::model_preview) use halo2::{
+    bake_halo_2, halo_2_type_name, read_halo_2_set, scatter_halo_2,
 };
 pub(in crate::app::model_preview) use layout::{Layout, scatter};
 pub(in crate::app::model_preview) use material::resolve_decorator_material;
@@ -62,6 +66,9 @@ pub(crate) struct DecoratorSet {
     pub meshes: Vec<DecoratorMesh>,
     /// The patch [`Self::placements`] fill.
     pub layout: Layout,
+    /// A Halo 2 set's own: its classes, models and placements. Its types
+    /// are its permutations, which [`Self::types`] names alone.
+    pub halo2: Option<std::sync::Arc<halo2::Halo2Set>>,
     /// Where the preview stands each decorator.
     pub placements: Vec<Placement>,
 }
@@ -117,6 +124,33 @@ impl DecoratorSet {
     /// Whether its shader moves it on the clock: the wind's, or the waves'.
     pub(crate) fn moves(&self) -> bool {
         self.shader.is_some_and(DecoratorShader::moves)
+    }
+
+    /// How many of type `index` the patch stands.
+    pub(crate) fn placed(&self, index: usize) -> usize {
+        match &self.halo2 {
+            Some(set) => set
+                .records
+                .iter()
+                .filter(|record| set.type_index(record.class, record.permutation) == index)
+                .count(),
+            None => self
+                .placements
+                .iter()
+                .filter(|placement| placement.type_index == index)
+                .count(),
+        }
+    }
+
+    /// Whether type `index` has anything to draw.
+    pub(crate) fn draws_type(&self, index: usize) -> bool {
+        match &self.halo2 {
+            Some(set) => set.draws(index),
+            None => self
+                .meshes
+                .get(index)
+                .is_some_and(|mesh| !mesh.indices.is_empty()),
+        }
     }
 
     /// The type a batch's region names ([`bake::type_name`]).

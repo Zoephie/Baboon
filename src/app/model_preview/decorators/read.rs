@@ -79,6 +79,7 @@ pub(in crate::app::model_preview) fn read_decorator_set(
         types,
         meshes,
         layout: Default::default(),
+        halo2: None,
         placements: Vec::new(),
     })
 }

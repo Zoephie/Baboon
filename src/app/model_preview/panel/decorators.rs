@@ -66,6 +66,19 @@ fn type_region(set: &DecoratorSet, index: usize) -> String {
 /// What the set draws with, a row each: its shader, its sides, its texture
 /// and the wind it sways in.
 fn draw_set_rows(ui: &mut Ui, set: &DecoratorSet) {
+    // Halo 2's permutations each name a shader of the set's, and nothing sways.
+    if let Some(halo2) = &set.halo2 {
+        let classes = halo2.classes.len().to_string();
+        let mut rows = vec![("Classes", classes.as_str())];
+        rows.extend(
+            halo2
+                .shaders
+                .iter()
+                .map(|shader| ("Shader", shader.as_str())),
+        );
+        draw_rows(ui, &rows);
+        return;
+    }
     let shader = set.shader.map_or("unknown", |shader| shader.name());
     let wind = match (
         &set.wind,
@@ -83,13 +96,19 @@ fn draw_set_rows(ui: &mut Ui, set: &DecoratorSet) {
     if let Some(wind) = wind {
         rows.push(("Wind", wind));
     }
+    draw_rows(ui, &rows);
+}
+
+/// A row per `(name, value)`, the value cut short with its whole self on
+/// hover.
+fn draw_rows(ui: &mut Ui, rows: &[(&str, &str)]) {
     let width = name_column_width(
         ui,
         rows.iter().map(|(name, _)| *name),
         ui.available_width().max(1.0),
     );
     let mut card = CardRows::default();
-    for (name, value) in rows {
+    for &(name, value) in rows {
         card.row(ui, |ui| {
             name_cell(ui, name, width);
             ui.add(
@@ -114,15 +133,8 @@ fn draw_type_rows(ui: &mut Ui, set: &DecoratorSet, state: &mut ModelPreviewState
     );
     let mut rows = CardRows::default();
     for (index, name) in names.iter().enumerate() {
-        let placed = set
-            .placements
-            .iter()
-            .filter(|placement| placement.type_index == index)
-            .count();
-        let drawn = set
-            .meshes
-            .get(index)
-            .is_some_and(|mesh| !mesh.indices.is_empty());
+        let placed = set.placed(index);
+        let drawn = set.draws_type(index);
         let selection = state
             .region_selections
             .entry(name.clone())

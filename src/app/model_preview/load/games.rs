@@ -445,9 +445,15 @@ pub(in crate::app::model_preview) fn resolve_own_shader(
                 caches,
             ))
         }
-        blam_tags::game::Game::Halo2 if group == *b"shad" => Some(
-            super::super::h2::shader::resolve::resolve_h2_shader(reader, shader, caches),
-        ),
+        blam_tags::game::Game::Halo2 if group == *b"shad" => {
+            let mut textures = super::super::h2::shader::resolve::resolve_h2_shader(reader, shader, caches);
+            // `decorator_tex` alpha-tests its base map at 128, and the decal
+            // templates blend by its alpha: a decorator cuts out on it.
+            if material.h2.decorator && textures.slots[super::super::TextureSlot::AlphaTest as usize].is_none() {
+                textures.slots[super::super::TextureSlot::AlphaTest as usize] = textures.slots[super::super::TextureSlot::Base as usize].clone();
+            }
+            Some(textures)
+        }
         _ => None,
     }
 }

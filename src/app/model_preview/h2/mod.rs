@@ -28,6 +28,8 @@ pub(crate) struct H2MaterialLook {
     /// Which of a model's damage or hologram shaders this is, drawn from no
     /// batch of its own while the object says so.
     pub shield: Option<super::dx9::passes::Dx9Layer>,
+    /// A decorator set's shader, which cuts out on its base map's alpha.
+    pub decorator: bool,
 }
 
 impl super::RenderModelPreviewMaterial {

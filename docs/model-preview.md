@@ -76,6 +76,8 @@ The sidebar has three cards in place of Permutations:
 - **Types**: a row per type, ticked to show it, with how many the patch stands. A type whose mesh its render model no longer has draws nothing, as in the game, and says so.
 - **Layout**: the patch's edge in world units, how many decorators it tries to stand (any number; past 100,000 it warns that it's slow), and its seed. A change lays the patch out again at once. Fewer fit than asked where types keep their distance, and the card says how many did.
 
+A Halo 2 `.decorator_set` opens the same way, but its decorators are its classes' permutations: models of the set's own, sprite quads, and decals on the ground, each drawn with one of the set's `shaders`. The preview stands each as the game keeps it, in a record of a few bits each for its yaw, tint and scale and its place in an 8-unit cell, and builds it from those bits as the game's cache builder does: a quad's sprite is picked from its sequence by its place and tint, as in game. A permutation is picked by its distribution weight. A permutation whose scale range is 0 draws nothing, as in the game. For now Halo 2's sets draw in Solid and Textured, cut out on their base map's alpha; the screen-facing and axis-rotating quads, which turn toward the viewer in game, face one way (as for an eye looking along +Y), and a projected decal lies flat as a floating one does. The Decorator Set card lists its classes and shaders; Types lists its permutations.
+
 The game fades decorators out with distance; the preview doesn't yet. See `docs/decorator-preview-plan.md` for what comes next.
 
 ## The footer

@@ -251,7 +251,10 @@ See the proposals that accompany this plan.
 - Halo 4: Game Shaders through each `explicit_shaders\decorators\*.material_shader`'s own
   source, its `RGBk` output decoded and exposed as its other passes are; positions at the vertex
   compression's constant scale of 5 (`|q|² = scale / 5`). LODs, decimation and stipple as Reach.
-- Halo 2, Halo CE: to do.
+- Halo 2: loader, records and geometry as the cache builder builds them, Solid/Textured with the
+  `shad`s cut out on their base map. Game Shaders (the decorator vertex shaders' HLSL as a new DX9
+  vertex stage, the colour formula into D0/`c207`) to do.
+- Halo CE: to do.
 
 ## Seen in the preview, not yet explained
 
