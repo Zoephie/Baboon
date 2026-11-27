@@ -440,7 +440,7 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
     }
     apply_layer_actions(state, &drawn);
     if has_armature {
-        draw_pose_toggle(ui, state);
+        draw_pose_toggle(ui, state, !data.preview.joint_limits.is_empty());
     }
     if state.overlays_pending && (state.show_collision || state.show_physics) {
         ui.spinner();
@@ -450,10 +450,16 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
 
 /// Pose mode, which drags joints rather than orbiting when a drag starts on
 /// one, and once anything is posed, the button that undoes it.
-fn draw_pose_toggle(ui: &mut Ui, state: &mut ModelPreviewState) {
+fn draw_pose_toggle(ui: &mut Ui, state: &mut ModelPreviewState, limited: bool) {
     ui.selectable_label(state.pose.on, "Pose").on_hover_text(
         "Drag a joint to pose the skeleton, over the bind pose or the animation playing.\nDragging anywhere else still orbits.",
     ).clicked().then(|| state.pose.on = !state.pose.on);
+    if state.pose.on && limited {
+        ui.selectable_label(state.pose.limits, "Limits")
+            .on_hover_text("Keep the joints the physics model limits (shoulders, hips, elbows, knees, head) within their ragdoll limits")
+            .clicked()
+            .then(|| state.pose.limits = !state.pose.limits);
+    }
     if state.pose.is_posed() && ui.button("Reset pose").on_hover_text("Undo every joint posed by hand").clicked() {
         state.pose.reset();
     }

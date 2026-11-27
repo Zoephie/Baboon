@@ -24,7 +24,7 @@ follows like a puppet, over the bind pose or over an animation.
   (and Halo 4's physics models) carry them; the stock Chief, Elite and Spartan each have 5 ragdolls
   (head, shoulders, hips) and 4 limited hinges (elbows, knees). blam-tags already reads them
   (`JmsRagdoll`, `JmsHinge`). Their nodes map to the render model's by name, as the game's model node
-  maps do. Still to read from the game: which frame axis is the twist, the cone and the plane.
+  maps do.
 - **IK chains: Reach's and Halo 4's graphs** name their own (`right_arm`, `left_arm`, `right_leg`,
   `left_leg`, start node to effector node). Halo 2's and Halo 3's graphs name none.
 - **The two-bone solver** the preview already runs for weapon IK (`two_bone_ik`, the game's).
@@ -40,8 +40,16 @@ follows like a puppet, over the bind pose or over an animation.
    each node then takes the least swing that lands its child, root first, adding no twist. Damped
    least squares was tried first: it crawled near full extension, and with lighter damping it folded
    the chain backward.
-3. **Joint limits.** The physics model's ragdoll and hinge limits held during the solve, with the
-   axis meaning read from the game; joints without one stay free.
+3. **Joint limits (done).** The physics model's ragdoll and limited hinge constraints, read by name
+   and their nodes matched to the render model's by name, held after each placing (a few rounds of
+   placing and holding each drag event); a Limits toggle beside Pose. As
+   `c_havok_component::create_constraint` (Halo 3 0x1803206F0, Ares `havok_component.cpp`) builds
+   them: a frame's columns are forward, left, up (`hkTransform_from_matrix4x3`); a ragdoll's twist
+   axis is forward and its plane axis left, its twist range as the tag has it, its cone the larger of
+   `min cone` and `max cone`, its plane range negated; a limited hinge turns about up from left, its
+   range negated. The tag holds degrees. The ragdolls' `node a` is the pelvis (the torso is one rigid
+   body in a ragdoll), so a bent spine counts against the shoulders and head. Joints with no
+   constraint (spine, wrists, fingers) stay free.
 4. **Pins and twist.** Pin joints the solve must hold (hands and feet planted while the body moves),
    a ring to twist a joint about its bone, and moving the root.
 
@@ -51,3 +59,11 @@ FABRIK (Aristidou & Lasenby) works in joint positions and needs a twist rule whe
 rotations; CCD favours the joints nearest the effector; damped least squares (Buss) handles several
 effectors and unreachable targets stably and takes per-joint weights. Blender's Auto IK sets the
 chain by length while dragging; Unreal's Full Body IK is position-based with per-bone stiffness.
+
+## Not settled
+
+- The sign of a ragdoll joint's plane angle in Havok's terms: the preview measures it as the twist
+  axis's angle toward the left axis, its range negated as the game negates it. The hinge's sign is
+  checked against the Chief's elbow, which bends forward to its limit; the plane's has no such check.
+- Halo 2's, Reach's and Halo 4's constraint builds: only Halo 3's was read. Their tags share the
+  field names and hold the same degree ranges.

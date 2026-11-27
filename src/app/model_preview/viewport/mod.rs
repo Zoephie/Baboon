@@ -277,7 +277,7 @@ fn pose_drag(
     rect: egui::Rect,
     wheel: Option<f32>,
 ) -> bool {
-    use super::pose::{PoseDrag, chain_above, reach};
+    use super::pose::{PoseDrag, chain_above, reach, resolve_limits};
     if response.drag_started_by(egui::PointerButton::Primary) {
         let camera = PreviewCamera::new(data, state, rect);
         let pointer = ui.input(|i| i.pointer.press_origin());
@@ -329,7 +329,12 @@ fn pose_drag(
         return true;
     };
     let target = camera.unproject_beside(pointer, joint.translation());
-    reach(&data.preview.nodes, &base, &mut state.pose, drag.joint, &chain, target);
+    let limits = if state.pose.limits {
+        resolve_limits(&data.preview.nodes, &data.preview.joint_limits)
+    } else {
+        Vec::new()
+    };
+    reach(&data.preview.nodes, &base, &mut state.pose, drag.joint, &chain, target, &limits);
     true
 }
 

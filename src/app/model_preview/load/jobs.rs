@@ -301,6 +301,7 @@ impl Baboon {
             }
             if let Some(overlay) = &physics {
                 merge_preview_append(&mut merged, overlay);
+                merged.joint_limits = overlay.joint_limits.clone();
             }
             data.preview = Arc::new(merged);
             data.mesh_id = NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed);

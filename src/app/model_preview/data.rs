@@ -50,6 +50,8 @@ pub(crate) struct RenderModelPreview {
     /// Where a held weapon pulls the unit's hands, in every game that holds
     /// weapons.
     pub weapon_ik: Vec<crate::app::model_preview::animation::ik::weapon::WeaponIk>,
+    /// The physics model's joint limits, which posing by hand keeps to.
+    pub joint_limits: Vec<crate::app::model_preview::pose::JointLimit>,
     pub particles: Vec<Arc<particles::ParticleSystem>>,
     pub cloth: Vec<cloth::ClothAt>,
     pub instances: RenderModelInstances,
