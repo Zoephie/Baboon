@@ -218,11 +218,29 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
                 .and_then(|joint| positions.get(joint))
                 .and_then(|&joint| pose_gizmo::PoseGizmo::at(&camera, joint))
         {
-            let lit = match state.pose.dragging {
-                Some(drag) => drag.lock,
-                None => hover_pos.and_then(|pos| gizmo.hit(pos)),
-            };
-            gizmo.draw(&painter, lit);
+            match state.pose.gizmo {
+                super::pose::GizmoMode::Move => {
+                    let lit = match state.pose.dragging {
+                        Some(drag) => drag.lock,
+                        None => hover_pos.and_then(|pos| gizmo.hit(pos)),
+                    };
+                    gizmo.draw(&painter, lit);
+                }
+                super::pose::GizmoMode::Rotate => {
+                    if let Some(rings) = state
+                        .pose
+                        .selected
+                        .and_then(|joint| positions.get(joint))
+                        .and_then(|&joint| pose_gizmo::PoseRings::at(&camera, joint))
+                    {
+                        let lit = match state.pose.dragging {
+                            Some(drag) => drag.ring.map(|ring| ring.axis),
+                            None => hover_pos.and_then(|pos| rings.hit(pos)).map(|hit| hit.axis),
+                        };
+                        rings.draw(&painter, lit);
+                    }
+                }
+            }
         }
         // Dragging, the joint names itself and how many nodes above it turn.
         if let Some(drag) = state.pose.dragging
@@ -282,6 +300,23 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
     keep_snapshot_source(ui, state, shown, rect, painter.layer_id(), helpers_from);
 }
 
+/// A gizmo handle a press takes.
+enum Handle {
+    Move(super::pose::Lock),
+    /// A ring, and its radius on screen.
+    Ring(pose_gizmo::RingHit, f32),
+}
+
+/// The handle of `mode`'s gizmo about `joint` under `pointer`.
+fn gizmo_handle(camera: &PreviewCamera, mode: super::pose::GizmoMode, joint: [f32; 3], pointer: egui::Pos2) -> Option<Handle> {
+    match mode {
+        super::pose::GizmoMode::Move => pose_gizmo::PoseGizmo::at(camera, joint)?.hit(pointer).map(Handle::Move),
+        super::pose::GizmoMode::Rotate => pose_gizmo::PoseRings::at(camera, joint)?
+            .hit(pointer)
+            .map(|hit| Handle::Ring(hit, pose_gizmo::RING)),
+    }
+}
+
 /// A pinned joint's ring.
 const PIN_COLOR: Color32 = Color32::from_rgb(255, 140, 40);
 
@@ -303,7 +338,7 @@ fn pose_drag(
     rect: egui::Rect,
     wheel: Option<f32>,
 ) -> bool {
-    use super::pose::{PoseDrag, chain_above, hold_pins, reach, reach_held, resolve_limits, twist};
+    use super::pose::{PoseDrag, RingGrab, chain_above, hold_pins, reach, reach_held, resolve_limits, rotate, twist};
     let joint_at = |state: &ModelPreviewState, pointer: egui::Pos2| {
         let camera = PreviewCamera::new(data, state, rect);
         armature_node_positions(data, state)
@@ -335,8 +370,7 @@ fn pose_drag(
             let camera = PreviewCamera::new(data, state, rect);
             armature_node_positions(data, state)
                 .get(joint)
-                .and_then(|&at| pose_gizmo::PoseGizmo::at(&camera, at))
-                .is_some_and(|gizmo| gizmo.hit(pointer).is_some())
+                .is_some_and(|&at| gizmo_handle(&camera, state.pose.gizmo, at, pointer).is_some())
         });
         if !on_handle {
             state.pose.selected = joint_at(state, pointer);
@@ -348,21 +382,37 @@ fn pose_drag(
         let positions = armature_node_positions(data, state);
         // The selected joint's gizmo first: a handle locks the drag.
         let camera = PreviewCamera::new(data, state, rect);
-        let handle = state.pose.selected.filter(|_| !alt).and_then(|joint| {
-            let gizmo = pose_gizmo::PoseGizmo::at(&camera, *positions.get(joint)?)?;
-            Some((joint, gizmo.hit(pointer?)?))
-        });
+        let handle = state
+            .pose
+            .selected
+            .filter(|_| !alt)
+            .and_then(|joint| Some((joint, gizmo_handle(&camera, state.pose.gizmo, *positions.get(joint)?, pointer?)?)));
         state.pose.dragging = match handle {
-            Some((joint, lock)) => Some(PoseDrag {
+            Some((joint, Handle::Move(lock))) => Some(PoseDrag {
                 joint,
                 twist: false,
                 lock: Some(lock),
                 anchor: positions[joint],
                 held: positions[joint],
+                ring: None,
+            }),
+            Some((joint, Handle::Ring(hit, radius))) => Some(PoseDrag {
+                joint,
+                twist: false,
+                lock: None,
+                anchor: positions[joint],
+                held: positions[joint],
+                ring: pointer.map(|pointer| RingGrab {
+                    axis: hit.axis,
+                    press: [pointer.x, pointer.y],
+                    tangent: [hit.tangent.x, hit.tangent.y],
+                    radius,
+                    turned: 0.0,
+                }),
             }),
             None => pointer.and_then(|pointer| joint_at(state, pointer)).map(|joint| {
                 state.pose.selected = Some(joint);
-                PoseDrag { joint, twist: alt, lock: None, anchor: positions[joint], held: positions[joint] }
+                PoseDrag { joint, twist: alt, lock: None, anchor: positions[joint], held: positions[joint], ring: None }
             }),
         };
     }
@@ -383,7 +433,15 @@ fn pose_drag(
     if base.is_empty() {
         return true;
     }
-    if drag.twist {
+    if let Some(ring) = drag.ring {
+        if let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) {
+            let angle = ring.angle([pointer.x, pointer.y]);
+            rotate(nodes, &base, &mut state.pose, drag.joint, ring.axis, angle - ring.turned, &limits);
+            if let Some(grab) = state.pose.dragging.as_mut().and_then(|drag| drag.ring.as_mut()) {
+                grab.turned = angle;
+            }
+        }
+    } else if drag.twist {
         // A point across is a hundredth of a radian.
         let angle = response.drag_delta().x * 0.01;
         twist(nodes, &base, &mut state.pose, drag.joint, angle, &limits);

@@ -75,6 +75,12 @@ follows like a puppet, over the bind pose or over an animation.
    the chain and its limits can take the joint exactly (a search between the last point reached and
    the target), so a hand pulled up past its reach stops on the axis rather than swinging off it.
 
+6. **Rotate mode (done).** Move and Rotate beside Pose switch the selected joint's gizmo. In
+   Rotate it shows a ring per model axis (near halves over far); dragging round one turns the joint
+   about that axis, carrying what hangs below, its limit held and the pins after. The turn follows
+   the pointer's run along the ring's way round where it was taken, over the ring's radius, so a ring
+   seen edge on still turns. Alt-drag still twists about the bone.
+
 ## Research
 
 FABRIK (Aristidou & Lasenby) works in joint positions and needs a twist rule when turned back into

@@ -1,8 +1,9 @@
-//! Pose mode's move gizmo on the selected joint: an arrow per model axis
-//! (x forward red, y left green, z up blue) to drag the joint along that
-//! axis alone, and a square per plane between two of them to drag it within
-//! that plane. The joint itself still drags across the plane facing the
-//! camera.
+//! Pose mode's gizmo on the selected joint, in the model's axes (x forward
+//! red, y left green, z up blue). To move it: an arrow per axis to drag the
+//! joint along that axis alone, and a square per plane between two of them
+//! to drag it within that plane; the joint itself still drags across the
+//! plane facing the camera. To rotate it: a ring per axis, round which a
+//! drag turns the joint about that axis.
 
 use super::super::PreviewCamera;
 use super::super::pose::Lock;
@@ -162,6 +163,109 @@ fn area(corners: &[Pos2; 4]) -> f32 {
     twice.abs() * 0.5
 }
 
+/// A rotate ring's radius on screen, in points, whatever the zoom.
+pub(super) const RING: f32 = 60.0;
+/// Points round a ring, as it is drawn and taken.
+const RING_POINTS: usize = 64;
+/// How near a ring, in points, a press takes it.
+const RING_PICK: f32 = 6.0;
+
+/// The rotate gizmo as it lies on screen.
+pub(super) struct PoseRings {
+    /// Each axis's ring, its points in the order of a turn about the axis
+    /// from the right hand (`cos t · u + sin t · v`, `u × v` the axis).
+    rings: [Vec<Pos2>; 3],
+    /// Whether each ring's point lies on the near half of its ring, which
+    /// draws over the far half.
+    near: [Vec<bool>; 3],
+}
+
+/// A ring taken by a press: its axis, and its way round on screen there.
+pub(super) struct RingHit {
+    pub(super) axis: usize,
+    pub(super) tangent: Vec2,
+}
+
+impl PoseRings {
+    /// The rings about `joint`, seen through `camera`.
+    pub(super) fn at(camera: &PreviewCamera, joint: [f32; 3]) -> Option<Self> {
+        if !camera.project(joint).in_front {
+            return None;
+        }
+        let per_unit = camera.points_per_unit(joint);
+        if per_unit <= 1e-6 {
+            return None;
+        }
+        let radius = RING / per_unit;
+        let eye = camera.ray(camera.project(joint).pos).1;
+        let ring = |axis: usize| {
+            let (u, v) = ((axis + 1) % 3, (axis + 2) % 3);
+            (0..RING_POINTS)
+                .map(|index| {
+                    let t = std::f32::consts::TAU * index as f32 / RING_POINTS as f32;
+                    let mut point = joint;
+                    point[u] += radius * t.cos();
+                    point[v] += radius * t.sin();
+                    // Nearer the eye than the joint: on the near half.
+                    let toward: f32 = (0..3)
+                        .map(|axis| (point[axis] - joint[axis]) * eye[axis])
+                        .sum();
+                    (camera.project(point).pos, toward <= 0.0)
+                })
+                .unzip::<_, _, Vec<Pos2>, Vec<bool>>()
+        };
+        let [x, y, z] = [ring(0), ring(1), ring(2)];
+        Some(Self {
+            rings: [x.0, y.0, z.0],
+            near: [x.1, y.1, z.1],
+        })
+    }
+
+    /// The ring under `pointer`, the nearest, and its way round there.
+    pub(super) fn hit(&self, pointer: Pos2) -> Option<RingHit> {
+        let mut best: Option<(f32, usize, Vec2)> = None;
+        for (axis, ring) in self.rings.iter().enumerate() {
+            for index in 0..ring.len() {
+                let (a, b) = (ring[index], ring[(index + 1) % ring.len()]);
+                let distance = segment_distance(pointer, a, b);
+                if distance <= RING_PICK && best.is_none_or(|(closest, _, _)| distance < closest) {
+                    let way = b - a;
+                    if way.length() > 1e-3 {
+                        best = Some((distance, axis, way.normalized()));
+                    }
+                }
+            }
+        }
+        best.map(|(_, axis, tangent)| RingHit { axis, tangent })
+    }
+
+    /// Paint them, `lit` the ring under the pointer or in use: the far
+    /// halves faint beneath, the near halves over them.
+    pub(super) fn draw(&self, painter: &egui::Painter, lit: Option<usize>) {
+        for near in [false, true] {
+            for (axis, ring) in self.rings.iter().enumerate() {
+                let color = if lit == Some(axis) {
+                    LIT
+                } else {
+                    AXIS_COLORS[axis]
+                };
+                let color = if near {
+                    color
+                } else {
+                    color.gamma_multiply(0.35)
+                };
+                for index in 0..ring.len() {
+                    let next = (index + 1) % ring.len();
+                    if self.near[axis][index] != near || self.near[axis][next] != near {
+                        continue;
+                    }
+                    painter.line_segment([ring[index], ring[next]], Stroke::new(2.0_f32, color));
+                }
+            }
+        }
+    }
+}
+
 /// Whether `point` lies in the convex quad `corners`, either winding.
 fn inside(corners: &[Pos2; 4], point: Pos2) -> bool {
     let side = |a: Pos2, b: Pos2| (b - a).x * (point - a).y - (b - a).y * (point - a).x;
@@ -250,5 +354,49 @@ mod tests {
         ];
         assert!(!gizmo.shown(1));
         assert_eq!(gizmo.hit(Pos2::new(124.0, 60.2)), None);
+    }
+
+    /// A press on a ring takes its axis and the ring's way round there.
+    #[test]
+    fn a_press_takes_the_ring_under_it() {
+        // Seen down z: the z ring a circle, x and y edge on.
+        let circle: Vec<Pos2> = (0..RING_POINTS)
+            .map(|index| {
+                let t = std::f32::consts::TAU * index as f32 / RING_POINTS as f32;
+                Pos2::new(100.0 + 60.0 * t.cos(), 100.0 - 60.0 * t.sin())
+            })
+            .collect();
+        let line = |vertical: bool| -> Vec<Pos2> {
+            (0..RING_POINTS)
+                .map(|index| {
+                    let t = std::f32::consts::TAU * index as f32 / RING_POINTS as f32;
+                    if vertical {
+                        Pos2::new(100.0, 100.0 - 60.0 * t.sin())
+                    } else {
+                        Pos2::new(100.0 + 60.0 * t.cos(), 100.0)
+                    }
+                })
+                .collect()
+        };
+        let rings = PoseRings {
+            rings: [line(true), line(false), circle],
+            near: [
+                vec![true; RING_POINTS],
+                vec![true; RING_POINTS],
+                vec![true; RING_POINTS],
+            ],
+        };
+        // At 45° round, clear of the edge-on rings.
+        let hit = rings.hit(Pos2::new(142.4, 57.6)).expect("on the z ring");
+        assert_eq!(hit.axis, 2);
+        assert!(
+            hit.tangent.x < -0.6 && hit.tangent.y < -0.6,
+            "anticlockwise on screen there: up and left {:?}",
+            hit.tangent
+        );
+        assert!(
+            rings.hit(Pos2::new(130.0, 130.0)).is_none(),
+            "inside, clear of every ring"
+        );
     }
 }

@@ -40,6 +40,8 @@ pub(crate) struct PoseEdit {
     pub chain: usize,
     /// Whether the physics model's joint limits hold.
     pub limits: bool,
+    /// What the selected joint's gizmo does.
+    pub gizmo: GizmoMode,
     /// Each pinned joint and where it was pinned, in model space.
     pub pins: BTreeMap<usize, [f32; 3]>,
     /// How far the skeleton's roots are moved, in model space.
@@ -63,6 +65,44 @@ pub(crate) struct PoseDrag {
     pub anchor: [f32; 3],
     /// Where a locked drag last brought the joint, on its line or plane.
     pub held: [f32; 3],
+    /// The rotate gizmo's ring it was taken by, which turns it instead.
+    pub ring: Option<RingGrab>,
+}
+
+/// A rotate gizmo ring taken by a drag: the joint turns about its axis as
+/// the pointer runs along the ring from where it was taken.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RingGrab {
+    /// The model axis it turns about: 0 x, 1 y, 2 z.
+    pub axis: usize,
+    /// Where the pointer took the ring, on screen.
+    pub press: [f32; 2],
+    /// The ring's way round on screen at that point, unit length: the
+    /// pointer's run along it, over the ring's radius, is the turn.
+    pub tangent: [f32; 2],
+    /// The ring's radius on screen, in points.
+    pub radius: f32,
+    /// How far the drag has turned the joint so far, in radians.
+    pub turned: f32,
+}
+
+impl RingGrab {
+    /// The turn the drag asks for with the pointer at `pointer`, all told.
+    pub(crate) fn angle(&self, pointer: [f32; 2]) -> f32 {
+        let run = (pointer[0] - self.press[0]) * self.tangent[0]
+            + (pointer[1] - self.press[1]) * self.tangent[1];
+        run / self.radius.max(1.0)
+    }
+}
+
+/// What the selected joint's gizmo does.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum GizmoMode {
+    /// Arrows and squares that move it.
+    #[default]
+    Move,
+    /// Rings that turn it.
+    Rotate,
 }
 
 /// What a gizmo handle holds a dragged joint to, in model space.
@@ -133,6 +173,7 @@ impl Default for PoseEdit {
             dragging: None,
             chain: DEFAULT_CHAIN,
             limits: true,
+            gizmo: GizmoMode::Move,
             pins: BTreeMap::new(),
             offset: [0.0; 3],
             geometry: 0,
@@ -154,6 +195,7 @@ impl PoseEdit {
                 on: self.on,
                 chain: self.chain,
                 limits: self.limits,
+                gizmo: self.gizmo,
                 geometry,
                 ..Self::default()
             };
@@ -277,6 +319,35 @@ pub(crate) fn twist(
         joint,
         parent.and_then(|parent| matrices.get(parent)),
         about(axis, angle),
+    );
+    for limit in limits.iter().filter(|limit| limit.b == joint) {
+        hold(nodes, base, edit, limit);
+    }
+}
+
+/// Turn `joint` by `angle` radians about model axis `axis` (0 x, 1 y, 2 z),
+/// carrying what hangs below it: the rotate gizmo's ring. Its limit, if
+/// any, holds.
+pub(crate) fn rotate(
+    nodes: &[RenderModelPreviewNode],
+    base: &[Matrix4],
+    edit: &mut PoseEdit,
+    joint: usize,
+    axis: usize,
+    angle: f32,
+    limits: &[ResolvedLimit],
+) {
+    let mut matrices = base.to_vec();
+    apply(nodes, &mut matrices, edit);
+    if matrices.get(joint).is_none() {
+        return;
+    }
+    let along = [FORWARD, LEFT, UP][axis.min(2)];
+    let parent = usize::try_from(nodes[joint].parent).ok();
+    edit.turn_by(
+        joint,
+        parent.and_then(|parent| matrices.get(parent)),
+        about(along, angle),
     );
     for limit in limits.iter().filter(|limit| limit.b == joint) {
         hold(nodes, base, edit, limit);
@@ -1742,6 +1813,45 @@ mod tests {
         assert!(
             inward > start - 0.01,
             "in across the other leg it is held back: {start} → {inward}"
+        );
+    }
+
+    /// A ring turns its joint about the ring's axis, carrying what hangs
+    /// below it, the joint itself staying put.
+    #[test]
+    fn a_ring_turns_its_joint_about_its_axis() {
+        let (nodes, base) = line(3);
+        let mut edit = PoseEdit::default();
+        rotate(
+            &nodes,
+            &base,
+            &mut edit,
+            1,
+            2,
+            std::f32::consts::FRAC_PI_2,
+            &[],
+        );
+        let mut posed = base.clone();
+        apply(&nodes, &mut posed, &edit);
+        assert!(
+            near(posed[1].translation(), [1.0, 0.0, 0.0]),
+            "the joint stays"
+        );
+        assert!(
+            near(posed[2].translation(), [1.0, 1.0, 0.0]),
+            "{:?}",
+            posed[2].translation()
+        );
+        let grab = RingGrab {
+            axis: 2,
+            press: [10.0, 10.0],
+            tangent: [0.0, -1.0],
+            radius: 50.0,
+            turned: 0.0,
+        };
+        assert!(
+            (grab.angle([30.0, -15.0]) - 0.5).abs() < 1e-6,
+            "a run of half the radius along it is half a radian"
         );
     }
 }
