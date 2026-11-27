@@ -69,6 +69,8 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
             state.pitch = (state.pitch + delta.y * 0.01).clamp(-1.45, 1.45);
         }
     }
+    let camera_moving = !posing && (response.dragged() || wheel.is_some());
+    let camera_settling = camera_settling(ui, response.id, camera_moving);
     if let Some(scroll) = wheel.filter(|_| !posing) {
         let least = min_preview_scale(&data.preview);
         let old_scale = state.scale.clamp(least, MAX_PREVIEW_SCALE);
@@ -274,6 +276,7 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
                 ARMATURE_COLOR,
             );
         } else if let Some((index, position, _)) = hovered
+            && !camera_settling
             && let Some(node) = data.preview.nodes.get(index)
         {
             draw_preview_hover_label(
@@ -358,6 +361,33 @@ fn gizmo_handle(
             circle.hit(pointer).then_some(Handle::Scale(circle.centre))
         }
     }
+}
+
+/// How long after the camera last moved the joints' names stay hidden, so
+/// a zoom's separate wheel ticks don't flash a name between them.
+const CAMERA_SETTLE_SECONDS: f64 = 0.25;
+
+/// Whether the viewport's camera is moving (`moving`: orbiting, panning or
+/// zooming this pass) or moved within [`CAMERA_SETTLE_SECONDS`], the
+/// joint under the pointer then left unnamed: a name flicking past each
+/// joint the view sweeps over is noise.
+fn camera_settling(ui: &Ui, viewport: egui::Id, moving: bool) -> bool {
+    let id = viewport.with("camera_moved_at");
+    let now = ui.input(|i| i.time);
+    if moving {
+        ui.ctx().data_mut(|data| data.insert_temp(id, now));
+        return true;
+    }
+    let Some(moved_at) = ui.ctx().data(|data| data.get_temp::<f64>(id)) else {
+        return false;
+    };
+    let left = CAMERA_SETTLE_SECONDS - (now - moved_at);
+    if left > 0.0 {
+        // Name it once the camera has settled, though nothing else moves.
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
+        return true;
+    }
+    false
 }
 
 /// A pinned joint's ring.

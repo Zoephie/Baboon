@@ -2297,6 +2297,92 @@ fn shift_click_selects_both_hands_and_the_arrow_moves_them_together() {
     assert!(state.pose.pins.is_empty(), "with Shift, a double-click pins nothing");
 }
 
+/// A joint under the pointer is named while the view is still, not while
+/// the camera moves (here zooming in on it, which keeps it under the
+/// pointer), and named again once the camera has settled.
+#[test]
+fn a_joints_name_waits_for_the_camera_to_settle() {
+    use crate::app::model_preview::{PreviewCamera, RenderModelPreviewNode, armature_node_positions};
+    let worlds = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.8, 0.0, 0.0]];
+    let locals = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.4, 0.0, -0.3]];
+    let nodes = (0..3)
+        .map(|index| RenderModelPreviewNode {
+            name: format!("node {index}"),
+            parent: index as i16 - 1,
+            bind_rotation: [0.0, 0.0, 0.0, 1.0],
+            bind_translation: locals[index],
+            inverse_bind: [
+                [1.0, 0.0, 0.0, -worlds[index][0]],
+                [0.0, 1.0, 0.0, -worlds[index][1]],
+                [0.0, 0.0, 1.0, -worlds[index][2]],
+            ],
+        })
+        .collect();
+    let preview = RenderModelPreview {
+        nodes,
+        bounds_min: [-1.0; 3],
+        bounds_max: [1.0; 3],
+        ..Default::default()
+    };
+    let data = model_preview_data("test".into(), "test".into(), preview, vec![]);
+    let mut state = ModelPreviewState::default();
+    state.show_armature = true;
+    let context = egui::Context::default();
+    let time = std::cell::Cell::new(0.0_f64);
+    let mut rect = egui::Rect::NOTHING;
+    // A pass, and whether it named the hand.
+    let mut frame = |state: &mut ModelPreviewState, events: Vec<egui::Event>| {
+        time.set(time.get() + 1.0 / 60.0);
+        let output = crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(500.0, 400.0))),
+                time: Some(time.get()),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                // The wheel goes to whoever claims it in the gesture, as the
+                // workspace sets it going each pass.
+                crate::app::editor::begin_wheel_gesture(ui.ctx());
+                egui::CentralPanel::default().show(ui, |ui| {
+                    rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(400.0, 300.0));
+                    crate::app::model_preview::viewport::draw_model_viewport(ui, &data, state, rect.size());
+                });
+                crate::app::editor::end_wheel_gesture(ui.ctx());
+            },
+        );
+        let named = output.shapes.iter().any(|clipped| {
+            matches!(&clipped.shape, egui::Shape::Text(text) if text.galley.text() == "node 2")
+        });
+        (rect, named)
+    };
+    frame(&mut state, vec![]);
+    let (rect, _) = frame(&mut state, vec![]);
+    let camera = PreviewCamera::new(&data, &state, rect);
+    let hand = camera.project(armature_node_positions(&data, &state)[2]).pos;
+    for step in 1..=4 {
+        frame(&mut state, vec![egui::Event::PointerMoved(rect.center() + (hand - rect.center()) * (step as f32 / 4.0))]);
+    }
+    assert!(frame(&mut state, vec![]).1, "still, the joint under the pointer is named");
+    let wheel = egui::Event::MouseWheel {
+        source: egui::MouseWheelSource::Unknown,
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, 20.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+    };
+    let scale = state.scale;
+    let zooming = frame(&mut state, vec![wheel.clone()]).1;
+    assert!(state.scale > scale, "the wheel zoomed: {scale} → {}", state.scale);
+    assert!(!zooming, "zooming, it is not");
+    assert!(!frame(&mut state, vec![]).1, "nor between a zoom's wheel ticks");
+    assert!(!frame(&mut state, vec![wheel]).1);
+    time.set(time.get() + 0.5);
+    assert!(frame(&mut state, vec![]).1, "settled, it is named again");
+}
+
 /// With `BLAM_TEST_H3EK`: the Model Preview card's header fits its width,
 /// from wide down to narrow: no two of its labels or icons overlap, and
 /// none leaves the card. Posing, the header carries its most.
