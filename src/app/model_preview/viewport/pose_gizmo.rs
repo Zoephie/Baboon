@@ -3,7 +3,8 @@
 //! joint along that axis alone, and a square per plane between two of them
 //! to drag it within that plane; the joint itself still drags across the
 //! plane facing the camera. To rotate it: a ring per axis, round which a
-//! drag turns the joint about that axis.
+//! drag turns the joint about that axis. To scale it: a circle flat to the
+//! screen, which a drag outward grows and inward shrinks.
 
 use super::super::PreviewCamera;
 use super::super::pose::Lock;
@@ -262,6 +263,47 @@ impl PoseRings {
                     painter.line_segment([ring[index], ring[next]], Stroke::new(2.0_f32, color));
                 }
             }
+        }
+    }
+}
+
+/// The scale circle's radius on screen, in points, whatever the zoom:
+/// inside the rotate rings', so the two never sit on each other.
+pub(super) const SCALE_CIRCLE: f32 = 45.0;
+/// The scale circle's colour, apart from the axes', as it scales on none.
+const SCALE_COLOR: Color32 = Color32::from_rgb(225, 225, 225);
+
+/// The scale gizmo as it lies on screen: a circle round the joint, flat to
+/// the screen, as the scale is the same along every axis.
+pub(super) struct PoseScale {
+    pub(super) centre: Pos2,
+}
+
+impl PoseScale {
+    /// The circle about `joint`, seen through `camera`.
+    pub(super) fn at(camera: &PreviewCamera, joint: [f32; 3]) -> Option<Self> {
+        let projected = camera.project(joint);
+        projected.in_front.then_some(Self { centre: projected.pos })
+    }
+
+    /// Whether `pointer` takes the circle.
+    pub(super) fn hit(&self, pointer: Pos2) -> bool {
+        ((pointer - self.centre).length() - SCALE_CIRCLE).abs() <= RING_PICK
+    }
+
+    /// Paint it, `lit` while under the pointer or in use, and beside it the
+    /// joint's scale while it is scaled.
+    pub(super) fn draw(&self, painter: &egui::Painter, lit: bool, scale: f32) {
+        let color = if lit { LIT } else { SCALE_COLOR };
+        painter.circle_stroke(self.centre, SCALE_CIRCLE, Stroke::new(2.0_f32, color));
+        if lit || (scale - 1.0).abs() >= 1e-4 {
+            painter.text(
+                self.centre + Vec2::new(SCALE_CIRCLE * 0.75, -SCALE_CIRCLE * 0.75),
+                egui::Align2::LEFT_BOTTOM,
+                format!("×{scale:.2}"),
+                egui::FontId::proportional(13.0),
+                color,
+            );
         }
     }
 }

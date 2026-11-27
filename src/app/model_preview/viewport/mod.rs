@@ -240,6 +240,17 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
                         rings.draw(&painter, lit);
                     }
                 }
+                super::pose::GizmoMode::Scale => {
+                    if let Some(joint) = state.pose.selected
+                        && let Some(circle) = positions.get(joint).and_then(|&at| pose_gizmo::PoseScale::at(&camera, at))
+                    {
+                        let lit = match state.pose.dragging {
+                            Some(drag) => drag.scale.is_some(),
+                            None => hover_pos.is_some_and(|pos| circle.hit(pos)),
+                        };
+                        circle.draw(&painter, lit, state.pose.scale_of(joint));
+                    }
+                }
             }
         }
         // Dragging, the joint names itself and how many nodes above it turn.
@@ -305,6 +316,8 @@ enum Handle {
     Move(super::pose::Lock),
     /// A ring, and its radius on screen.
     Ring(pose_gizmo::RingHit, f32),
+    /// The scale circle, and the joint on screen.
+    Scale(egui::Pos2),
 }
 
 /// The handle of `mode`'s gizmo about `joint` under `pointer`.
@@ -314,6 +327,10 @@ fn gizmo_handle(camera: &PreviewCamera, mode: super::pose::GizmoMode, joint: [f3
         super::pose::GizmoMode::Rotate => pose_gizmo::PoseRings::at(camera, joint)?
             .hit(pointer)
             .map(|hit| Handle::Ring(hit, pose_gizmo::RING)),
+        super::pose::GizmoMode::Scale => {
+            let circle = pose_gizmo::PoseScale::at(camera, joint)?;
+            circle.hit(pointer).then_some(Handle::Scale(circle.centre))
+        }
     }
 }
 
@@ -338,7 +355,7 @@ fn pose_drag(
     rect: egui::Rect,
     wheel: Option<f32>,
 ) -> bool {
-    use super::pose::{PoseDrag, RingGrab, chain_above, hold_pins, reach, reach_held, resolve_limits, rotate, twist};
+    use super::pose::{PoseDrag, RingGrab, ScaleGrab, chain_above, hold_pins, reach, reach_held, resolve_limits, rotate, twist};
     let joint_at = |state: &ModelPreviewState, pointer: egui::Pos2| {
         let camera = PreviewCamera::new(data, state, rect);
         armature_node_positions(data, state)
@@ -395,6 +412,7 @@ fn pose_drag(
                 anchor: positions[joint],
                 held: positions[joint],
                 ring: None,
+                scale: None,
             }),
             Some((joint, Handle::Ring(hit, radius))) => Some(PoseDrag {
                 joint,
@@ -409,10 +427,24 @@ fn pose_drag(
                     radius,
                     turned: 0.0,
                 }),
+                scale: None,
+            }),
+            Some((joint, Handle::Scale(centre))) => Some(PoseDrag {
+                joint,
+                twist: false,
+                lock: None,
+                anchor: positions[joint],
+                held: positions[joint],
+                ring: None,
+                scale: pointer.map(|pointer| ScaleGrab {
+                    centre: [centre.x, centre.y],
+                    press: (pointer - centre).length(),
+                    from: state.pose.scale_of(joint),
+                }),
             }),
             None => pointer.and_then(|pointer| joint_at(state, pointer)).map(|joint| {
                 state.pose.selected = Some(joint);
-                PoseDrag { joint, twist: alt, lock: None, anchor: positions[joint], held: positions[joint], ring: None }
+                PoseDrag { joint, twist: alt, lock: None, anchor: positions[joint], held: positions[joint], ring: None, scale: None }
             }),
         };
     }
@@ -433,7 +465,11 @@ fn pose_drag(
     if base.is_empty() {
         return true;
     }
-    if let Some(ring) = drag.ring {
+    if let Some(grab) = drag.scale {
+        if let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) {
+            state.pose.set_scale(drag.joint, grab.scale([pointer.x, pointer.y]));
+        }
+    } else if let Some(ring) = drag.ring {
         if let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) {
             let angle = ring.angle([pointer.x, pointer.y]);
             rotate(nodes, &base, &mut state.pose, drag.joint, ring.axis, angle - ring.turned, &limits);

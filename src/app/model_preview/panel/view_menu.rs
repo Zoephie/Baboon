@@ -481,8 +481,8 @@ fn draw_pose_toggle(ui: &mut Ui, state: &mut ModelPreviewState) {
 }
 
 /// Pose mode's tools, in the viewport's corner while posing: Limits for a
-/// model whose physics model limits its joints, the gizmo's Move and
-/// Rotate, and once anything is posed, the button that undoes it.
+/// model whose physics model limits its joints, the gizmo's Move, Rotate
+/// and Scale, and once anything is posed, the button that undoes it.
 pub(in crate::app::model_preview) fn draw_pose_tools(ui: &mut Ui, state: &mut ModelPreviewState, limited: bool) {
     if limited {
         ui.selectable_label(state.pose.limits, "Limits")
@@ -494,13 +494,14 @@ pub(in crate::app::model_preview) fn draw_pose_tools(ui: &mut Ui, state: &mut Mo
     for (mode, label, tip) in [
         (GizmoMode::Move, "Move", "The selected joint's gizmo moves it: an arrow along one axis, a square within one plane"),
         (GizmoMode::Rotate, "Rotate", "The selected joint's gizmo turns it: drag round a ring to turn it about that axis"),
+        (GizmoMode::Scale, "Scale", "The selected joint's gizmo scales it and what hangs below it, alike along every axis as the game's nodes scale: drag the circle outward to grow it, inward to shrink it"),
     ] {
         if ui.selectable_label(state.pose.gizmo == mode, label).on_hover_text(tip).clicked() {
             state.pose.gizmo = mode;
         }
     }
     let posed = state.pose.is_posed() || !state.pose.pins.is_empty();
-    if posed && ui.button("Reset pose").on_hover_text("Undo every joint posed or pinned by hand").clicked() {
+    if posed && ui.button("Reset pose").on_hover_text("Undo every joint posed, scaled or pinned by hand").clicked() {
         state.pose.reset();
     }
 }

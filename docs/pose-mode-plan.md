@@ -87,6 +87,14 @@ follows like a puppet, over the bind pose or over an animation.
    now measures its two groups before drawing them and, too narrow for both, gives the right
    group's menus up to icons, then folds the model toggles into the Other menu.
 
+8. **Scale mode (done).** Scale beside Move and Rotate puts a circle on the selected joint, flat
+   to the screen; dragging it outward grows the joint, inward shrinks it, by the pointer's distance
+   from the joint over its distance at the press (×0.05 to ×20). The scale is one factor for all
+   three axes, as a Halo node transform and its animations carry, laid over the scale beneath:
+   the joint stays where it stands, and what hangs below it scales with it. The solver reads bone
+   lengths from the posed skeleton, so a drag below a scaled joint reaches as far as its longer
+   bones now do. Reset pose undoes scales too.
+
 ## Research
 
 FABRIK (Aristidou & Lasenby) works in joint positions and needs a twist rule when turned back into

@@ -32,6 +32,10 @@ pub(crate) struct PoseEdit {
     pub on: bool,
     /// Each turned node's turn, in its parent's frame.
     pub turns: BTreeMap<usize, RealQuaternion>,
+    /// Each scaled node's scale, over the scale beneath: one factor for all
+    /// three axes, as a Halo node transform (and its animations) carries.
+    /// It scales the node and everything below it.
+    pub scales: BTreeMap<usize, f32>,
     /// The joint last picked, which the armature marks.
     pub selected: Option<usize>,
     /// The drag under way: the joint dragged.
@@ -67,7 +71,35 @@ pub(crate) struct PoseDrag {
     pub held: [f32; 3],
     /// The rotate gizmo's ring it was taken by, which turns it instead.
     pub ring: Option<RingGrab>,
+    /// The scale gizmo's circle it was taken by, which scales it instead.
+    pub scale: Option<ScaleGrab>,
 }
+
+/// The scale gizmo's circle taken by a drag: the joint scales by the
+/// pointer's distance from the joint on screen over its distance there at
+/// the press, outward growing, inward shrinking.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ScaleGrab {
+    /// The joint on screen at the press.
+    pub centre: [f32; 2],
+    /// The pointer's distance from it at the press, in points.
+    pub press: f32,
+    /// The joint's scale at the press.
+    pub from: f32,
+}
+
+impl ScaleGrab {
+    /// The scale the drag asks for with the pointer at `pointer`, held
+    /// within [`SCALE_RANGE`].
+    pub(crate) fn scale(&self, pointer: [f32; 2]) -> f32 {
+        let distance = (pointer[0] - self.centre[0]).hypot(pointer[1] - self.centre[1]);
+        (self.from * distance / self.press.max(1.0)).clamp(SCALE_RANGE[0], SCALE_RANGE[1])
+    }
+}
+
+/// The least and most a joint scales by hand: small enough to all but hide
+/// a part, never to nothing, whose inverse the skinning can't take.
+pub(crate) const SCALE_RANGE: [f32; 2] = [0.05, 20.0];
 
 /// A rotate gizmo ring taken by a drag: the joint turns about its axis as
 /// the pointer runs along the ring from where it was taken.
@@ -103,6 +135,8 @@ pub(crate) enum GizmoMode {
     Move,
     /// Rings that turn it.
     Rotate,
+    /// A circle that scales it, and what hangs below it.
+    Scale,
 }
 
 /// What a gizmo handle holds a dragged joint to, in model space.
@@ -169,6 +203,7 @@ impl Default for PoseEdit {
         Self {
             on: false,
             turns: BTreeMap::new(),
+            scales: BTreeMap::new(),
             selected: None,
             dragging: None,
             chain: DEFAULT_CHAIN,
@@ -182,10 +217,26 @@ impl Default for PoseEdit {
 }
 
 impl PoseEdit {
-    /// Whether any node is turned, or the skeleton moved, from the pose
-    /// beneath.
+    /// Whether any node is turned or scaled, or the skeleton moved, from
+    /// the pose beneath.
     pub(crate) fn is_posed(&self) -> bool {
-        !self.turns.is_empty() || self.offset != [0.0; 3]
+        !self.turns.is_empty() || !self.scales.is_empty() || self.offset != [0.0; 3]
+    }
+
+    /// `joint`'s scale over the scale beneath: 1 unscaled.
+    pub(crate) fn scale_of(&self, joint: usize) -> f32 {
+        self.scales.get(&joint).copied().unwrap_or(1.0)
+    }
+
+    /// Scale `joint`, and what hangs below it, to `scale` over the scale
+    /// beneath, held within [`SCALE_RANGE`]; back to 1, it is unscaled.
+    pub(crate) fn set_scale(&mut self, joint: usize, scale: f32) {
+        let scale = scale.clamp(SCALE_RANGE[0], SCALE_RANGE[1]);
+        if (scale - 1.0).abs() < 1e-4 {
+            self.scales.remove(&joint);
+        } else {
+            self.scales.insert(joint, scale);
+        }
     }
 
     /// Unposed, for `geometry`'s nodes, if the turns are another model's.
@@ -202,9 +253,10 @@ impl PoseEdit {
         }
     }
 
-    /// Every turn, move and pin undone.
+    /// Every turn, scale, move and pin undone.
     pub(crate) fn reset(&mut self) {
         self.turns.clear();
+        self.scales.clear();
         self.pins.clear();
         self.offset = [0.0; 3];
         self.dragging = None;
@@ -234,8 +286,9 @@ impl PoseEdit {
 }
 
 /// `matrices`, each node's world transform as the preview poses it, with
-/// `edit`'s turns laid over: each node's transform relative to its parent
-/// kept, but for its turn, and its parent's posed transform carried down.
+/// `edit`'s turns and scales laid over: each node's transform relative to
+/// its parent kept, but for its turn and scale, and its parent's posed
+/// transform carried down.
 pub(in crate::app::model_preview) fn apply(
     nodes: &[RenderModelPreviewNode],
     matrices: &mut [Matrix4],
@@ -254,12 +307,15 @@ pub(in crate::app::model_preview) fn apply(
             Some(parent) => before[parent].inverse() * before[index],
             None => before[index],
         };
-        let local = match edit.turns.get(&index) {
-            Some(turn) => {
+        // Turned, then scaled about its own origin: its children's offsets
+        // scale with it, as an animation's node scale carries down.
+        let local = match (edit.turns.get(&index), edit.scales.get(&index)) {
+            (None, None) => local,
+            (turn, grow) => {
                 let (translation, rotation, scale) = local.decompose();
-                Matrix4::from_loc_rot_scale(translation, (*turn * rotation).normalized(), scale)
+                let rotation = turn.map_or(rotation, |turn| (*turn * rotation).normalized());
+                Matrix4::from_loc_rot_scale(translation, rotation, scale * grow.copied().unwrap_or(1.0))
             }
-            None => local,
         };
         matrices[index] = match parent {
             Some(parent) => matrices[parent] * local,
@@ -1058,6 +1114,55 @@ mod tests {
 
     fn near(a: [f32; 3], b: [f32; 3]) -> bool {
         (0..3).all(|axis| (a[axis] - b[axis]).abs() < 1e-4)
+    }
+
+    /// Scaling the middle node scales it and carries down: it stays where
+    /// it stands, the bone below it doubles and the tip takes the scale.
+    /// Back to 1, nothing is scaled; Reset undoes a scale.
+    #[test]
+    fn a_scale_carries_down_and_leaves_the_joint_where_it_stands() {
+        let (nodes, base) = chain();
+        let mut edit = PoseEdit::default();
+        edit.set_scale(1, 2.0);
+        assert!(edit.is_posed());
+        let mut matrices = base.clone();
+        apply(&nodes, &mut matrices, &edit);
+        assert!(near(matrices[0].translation(), [0.0; 3]));
+        assert!(near(matrices[1].translation(), [1.0, 0.0, 0.0]));
+        assert!(near(matrices[2].translation(), [3.0, 0.0, 0.0]), "{:?}", matrices[2].translation());
+        assert!((matrices[2].decompose().2 - 2.0).abs() < 1e-4);
+        edit.set_scale(1, 1.0);
+        assert!(!edit.is_posed());
+        edit.set_scale(1, 0.0);
+        assert_eq!(edit.scale_of(1), SCALE_RANGE[0], "never to nothing");
+        edit.reset();
+        assert!(edit.scales.is_empty());
+    }
+
+    /// A chain below a scaled node reaches with its bones as long as they
+    /// now are: a target only the longer bone can reach is reached.
+    #[test]
+    fn a_scaled_chain_reaches_with_its_scaled_lengths() {
+        let (nodes, base) = chain();
+        let mut edit = PoseEdit::default();
+        edit.set_scale(1, 2.0);
+        // 2.6 from the root: past the unscaled reach of 2, in the scaled 3.
+        let target = [1.8, 1.8, 0.4];
+        reach(&nodes, &base, &mut edit, 2, &[1, 0], target, &[]);
+        let mut matrices = base.clone();
+        apply(&nodes, &mut matrices, &edit);
+        assert!(distance(matrices[2].translation(), target) < 1e-3, "{:?}", matrices[2].translation());
+        assert!((distance(matrices[1].translation(), matrices[2].translation()) - 2.0).abs() < 1e-3);
+    }
+
+    /// The scale circle's drag: twice as far from the joint as the press
+    /// is twice the scale it began with; in to the joint stops at the least.
+    #[test]
+    fn the_scale_grab_scales_by_the_pointers_distance() {
+        let grab = ScaleGrab { centre: [10.0, 10.0], press: 50.0, from: 1.5 };
+        assert!((grab.scale([110.0, 10.0]) - 3.0).abs() < 1e-5);
+        assert!((grab.scale([10.0, 35.0]) - 0.75).abs() < 1e-5);
+        assert_eq!(grab.scale([10.0, 10.0]), SCALE_RANGE[0]);
     }
 
     /// Turning the middle node a quarter about up swings the tip round it

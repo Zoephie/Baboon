@@ -1972,6 +1972,96 @@ fn a_drag_round_the_gizmos_z_ring_turns_the_joint_about_z() {
     assert!(turned > 0.1, "turned about z the way the ring runs: {turned}");
 }
 
+/// Pose mode's scale gizmo, driven through the viewport: with the elbow
+/// selected, a drag taking its circle out to twice as far from the joint
+/// doubles the elbow's scale, and the forearm with it, the elbow staying put.
+#[test]
+fn a_drag_outward_on_the_scale_circle_grows_the_joint() {
+    use crate::app::model_preview::pose::GizmoMode;
+    use crate::app::model_preview::{PreviewCamera, RenderModelPreviewNode, armature_node_positions};
+    let worlds = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.8, 0.0, 0.0]];
+    let locals = [[0.0, 0.0, 0.0], [0.4, 0.0, 0.3], [0.4, 0.0, -0.3]];
+    let nodes = (0..3)
+        .map(|index| RenderModelPreviewNode {
+            name: format!("node {index}"),
+            parent: index as i16 - 1,
+            bind_rotation: [0.0, 0.0, 0.0, 1.0],
+            bind_translation: locals[index],
+            inverse_bind: [
+                [1.0, 0.0, 0.0, -worlds[index][0]],
+                [0.0, 1.0, 0.0, -worlds[index][1]],
+                [0.0, 0.0, 1.0, -worlds[index][2]],
+            ],
+        })
+        .collect();
+    let preview = RenderModelPreview {
+        nodes,
+        bounds_min: [-1.0; 3],
+        bounds_max: [1.0; 3],
+        ..Default::default()
+    };
+    let data = model_preview_data("test".into(), "test".into(), preview, vec![]);
+    let mut state = ModelPreviewState::default();
+    state.pose.on = true;
+    state.pose.gizmo = GizmoMode::Scale;
+    // The pose belongs to this model before the elbow is picked.
+    state.pose.follow(data.geometry_id);
+    state.pose.selected = Some(1);
+    let context = egui::Context::default();
+    let mut time = 0.0;
+    let mut rect = egui::Rect::NOTHING;
+    let mut frame = |state: &mut ModelPreviewState, events: Vec<egui::Event>| {
+        time += 1.0 / 60.0;
+        crate::app::run_ui_test(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(500.0, 400.0))),
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(400.0, 300.0));
+                    crate::app::model_preview::viewport::draw_model_viewport(ui, &data, state, rect.size());
+                });
+            },
+        );
+        rect
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut state, vec![]);
+    let rect = frame(&mut state, vec![]);
+    let camera = PreviewCamera::new(&data, &state, rect);
+    let before = armature_node_positions(&data, &state);
+    let elbow = before[1];
+    let centre = camera.project(elbow).pos;
+    let start = centre + Vec2::new(45.0, 0.0);
+    let to = centre + Vec2::new(90.0, 0.0);
+    for index in 1..=4 {
+        let at = rect.center() + (start - rect.center()) * (index as f32 / 4.0);
+        frame(&mut state, vec![egui::Event::PointerMoved(at)]);
+    }
+    frame(&mut state, vec![button(start, true)]);
+    for index in 1..=4 {
+        frame(&mut state, vec![egui::Event::PointerMoved(start + (to - start) * (index as f32 / 4.0))]);
+    }
+    frame(&mut state, vec![button(to, false)]);
+    let after = armature_node_positions(&data, &state);
+    let forearm = |positions: &[[f32; 3]]| (0..3).map(|axis| (positions[2][axis] - positions[1][axis]).powi(2)).sum::<f32>().sqrt();
+    assert!((0..3).all(|axis| (after[1][axis] - elbow[axis]).abs() < 1e-4), "the elbow stays");
+    assert!((state.pose.scale_of(1) - 2.0).abs() < 0.05, "scaled by 2: {}", state.pose.scale_of(1));
+    let grown = forearm(&after) / forearm(&before);
+    assert!((grown - state.pose.scale_of(1)).abs() < 1e-3, "the forearm grows with it: {grown}");
+    assert_eq!(state.pose.selected, Some(1), "the press on the circle keeps the joint selected");
+}
+
 /// With `BLAM_TEST_H3EK`: the Model Preview card's header fits its width,
 /// from wide down to narrow: no two of its labels or icons overlap, and
 /// none leaves the card. Posing, the header carries its most.
