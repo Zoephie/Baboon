@@ -95,6 +95,25 @@ fn read_permutation(element: TagStruct<'_>) -> Permutation {
             .unwrap_or(0)
             .max(0) as f32,
         scale,
+        tints: ["tint 1", "tint 2"].map(|name| pixel_color(element, name)),
+        base_map_tint: element
+            .read_real("base map tint percentage")
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0),
+        lightmap_tint: element
+            .read_real("lightmap tint percentage")
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0),
+    }
+}
+
+/// An `rgb_color`, a pixel32 (`pixel32_to_real_rgb_color`).
+fn pixel_color(element: TagStruct<'_>, name: &str) -> [f32; 3] {
+    match element.field(name).and_then(|field| field.value()) {
+        Some(TagFieldData::RgbColor(color)) => {
+            [16, 8, 0].map(|shift| ((color.0 >> shift) & 0xFF) as f32 / 255.0)
+        }
+        _ => [0.0; 3],
     }
 }
 

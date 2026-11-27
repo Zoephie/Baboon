@@ -985,6 +985,39 @@ fn a_halo_4_decorator_set_sways_only_in_the_wind() {
     assert_eq!(moved(&rocks_before, &rocks_after), 0, "nothing moved the rocks");
 }
 
+/// With `BLAM_TEST_H2EK`: Halo 2's screen-facing decorators turn to the eye
+/// through their own vertex shader, translated: with Game Shaders the grass
+/// field covers as much of the picture from two headings a quarter-turn
+/// apart, and without them, baked facing one way, it all but vanishes edge-on
+/// from one of them.
+#[test]
+fn halo_2_decorators_turn_to_the_eye_with_game_shaders() {
+    let Some(halo2) = super::kit::kit_source(GameId::Halo2) else {
+        return;
+    };
+    let shot = |shaders: bool, yaw: f32| Shot {
+        model: "scenarios\\decorators\\grass\\grass_field\\grass_field".to_owned(),
+        shaders,
+        lights: false,
+        yaw,
+        pitch: 0.05,
+        kind: Some("decorator_set".to_owned()),
+    };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let options = ShotOptions::new(GameId::Halo2);
+    let mut covered = |shaders: bool, yaw: f32| {
+        let pixels = render(&gl, &mut renderer, &halo2, &shot(shaders, yaw), &options).pixels;
+        let background = pixels[..3].to_vec();
+        pixels.chunks(4).filter(|pixel| pixel[..3] != background[..]).count() as f32
+    };
+    let ratio = |a: f32, b: f32| a.min(b) / a.max(b).max(1.0);
+    let turning = ratio(covered(true, 0.0), covered(true, std::f32::consts::FRAC_PI_2));
+    let baked = ratio(covered(false, 0.0), covered(false, std::f32::consts::FRAC_PI_2));
+    assert!(turning > 0.6, "with Game Shaders the quads face the eye from both: {turning}");
+    assert!(baked < 0.4, "baked one way, they go edge-on from one: {baked}");
+}
+
 /// The gen3 pipelines share one set of targets: a Reach frame after a Halo 3
 /// one, at the same size, draws through the set Halo 3 made rather than a
 /// second, and hands it back.

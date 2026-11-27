@@ -170,6 +170,20 @@ pub(in crate::app::model_preview) unsafe fn link_pass_program(
         }
         attributes.push((PRT_CLUSTER_ATTRIBUTE, "a_prt_cluster"));
         attributes.push((PRT_WEIGHTS_ATTRIBUTE, "a_prt_weights"));
+        // A stage translated from a vertex shader's source names its inputs
+        // by semantic: Halo 2's decorators read the preview's own vertex, and
+        // their placements from the decorator stream.
+        for (translated, own) in [
+            ("a_TEXCOORD0", "a_texcoord"),
+            ("a_NORMAL0", "a_normal"),
+            ("a_TANGENT0", "a_tangent"),
+            ("a_BINORMAL0", "a_binormal"),
+        ] {
+            if let Some(location) = gl.get_attrib_location(main, own) {
+                attributes.push((location, translated));
+            }
+        }
+        attributes.extend(super::super::decorators::HALO_2_STREAM_ATTRIBUTES);
         let stages = [
             (glow::VERTEX_SHADER, vertex_source),
             (glow::FRAGMENT_SHADER, fragment_source),

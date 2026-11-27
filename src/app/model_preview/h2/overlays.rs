@@ -35,7 +35,7 @@ pub(in crate::app::model_preview) fn add_overlay_shaders(
                 ce: Default::default(),
                 h2: super::H2MaterialLook {
                     shield: Some(Dx9Layer::HologramBloom),
-                    decorator: false,
+                    decorator: None,
                 },
                 object: 0,
             });
@@ -64,7 +64,7 @@ pub(in crate::app::model_preview) fn add_overlay_shaders(
                 ce: Default::default(),
                 h2: super::H2MaterialLook {
                     shield: Some(layer),
-                    decorator: false,
+                    decorator: None,
                 },
                 object: 0,
             });

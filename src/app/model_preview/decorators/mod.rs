@@ -34,7 +34,8 @@ pub(in crate::app::model_preview) use halo_ce::{
     bake_halo_ce, read_halo_ce_collection, scatter_halo_ce,
 };
 pub(in crate::app::model_preview) use halo2::{
-    bake_halo_2, halo_2_type_name, read_halo_2_set, scatter_halo_2,
+    HALO_2_RIGID_CONSTANTS, HALO_2_STREAM_ATTRIBUTES, Halo2DecoratorStream, Halo2DecoratorVertex,
+    bake_halo_2, halo_2_type_name, halo_2_vertex_constants, read_halo_2_set, scatter_halo_2,
 };
 pub(in crate::app::model_preview) use layout::{Layout, scatter};
 pub(in crate::app::model_preview) use material::{

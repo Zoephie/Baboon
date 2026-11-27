@@ -28,8 +28,10 @@ pub(crate) struct H2MaterialLook {
     /// Which of a model's damage or hologram shaders this is, drawn from no
     /// batch of its own while the object says so.
     pub shield: Option<super::dx9::passes::Dx9Layer>,
-    /// A decorator set's shader, which cuts out on its base map's alpha.
-    pub decorator: bool,
+    /// A decorator set's shader, and the classification of its vertex shader
+    /// its class draws through. Without Game Shaders it cuts out on its base
+    /// map's alpha.
+    pub decorator: Option<shader::decorator_stage::DecoratorSlot>,
 }
 
 impl super::RenderModelPreviewMaterial {
@@ -59,4 +61,9 @@ pub(crate) struct H2Features {
     pub light_volumes: Vec<super::h2::light_volumes::H2LightVolume>,
     pub contrails: Vec<super::h2::contrails::H2ContrailAt>,
     pub liquids: Vec<super::h2::liquid::H2LiquidAt>,
+    /// A decorator set's placements, a vertex each beside the model's
+    /// vertices, for its vertex shaders; empty for anything else.
+    pub decorator_vertices: Vec<super::decorators::Halo2DecoratorVertex>,
+    /// Each model placement's constants (`c203` to `c207`), by batch.
+    pub decorator_rigid: std::collections::BTreeMap<usize, [[f32; 4]; 5]>,
 }

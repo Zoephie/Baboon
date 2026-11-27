@@ -13,10 +13,15 @@
 mod geometry;
 mod placement;
 mod read;
+mod stream;
 
 pub(in crate::app::model_preview) use geometry::{bake_halo_2, halo_2_type_name};
 pub(in crate::app::model_preview) use placement::{Record, scatter_halo_2};
 pub(in crate::app::model_preview) use read::read_halo_2_set;
+pub(in crate::app::model_preview) use stream::{
+    HALO_2_RIGID_CONSTANTS, HALO_2_STREAM_ATTRIBUTES, Halo2DecoratorStream, Halo2DecoratorVertex,
+    halo_2_vertex_constants,
+};
 
 #[cfg(test)]
 mod tests;
@@ -113,6 +118,12 @@ pub(crate) struct Permutation {
     pub index: usize,
     pub distribution_weight: f32,
     pub scale: [f32; 2],
+    /// `tint 1` and `tint 2`.
+    pub tints: [[f32; 3]; 2],
+    /// `base map tint percentage` and `lightmap tint percentage`, held to 0
+    /// to 1 as the game holds them.
+    pub base_map_tint: f32,
+    pub lightmap_tint: f32,
 }
 
 /// One `raw vertices` element.

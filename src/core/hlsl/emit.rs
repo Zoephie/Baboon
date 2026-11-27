@@ -342,6 +342,18 @@ pub(crate) fn translate_full(
     Ok(Translated { source, uniforms: emitter.uniforms, textures: emitter.textures, attributes })
 }
 
+/// How many times `identifier` appears in `text` as a whole word.
+fn identifier_count(text: &str, identifier: &str) -> usize {
+    let word = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+    text.match_indices(identifier)
+        .filter(|(at, _)| {
+            let before = text.as_bytes().get(at.wrapping_sub(1)).copied();
+            let after = text.as_bytes().get(at + identifier.len()).copied();
+            !before.is_some_and(word) && !after.is_some_and(word)
+        })
+        .count()
+}
+
 /// A system value semantic with its index 0 written out (`SV_Position0`, as
 /// Halo 4's particle interpolators spell it), as it is without.
 fn system_semantic(upper: &str) -> String {
@@ -1783,6 +1795,13 @@ impl Emitter<'_> {
         let mut after = String::new();
         let binds = !arguments.is_empty();
         let mut arguments = arguments.iter();
+        // The entry as written, to tell which of its inputs it reads.
+        let entry_text = self
+            .function_text
+            .iter()
+            .find(|text| text.contains(&format!(" {symbol}(")))
+            .cloned()
+            .unwrap_or_default();
         for (at, parameter) in function.parameters.iter().enumerate() {
             let ty = self.resolved(&parameter.variable)?;
             let local = format!("hlsl_p{at}");
@@ -1797,7 +1816,13 @@ impl Emitter<'_> {
             if parameter.direction != Direction::In {
                 self.wire_output(&ty, parameter.variable.semantic.as_deref(), &local, &mut header, &mut after)?;
             }
-            if parameter.direction != Direction::Out {
+            // A vertex input the entry never reads is no attribute: Halo 2's
+            // asm-converted shaders declare every input of the vertex they
+            // were written for, past the 16 a stage can have.
+            let unread = self.stage == Stage::Vertex
+                && parameter.direction == Direction::In
+                && identifier_count(&entry_text, &format!("l_{}", parameter.variable.name)) <= 1;
+            if parameter.direction != Direction::Out && !unread {
                 self.wire_input(
                     &ty,
                     parameter.variable.semantic.as_deref(),
@@ -2142,6 +2167,17 @@ mod tests {
         assert_eq!(translated.attributes[0].semantic, "POSITION");
         assert!(translated.source.contains("gl_Position = hlsl_result.p;"), "{}", translated.source);
         assert!(translated.source.contains("out vec2 v_TEXCOORD0;"), "{}", translated.source);
+    }
+
+    /// An input the entry never reads is no attribute; one it reads is, even
+    /// one whose name another's begins with.
+    #[test]
+    fn a_vertex_input_the_entry_never_reads_is_no_attribute() {
+        let source = "float4 main_vs(float4 position : POSITION0, float4 position_unused : TEXCOORD5, float4 color : COLOR0) : SV_Position { return position; }\n";
+        let translated = glsl(source, "main_vs", Stage::Vertex);
+        assert!(translated.source.contains("in vec4 a_POSITION0;"), "{}", translated.source);
+        assert!(!translated.source.contains("a_TEXCOORD5") && !translated.source.contains("a_COLOR0"), "{}", translated.source);
+        assert_eq!(identifier_count("l_a l_ab (l_a)", "l_a"), 2);
     }
 
     /// An integer input arrives as a float, converted, unless the caller
