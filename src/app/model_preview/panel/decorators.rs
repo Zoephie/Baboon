@@ -2,8 +2,8 @@
 //! the patch its placements fill (`model_preview::decorators`).
 
 use super::super::super::editor::fields::BoxPart;
-use super::super::super::ui_kit::style::{subtle_dark, text_dark};
-use super::super::decorators::{DecoratorSet, DetailFacing, Layout};
+use super::super::super::ui_kit::style::subtle_dark;
+use super::super::decorators::{DecoratorSet, Layout};
 use super::super::{ModelPreviewData, ModelPreviewState, ModelRegionSelection};
 use super::functions::setup_section;
 use super::rows::{CardRows, name_cell, name_column_width, row_font};
@@ -23,11 +23,6 @@ pub(in crate::app::model_preview) fn draw_decorator_cards(
     let Some(set) = data.preview.decorators.as_deref() else {
         return;
     };
-    setup_section(ui, "Decorator Set", false, |ui, part| {
-        if part == BoxPart::Body {
-            draw_set_rows(ui, set);
-        }
-    });
     let hidden = set.types.iter().enumerate().any(|(index, _)| {
         state
             .region_selections
@@ -192,68 +187,6 @@ fn draw_wind_rows(ui: &mut Ui, set: &DecoratorSet, layout: &mut Layout) {
 
 fn type_region(set: &DecoratorSet, index: usize) -> String {
     super::super::decorators::type_name(index, &set.types[index].mesh_name)
-}
-
-/// What the set draws with, a row each: its shader, its sides and its
-/// texture.
-fn draw_set_rows(ui: &mut Ui, set: &DecoratorSet) {
-    // Halo 2's permutations each name a shader of the set's, and nothing sways.
-    if let Some(halo2) = &set.halo2 {
-        let classes = halo2.classes.len().to_string();
-        let mut rows = vec![("Classes", classes.as_str())];
-        rows.extend(
-            halo2
-                .shaders
-                .iter()
-                .map(|shader| ("Shader", shader.as_str())),
-        );
-        draw_rows(ui, &rows);
-        return;
-    }
-    if let Some(collection) = &set.halo_ce {
-        let offset = format!("{} wu", collection.z_offset);
-        let facing = match collection.facing {
-            DetailFacing::ScreenFacing => "screen-facing",
-            DetailFacing::ViewerFacing => "viewer-facing",
-        };
-        draw_rows(
-            ui,
-            &[
-                ("Facing", facing),
-                ("Sprite plate", collection.plate_path.as_str()),
-                ("Z offset", offset.as_str()),
-            ],
-        );
-        return;
-    }
-    let shader = set.shader.map_or("unknown", |shader| shader.name());
-    let rows: Vec<(&str, &str)> = vec![
-        ("Render shader", shader),
-        ("Sides", if set.two_sided { "both" } else { "front" }),
-        ("Texture", set.texture.as_str()),
-    ];
-    draw_rows(ui, &rows);
-}
-
-/// A row per `(name, value)`, the value cut short with its whole self on
-/// hover.
-fn draw_rows(ui: &mut Ui, rows: &[(&str, &str)]) {
-    let width = name_column_width(
-        ui,
-        rows.iter().map(|(name, _)| *name),
-        ui.available_width().max(1.0),
-    );
-    let mut card = CardRows::default();
-    for &(name, value) in rows {
-        card.row(ui, |ui| {
-            name_cell(ui, name, width);
-            ui.add(
-                egui::Label::new(RichText::new(value).color(text_dark()).font(row_font()))
-                    .truncate(),
-            )
-            .on_hover_text(value);
-        });
-    }
 }
 
 /// A row per type: whether it shows, its name, and how many the patch

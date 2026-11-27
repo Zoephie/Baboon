@@ -64,8 +64,6 @@ pub(crate) struct DecoratorSet {
     pub shader: Option<DecoratorShader>,
     /// `render two sided`: drawn with no culling.
     pub two_sided: bool,
-    /// The set's only material.
-    pub texture: String,
     /// `translucency A`, `B`, `C` and `translucency`, as the tag has them:
     /// the shader's `translucency`, which its dynamic lights and sun read.
     pub translucency: [f32; 4],

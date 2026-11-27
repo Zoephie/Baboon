@@ -92,10 +92,6 @@ pub(in crate::app::model_preview) fn read_decorator_set(
     Ok(DecoratorSet {
         shader,
         two_sided: has_flag(root, "render flags", "render two sided"),
-        texture: root
-            .read_tag_ref_path("texture")
-            .map(|path| path.trim().to_owned())
-            .unwrap_or_default(),
         translucency: [
             "translucency A",
             "translucency B",

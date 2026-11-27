@@ -262,7 +262,7 @@ See the proposals that accompany this plan.
   type and corner in `COLOR1`), the vertex shaders' `c[]` tables, Sapien's colour in RGB565, and the
   game's alpha blend.
 
-- Cards: Decorator Set, Types, Layout, Distance (the game's fade, toggled), Lighting (the stand-in
+- Cards: Types, Layout, Distance (the game's fade, toggled), Lighting (the stand-in
   light's level), Wind (sway).
 - Reach's and Halo 4's levels: every valid model read (a further level draws the nearest's subpart
   by index, as its placements are named otherwise), the postprocess's repairs, cull blocks gridded by

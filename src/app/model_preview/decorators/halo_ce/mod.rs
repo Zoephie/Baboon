@@ -27,10 +27,6 @@ mod tests;
 pub(crate) struct HaloCeCollection {
     /// `global z offset`, which the game adds at load (`sub_5A9040`).
     pub z_offset: f32,
-    /// `collection type`.
-    pub facing: DetailFacing,
-    /// The sprite plate's path.
-    pub plate_path: String,
     pub plate: Plate,
     pub types: Vec<DetailType>,
     /// Where the preview stands each detail object.

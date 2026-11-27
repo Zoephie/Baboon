@@ -2,7 +2,7 @@
 
 use super::super::super::common::fields::{elements, has_flag};
 use super::super::super::load::TagReader;
-use super::{DetailFacing, DetailType, HaloCeCollection, Plate, Sprite};
+use super::{DetailType, HaloCeCollection, Plate, Sprite};
 use blam_tags::bitmap::BitmapDefinition;
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
@@ -54,14 +54,8 @@ pub(in crate::app::model_preview) fn read_halo_ce_collection(
             .map(|image| [f32::from(image.width), f32::from(image.height)])
             .collect(),
     };
-    let facing = root
-        .read_enum_option("collection type")
-        .and_then(|name| DetailFacing::from_option_name(&name))
-        .unwrap_or_default();
     Ok(HaloCeCollection {
         z_offset: root.read_real("global z offset").unwrap_or(0.0),
-        facing,
-        plate_path,
         plate,
         types,
         instances: Vec::new(),

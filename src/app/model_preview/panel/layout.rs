@@ -187,10 +187,32 @@ pub(in crate::app) fn draw_model_preview_panel(
     if requests.mutation {
         state.invalidate_load();
     } else if !requests.reload {
-        state.data = restore_data.take();
-        if let Some(Ok(data)) = state.data.as_mut() {
-            super::super::decorators::relayout(data, state.decorator_layout);
-        }
+        state.data = match restore_data.take() {
+            Some(Ok(mut data)) => {
+                relayout_in_place(&mut data, state);
+                Some(Ok(data))
+            }
+            other => other,
+        };
+    }
+}
+
+/// A decorator set laid out again as the cards ask, the camera left where it
+/// was: the view orbits the bounds' centre plus the focus and fits their
+/// radius, both of which a new patch moves, so the focus takes up the move
+/// and the zoom the change of radius.
+fn relayout_in_place(data: &mut ModelPreviewData, state: &mut ModelPreviewState) {
+    use super::super::common::camera::preview_center_radius;
+    let mesh = data.mesh_id;
+    let (center, radius) = preview_center_radius(&data.preview);
+    super::super::decorators::relayout(data, state.decorator_layout);
+    if data.mesh_id == mesh {
+        return;
+    }
+    let (moved, grown) = preview_center_radius(&data.preview);
+    state.focus = std::array::from_fn(|axis| center[axis] + state.focus[axis] - moved[axis]);
+    if radius > 0.0 && grown > 0.0 {
+        state.scale *= grown / radius;
     }
 }
 
@@ -484,8 +506,49 @@ pub(in crate::app) fn preview_panel_title(group_tag: u32) -> &'static str {
         b"phmo" => "Physics Model",
         b"sbsp" => "Structure BSP",
         b"scnr" => "Scenario Geometry",
-        b"dctr" | b"DECR" => "Decorator Set",
-        b"dobc" => "Detail Objects",
         _ => "Model Preview",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::model_preview::common::camera::preview_center_radius;
+    use crate::app::model_preview::harness::kit::{kit_preview, kit_root};
+
+    /// With `BLAM_TEST_H3EK`: a bigger patch leaves the camera where it
+    /// was. The view orbits the bounds' centre plus the focus at a zoom of
+    /// the scale over the radius, and the new bounds move both; the world
+    /// point and the world size of a pixel stay.
+    #[test]
+    fn a_new_patch_leaves_the_camera_alone() {
+        let Some(root) = kit_root(GameId::Halo3) else {
+            return;
+        };
+        let mut data = kit_preview(
+            &root,
+            GameId::Halo3,
+            "levels\\shared\\decorators\\outskirts_tall_grass\\isolation_deadgrass",
+            "decorator_set",
+            b"dctr",
+        );
+        let mut state = ModelPreviewState {
+            focus: [0.3, -0.2, 0.1],
+            scale: 2.0,
+            ..Default::default()
+        };
+        let view = |data: &ModelPreviewData, state: &ModelPreviewState| {
+            let (center, radius) = preview_center_radius(&data.preview);
+            let orbit: [f32; 3] = std::array::from_fn(|axis| center[axis] + state.focus[axis]);
+            (orbit, state.scale / radius)
+        };
+        let before = view(&data, &state);
+        state.decorator_layout.size = 12.0;
+        relayout_in_place(&mut data, &mut state);
+        let after = view(&data, &state);
+        assert_ne!(preview_center_radius(&data.preview).1, 0.0);
+        assert!((0..3).all(|axis| (before.0[axis] - after.0[axis]).abs() < 1e-4), "{before:?} {after:?}");
+        assert!((before.1 - after.1).abs() < 1e-5, "{before:?} {after:?}");
+        assert_ne!(state.scale, 2.0, "the zoom took up the new radius");
     }
 }
