@@ -643,6 +643,14 @@ impl RenderCore {
                 let location = program.location(gl, "c");
                 gl.uniform_4_f32_slice(location.as_ref(), constants.as_flattened());
             }
+            if let (Dx9VertexStage::DetailObject(_), Some(collection)) = (
+                pass.stage,
+                frame.preview.decorators.as_ref().and_then(|set| set.halo_ce.as_ref()),
+            ) {
+                let constants = crate::app::model_preview::decorators::halo_ce_vertex_constants(frame, collection);
+                let location = program.location(gl, "c");
+                gl.uniform_4_f32_slice(location.as_ref(), constants.as_flattened());
+            }
             if matches!(
                 pass.stage,
                 Dx9VertexStage::ShadowCaster | Dx9VertexStage::ShadowMask

@@ -9,6 +9,7 @@
 //! carries.
 
 use super::super::common::fields::elements;
+use super::super::dx9::passes::Dx9Layer;
 use super::super::functions::FunctionValues;
 use super::super::gen3::materials::gen3_image;
 use super::super::gen3::shaders::{
@@ -19,7 +20,7 @@ use super::super::h4::materials::shaders::{H4_DEFINES, H4ShaderSource, translate
 use super::super::load::TagReader;
 use super::super::materials::{SlotBitmap, cached_bitmap};
 use super::super::{MaterialTextures, ResolveCaches, TextureSlot};
-use super::{DecoratorShader, WindDefinition};
+use super::{DecoratorShader, DetailFacing, WindDefinition, detail_object_pass};
 use crate::core::game::GameId;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::hlsl::emit::Stage;
@@ -73,7 +74,19 @@ pub(in crate::app::model_preview) fn resolve_detail_object_material(
     if path.is_empty() {
         return MaterialTextures::failed("this detail object collection names no sprite plate");
     }
-    cutout(reader, &path, caches)
+    let mut textures = cutout(reader, &path, caches);
+    if textures.error.is_none() && reader.game_shaders() {
+        let facing = collection
+            .root()
+            .read_enum_option("collection type")
+            .and_then(|name| DetailFacing::from_option_name(&name))
+            .unwrap_or_default();
+        match detail_object_pass(reader, facing, &path) {
+            Ok(pass) => textures.dx9_layers[Dx9Layer::Transparent as usize] = vec![pass],
+            Err(error) => textures.game_shaders_error = Some(error),
+        }
+    }
+    textures
 }
 
 /// The bitmap at `path` as the base map and the map that cuts it out.

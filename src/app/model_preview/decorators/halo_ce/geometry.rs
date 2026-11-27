@@ -9,6 +9,7 @@ use super::super::super::{
     RenderModelPreviewRegion, RenderModelPreviewVertex,
 };
 use super::super::bake::{PERMUTATION, type_name};
+use super::super::stream::DecoratorStreamVertex;
 use super::HaloCeCollection;
 
 /// The corners, across then up, and the triangles of each face.
@@ -42,6 +43,15 @@ pub(in crate::app::model_preview) fn bake_halo_ce(
         else {
             continue;
         };
+        // Where the type's sequence starts among every sequence's sprites,
+        // as the vertex shader's sprite table lists them.
+        let first_sprite: usize = collection
+            .plate
+            .sequences
+            .iter()
+            .take(kind.sequence)
+            .map(Vec::len)
+            .sum();
         let index_start = preview.indices.len() as u32;
         for instance in collection
             .instances
@@ -67,7 +77,7 @@ pub(in crate::app::model_preview) fn bake_halo_ce(
             ) else {
                 break;
             };
-            for [across, up] in CORNERS {
+            for (corner, [across, up]) in CORNERS.into_iter().enumerate() {
                 let [x, y, z] = instance.position;
                 let position = [x + across * size[0], y, z + up * size[1]];
                 expand_preview_bounds_local(
@@ -83,6 +93,13 @@ pub(in crate::app::model_preview) fn bake_halo_ce(
                         if up > 0.0 { top } else { bottom },
                     ],
                     ..Default::default()
+                });
+                let index = (first_sprite + instance.frame % sprites.len()) as f32;
+                preview.decorator_stream.push(DecoratorStreamVertex {
+                    origin: instance.position,
+                    color: [instance.color[0], instance.color[1], instance.color[2], 1.0],
+                    offset: [index, type_index as f32, corner as f32].map(|value| value / 255.0),
+                    axis: [0.0; 3],
                 });
             }
             for face in FACES {

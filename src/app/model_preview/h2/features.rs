@@ -10,7 +10,7 @@ features!(super::H2Features {
     light_volumes => "h2.light_volumes",
     contrails => "h2.contrails",
     liquids => "h2.liquids";
-    skip prt, hologram_control, decorator_vertices, decorator_rigid
+    skip prt, hologram_control, decorator_rigid
 });
 
 // Lights and flares move when they animate (`object_moves`), and read their

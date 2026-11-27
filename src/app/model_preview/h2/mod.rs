@@ -61,9 +61,6 @@ pub(crate) struct H2Features {
     pub light_volumes: Vec<super::h2::light_volumes::H2LightVolume>,
     pub contrails: Vec<super::h2::contrails::H2ContrailAt>,
     pub liquids: Vec<super::h2::liquid::H2LiquidAt>,
-    /// A decorator set's placements, a vertex each beside the model's
-    /// vertices, for its vertex shaders; empty for anything else.
-    pub decorator_vertices: Vec<super::decorators::Halo2DecoratorVertex>,
     /// Each model placement's constants (`c203` to `c207`), by batch.
     pub decorator_rigid: std::collections::BTreeMap<usize, [[f32; 4]; 5]>,
 }

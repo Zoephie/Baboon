@@ -394,7 +394,7 @@ pub(in crate::app::model_preview) fn vertex_streams() -> [&'static dyn VertexStr
     [
         &super::super::h2::prt::H2PrtStream,
         &super::super::gen3::prt::Gen3PrtStream,
-        &super::super::decorators::Halo2DecoratorStream,
+        &super::super::decorators::DecoratorStream,
     ]
 }
 

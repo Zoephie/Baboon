@@ -183,7 +183,7 @@ pub(in crate::app::model_preview) unsafe fn link_pass_program(
                 attributes.push((location, translated));
             }
         }
-        attributes.extend(super::super::decorators::HALO_2_STREAM_ATTRIBUTES);
+        attributes.extend(super::super::decorators::DECORATOR_STREAM_ATTRIBUTES);
         let stages = [
             (glow::VERTEX_SHADER, vertex_source),
             (glow::FRAGMENT_SHADER, fragment_source),

@@ -14,7 +14,7 @@ use super::super::super::{
     RenderModelPreviewRegion, RenderModelPreviewVertex,
 };
 use super::super::bake::{PERMUTATION, type_name};
-use super::stream::Halo2DecoratorVertex;
+use super::super::stream::DecoratorStreamVertex;
 use super::{ClassKind, Halo2Set, Permutation, Plate, Record, Sprite, WHOLE_IMAGE};
 
 /// Shader references' group.
@@ -201,7 +201,7 @@ pub(in crate::app::model_preview) fn bake_halo_2(set: &Halo2Set) -> RenderModelP
 #[derive(Default)]
 struct Built {
     vertices: Vec<RenderModelPreviewVertex>,
-    stream: Vec<Halo2DecoratorVertex>,
+    stream: Vec<DecoratorStreamVertex>,
     indices: Vec<u32>,
 }
 
@@ -211,7 +211,7 @@ impl Built {
         position: [f32; 3],
         normal: [f32; 3],
         texcoord: [f32; 2],
-        stream: Halo2DecoratorVertex,
+        stream: DecoratorStreamVertex,
     ) -> u32 {
         self.stream.push(stream);
         self.vertices.push(RenderModelPreviewVertex {
@@ -229,7 +229,7 @@ impl Built {
         position: [f32; 3],
         frame: [[f32; 3]; 3],
         texcoord: [f32; 2],
-        stream: Halo2DecoratorVertex,
+        stream: DecoratorStreamVertex,
     ) -> u32 {
         self.stream.push(stream);
         let [normal, tangent, binormal] = frame;
@@ -260,7 +260,7 @@ impl Built {
             );
         }
         preview.vertices.extend(self.vertices);
-        preview.h2.decorator_vertices.extend(self.stream);
+        preview.decorator_stream.extend(self.stream);
         preview
             .indices
             .extend(self.indices.iter().map(|&index| base.offset(index)));
@@ -311,7 +311,7 @@ fn model(
             let placed = turn(vertex.position);
             let position = std::array::from_fn(|axis| origin[axis] + placed[axis] * scale);
             let frame = [vertex.normal, vertex.tangent, vertex.binormal].map(turn);
-            let stream = Halo2DecoratorVertex {
+            let stream = DecoratorStreamVertex {
                 origin: position,
                 color: vertex_color(color),
                 ..Default::default()
@@ -401,12 +401,12 @@ fn quad(
             // and axis-rotating vertex shaders turn to the eye; a cross
             // quad's corners are baked where they stand.
             let stream = match kind {
-                ClassKind::CrossQuad => Halo2DecoratorVertex {
+                ClassKind::CrossQuad => DecoratorStreamVertex {
                     origin: position,
                     color: vertex_color(color),
                     ..Default::default()
                 },
-                _ => Halo2DecoratorVertex {
+                _ => DecoratorStreamVertex {
                     origin,
                     color: vertex_color(color),
                     offset: [0.0, offset[0], offset[1]],
@@ -454,7 +454,7 @@ fn decal(
         });
         let u = if cx > 0.0 { left } else { right };
         let v = if cy > 0.0 { bottom } else { top };
-        let stream = Halo2DecoratorVertex {
+        let stream = DecoratorStreamVertex {
             origin: position,
             color: vertex_color(color),
             ..Default::default()

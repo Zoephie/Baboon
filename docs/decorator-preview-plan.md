@@ -258,8 +258,10 @@ See the proposals that accompany this plan.
   `TEXCOORD4`/`5`), the `c[]` constants, a model placement's `c203`–`c207` per batch, the colour of
   `sub_6AEF00`, and the decorator pass's only implementation in the lightmap layers.
 - Halo CE: loader, Sapien's lattice and frame pick, billboards baked for Solid/Textured with the
-  plate cut out. Game Shaders (the `detail_object_type0`/`type1.vsh` source, the colour formula,
-  the fade) to do, after Halo 2's.
+  plate cut out; Game Shaders through the kit's `detail_object_type0`/`type1.vsh` and
+  `modulate.psh`, translated (a `DetailObject` DX9 stage), the shared decorator stream (frame,
+  type and corner in `COLOR1`), the vertex shaders' `c[]` tables, Sapien's colour in RGB565, and the
+  game's alpha blend.
 
 ## Seen in the preview, not yet explained
 

@@ -57,6 +57,10 @@ pub(crate) struct RenderModelPreview {
     pub antennas: Vec<antennas::Antenna>,
     /// An opened decorator set, whose placements its batches bake.
     pub decorators: Option<Arc<super::decorators::DecoratorSet>>,
+    /// A Halo 2 decorator set's or Halo CE detail object collection's
+    /// placements, a vertex each beside `vertices`, for their vertex
+    /// shaders; empty for anything else.
+    pub decorator_stream: Vec<super::decorators::DecoratorStreamVertex>,
     /// Halo 2's own features.
     pub h2: h2::H2Features,
     /// What more than one gen3 game shares.

@@ -10,18 +10,17 @@
 //! its decorators as such records ([`placement`]) and builds them as the
 //! cache builder does ([`geometry`]).
 
+mod constants;
 mod geometry;
 mod placement;
 mod read;
-mod stream;
 
+pub(in crate::app::model_preview) use constants::{
+    HALO_2_RIGID_CONSTANTS, halo_2_vertex_constants,
+};
 pub(in crate::app::model_preview) use geometry::{bake_halo_2, halo_2_type_name};
 pub(in crate::app::model_preview) use placement::{Record, scatter_halo_2};
 pub(in crate::app::model_preview) use read::read_halo_2_set;
-pub(in crate::app::model_preview) use stream::{
-    HALO_2_RIGID_CONSTANTS, HALO_2_STREAM_ATTRIBUTES, Halo2DecoratorStream, Halo2DecoratorVertex,
-    halo_2_vertex_constants,
-};
 
 #[cfg(test)]
 mod tests;

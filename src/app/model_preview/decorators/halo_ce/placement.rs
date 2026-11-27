@@ -10,6 +10,7 @@
 use super::super::super::particles::Random;
 use super::super::Layout;
 use super::HaloCeCollection;
+use super::shading::detail_object_color;
 
 /// The lattice's step: an 8-unit cell in 255 steps.
 pub(crate) const LATTICE: f32 = 8.0 / 255.0;
@@ -21,6 +22,8 @@ pub(crate) struct Instance {
     /// Of its type's sequence.
     pub frame: usize,
     pub position: [f32; 3],
+    /// As Sapien bakes it (`detail_object_color`).
+    pub color: [f32; 3],
 }
 
 /// The instances `layout` asks for: each on a lattice point of the patch no
@@ -57,9 +60,12 @@ pub(in crate::app::model_preview) fn scatter_halo_ce(
             // What the instance keeps of Sapien's pick, then the game's own.
             ((random.bits() as usize % sprites) & 0xF) % sprites
         };
+        // Sapien's one draw of its colour's place between least and most.
+        let color = detail_object_color(&collection.types[type_index], random.next());
         instances.push(Instance {
             type_index,
             frame,
+            color,
             position: [
                 point[0] as f32 * LATTICE,
                 point[1] as f32 * LATTICE,

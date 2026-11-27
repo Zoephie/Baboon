@@ -3,7 +3,7 @@
 
 use super::super::super::editor::fields::BoxPart;
 use super::super::super::ui_kit::style::{subtle_dark, text_dark};
-use super::super::decorators::{DecoratorSet, Layout};
+use super::super::decorators::{DecoratorSet, DetailFacing, Layout};
 use super::super::{ModelPreviewData, ModelPreviewState, ModelRegionSelection};
 use super::functions::setup_section;
 use super::rows::{CardRows, name_cell, name_column_width, row_font};
@@ -81,9 +81,14 @@ fn draw_set_rows(ui: &mut Ui, set: &DecoratorSet) {
     }
     if let Some(collection) = &set.halo_ce {
         let offset = format!("{} wu", collection.z_offset);
+        let facing = match collection.facing {
+            DetailFacing::ScreenFacing => "screen-facing",
+            DetailFacing::ViewerFacing => "viewer-facing",
+        };
         draw_rows(
             ui,
             &[
+                ("Facing", facing),
                 ("Sprite plate", collection.plate_path.as_str()),
                 ("Z offset", offset.as_str()),
             ],

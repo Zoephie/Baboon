@@ -10,10 +10,14 @@
 mod geometry;
 mod placement;
 mod read;
+mod shading;
 
 pub(in crate::app::model_preview) use geometry::bake_halo_ce;
 pub(in crate::app::model_preview) use placement::{Instance, scatter_halo_ce};
 pub(in crate::app::model_preview) use read::read_halo_ce_collection;
+pub(in crate::app::model_preview) use shading::{
+    DetailFacing, detail_object_pass, halo_ce_vertex_constants,
+};
 
 #[cfg(test)]
 mod tests;
@@ -23,6 +27,8 @@ mod tests;
 pub(crate) struct HaloCeCollection {
     /// `global z offset`, which the game adds at load (`sub_5A9040`).
     pub z_offset: f32,
+    /// `collection type`.
+    pub facing: DetailFacing,
     /// The sprite plate's path.
     pub plate_path: String,
     pub plate: Plate,
@@ -39,6 +45,17 @@ pub(crate) struct DetailType {
     pub sequence: usize,
     /// World units per texel of its sprite.
     pub size: f32,
+    pub near_fade: f32,
+    pub far_fade: f32,
+    /// `minimum color` and `maximum color`.
+    pub colors: [[f32; 3]; 2],
+    /// `interpolate color in hsv`, and `...more colors`, which takes the hue
+    /// the long way round.
+    pub hsv: bool,
+    pub more_colors: bool,
+    pub color_override: f32,
+    /// `ambient color`, alpha first, each 0 to 1.
+    pub ambient: [f32; 4],
 }
 
 /// The sprite plate: its sprites by sequence, and each image's size, which

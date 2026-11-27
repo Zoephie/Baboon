@@ -24,6 +24,7 @@ mod layout;
 mod material;
 mod read;
 mod shader;
+mod stream;
 mod wind;
 
 pub(in crate::app::model_preview) use bake::{PERMUTATION, bake_placements, relayout, type_name};
@@ -31,11 +32,12 @@ pub(in crate::app::model_preview) use gpu::{
     DecoratorBuffers, INSTANCE_ATTRIBUTES, decorator_value,
 };
 pub(in crate::app::model_preview) use halo_ce::{
-    bake_halo_ce, read_halo_ce_collection, scatter_halo_ce,
+    DetailFacing, bake_halo_ce, detail_object_pass, halo_ce_vertex_constants,
+    read_halo_ce_collection, scatter_halo_ce,
 };
 pub(in crate::app::model_preview) use halo2::{
-    HALO_2_RIGID_CONSTANTS, HALO_2_STREAM_ATTRIBUTES, Halo2DecoratorStream, Halo2DecoratorVertex,
-    bake_halo_2, halo_2_type_name, halo_2_vertex_constants, read_halo_2_set, scatter_halo_2,
+    HALO_2_RIGID_CONSTANTS, bake_halo_2, halo_2_type_name, halo_2_vertex_constants,
+    read_halo_2_set, scatter_halo_2,
 };
 pub(in crate::app::model_preview) use layout::{Layout, scatter};
 pub(in crate::app::model_preview) use material::{
@@ -43,6 +45,9 @@ pub(in crate::app::model_preview) use material::{
 };
 pub(in crate::app::model_preview) use read::read_decorator_set;
 pub(in crate::app::model_preview) use shader::DecoratorShader;
+pub(in crate::app::model_preview) use stream::{
+    DECORATOR_STREAM_ATTRIBUTES, DecoratorStream, DecoratorStreamVertex,
+};
 pub(in crate::app::model_preview) use wind::WindDefinition;
 
 #[cfg(test)]
