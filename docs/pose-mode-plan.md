@@ -47,11 +47,20 @@ follows like a puppet, over the bind pose or over an animation.
    them: a frame's columns are forward, left, up (`hkTransform_from_matrix4x3`); a ragdoll's twist
    axis is forward and its plane axis left, its twist range as the tag has it, its cone the larger of
    `min cone` and `max cone`, its plane range negated; a limited hinge turns about up from left, its
-   range negated. The tag holds degrees. The ragdolls' `node a` is the pelvis (the torso is one rigid
+   range negated. The tag holds degrees. The preview measures a hinge's angle the right-handed way
+   about up, which runs opposite to Havok's, so in the preview's terms the limit is the tag's own
+   range: the Chief's elbow bends to 75° and his knee to 60° the way they bend, 15° the other (a
+   first reading with Havok's sign took for a forward bend what was the elbow bent backward). The ragdolls' `node a` is the pelvis (the torso is one rigid
    body in a ragdoll), so a bent spine counts against the shoulders and head. Joints with no
    constraint (spine, wrists, fingers) stay free.
-4. **Pins and twist.** Pin joints the solve must hold (hands and feet planted while the body moves),
-   a ring to twist a joint about its bone, and moving the root.
+4. **Pins, twist and the root (done).** Double-click a joint to pin it where it stands (an orange
+   ring); after every drag each pin's own chain is turned to bring it back, so the feet stay planted
+   while the pelvis is dragged down into a crouch. Alt-drag twists a joint about its bone (the line to
+   its first child). Dragging the root moves the whole skeleton. Reset pose clears pins too. Two
+   additions made limited chains land: a limited hinge is first bent a little into its larger side
+   (FABRIK bends a chain the way it is already bent, and the Chief's knees stand a hair back in the
+   bind pose), and a finishing pass turns each node only as it can turn, a hinge about its own axis,
+   since FABRIK bends in the plane of the joints, which a hinge's plane need not be.
 
 ## Research
 
@@ -63,7 +72,9 @@ chain by length while dragging; Unreal's Full Body IK is position-based with per
 ## Not settled
 
 - The sign of a ragdoll joint's plane angle in Havok's terms: the preview measures it as the twist
-  axis's angle toward the left axis, its range negated as the game negates it. The hinge's sign is
-  checked against the Chief's elbow, which bends forward to its limit; the plane's has no such check.
+  axis's angle toward the left axis, its range negated as the game negates it. The hinge's sign was
+  settled by how the Chief's elbows and knees bend; the plane's has no such check. It matters: the
+  Chief's plane ranges are symmetric, but 65 of the 91 ragdoll joints among Halo 3's characters and 47
+  of 89 among Reach's are not.
 - Halo 2's, Reach's and Halo 4's constraint builds: only Halo 3's was read. Their tags share the
   field names and hold the same degree ranges.

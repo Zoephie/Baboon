@@ -194,6 +194,9 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
             }
             // Posing, joints are bigger targets, the one picked marked.
             let picked = state.pose.on && state.pose.selected == Some(index);
+            if state.pose.on && state.pose.pins.contains_key(&index) {
+                painter.circle_stroke(joint, 7.0, Stroke::new(2.0_f32, PIN_COLOR));
+            }
             let radius = if state.pose.on { 4.0 } else { 2.5 };
             painter.circle_filled(joint, radius, if picked { ARMATURE_COLOR } else { Color32::WHITE });
             painter.circle_stroke(joint, radius, Stroke::new(1.0_f32, Color32::BLACK));
@@ -262,13 +265,19 @@ pub(in crate::app::model_preview) fn draw_model_viewport(
     keep_snapshot_source(ui, state, shown, rect, painter.layer_id(), helpers_from);
 }
 
+/// A pinned joint's ring.
+const PIN_COLOR: Color32 = Color32::from_rgb(255, 140, 40);
+
 /// How near a joint, in points, a press must land to pick it while posing.
 const POSE_PICK_DISTANCE: f32 = 8.0;
 
-/// Pose mode's drag: one started on a joint carries it across the plane
-/// through it facing the camera, turning the chain above it; the wheel
-/// lengthens or shortens the chain meanwhile. Whether a pose drag is under
-/// way, which the orbit and zoom then leave alone.
+/// Pose mode's input. A drag started on a joint carries it across the plane
+/// through it facing the camera, turning the chain above it (the wheel
+/// lengthening or shortening the chain meanwhile); on the root it moves the
+/// whole skeleton; with Alt held it twists the joint about its bone. A
+/// double-click on a joint pins or unpins it, and every drag ends by holding
+/// the pins. Whether a pose drag is under way, which the orbit and zoom then
+/// leave alone.
 fn pose_drag(
     ui: &egui::Ui,
     response: &egui::Response,
@@ -277,25 +286,35 @@ fn pose_drag(
     rect: egui::Rect,
     wheel: Option<f32>,
 ) -> bool {
-    use super::pose::{PoseDrag, chain_above, reach, resolve_limits};
-    if response.drag_started_by(egui::PointerButton::Primary) {
+    use super::pose::{PoseDrag, chain_above, hold_pins, reach, resolve_limits, twist};
+    let joint_at = |state: &ModelPreviewState, pointer: egui::Pos2| {
         let camera = PreviewCamera::new(data, state, rect);
-        let pointer = ui.input(|i| i.pointer.press_origin());
-        let picked = pointer.and_then(|pointer| {
-            armature_node_positions(data, state)
-                .iter()
-                .enumerate()
-                .filter_map(|(index, &position)| {
-                    let projected = camera.project(position);
-                    projected.in_front.then(|| (index, screen_edge_length(pointer, projected.pos)))
-                })
-                .filter(|&(_, distance)| distance <= POSE_PICK_DISTANCE)
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(index, _)| index)
-        });
+        armature_node_positions(data, state)
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &position)| {
+                let projected = camera.project(position);
+                projected.in_front.then(|| (index, screen_edge_length(pointer, projected.pos)))
+            })
+            .filter(|&(_, distance)| distance <= POSE_PICK_DISTANCE)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(index, _)| index)
+    };
+    if response.double_clicked()
+        && let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
+        && let Some(joint) = joint_at(state, pointer)
+    {
+        let at = armature_node_positions(data, state)[joint];
+        state.pose.follow(data.geometry_id);
+        state.pose.toggle_pin(joint, at);
+        state.pose.selected = Some(joint);
+    }
+    if response.drag_started_by(egui::PointerButton::Primary) {
+        let picked = ui.input(|i| i.pointer.press_origin()).and_then(|pointer| joint_at(state, pointer));
+        let alt = ui.input(|i| i.modifiers.alt);
         state.pose.dragging = picked.map(|joint| {
             state.pose.selected = Some(joint);
-            PoseDrag { joint }
+            PoseDrag { joint, twist: alt }
         });
     }
     if !response.dragged_by(egui::PointerButton::Primary) {
@@ -305,36 +324,56 @@ fn pose_drag(
     let Some(drag) = state.pose.dragging else {
         return false;
     };
-    // The wheel lengthens or shortens the chain a node at a time.
-    if let Some(scrolled) = wheel {
-        state.pose.chain = if scrolled > 0.0 {
-            state.pose.chain + 1
-        } else {
-            state.pose.chain.saturating_sub(1).max(1)
-        };
-    }
-    let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) else {
-        return true;
-    };
-    let chain = chain_above(&data.preview.nodes, drag.joint, state.pose.chain);
-    if chain.is_empty() {
-        return true;
-    }
-    // A chain longer than the joint has ancestors stops at the root.
-    state.pose.chain = state.pose.chain.min(chain.len());
-    let camera = PreviewCamera::new(data, state, rect);
-    let base = pose_beneath(data, state);
-    let matrices = armature_node_matrices(data, state);
-    let Some(joint) = matrices.get(drag.joint) else {
-        return true;
-    };
-    let target = camera.unproject_beside(pointer, joint.translation());
+    let nodes = &data.preview.nodes;
     let limits = if state.pose.limits {
-        resolve_limits(&data.preview.nodes, &data.preview.joint_limits)
+        resolve_limits(nodes, &data.preview.joint_limits)
     } else {
         Vec::new()
     };
-    reach(&data.preview.nodes, &base, &mut state.pose, drag.joint, &chain, target, &limits);
+    let base = pose_beneath(data, state);
+    if base.is_empty() {
+        return true;
+    }
+    if drag.twist {
+        // A point across is a hundredth of a radian.
+        let angle = response.drag_delta().x * 0.01;
+        twist(nodes, &base, &mut state.pose, drag.joint, angle, &limits);
+    } else {
+        // The wheel lengthens or shortens the chain a node at a time.
+        if let Some(scrolled) = wheel {
+            state.pose.chain = if scrolled > 0.0 {
+                state.pose.chain + 1
+            } else {
+                state.pose.chain.saturating_sub(1).max(1)
+            };
+        }
+        let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) else {
+            return true;
+        };
+        let camera = PreviewCamera::new(data, state, rect);
+        let matrices = armature_node_matrices(data, state);
+        let Some(joint) = matrices.get(drag.joint).map(|matrix| matrix.translation()) else {
+            return true;
+        };
+        let target = camera.unproject_beside(pointer, joint);
+        let chain = chain_above(nodes, drag.joint, state.pose.chain);
+        if chain.is_empty() {
+            // The root: the whole skeleton moves with it.
+            for axis in 0..3 {
+                state.pose.offset[axis] += target[axis] - joint[axis];
+            }
+        } else {
+            // A chain longer than the joint has ancestors stops at the root.
+            state.pose.chain = state.pose.chain.min(chain.len());
+            reach(nodes, &base, &mut state.pose, drag.joint, &chain, target, &limits);
+        }
+        // A pinned joint dragged is pinned where it is dragged to.
+        if state.pose.pins.contains_key(&drag.joint) {
+            let at = armature_node_positions(data, state)[drag.joint];
+            state.pose.pins.insert(drag.joint, at);
+        }
+    }
+    hold_pins(nodes, &base, &mut state.pose, Some(drag.joint), &limits);
     true
 }
 

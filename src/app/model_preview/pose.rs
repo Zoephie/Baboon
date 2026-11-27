@@ -8,7 +8,10 @@
 //! game's own skin weights, as it does for an animation.
 //!
 //! Dragging a joint carries it across the plane through it that faces the
-//! camera, turning the chain of nodes above it, solved by FABRIK.
+//! camera, turning the chain of nodes above it, solved by FABRIK. Dragging
+//! the root moves the whole skeleton; Alt-dragging a joint twists it about
+//! its bone. A pinned joint stays where it was pinned, its own chain turned
+//! to hold it there whatever else moves.
 //!
 //! Where the physics model limits a joint, the pose keeps to its limits as
 //! the game's ragdolls do (`c_havok_component::create_constraint`, Halo 3
@@ -37,6 +40,10 @@ pub(crate) struct PoseEdit {
     pub chain: usize,
     /// Whether the physics model's joint limits hold.
     pub limits: bool,
+    /// Each pinned joint and where it was pinned, in model space.
+    pub pins: BTreeMap<usize, [f32; 3]>,
+    /// How far the skeleton's roots are moved, in model space.
+    pub offset: [f32; 3],
     /// The geometry the turns are for (`ModelPreviewData::geometry_id`);
     /// another model's nodes start unposed.
     pub geometry: u64,
@@ -46,6 +53,8 @@ pub(crate) struct PoseEdit {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PoseDrag {
     pub joint: usize,
+    /// Twisting it about its bone, rather than moving it.
+    pub twist: bool,
 }
 
 /// A dragged joint's chain to begin with: its parent and grandparent, as
@@ -62,15 +71,18 @@ impl Default for PoseEdit {
             dragging: None,
             chain: DEFAULT_CHAIN,
             limits: true,
+            pins: BTreeMap::new(),
+            offset: [0.0; 3],
             geometry: 0,
         }
     }
 }
 
 impl PoseEdit {
-    /// Whether any node is turned from the pose beneath.
+    /// Whether any node is turned, or the skeleton moved, from the pose
+    /// beneath.
     pub(crate) fn is_posed(&self) -> bool {
-        !self.turns.is_empty()
+        !self.turns.is_empty() || self.offset != [0.0; 3]
     }
 
     /// Unposed, for `geometry`'s nodes, if the turns are another model's.
@@ -86,10 +98,19 @@ impl PoseEdit {
         }
     }
 
-    /// Every turn undone.
+    /// Every turn, move and pin undone.
     pub(crate) fn reset(&mut self) {
         self.turns.clear();
+        self.pins.clear();
+        self.offset = [0.0; 3];
         self.dragging = None;
+    }
+
+    /// Pin `joint` where it stands, or unpin it.
+    pub(crate) fn toggle_pin(&mut self, joint: usize, at: [f32; 3]) {
+        if self.pins.remove(&joint).is_none() {
+            self.pins.insert(joint, at);
+        }
     }
 
     /// Turn `node` further by `turn`, a turn in model space about the node's
@@ -138,8 +159,86 @@ pub(in crate::app::model_preview) fn apply(
         };
         matrices[index] = match parent {
             Some(parent) => matrices[parent] * local,
-            None => local,
+            None => moved(local, edit.offset),
         };
+    }
+}
+
+/// `matrix` moved by `offset` in model space.
+fn moved(matrix: Matrix4, offset: [f32; 3]) -> Matrix4 {
+    if offset == [0.0; 3] {
+        return matrix;
+    }
+    let (translation, rotation, scale) = matrix.decompose();
+    let translation = blam_tags::math::RealPoint3d {
+        x: translation.x + offset[0],
+        y: translation.y + offset[1],
+        z: translation.z + offset[2],
+    };
+    Matrix4::from_loc_rot_scale(translation, rotation, scale)
+}
+
+/// Twist `joint` by `angle` radians about its bone: the line to its first
+/// child, or from its parent where it has none. Its limit, if any, holds.
+pub(crate) fn twist(
+    nodes: &[RenderModelPreviewNode],
+    base: &[Matrix4],
+    edit: &mut PoseEdit,
+    joint: usize,
+    angle: f32,
+    limits: &[ResolvedLimit],
+) {
+    let mut matrices = base.to_vec();
+    apply(nodes, &mut matrices, edit);
+    let Some(at) = matrices.get(joint).map(Matrix4::translation) else {
+        return;
+    };
+    let child = nodes
+        .iter()
+        .position(|node| usize::try_from(node.parent).ok() == Some(joint));
+    let parent = usize::try_from(nodes[joint].parent).ok();
+    let bone = match (child, parent) {
+        (Some(child), _) => sub(matrices[child].translation(), at),
+        (None, Some(parent)) => sub(at, matrices[parent].translation()),
+        (None, None) => return,
+    };
+    let length = norm(bone);
+    if length < 1e-6 {
+        return;
+    }
+    let axis = RealVector3d {
+        i: bone[0] / length,
+        j: bone[1] / length,
+        k: bone[2] / length,
+    };
+    edit.turn_by(
+        joint,
+        parent.and_then(|parent| matrices.get(parent)),
+        about(axis, angle),
+    );
+    for limit in limits.iter().filter(|limit| limit.b == joint) {
+        hold(nodes, base, edit, limit);
+    }
+}
+
+/// Each pin but `except` (the joint being dragged) held where it was pinned:
+/// its own chain of [`DEFAULT_CHAIN`] nodes turned to bring it back.
+pub(crate) fn hold_pins(
+    nodes: &[RenderModelPreviewNode],
+    base: &[Matrix4],
+    edit: &mut PoseEdit,
+    except: Option<usize>,
+    limits: &[ResolvedLimit],
+) {
+    let pins: Vec<(usize, [f32; 3])> = edit
+        .pins
+        .iter()
+        .filter(|(joint, _)| Some(**joint) != except)
+        .map(|(joint, at)| (*joint, *at))
+        .collect();
+    for (joint, at) in pins {
+        let chain = chain_above(nodes, joint, DEFAULT_CHAIN);
+        reach(nodes, base, edit, joint, &chain, at, limits);
     }
 }
 
@@ -194,10 +293,103 @@ pub(crate) fn reach(
     // Placed, then held to its limits, which may leave the joint short of
     // the target: placed again from there, a few times over.
     let rounds = if held.is_empty() { 1 } else { LIMIT_ROUNDS };
+    for limit in &held {
+        seed_hinge(nodes, base, edit, limit);
+    }
     for _ in 0..rounds {
         place(nodes, base, edit, joint, chain, target);
         for limit in &held {
             hold(nodes, base, edit, limit);
+        }
+    }
+    if !held.is_empty() {
+        refine(nodes, base, edit, joint, chain, target, &held);
+    }
+}
+
+/// Passes of [`refine`] each drag event takes, at most.
+const REFINE_PASSES: usize = 8;
+
+/// Finish a limited chain's reach turning each node only as it can turn,
+/// nearest first (cyclic coordinate descent): a hinge about its own axis by
+/// the angle that best brings `joint` to `target`, any other node by the
+/// least swing that points it there, each then held to its limit. FABRIK
+/// bends a chain in the plane of its joints, which a hinge's plane need not
+/// be; this lands the joint where the hinge lets it.
+fn refine(
+    nodes: &[RenderModelPreviewNode],
+    base: &[Matrix4],
+    edit: &mut PoseEdit,
+    joint: usize,
+    chain: &[usize],
+    target: [f32; 3],
+    held: &[&ResolvedLimit],
+) {
+    let posed = |edit: &PoseEdit| {
+        let mut matrices = base.to_vec();
+        apply(nodes, &mut matrices, edit);
+        matrices
+    };
+    let reach_length: f32 = {
+        let matrices = posed(edit);
+        chain
+            .iter()
+            .scan(joint, |below, &node| {
+                let length = distance(matrices[*below].translation(), matrices[node].translation());
+                *below = node;
+                Some(length)
+            })
+            .sum()
+    };
+    for _ in 0..REFINE_PASSES {
+        for &node in chain {
+            let matrices = posed(edit);
+            let (at, effector) = (matrices[node].translation(), matrices[joint].translation());
+            if distance(effector, target) < 1e-5 * reach_length {
+                return;
+            }
+            let limit = held.iter().find(|limit| limit.b == node);
+            let turn = match limit.map(|limit| (limit, limit.kind)) {
+                Some((limit, LimitKind::Hinge { .. })) => {
+                    let axis = (matrices[limit.a].decompose().1 * limit.frame_a) * UP;
+                    let axis = [axis.i, axis.j, axis.k];
+                    let flat = |point: [f32; 3]| {
+                        let offset = sub(point, at);
+                        let along = offset.iter().zip(&axis).map(|(a, b)| a * b).sum::<f32>();
+                        std::array::from_fn::<f32, 3, _>(|index| {
+                            offset[index] - axis[index] * along
+                        })
+                    };
+                    let (from, to) = (flat(effector), flat(target));
+                    if norm(from) < 1e-6 || norm(to) < 1e-6 {
+                        continue;
+                    }
+                    let cross = [
+                        from[1] * to[2] - from[2] * to[1],
+                        from[2] * to[0] - from[0] * to[2],
+                        from[0] * to[1] - from[1] * to[0],
+                    ];
+                    let sine = cross.iter().zip(&axis).map(|(a, b)| a * b).sum::<f32>();
+                    let cosine = from.iter().zip(&to).map(|(a, b)| a * b).sum::<f32>();
+                    let axis = RealVector3d {
+                        i: axis[0],
+                        j: axis[1],
+                        k: axis[2],
+                    };
+                    Some(about(axis, sine.atan2(cosine)))
+                }
+                _ => swing(at, effector, target),
+            };
+            let Some(turn) = turn else {
+                continue;
+            };
+            let parent = usize::try_from(nodes[node].parent)
+                .ok()
+                .and_then(|parent| matrices.get(parent).copied());
+            edit.turn_by(node, parent.as_ref(), turn);
+            if let Some(limit) = limit {
+                hold(nodes, base, edit, limit);
+            }
         }
     }
 }
@@ -535,14 +727,62 @@ fn hold_ragdoll(
     (swing * about(FORWARD, twist_angle)).normalized()
 }
 
+/// How far into its larger side a limited hinge is bent before a chain
+/// through it is placed.
+const HINGE_SEED: f32 = 5.0 * std::f32::consts::PI / 180.0;
+
+/// A limited hinge bent a little into its larger side (the way the joint
+/// bends) if it stands straight or bent the other way: FABRIK bends a chain
+/// the way it is already bent, so a knee a hair back in its bind pose would
+/// otherwise fold backward against its limit.
+fn seed_hinge(
+    nodes: &[RenderModelPreviewNode],
+    base: &[Matrix4],
+    edit: &mut PoseEdit,
+    limit: &ResolvedLimit,
+) {
+    let LimitKind::Hinge { angle } = limit.kind else {
+        return;
+    };
+    let side = if angle[1].abs() >= angle[0].abs() {
+        angle[1].signum()
+    } else {
+        angle[0].signum()
+    };
+    let mut matrices = base.to_vec();
+    apply(nodes, &mut matrices, edit);
+    let (Some(a), Some(b)) = (matrices.get(limit.a), matrices.get(limit.b)) else {
+        return;
+    };
+    let turn_a = a.decompose().1 * limit.frame_a;
+    let frame_b = b.decompose().1 * limit.frame_b;
+    let relative = (turn_a.conjugate() * frame_b).normalized();
+    if hinge_angle(relative) * side >= HINGE_SEED {
+        return;
+    }
+    let wanted = (turn_a * about(UP, -side * HINGE_SEED)).normalized();
+    let turn = (wanted * frame_b.conjugate()).normalized();
+    let parent = usize::try_from(nodes[limit.b].parent)
+        .ok()
+        .and_then(|parent| matrices.get(parent).copied());
+    edit.turn_by(limit.b, parent.as_ref(), turn);
+}
+
 /// A frame relative to its other side's, kept to a limited hinge: only its
 /// turn about up, measured from left, within the range.
 fn hold_hinge(relative: RealQuaternion, angle: [f32; 2]) -> RealQuaternion {
+    about(UP, -hinge_angle(relative).clamp(angle[0], angle[1]))
+}
+
+/// A limited hinge's angle as Havok measures it: the turn of B's left from
+/// A's, the other way about up from the right hand. The game negates the
+/// tag's range for it, so a bend the tag's range allows is allowed here:
+/// the Chief's elbow and knee bend to their tags' 75° and 60°, the way they
+/// bend, and 15° the other.
+fn hinge_angle(relative: RealQuaternion) -> f32 {
     let left = relative * LEFT;
     let turned = left.j.atan2(left.i) - LEFT.j.atan2(LEFT.i);
-    let turned =
-        (turned + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
-    about(UP, turned.clamp(angle[0], angle[1]))
+    -((turned + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI)
 }
 
 /// The turn by `angle` radians about the unit `axis`.
@@ -891,10 +1131,17 @@ mod tests {
     /// out.
     #[test]
     fn a_hinge_turns_only_about_up_and_within_range() {
+        // Havok's angle runs the other way about up: a right-handed 100°
+        // turn is -100°, past this range's -15° end.
         let range = [degrees(-15.0), degrees(75.0)];
         let past = about(UP, degrees(100.0));
         let held = hold_hinge(past, range);
-        assert!((held.w - about(UP, degrees(75.0)).w).abs() < 1e-5 && held.k > 0.0);
+        assert!((held.w - about(UP, degrees(15.0)).w).abs() < 1e-5 && held.k > 0.0);
+        let bent = about(UP, degrees(-50.0));
+        assert!(
+            hold_hinge(bent, range).dot(bent).abs() > 1.0 - 1e-5,
+            "within range, untouched"
+        );
         let sideways = (about(FORWARD, degrees(30.0)) * about(UP, degrees(20.0))).normalized();
         let held = hold_hinge(sideways, range);
         let up = held * UP;
@@ -1023,8 +1270,7 @@ mod tests {
         let frame = |node: usize, frame: RealQuaternion| posed[node].decompose().1 * frame;
         let relative = (frame(elbow.a, elbow.frame_a).conjugate() * frame(forearm, elbow.frame_b))
             .normalized();
-        let left = relative * LEFT;
-        let bent = left.j.atan2(left.i) - std::f32::consts::FRAC_PI_2;
+        let bent = hinge_angle(relative);
         assert!(
             bent >= angle[0] - 1e-3 && bent <= angle[1] + 1e-3,
             "{} outside {angle:?}",
@@ -1034,5 +1280,167 @@ mod tests {
             distance(posed[hand].translation(), shoulder) > 0.01,
             "the hand stops short of folding onto the shoulder"
         );
+    }
+
+    /// Moving the root carries every node with it.
+    #[test]
+    fn moving_the_root_moves_the_skeleton() {
+        let (nodes, base) = line(3);
+        let edit = PoseEdit {
+            offset: [0.0, 0.0, 0.5],
+            ..Default::default()
+        };
+        let mut posed = base.clone();
+        apply(&nodes, &mut posed, &edit);
+        for index in 0..3 {
+            assert!(near(posed[index].translation(), [index as f32, 0.0, 0.5]));
+        }
+    }
+
+    /// A twist spins a joint about its bone: the child on the bone stays,
+    /// what lies off it goes round.
+    #[test]
+    fn a_twist_spins_only_what_lies_off_the_bone() {
+        let nodes: Vec<RenderModelPreviewNode> = [-1, 0, 1]
+            .iter()
+            .enumerate()
+            .map(|(index, &parent)| RenderModelPreviewNode {
+                name: format!("node {index}"),
+                parent,
+                ..Default::default()
+            })
+            .collect();
+        // A bend at the middle: the tip off the line from the middle's parent.
+        let base: Vec<Matrix4> = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]]
+            .iter()
+            .map(|&at| Matrix4::from_loc_rot_scale(point(at), RealQuaternion::IDENTITY, 1.0))
+            .collect();
+        let mut edit = PoseEdit::default();
+        // The root's bone runs to the middle, along x: the tip swings round x.
+        twist(
+            &nodes,
+            &base,
+            &mut edit,
+            0,
+            std::f32::consts::FRAC_PI_2,
+            &[],
+        );
+        let mut posed = base.clone();
+        apply(&nodes, &mut posed, &edit);
+        assert!(
+            near(posed[1].translation(), [1.0, 0.0, 0.0]),
+            "the child on the bone stays"
+        );
+        assert!(
+            near(posed[2].translation(), [1.0, 0.0, 1.0]),
+            "{:?}",
+            posed[2].translation()
+        );
+    }
+
+    /// A pinned joint stays where it was pinned when the root moves.
+    #[test]
+    fn a_pin_holds_when_the_root_moves() {
+        let nodes: Vec<RenderModelPreviewNode> = (0..4)
+            .map(|index| RenderModelPreviewNode {
+                name: format!("node {index}"),
+                parent: index as i16 - 1,
+                ..Default::default()
+            })
+            .collect();
+        // Bent, so the chain can take up a move toward the pin.
+        let base: Vec<Matrix4> = [
+            [0.0, 0.0, 2.0],
+            [0.0, 0.5, 1.0],
+            [0.0, 0.0, 0.0],
+            [0.3, 0.0, 0.0],
+        ]
+        .iter()
+        .map(|&at| Matrix4::from_loc_rot_scale(point(at), RealQuaternion::IDENTITY, 1.0))
+        .collect();
+        let mut edit = PoseEdit::default();
+        edit.toggle_pin(2, [0.0, 0.0, 0.0]);
+        edit.offset = [0.0, 0.0, -0.3];
+        hold_pins(&nodes, &base, &mut edit, None, &[]);
+        let mut posed = base.clone();
+        apply(&nodes, &mut posed, &edit);
+        assert!(
+            near(posed[0].translation(), [0.0, 0.0, 1.7]),
+            "the root moved"
+        );
+        assert!(
+            distance(posed[2].translation(), [0.0, 0.0, 0.0]) < 1e-3,
+            "{:?}",
+            posed[2].translation()
+        );
+        edit.toggle_pin(2, [0.0; 3]);
+        assert!(edit.pins.is_empty(), "a second toggle unpins");
+    }
+
+    /// With `BLAM_TEST_H3EK`: the Chief, his feet pinned, lowered by his
+    /// pelvis: his feet stay put, his knees bend within their hinges.
+    #[test]
+    fn the_chief_crouches_on_pinned_feet() {
+        use crate::app::model_preview::harness::kit::{kit_preview, kit_root, kit_source};
+        use crate::app::model_preview::load::TagReader;
+        use crate::app::model_preview::{ModelPreviewState, armature_node_matrices, pose_beneath};
+        use crate::core::game::GameId;
+        let (Some(root), Some(source)) = (kit_root(GameId::Halo3), kit_source(GameId::Halo3))
+        else {
+            return;
+        };
+        let physics = TagReader::new(&source)
+            .load(
+                "objects\\characters\\masterchief\\masterchief",
+                "physics_model",
+                b"phmo",
+            )
+            .unwrap();
+        let data = kit_preview(
+            &root,
+            GameId::Halo3,
+            "objects\\characters\\masterchief\\masterchief",
+            "render_model",
+            b"mode",
+        );
+        let nodes = &data.preview.nodes;
+        let limits = resolve_limits(nodes, &read_joint_limits(&physics));
+        let find = |name: &str| nodes.iter().position(|node| node.name == name).unwrap();
+        let mut state = ModelPreviewState::default();
+        state.pose.follow(data.geometry_id);
+        let base = pose_beneath(&data, &state);
+        let feet = [find("l_foot"), find("r_foot")];
+        for foot in feet {
+            state.pose.toggle_pin(foot, base[foot].translation());
+        }
+        state.pose.offset = [0.0, 0.0, -0.05];
+        hold_pins(nodes, &base, &mut state.pose, None, &limits);
+        let posed = armature_node_matrices(&data, &state);
+        for foot in feet {
+            assert!(
+                distance(posed[foot].translation(), base[foot].translation()) < 2e-3,
+                "{} slid",
+                nodes[foot].name
+            );
+        }
+        assert!(
+            posed[find("pelvis")].translation()[2] < base[find("pelvis")].translation()[2] - 0.04
+        );
+        for knee in [find("l_calf"), find("r_calf")] {
+            let limit = limits.iter().find(|limit| limit.b == knee).unwrap();
+            let LimitKind::Hinge { angle } = limit.kind else {
+                panic!("a knee is a hinge")
+            };
+            let frame = |node: usize, frame: RealQuaternion| posed[node].decompose().1 * frame;
+            let relative = (frame(limit.a, limit.frame_a).conjugate() * frame(knee, limit.frame_b))
+                .normalized();
+            let bent = hinge_angle(relative);
+            assert!(
+                bent >= angle[0] - 1e-3 && bent <= angle[1] + 1e-3,
+                "{} at {}",
+                nodes[knee].name,
+                bent.to_degrees()
+            );
+        }
     }
 }

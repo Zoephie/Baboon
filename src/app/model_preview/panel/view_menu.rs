@@ -452,7 +452,7 @@ pub(in crate::app::model_preview) fn draw_model_layer_toggles(
 /// one, and once anything is posed, the button that undoes it.
 fn draw_pose_toggle(ui: &mut Ui, state: &mut ModelPreviewState, limited: bool) {
     ui.selectable_label(state.pose.on, "Pose").on_hover_text(
-        "Drag a joint to pose the skeleton, over the bind pose or the animation playing.\nDragging anywhere else still orbits.",
+        "Drag a joint to pose the skeleton, over the bind pose or the animation playing; scroll while dragging to turn more or fewer nodes above it.\nAlt-drag a joint to twist it about its bone. Drag the root to move the whole skeleton.\nDouble-click a joint to pin it where it stands.\nDragging anywhere else still orbits.",
     ).clicked().then(|| state.pose.on = !state.pose.on);
     if state.pose.on && limited {
         ui.selectable_label(state.pose.limits, "Limits")
@@ -460,7 +460,8 @@ fn draw_pose_toggle(ui: &mut Ui, state: &mut ModelPreviewState, limited: bool) {
             .clicked()
             .then(|| state.pose.limits = !state.pose.limits);
     }
-    if state.pose.is_posed() && ui.button("Reset pose").on_hover_text("Undo every joint posed by hand").clicked() {
+    let posed = state.pose.is_posed() || !state.pose.pins.is_empty();
+    if posed && ui.button("Reset pose").on_hover_text("Undo every joint posed or pinned by hand").clicked() {
         state.pose.reset();
     }
 }
