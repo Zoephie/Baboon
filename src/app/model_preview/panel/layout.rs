@@ -474,7 +474,10 @@ pub(in crate::app::model_preview) fn draw_preview_header(
             .max_rect(left)
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
         |ui| {
-            ui.set_clip_rect(left.intersect(ui.clip_rect()));
+            // Cut at the sides only: a hovered button's outline stands out
+            // past the row's top and bottom.
+            let clip = ui.clip_rect();
+            ui.set_clip_rect(egui::Rect::from_x_y_ranges(left.x_range(), clip.y_range()).intersect(clip));
             match fit {
                 HeaderFit::Folded => {
                     let mut toggles = |ui: &mut Ui, state: &mut ModelPreviewState| draw_header_toggles(ui, panel, state);

@@ -2059,6 +2059,18 @@ fn the_preview_header_never_overlaps_itself() {
             }
         }
         assert!(pieces.len() > 3, "{width}: the header drew its controls");
+        // Nothing in the header is cut at its top or bottom, where a hovered
+        // button's outline stands a point past its frame.
+        for clipped in &shapes {
+            let rect = clipped.shape.visual_bounding_rect();
+            if rect.is_positive() && header.contains(rect.center()) {
+                let clip = clipped.clip_rect;
+                assert!(
+                    clip.top() <= rect.top() - 1.0 && clip.bottom() >= rect.bottom() + 1.0,
+                    "{width}: {rect:?} is cut by {clip:?}"
+                );
+            }
+        }
         if width >= 1000.0 {
             assert!(labels.contains("Refresh Model") && labels.contains("Pose"), "{width}: {labels}");
         }
