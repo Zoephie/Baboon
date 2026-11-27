@@ -62,11 +62,18 @@ follows like a puppet, over the bind pose or over an animation.
    bind pose), and a finishing pass turns each node only as it can turn, a hinge about its own axis,
    since FABRIK bends in the plane of the joints, which a hinge's plane need not be.
 
+   The plane angle's sign was settled the same way as the hinge's: the preview's angle toward left
+   runs opposite to Havok's, so in the preview's terms the limit is the tag's own range. The Chief's
+   hip and shoulder plane ranges are one-sided (−60° to 0° left, 0° to 60° right): read that way, each
+   leg splays outward but can't cross the other and each arm lifts away from his body, as a ragdoll is
+   built; read the other way, his legs could only cross and his arms couldn't lift.
 5. **A move gizmo (done).** Clicking a joint selects it and puts a gizmo on it in the model's axes
    (x forward red, y left green, z up blue). Dragging an arrow moves the joint along that axis alone,
    to the axis point nearest the pointer's line of sight; dragging a square moves it within that plane
    (xy, xz or yz), where the line of sight meets it; the joint's own dot still drags across the plane
-   facing the camera. The chain solve and limits follow the locked target as before.
+   facing the camera. A locked drag goes only as far toward the pointer along its line or plane as
+   the chain and its limits can take the joint exactly (a search between the last point reached and
+   the target), so a hand pulled up past its reach stops on the axis rather than swinging off it.
 
 ## Research
 
@@ -77,10 +84,7 @@ chain by length while dragging; Unreal's Full Body IK is position-based with per
 
 ## Not settled
 
-- The sign of a ragdoll joint's plane angle in Havok's terms: the preview measures it as the twist
-  axis's angle toward the left axis, its range negated as the game negates it. The hinge's sign was
-  settled by how the Chief's elbows and knees bend; the plane's has no such check. It matters: the
-  Chief's plane ranges are symmetric, but 65 of the 91 ragdoll joints among Halo 3's characters and 47
-  of 89 among Reach's are not.
+- The sign of a ragdoll joint's twist in Havok's terms. It rarely matters: every Halo 3 character's
+  twist range is symmetric, and all but 2 of Reach's 89.
 - Halo 2's, Reach's and Halo 4's constraint builds: only Halo 3's was read. Their tags share the
   field names and hold the same degree ranges.

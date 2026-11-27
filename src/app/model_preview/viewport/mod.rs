@@ -303,7 +303,7 @@ fn pose_drag(
     rect: egui::Rect,
     wheel: Option<f32>,
 ) -> bool {
-    use super::pose::{PoseDrag, chain_above, hold_pins, reach, resolve_limits, twist};
+    use super::pose::{PoseDrag, chain_above, hold_pins, reach, reach_held, resolve_limits, twist};
     let joint_at = |state: &ModelPreviewState, pointer: egui::Pos2| {
         let camera = PreviewCamera::new(data, state, rect);
         armature_node_positions(data, state)
@@ -344,10 +344,16 @@ fn pose_drag(
             Some((joint, gizmo.hit(pointer?)?))
         });
         state.pose.dragging = match handle {
-            Some((joint, lock)) => Some(PoseDrag { joint, twist: false, lock: Some(lock), anchor: positions[joint] }),
+            Some((joint, lock)) => Some(PoseDrag {
+                joint,
+                twist: false,
+                lock: Some(lock),
+                anchor: positions[joint],
+                held: positions[joint],
+            }),
             None => pointer.and_then(|pointer| joint_at(state, pointer)).map(|joint| {
                 state.pose.selected = Some(joint);
-                PoseDrag { joint, twist: alt, lock: None, anchor: positions[joint] }
+                PoseDrag { joint, twist: alt, lock: None, anchor: positions[joint], held: positions[joint] }
             }),
         };
     }
@@ -409,7 +415,14 @@ fn pose_drag(
         } else {
             // A chain longer than the joint has ancestors stops at the root.
             state.pose.chain = state.pose.chain.min(chain.len());
-            reach(nodes, &base, &mut state.pose, drag.joint, &chain, target, &limits);
+            if drag.lock.is_some() {
+                let held = reach_held(nodes, &base, &mut state.pose, drag.joint, &chain, (drag.held, target), &limits);
+                if let Some(dragging) = state.pose.dragging.as_mut() {
+                    dragging.held = held;
+                }
+            } else {
+                reach(nodes, &base, &mut state.pose, drag.joint, &chain, target, &limits);
+            }
         }
         // A pinned joint dragged is pinned where it is dragged to.
         if state.pose.pins.contains_key(&drag.joint) {

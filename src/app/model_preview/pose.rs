@@ -61,6 +61,8 @@ pub(crate) struct PoseDrag {
     /// Where the joint stood when the drag began, which a lock's line or
     /// plane runs through.
     pub anchor: [f32; 3],
+    /// Where a locked drag last brought the joint, on its line or plane.
+    pub held: [f32; 3],
 }
 
 /// What a gizmo handle holds a dragged joint to, in model space.
@@ -454,6 +456,76 @@ fn refine(
     }
 }
 
+/// Trials of [`reach_held`]'s search along the way to a target out of
+/// reach.
+const HELD_TRIALS: usize = 12;
+
+/// [`reach`] for a joint held to a gizmo's axis or plane: `from` (where
+/// the joint was last brought, on the line) and `target` both lie on it, and
+/// the joint goes no further from `from` toward `target` than the chain (and
+/// its limits) can take it exactly. Where [`reach`] would point the chain at
+/// a target out of reach, which carries the joint off the line, this stops it
+/// at the furthest point toward the target it lands on. The point it was
+/// brought to, for the next step to search from.
+pub(crate) fn reach_held(
+    nodes: &[RenderModelPreviewNode],
+    base: &[Matrix4],
+    edit: &mut PoseEdit,
+    joint: usize,
+    chain: &[usize],
+    (from, target): ([f32; 3], [f32; 3]),
+    limits: &[ResolvedLimit],
+) -> [f32; 3] {
+    let at = |edit: &PoseEdit| {
+        let mut matrices = base.to_vec();
+        apply(nodes, &mut matrices, edit);
+        matrices
+    };
+    let matrices = at(edit);
+    if matrices.get(joint).is_none() {
+        return from;
+    }
+    let reach_length: f32 = chain
+        .iter()
+        .scan(joint, |below, &node| {
+            let length = distance(matrices[*below].translation(), matrices[node].translation());
+            *below = node;
+            Some(length)
+        })
+        .sum();
+    let tolerance = 2e-3 * reach_length.max(1e-3);
+    let lands = |goal: [f32; 3]| {
+        let mut trial = edit.clone();
+        reach(nodes, base, &mut trial, joint, chain, goal, limits);
+        let landed = at(&trial)[joint].translation();
+        (distance(landed, goal) <= tolerance).then_some(trial)
+    };
+    if let Some(trial) = lands(target) {
+        *edit = trial;
+        return target;
+    }
+    let (mut low, mut high) = (0.0_f32, 1.0_f32);
+    let mut best = None;
+    for _ in 0..HELD_TRIALS {
+        let middle = 0.5 * (low + high);
+        let goal = std::array::from_fn(|axis| from[axis] + (target[axis] - from[axis]) * middle);
+        match lands(goal) {
+            Some(trial) => {
+                best = Some((trial, goal));
+                low = middle;
+            }
+            None => high = middle,
+        }
+    }
+    match best {
+        Some((trial, goal)) => {
+            *edit = trial;
+            goal
+        }
+        None => from,
+    }
+}
+
 /// Rounds of placing and holding to limits each drag event takes.
 const LIMIT_ROUNDS: usize = 4;
 
@@ -753,9 +825,12 @@ fn hold_ragdoll(
         .rem_euclid(std::f32::consts::TAU)
         - std::f32::consts::PI;
     let twist_angle = twist_angle.clamp(twist[0], twist[1]);
-    // Off the plane square to left: the angle toward left.
+    // Off the plane square to left. Havok measures the angle away from left,
+    // the other way to the angle toward it, as with the hinge: in its terms
+    // the game's negated range lets each of the Chief's legs splay outward
+    // but not cross the other, and each arm lift away from his body.
     let [x, y, z] = [direction.i, direction.j, direction.k];
-    let elevation = y.clamp(-1.0, 1.0).asin().clamp(plane[0], plane[1]);
+    let elevation = -(-y.clamp(-1.0, 1.0).asin()).clamp(plane[0], plane[1]);
     let flat = (x * x + z * z).sqrt();
     let (fx, fz) = if flat > 1e-6 {
         (x / flat, z / flat)
@@ -1539,6 +1614,134 @@ mod tests {
         assert!(
             (hit[2] - 3.0).abs() < 1e-5,
             "on the xy plane through the anchor: {hit:?}"
+        );
+    }
+
+    /// With `BLAM_TEST_H3EK`: the Chief's left hand held to the up axis and
+    /// pulled far above his head stays on the line through where it began,
+    /// rising as high as his arm and its limits let it.
+    #[test]
+    fn a_hand_held_to_an_axis_stays_on_it_past_its_reach() {
+        use crate::app::model_preview::harness::kit::{kit_preview, kit_root, kit_source};
+        use crate::app::model_preview::load::TagReader;
+        use crate::app::model_preview::{ModelPreviewState, armature_node_matrices, pose_beneath};
+        use crate::core::game::GameId;
+        let (Some(root), Some(source)) = (kit_root(GameId::Halo3), kit_source(GameId::Halo3))
+        else {
+            return;
+        };
+        let physics = TagReader::new(&source)
+            .load(
+                "objects\\characters\\masterchief\\masterchief",
+                "physics_model",
+                b"phmo",
+            )
+            .unwrap();
+        let data = kit_preview(
+            &root,
+            GameId::Halo3,
+            "objects\\characters\\masterchief\\masterchief",
+            "render_model",
+            b"mode",
+        );
+        let nodes = &data.preview.nodes;
+        let limits = resolve_limits(nodes, &read_joint_limits(&physics));
+        let hand = nodes.iter().position(|node| node.name == "l_hand").unwrap();
+        for limited in [false, true] {
+            let mut state = ModelPreviewState::default();
+            state.pose.follow(data.geometry_id);
+            let base = pose_beneath(&data, &state);
+            let start = base[hand].translation();
+            let chain = chain_above(nodes, hand, DEFAULT_CHAIN);
+            let used: &[ResolvedLimit] = if limited { &limits } else { &[] };
+            // Dragged up a step at a time, far past the arm's reach.
+            let mut held = start;
+            for step in 1..=20 {
+                let target = [start[0], start[1], start[2] + 0.05 * step as f32];
+                held = reach_held(
+                    nodes,
+                    &base,
+                    &mut state.pose,
+                    hand,
+                    &chain,
+                    (held, target),
+                    used,
+                );
+            }
+            let moved = armature_node_matrices(&data, &state)[hand].translation();
+            let off = ((moved[0] - start[0]).powi(2) + (moved[1] - start[1]).powi(2)).sqrt();
+            assert!(off < 2e-3, "limits {limited}: off the axis by {off}");
+            assert!(
+                moved[2] > start[2] + 0.05,
+                "limits {limited}: it rose: {}",
+                moved[2] - start[2]
+            );
+        }
+    }
+
+    /// With `BLAM_TEST_H3EK`: the plane limit's sign, by the Chief's left
+    /// leg. His hips' plane ranges are one-sided: swung out to his left it
+    /// keeps the swing, swung in across his right leg it is held back to
+    /// where it stood. Ragdolls are built so the legs splay but don't cross.
+    #[test]
+    fn a_leg_splays_outward_but_does_not_cross() {
+        use crate::app::model_preview::harness::kit::{kit_preview, kit_root, kit_source};
+        use crate::app::model_preview::load::TagReader;
+        use crate::app::model_preview::{ModelPreviewState, armature_node_matrices, pose_beneath};
+        use crate::core::game::GameId;
+        let (Some(root), Some(source)) = (kit_root(GameId::Halo3), kit_source(GameId::Halo3))
+        else {
+            return;
+        };
+        let physics = TagReader::new(&source)
+            .load(
+                "objects\\characters\\masterchief\\masterchief",
+                "physics_model",
+                b"phmo",
+            )
+            .unwrap();
+        let data = kit_preview(
+            &root,
+            GameId::Halo3,
+            "objects\\characters\\masterchief\\masterchief",
+            "render_model",
+            b"mode",
+        );
+        let nodes = &data.preview.nodes;
+        let limits = resolve_limits(nodes, &read_joint_limits(&physics));
+        let find = |name: &str| nodes.iter().position(|node| node.name == name).unwrap();
+        let (thigh, foot) = (find("l_thigh"), find("l_foot"));
+        let hip = limits
+            .iter()
+            .find(|limit| limit.b == thigh)
+            .unwrap()
+            .clone();
+        // The foot's sideways place before and after the thigh is swung
+        // `angle` (out to the left for a positive one) and held.
+        let swung = |angle: f32| {
+            let mut state = ModelPreviewState::default();
+            state.pose.follow(data.geometry_id);
+            let base = pose_beneath(&data, &state);
+            let parent = base[nodes[thigh].parent as usize];
+            // About +x: a leg hanging down swings toward +y, the left.
+            state
+                .pose
+                .turn_by(thigh, Some(&parent), about(FORWARD, angle));
+            hold(nodes, &base, &mut state.pose, &hip);
+            (
+                base[foot].translation()[1],
+                armature_node_matrices(&data, &state)[foot].translation()[1],
+            )
+        };
+        let (start, out) = swung(degrees(20.0));
+        assert!(
+            out > start + 0.02,
+            "out to the left it keeps its swing: {start} → {out}"
+        );
+        let (start, inward) = swung(degrees(-20.0));
+        assert!(
+            inward > start - 0.01,
+            "in across the other leg it is held back: {start} → {inward}"
         );
     }
 }
