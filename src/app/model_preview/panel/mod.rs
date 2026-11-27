@@ -6,6 +6,9 @@ pub(in crate::app) use layout::*;
 mod animation;
 mod section;
 mod setup;
+mod snapshot;
+#[cfg(test)]
+pub(in crate::app) use snapshot::snapshot_chevron_id;
 pub(in crate::app) use section::*;
 mod functions;
 mod rows;

@@ -276,11 +276,15 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
     {
         rejected = None;
     }
-    let stacked = stacked_field_row(ui);
+    // No label (a window naming the field itself): no type caption either,
+    // and the box takes what its buttons leave of the row.
+    let bare = meta.label.is_empty();
+    let stacked = bare || stacked_field_row(ui);
     let row_response = foundation_field_row(ui, meta, depth, |ui| {
             let value_width = if stacked {
+                let caption = if bare { 0.0 } else { foundation_caption_space(ui, suffix) };
                 (ui.available_size_before_wrap().x - 4.0 * (ICON_BUTTON_SIZE.x + ui.spacing().item_spacing.x)
-                    - foundation_caption_space(ui, suffix) - 2.0).max(1.0)
+                    - caption - 2.0).max(1.0)
             } else { value_width };
             let editable = droppable;
             let has_ref = target.is_some();
@@ -480,7 +484,9 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     });
                 }
             }
-            ui.label(RichText::new(suffix).color(subtle_dark()).small());
+            if !bare {
+                ui.label(RichText::new(suffix).color(subtle_dark()).small());
+            }
         })
         .response;
 

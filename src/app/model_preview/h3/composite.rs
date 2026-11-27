@@ -64,10 +64,7 @@ impl H3Game {
                 gl.get_uniform_location(program, "exposure").as_ref(),
                 screen.exposure(),
             );
-            gl.uniform_1_f32(
-                gl.get_uniform_location(program, "view_scale").as_ref(),
-                screen.view_scale(HALF_LENS),
-            );
+core.set_composite_window(gl, program, screen.view_scale(HALF_LENS));
             premultiplied_over(state.empty_array(gl)).apply(gl);
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             PassState::new().enable(glow::DEPTH_TEST).apply(gl);

@@ -174,17 +174,9 @@ pub(in crate::app) fn draw_function_popup(
     // open can invalidate classic H2 wrapper fields underneath combo boxes.
     let mut batch = None;
     if editable && commit {
-        if let Some(paths) = popup.view.edit.clone() {
-            let mut edits = push_function_edit(&paths, &popup.last_applied, &popup.view);
-            if !edits.edits.is_empty() || !edits.data_ops.is_empty() {
-                popup.last_applied = FunctionSnapshot::from_view(&popup.view);
-                edits.tag_key = popup.tag_key.clone();
-                batch = Some(FunctionEditBatch {
-                    tag_key: edits.tag_key,
-                    edits: edits.edits,
-                    data_ops: edits.data_ops,
-                });
-            }
+        batch = popup.batch(false);
+        if batch.is_some() {
+            popup.last_applied = FunctionSnapshot::from_view(&popup.view);
         }
     }
 

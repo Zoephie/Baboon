@@ -11,6 +11,8 @@ mod rows;
 pub(in crate::app) use rows::*;
 mod editing;
 pub(in crate::app) use editing::*;
+mod material_tag;
+pub(in crate::app) use material_tag::build_material_tag_editor_model;
 mod widgets;
 pub(in crate::app) use widgets::*;
 
@@ -186,6 +188,9 @@ pub(in crate::app) enum ShaderRowEditKind {
         parameters_block_path: String,
         parameter_name: String,
         parameter_type_index: i32,
+        /// The value field the new element's number goes in: `real` for a
+        /// render method's, `real` or `int/bool` for a Halo 4 material's.
+        field: &'static str,
     },
     H2CreateTemplateValue {
         parameters_block_path: String,
@@ -689,9 +694,41 @@ mod tests {
         color_popup: Option<MaterialColorPopup>,
         function_popup: Option<FunctionPopup>,
         painted: Painted,
+        /// The game the grid's tag is from.
+        game: &'static str,
+        /// Drawn as a tag whose structure is locked (Halo 5's) is.
+        locked: bool,
     }
 
     impl Grid {
+        /// The grid of the kit tag at `relative` in `game`'s kit, or `None`
+        /// (the test skips) when that kit isn't set.
+        fn for_kit_tag(game: &'static str, game_id: GameId, relative: &str) -> Option<Self> {
+            let root = PathBuf::from(crate::core::test_kits::tag_path(game, ""));
+            let path = root.join(relative);
+            if !path.exists() {
+                eprintln!("skipping: no {game} kit tag at {}", path.display());
+                return None;
+            }
+            let tag = TagFile::read(&path).expect("read the kit tag");
+            let mut grid = Self::new(1);
+            grid.entry = TagEntry {
+                key: TAG_KEY.to_owned(),
+                display_path: relative.to_owned(),
+                group_tag: tag.header.group_tag,
+                group_name: None,
+                location: TagEntryLocation::LooseFile(path),
+            };
+            grid.doc = TagDocument::clean(tag);
+            grid.source = TagSource::LooseFolder {
+                root,
+                game: Some(game_id),
+                definitions_root: locate_definitions_root(),
+            };
+            grid.game = game;
+            Some(grid)
+        }
+
         fn new(categories: usize) -> Self {
             let (rmdf, rmop) = render_method_caches(categories);
             let shader = synthetic_shader(categories);
@@ -722,6 +759,8 @@ mod tests {
                 color_popup: None,
                 function_popup: None,
                 painted: Vec::new(),
+                game: GAME,
+                locked: false,
             }
         }
 
@@ -755,15 +794,19 @@ mod tests {
                 ops,
                 color_popup,
                 function_popup,
+                game,
+                locked,
                 ..
             } = self;
+            let (game, locked) = (*game, *locked);
             let output = crate::app::run_ui_test(&ctx, input, |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
                     let mut sinks = EditSinks::default();
                     let mut edit = FieldEditContext::read_only(&mut sinks, "test", TAG_KEY);
                     edit.group_tag = doc.tag.header.group_tag;
                     edit.root = Some(doc.tag.root());
-                    edit.game = GameId::from_id(GAME);
+                    edit.game = GameId::from_id(game);
+                    edit.structure_locked = locked;
                     edit.definitions_root = Some(definitions_root.as_path());
                     edit.names = Some(names);
                     edit.editable = true;
@@ -916,7 +959,7 @@ mod tests {
         /// move the document to a new revision so the grid rebuilds from it.
         fn apply(&mut self) -> AppliedDeferredOps {
             let mut ops = std::mem::take(&mut self.ops);
-            ops.index_targets = Some(crate::core::index_targets::load(None, Some(GameId::Halo3), false));
+            ops.index_targets = Some(crate::core::index_targets::load(None, GameId::from_id(self.game), false));
             let applied = apply_deferred_ops(&mut self.doc, ops, "test");
             // The pane applies every frame; the next frame's empty batch is what
             // closes the undo step.
@@ -1898,5 +1941,311 @@ mod tests {
             assert_eq!(outcome.result, Ok(()));
         }
         assert_eq!(grid.count("p0_0_filter_mode"), 1, "{:?}", grid.texts());
+    }
+
+    // A Halo 4 `material`'s grid: its material shader's parameters, over a
+    // real kit material, edited the way a user edits them.
+    //
+    // `objects/multi/darth_shader.material` names `srf_lambert`, which
+    // declares color_map, normal_map, albedo_tint and diffuse_intensity. The
+    // material overrides albedo_tint with a constant colour function, and
+    // carries a `diffuse_alpha` the shader doesn't declare.
+
+    const H4_MATERIAL: &str = "objects/multi/darth_shader.material";
+
+    fn h4_material_grid() -> Option<Grid> {
+        let mut grid = Grid::for_kit_tag("halo4_mcc", GameId::Halo4, H4_MATERIAL)?;
+        grid.idle(3);
+        Some(grid)
+    }
+
+    fn material_parameters(grid: &Grid) -> Vec<(String, TagStruct<'_>)> {
+        let root = grid.doc.tag.root();
+        let Some(block) = root.field("material parameters").and_then(|field| field.as_block()) else {
+            return Vec::new();
+        };
+        block
+            .iter()
+            .map(|element| (element.read_string_id("parameter name").unwrap_or_default(), element))
+            .collect()
+    }
+
+    /// The grid lists what the shader declares, the material's own value or
+    /// the shader's default beside each, and the override the shader no
+    /// longer declares under its own heading.
+    #[test]
+    fn a_halo_4_material_lists_its_shaders_parameters() {
+        let Some(grid) = h4_material_grid() else { return };
+        // Labelled with the shader's display names, grouped by its display
+        // groups.
+        for label in ["material shader", "Color Map", "Normal Map", "Color Tint", "Diffuse Intensity", "COLOR MAP", "NORMAL MAP"] {
+            assert_eq!(grid.count(label), 1, "{label}: {:?}", grid.texts());
+        }
+        assert_eq!(grid.count("UNUSED PARAMETERS"), 1);
+        assert_eq!(grid.count("diffuse_alpha"), 1);
+        assert_eq!(grid.count("MATERIAL PROPERTIES"), 1);
+        // The material's own fields, as its layout has them.
+        for label in ["physics material name", "alpha blend mode", "sort layer", "flags"] {
+            assert_eq!(grid.count(label), 1, "{label}: {:?}", grid.texts());
+        }
+        // The three the material doesn't override offer to.
+        assert_eq!(grid.count("Override Default"), 3, "{:?}", grid.texts());
+    }
+
+    /// Override Default on an inherited real adds it to the material, named
+    /// and typed as the shader declares it, at the shader's default.
+    #[test]
+    fn overriding_a_halo_4_default_adds_the_parameter() {
+        let Some(mut grid) = h4_material_grid() else { return };
+        let before = material_parameters(&grid).len();
+        grid.click_at(rightmost_on_row(&grid, "Diffuse Intensity", "Override Default").center());
+        grid.apply();
+        let parameters = material_parameters(&grid);
+        assert_eq!(parameters.len(), before + 1);
+        let (_, added) = parameters.iter().find(|(name, _)| name == "diffuse_intensity").expect("added");
+        // `material_shader_parameter_type_enum`: real is 1.
+        assert_eq!(added.read_int_any("parameter type"), Some(1));
+        assert_eq!(added.read_real("real"), Some(1.0));
+        assert_eq!(grid.count("Override Default"), 2, "{:?}", grid.texts());
+    }
+
+    /// Clear on an override the shader doesn't declare deletes it, and no
+    /// other.
+    #[test]
+    fn clearing_an_unused_halo_4_override_deletes_it() {
+        let Some(mut grid) = h4_material_grid() else { return };
+        grid.click_at(rightmost_on_row(&grid, "diffuse_alpha", "×").center());
+        grid.apply();
+        let names: Vec<String> = material_parameters(&grid).into_iter().map(|(name, _)| name).collect();
+        assert_eq!(names, vec!["albedo_tint".to_owned()]);
+        assert_eq!(grid.count("UNUSED PARAMETERS"), 0);
+    }
+
+    /// Typing into the override's box writes the material's real.
+    #[test]
+    fn typing_a_halo_4_override_writes_its_value() {
+        let Some(mut grid) = h4_material_grid() else { return };
+        grid.click_at(rightmost_on_row(&grid, "Diffuse Intensity", "Override Default").center());
+        grid.apply();
+        grid.click(&"1.0".to_owned(), 0);
+        grid.type_text("0.25");
+        grid.apply();
+        let parameters = material_parameters(&grid);
+        let (_, value) = parameters.iter().find(|(name, _)| name == "diffuse_intensity").expect("overridden");
+        assert_eq!(value.read_real("real"), Some(0.25));
+    }
+
+    /// A tag whose structure is locked (Halo 5's) keeps its values editable
+    /// but offers nothing that adds or deletes a parameter.
+    #[test]
+    fn a_locked_material_offers_no_override_or_clear() {
+        let Some(mut grid) = h4_material_grid() else { return };
+        assert!(grid.count("Override Default") > 0 && grid.count("×") > 0, "unlocked, both are offered");
+        grid.locked = true;
+        grid.idle(2);
+        assert_eq!(grid.count("Override Default"), 0, "{:?}", grid.texts());
+        assert_eq!(grid.count("×"), 0);
+    }
+
+    /// A new override made through a function gets its function in the
+    /// material's `function parameters` block: the op names the block the
+    /// render-method way, and the parameter's own schema says which it is.
+    #[test]
+    fn a_halo_4_override_made_with_a_function_lands_in_function_parameters() {
+        let Some(mut grid) = h4_material_grid() else { return };
+        let action = shader_function_action(
+            &ShaderFunctionCreateTarget::NewParameter {
+                parameters_block_path: "material parameters".to_owned(),
+                parameter_name: "albedo_tint_two".to_owned(),
+                parameter_type_index: 4,
+                output_type_index: 1,
+            },
+            constant_color_function_hex(1.0, 0.5, 0.25, 1.0),
+        );
+        grid.ops = shader_context_action_ops(&action);
+        grid.apply();
+        let parameters = material_parameters(&grid);
+        let (_, added) = parameters.iter().find(|(name, _)| name == "albedo_tint_two").expect("added");
+        let functions = added.field("function parameters").and_then(|field| field.as_block()).expect("function block");
+        assert_eq!(functions.len(), 1);
+        assert_eq!(functions.iter().next().unwrap().read_int_any("type"), Some(1), "a colour function");
+    }
+
+    /// Every kit material builds its grid, and every edit a row offers names
+    /// a field the material has. Ignored: it reads all 6977 of them.
+    ///
+    ///   BLAM_TEST_H4EK=~/Halo/halo4_mcc/tags cargo test --release \
+    ///     every_halo_4_kit_material -- --ignored
+    #[test]
+    #[ignore = "sweeps every Halo 4 kit material; set BLAM_TEST_H4EK"]
+    fn every_halo_4_kit_material_builds_a_grid_whose_edits_resolve() {
+        let root = PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        if !root.exists() {
+            eprintln!("skipping: set BLAM_TEST_H4EK");
+            return;
+        }
+        let source = TagSource::LooseFolder { root: root.clone(), game: Some(GameId::Halo4), definitions_root: locate_definitions_root() };
+        let mut templates = H2TemplateCache::default();
+        let (mut built, mut unread, mut paths) = (0, 0, 0);
+        let mut failures = Vec::new();
+        let mut stack = vec![root];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|ext| ext != "material") {
+                    continue;
+                }
+                let Ok(tag) = TagFile::read(&path) else {
+                    unread += 1;
+                    continue;
+                };
+                let Some(model) = build_material_tag_editor_model(&tag, tag.header.group_tag, Some(&source), &mut templates) else {
+                    failures.push(format!("{}: no grid", path.display()));
+                    continue;
+                };
+                built += 1;
+                let rows = model.top_rows.iter().chain(model.sections.iter().flat_map(|section| section.rows.iter()));
+                for row in rows {
+                    let Some(edit) = row.edit.as_ref() else { continue };
+                    if edit.path.is_empty() || edit.path.starts_with("create:") {
+                        continue;
+                    }
+                    paths += 1;
+                    if tag.root().field_path(&edit.path).is_none() {
+                        failures.push(format!("{}: {} → {}", path.display(), row.label, edit.path));
+                    }
+                }
+            }
+        }
+        eprintln!("{built} grids, {paths} edit paths, {unread} unreadable");
+        assert!(built > 6000, "{built} grids");
+        assert!(failures.is_empty(), "{} failures, first: {:?}", failures.len(), &failures[..failures.len().min(10)]);
+    }
+
+    /// Halo 2 Anniversary's materials take the same grid as Halo 4's: its
+    /// definitions lay a material's parameters out alike. No H2A kit is at
+    /// hand, so its tags are built from its definitions: a material shader
+    /// declaring a colour, and a material naming it. The grid lists the
+    /// colour, and overriding it makes a parameter with a colour function,
+    /// in the material's own block. (Halo 5 tags can't be built this way:
+    /// they are edited only from extracted files.)
+    #[test]
+    fn halo_2_anniversary_materials_take_the_grid() {
+        use crate::app::loose_fixture::{definition, group_tag, set_reference};
+        for (game, game_id) in [("halo2amp_mcc", Some(GameId::Halo2Amp))] {
+            let root = crate::core::test_kits::unique_temp_dir(&format!("material-grid-{game}"));
+            let write = |rel: &str, group: &str, edit: &dyn Fn(&mut TagFile)| {
+                let mut tag = TagFile::new(definition(game, group)).unwrap_or_else(|error| panic!("{game} {group}: {error}"));
+                edit(&mut tag);
+                let path = root.join(format!("{rel}.{group}"));
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                tag.write(&path).unwrap();
+                path
+            };
+            write("shaders/tint", "material_shader", &|tag| {
+                apply_one_shader_param_op(
+                    tag,
+                    &ShaderParamOp {
+                        parameters_block_path: "material parameters".to_owned(),
+                        parameter_name: "tint".to_owned(),
+                        // `material_shader_parameter_type_enum`: colour.
+                        initial_fields: vec![shader_parameter_type_initial_field(4)],
+                        animated_parameters: Vec::new(),
+                    },
+                )
+                .unwrap();
+            });
+            let material = write("objects/thing", "material", &|tag| {
+                set_reference(tag, "material shader", group_tag(game, "material_shader"), "shaders\\tint");
+            });
+            let source = TagSource::LooseFolder { root: root.clone(), game: game_id, definitions_root: locate_definitions_root() };
+            let tag = TagFile::read(&material).unwrap();
+            let model = build_material_tag_editor_model(&tag, u32::from_be_bytes(*b"mat "), Some(&source), &mut H2TemplateCache::default())
+                .unwrap_or_else(|| panic!("{game}: a grid"));
+            let row = model
+                .sections
+                .iter()
+                .flat_map(|section| section.rows.iter())
+                .find(|row| row.label == "tint")
+                .unwrap_or_else(|| panic!("{game}: the shader's colour is listed"));
+            let Some(ShaderRowEdit { kind: ShaderRowEditKind::CreateFunctionColor { target }, .. }) = row.edit.as_ref() else {
+                panic!("{game}: an inherited colour is overridden with a function");
+            };
+            let mut document = TagDocument::clean(tag);
+            apply_deferred_ops(
+                &mut document,
+                shader_context_action_ops(&shader_function_action(target, constant_color_function_hex(1.0, 0.0, 0.0, 1.0))),
+                "test",
+            );
+            let root_struct = document.tag.root();
+            let parameters = root_struct.field("material parameters").and_then(|field| field.as_block()).unwrap();
+            let added = parameters.iter().next().unwrap_or_else(|| panic!("{game}: the override"));
+            assert_eq!(added.read_string_id("parameter name").as_deref(), Some("tint"), "{game}");
+            assert_eq!(added.read_int_any("parameter type"), Some(4), "{game}");
+            let functions = added.field("function parameters").and_then(|field| field.as_block()).unwrap();
+            assert_eq!(functions.len(), 1, "{game}: its colour function");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
+    /// A Halo 5 material, in Halo 5's own native (`ucsh`) form, takes the
+    /// grid too, its structure locked as the pane locks every Halo 5 tag:
+    /// its fields edit in place, and the edit writes back out as Halo 5
+    /// bytes. No Halo 5 tag is at hand, and new ones can't be made from the
+    /// definitions, so this one is laid out by hand as blam-tags' own Halo 5
+    /// tests lay theirs: a header and a zeroed root.
+    #[test]
+    fn a_halo_5_material_edits_in_place_in_the_grid() {
+        let definition = locate_definitions_root().join("halo5_guardians").join("material.json");
+        let layout = blam_tags::TagLayout::from_json(&definition).expect("Halo 5's material layout");
+        let root = &layout.struct_layouts
+            [layout.block_layouts[layout.header.tag_group_block_index as usize].struct_index as usize];
+        let mut bytes = vec![0u8; 128 + root.size];
+        bytes[..4].copy_from_slice(b"ucsh");
+        for (offset, value) in [(4, 27u32), (32, 1), (36, 1), (60, 128), (64, root.size as u32), (80, root.size as u32), (120, u32::MAX)] {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        bytes[86] = 1;
+        bytes[96..112].copy_from_slice(&root.guid);
+        let group = u32::from_be_bytes(*b"mat ");
+        let tag = crate::core::source::read_tag_from_bytes(&bytes, None, None, group).expect("read as Baboon reads Halo 5 tags");
+        assert!(tag.is_halo5());
+
+        let mut grid = Grid::new(1);
+        grid.entry = TagEntry {
+            key: TAG_KEY.to_owned(),
+            display_path: "objects/h5.material".to_owned(),
+            group_tag: group,
+            group_name: Some("material".to_owned()),
+            location: TagEntryLocation::LooseFile("objects/h5.material".into()),
+        };
+        grid.doc = TagDocument::clean(tag);
+        grid.locked = true;
+        grid.idle(3);
+        for label in ["material shader", "MATERIAL PROPERTIES", "sort offset", "alpha blend mode"] {
+            assert_eq!(grid.count(label), 1, "{label}: {:?}", grid.texts());
+        }
+        assert_eq!(grid.count("Override Default"), 0, "nothing to add on a locked tag");
+
+        let row = grid.find("sort offset", 0).center().y;
+        let value = grid
+            .painted
+            .iter()
+            .filter(|(text, rect)| text == "0.0" && (rect.center().y - row).abs() < 6.0)
+            .map(|(_, rect)| *rect)
+            .max_by(|a, b| a.left().total_cmp(&b.left()))
+            .expect("its value box");
+        grid.click_at(value.center());
+        grid.type_text("0.75");
+        grid.apply();
+        assert_eq!(grid.doc.tag.root().read_real("sort offset"), Some(0.75), "edited in place");
+        let written = grid.doc.tag.write_to_bytes().expect("written as Halo 5 bytes");
+        assert!(blam_tags::halo5::looks_like_halo5(&written));
+        let reread = crate::core::source::read_tag_from_bytes(&written, None, None, group).unwrap();
+        assert_eq!(reread.root().read_real("sort offset"), Some(0.75), "and read back");
     }
 }

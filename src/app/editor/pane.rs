@@ -21,12 +21,16 @@ const BITMAP_HEADER_ACTIONS_WIDTH: f32 = 225.0;
 /// for the filter it may apply; the field a reference jump is heading for;
 /// the sound player; and the docs and Wwise binding the caller resolved for
 /// this tag, which fill caches and so are resolved before the draw.
+#[derive(Clone)]
 pub(in crate::app) struct PaneInputs<'a> {
     pub(in crate::app) find: &'a FindDialogState,
     pub(in crate::app) field_nav: Option<&'a FieldNav>,
     pub(in crate::app) audio: &'a audio::AudioState,
     pub(in crate::app) def_docs: Option<Rc<DefDocs>>,
     pub(in crate::app) ce_sound: Option<Arc<crate::core::source::ce_audio::CeSoundBinding>>,
+    /// Drawn by a Model Preview's Material Editor, for the preview of this
+    /// tag: the colour and function pickers it opens show live there.
+    pub(in crate::app) live_preview: Option<String>,
 }
 
 /// What a tag pane hands on once it has drawn: its edits, a jump Find's
@@ -112,6 +116,7 @@ impl Baboon {
         // the preview into a waiting state that has to be drawn.
         changed |= self.maybe_request_model_preview(kit_index, &key, ctx);
         changed |= self.maybe_request_model_textures(kit_index, &key, ctx);
+        changed |= self.maybe_request_material_resolve(kit_index, &key, ctx);
         changed |= self.maybe_request_model_overlays(kit_index, &key, ctx);
         changed |= self.maybe_request_unit_weapons(kit_index, &key, ctx);
         changed |= self.maybe_request_model_animations(kit_index, &key, ctx);
@@ -153,11 +158,6 @@ pub(in crate::app) fn draw_tag_pane(
         cx.set_status("Cut cancelled because the source changed. The clipboard can still be pasted as a copy.".to_owned());
     }
     if ctx.input(|input| input.key_pressed(egui::Key::Escape)) { string_row_clipboard::dismiss(ctx); }
-    let key = entry.key.clone();
-    let hud_message_usage = if entry.group_tag == blam_tags::string_list::HUD_GROUP {
-        let kit = &cx.model.kits[kit_index];
-        kit.source.as_ref().map_or(hud_messages::HudMessageUsage::Unknown, |source| hud_messages::usage(source, &key, &kit.parsed_tags))
-    } else { hud_messages::HudMessageUsage::Unknown };
     let kit_read_only = cx.model.editing_kit_is_read_only(kit_index);
     draw_responsive_tag_header(cx, ui, kit_index, entry, show_keyword_bar);
     disk_banner::draw_disk_banner(cx, ui, kit_index, entry);
@@ -168,6 +168,33 @@ pub(in crate::app) fn draw_tag_pane(
                 .color(subtle_dark()),
         );
     }
+    draw_tag_body(cx, ui, kit_index, entry, scope, inputs, view, editor);
+}
+
+/// The body of a tag pane: everything under its header, as
+/// [`draw_tag_pane`] describes. A window that shows a tag of its own (the
+/// Model Preview's Material Editor, for a shader) draws this under a header
+/// of its own, with a `scope` of its own, so the document is drawn, edited
+/// and undone exactly as in its tab, and its popups are stamped the same way.
+#[allow(clippy::too_many_arguments)]
+pub(in crate::app) fn draw_tag_body(
+    cx: &Ctx,
+    ui: &mut Ui,
+    kit_index: usize,
+    entry: &TagEntry,
+    scope: &str,
+    inputs: PaneInputs,
+    view: &mut KitView,
+    editor: &mut EditorFeature,
+) {
+    let ctx = cx.egui;
+    let key = entry.key.clone();
+    let window_inputs = inputs.clone();
+    let hud_message_usage = if entry.group_tag == blam_tags::string_list::HUD_GROUP {
+        let kit = &cx.model.kits[kit_index];
+        kit.source.as_ref().map_or(hud_messages::HudMessageUsage::Unknown, |source| hud_messages::usage(source, &key, &kit.parsed_tags))
+    } else { hud_messages::HudMessageUsage::Unknown };
+    let kit_read_only = cx.model.editing_kit_is_read_only(kit_index);
 
     let supports_field_search = supports_field_search(
         entry,
@@ -188,11 +215,14 @@ pub(in crate::app) fn draw_tag_pane(
         audio,
         def_docs,
         ce_sound,
+        live_preview,
     } = inputs;
     let bitmap_preview_view = cx.model.prefs.bitmap_preview_view;
     let model_preview_perspective = cx.model.prefs.model_preview_perspective;
     let model_preview_unsaved_edits = cx.model.prefs.model_preview_unsaved_edits;
     let model_preview_background = cx.model.prefs.model_preview_background;
+    let model_preview_snapshot_scale = cx.model.prefs.model_preview_snapshot_scale;
+    let model_preview_shading = cx.model.prefs.model_preview_shading;
 
     let Some(doc) = cx.model.kits[kit_index].parsed_tags.get(&key) else {
         if cx.model.kits[kit_index].loading_tags.contains(&key) {
@@ -498,6 +528,11 @@ pub(in crate::app) fn draw_tag_pane(
         // applied going in, and a toggle in this pane written back.
         model_preview.perspective = model_preview_perspective;
         model_preview.background = model_preview_background;
+        model_preview.snapshot_scale = model_preview_snapshot_scale;
+        // A preview opens on the shading last picked, before its first load.
+        if !std::mem::replace(&mut model_preview.shading_from_prefs, true) {
+            model_preview.set_shading(model_preview_shading);
+        }
         // Turned on or off (here or in another pane): draw again from the
         // edits, or from the files.
         if model_preview.show_unsaved_edits != model_preview_unsaved_edits {
@@ -526,6 +561,7 @@ pub(in crate::app) fn draw_tag_pane(
             model_preview,
             &mut model_setup_width,
             cx.model.prefs.expert_mode,
+            live_preview.is_none(),
             &mut edit_context,
         );
         if crate::app::editor::string_list::supports_group(entry.group_tag) {
@@ -564,6 +600,17 @@ pub(in crate::app) fn draw_tag_pane(
         if model_preview.background != model_preview_background {
             let background = model_preview.background;
             cx.edit_prefs(move |prefs| prefs.model_preview_background = background);
+        }
+        if std::mem::take(&mut model_preview.shading_picked) {
+            let shading = model_preview.shading();
+            cx.edit_prefs(move |prefs| prefs.model_preview_shading = shading);
+        }
+        if model_preview.snapshot_scale != model_preview_snapshot_scale {
+            let scale = model_preview.snapshot_scale;
+            cx.edit_prefs(move |prefs| prefs.model_preview_snapshot_scale = scale);
+        }
+        if let Some(message) = model_preview.snapshot_message.take() {
+            cx.set_status(message);
         }
     }
 
@@ -606,6 +653,7 @@ pub(in crate::app) fn draw_tag_pane(
             popup: Some(popup),
             kit: kit_id,
             opened_at: Some(layout_stamp),
+            live: live_preview.as_deref().map(LivePreviewTarget::new),
         });
     }
     if let Some(popup) = grid_function_popup.or(function_request) {
@@ -620,6 +668,7 @@ pub(in crate::app) fn draw_tag_pane(
             popup: Some(popup),
             kit: kit_id,
             opened_at: Some(layout_stamp),
+            live: live_preview.as_deref().map(LivePreviewTarget::new),
         });
     }
     // A referenced sound was played/extracted from a container source. It
@@ -632,7 +681,7 @@ pub(in crate::app) fn draw_tag_pane(
     // the field renderers, which are shared by every pane and know no kit:
     // they are stamped with this pane's here.
     if let Some(state) = tag_reference_picker {
-        cx.open_dialog(TagReferencePickerWindow { state, kit: kit_id });
+        cx.open_dialog(TagReferencePickerWindow { state, kit: kit_id, shader_switch: None });
     }
     if let Some(mut confirm) = block_confirm {
         confirm.kit = Some(kit_id);
@@ -679,6 +728,9 @@ pub(in crate::app) fn draw_tag_pane(
         bitmap_hover_requests,
         row_command,
     })));
+    // Last, with the view free again: a model's Material Editor, in the room
+    // its sidebar left, which draws its shader with this same function.
+    draw_material_editor_section(cx, ui, kit_index, entry, scope, window_inputs, view, editor);
 }
 
 /// The definitions a kit's tags are compared with: a loose kit's own, else

@@ -37,6 +37,8 @@ pub(in crate::app) enum ButtonIcon {
     AssetBrowser,
     Browse,
     Cache,
+    /// The Model Preview's snapshot: the frame to the clipboard.
+    Camera,
     ChangeAdded,
     ChangeModified,
     ChangeRemoved,
@@ -62,6 +64,9 @@ pub(in crate::app) enum ButtonIcon {
     Undo,
     Redo,
     Reset,
+    /// Reset, stacked: every one of a list put back (the Materials card's
+    /// Reset All).
+    ResetAll,
     Compare,
     Swap,
     Container,
@@ -123,6 +128,9 @@ pub(in crate::app) enum ButtonIcon {
     Rename,
     Right,
     Save,
+    /// Save, stacked: every one of a list saved (the Materials card's Save
+    /// All).
+    SaveAll,
     Settings,
     Sort,
     Stop,
@@ -170,6 +178,8 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::SelectAll => include_root_str!("assets/Button Icons/Select All.svg"),
         ButtonIcon::Undo => include_root_str!("assets/Button Icons/Undo.svg"),
         ButtonIcon::Reset => include_root_str!("assets/Button Icons/Reset.svg"),
+        ButtonIcon::Camera => include_root_str!("assets/Button Icons/Camera.svg"),
+        ButtonIcon::ResetAll => include_root_str!("assets/Button Icons/Reset All.svg"),
         ButtonIcon::Recent => include_root_str!("assets/Button Icons/Recent.svg"),
         ButtonIcon::Home => include_root_str!("assets/Button Icons/Home.svg"),
         ButtonIcon::Redo => include_root_str!("assets/Button Icons/Redo.svg"),
@@ -236,6 +246,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Rename => include_root_str!("assets/Button Icons/Rename.svg"),
         ButtonIcon::Right => include_root_str!("assets/Button Icons/Right.svg"),
         ButtonIcon::Save => include_root_str!("assets/Button Icons/Save.svg"),
+        ButtonIcon::SaveAll => include_root_str!("assets/Button Icons/Save All.svg"),
         ButtonIcon::Settings => include_root_str!("assets/Button Icons/Settings.svg"),
         ButtonIcon::Sort => include_root_str!("assets/Button Icons/Sort.svg"),
         ButtonIcon::Stop => include_root_str!("assets/Button Icons/Stop.svg"),
@@ -720,6 +731,44 @@ fn dropdown_menu_button<R>(
             .with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config))
         .show(contents);
     (response, inner)
+}
+
+/// A split button: `icon` and `label` on its main half, which does the
+/// button's own thing, and a chevron half joined to it that opens `contents`
+/// as a menu. Drawn in a right-to-left row, as the headers lay theirs out.
+/// Returns the main half's response, the chevron's, and what the menu
+/// returned, if open.
+pub(in crate::app) fn split_icon_dropdown_button<R>(
+    ui: &mut Ui,
+    icon: ButtonIcon,
+    label: &str,
+    enabled: bool,
+    contents: impl FnOnce(&mut Ui) -> R,
+) -> (egui::Response, egui::Response, Option<R>) {
+    let rounding = ui.visuals().widgets.inactive.corner_radius;
+    let outer = rounding.nw.max(rounding.ne);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        // Right to left: the chevron first, then the main half on its left.
+        let chevron = egui::Button::new("")
+            .min_size(Vec2::new(22.0, BUTTON_HEIGHT))
+            .corner_radius(egui::CornerRadius { nw: 0, sw: 0, ne: outer, se: outer });
+        let (chevron, menu) = dropdown_menu_button(ui, chevron, contents);
+        let rect = egui::Rect::from_center_size(chevron.rect.center(), Vec2::splat(BUTTON_ICON_SIZE));
+        paint_button_icon_at(ui, ButtonIcon::Down, rect, text_dark());
+        let image = button_icon_image(ui, icon, text_dark(), BUTTON_ICON_SIZE);
+        let main = ui.add_enabled(
+            enabled,
+            egui::Button::image_and_text(image, label)
+                .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
+                .corner_radius(egui::CornerRadius { nw: outer, sw: outer, ne: 0, se: 0 }),
+        );
+        // The seam between the halves.
+        let seam = egui::Rect::from_min_max(egui::pos2(chevron.rect.left(), chevron.rect.top() + 4.0), egui::pos2(chevron.rect.left(), chevron.rect.bottom() - 4.0));
+        ui.painter().vline(seam.left(), seam.y_range(), ui.visuals().widgets.noninteractive.bg_stroke);
+        (main, chevron, menu.map(|menu| menu.inner))
+    })
+    .inner
 }
 
 /// Shift only the popup anchor so its frame edge aligns with the real button.
@@ -1276,6 +1325,7 @@ mod tests {
             ButtonIcon::AssetBrowser,
             ButtonIcon::Browse,
             ButtonIcon::Cache,
+            ButtonIcon::Camera,
             ButtonIcon::ChannelAlpha,
             ButtonIcon::ChannelBlue,
             ButtonIcon::ChannelGreen,
@@ -1292,6 +1342,7 @@ mod tests {
             ButtonIcon::Undo,
             ButtonIcon::Redo,
             ButtonIcon::Reset,
+            ButtonIcon::ResetAll,
             ButtonIcon::Compare,
             ButtonIcon::Swap,
             ButtonIcon::Container,
@@ -1345,6 +1396,7 @@ mod tests {
             ButtonIcon::Rename,
             ButtonIcon::Right,
             ButtonIcon::Save,
+            ButtonIcon::SaveAll,
             ButtonIcon::SearchBar,
             ButtonIcon::Search,
             ButtonIcon::Settings,
@@ -1388,6 +1440,7 @@ mod tests {
             assert!(!svg.contains("currentColor"));
             assert!(!svg.contains("#00B2FF"));
             assert!(!svg.contains("#60DF20"));
+            assert!(!svg.contains("#D74242"));
         }
     }
 

@@ -33,6 +33,11 @@ fn foundation_field_row_inner<R>(
     // Controls retain one identity even when the label moves to another row.
     let controls_id = foundation_controls_id(ui, &meta.label);
     let controls = |ui: &mut Ui| ui.scope_builder(egui::UiBuilder::new().scope_id(controls_id), controls).inner;
+    // No label: the controls alone, as a window that names the field
+    // itself draws one (the Material Editor's shader reference).
+    if meta.label.is_empty() {
+        return ui.horizontal(controls);
+    }
     if ui.available_width() < breakpoint {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {

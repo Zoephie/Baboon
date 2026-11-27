@@ -2546,7 +2546,11 @@ mod tests {
                 .nth(nth)
                 .map(|(_, rect)| *rect)
                 .unwrap_or_else(|| panic!("{text:?} is not painted: {:?}", self.painted));
-            let target = rect.center();
+            self.click_at(rect.center())
+        }
+
+        /// [`Self::click`], at `target`.
+        pub(super) fn click_at(&mut self, target: egui::Pos2) -> Vec<egui::OutputCommand> {
             let from = target - egui::vec2(30.0, 30.0);
             let button = |pressed| egui::Event::PointerButton {
                 pos: target,
@@ -4524,6 +4528,7 @@ mod tests {
                             allowed_groups: vec![u32::from_be_bytes(*b"hlmt")],
                             search: String::new(),
                         },
+                        shader_switch: None,
                         kit,
                     });
                 },
@@ -4540,6 +4545,7 @@ mod tests {
                         popup: Some(MaterialColorPopup::new("Smoke Tint", 1.0, 0.5, 0.25, 1.0)),
                         kit,
                         opened_at: None,
+                        live: None,
                     });
                 },
                 &["Color Picker"],
@@ -4562,6 +4568,7 @@ mod tests {
                         )),
                         kit,
                         opened_at: None,
+                        live: None,
                     });
                 },
                 &["Smoke Function"],
@@ -5913,6 +5920,937 @@ mod tests {
         }
         h.frame(vec![button(from + by, false)]);
         idle(h);
+    }
+
+    /// Frames until `done`, letting background work land, or panic naming
+    /// `what` after a few seconds.
+    fn frames_until(h: &mut Harness, what: &str, done: impl Fn(&Harness) -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !done(h) {
+            assert!(std::time::Instant::now() < deadline, "timed out waiting for {what}");
+            h.frame(Vec::new());
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    /// The Material Editor is the sidebar's Materials card, after
+    /// Permutations and before Weapons, closed at first. Opened, it shows its
+    /// dropdown alone, on "None", holding nothing; a material picked, it
+    /// opens that shader as a document of its own, with no tab, held for the
+    /// preview, and draws it; closed, it lets go of it.
+    #[test]
+    fn the_materials_card_holds_the_shader_it_shows_and_lets_it_go() {
+        let mut h = Harness::new();
+        let kit = crate::app::loose_fixture::LooseKit::new("material_editor_pane", "halo3_mcc");
+        kit.write_mcc("objects\\smoke", "render_model", |_| {});
+        kit.write_mcc("shaders\\smoke", "shader", |_| {});
+        kit.install(&mut h.app);
+        let model = kit.open(&mut h.app, "objects\\smoke.render_model");
+        let shader = kit.key("shaders\\smoke.shader");
+        let id = h.app.model.kits[h.app.model.active].id;
+        h.app.views[id].caches.model_previews.insert(
+            model.clone(),
+            crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(
+                &model,
+                &[(b"rmsh", "shaders\\smoke")],
+            ),
+        );
+        idle(&mut h);
+        let rect = |h: &Harness, needle: &str| {
+            h.painted_rects.iter().find(|(text, _)| text.trim() == needle).map(|(_, rect)| *rect)
+        };
+        let card = rect(&h, "Materials").expect("the Materials card");
+        let permutations = rect(&h, "Permutations").expect("Permutations");
+        assert!(card.top() > permutations.top(), "after Permutations: {card:?} {permutations:?}");
+        assert!(!h.painted_contains("Material Editor"), "no header button");
+        assert!(h.app.views[id].caches.model_previews[&model].material_editor.is_none(), "closed at first");
+
+        h.click("Materials", 0);
+        idle(&mut h);
+        assert!(h.app.views[id].caches.model_previews[&model].material_editor.is_some(), "opened");
+        assert!(h.painted.iter().any(|text| text.trim() == "None"), "on None: {:?}", h.painted);
+        assert!(!h.app.model.kits[0].parsed_tags.contains_key(&shader), "None holds nothing");
+        assert!(!h.painted_contains("Open"), "the dropdown alone: {:?}", h.painted);
+
+        // Picked from the dropdown: "None" first, then the shader.
+        h.click("None", 0);
+        idle(&mut h);
+        let rows: Vec<&str> = h.painted.iter().map(|text| text.trim()).filter(|text| *text == "None" || *text == "smoke").collect();
+        assert!(rows.windows(2).any(|pair| pair == ["None", "smoke"]), "None before the materials: {rows:?}");
+        let smoke = h.painted_rects.iter().filter(|(text, _)| text.trim() == "smoke").map(|(_, rect)| *rect).last().unwrap();
+        h.click_at(smoke.center());
+        frames_until(&mut h, "the shader to open", |h| h.app.model.kits[0].parsed_tags.contains_key(&shader));
+        idle(&mut h);
+        let kit_state = &h.app.model.kits[0];
+        assert!(!kit_state.open_tabs.contains(&shader), "no tab of its own");
+        assert!(kit_state.held_documents[&shader].contains(&model), "held for the preview");
+
+        // The pointer over the dropdown lights the material it shows; away
+        // from it, nothing is lit.
+        let hovered = |h: &Harness| {
+            h.app.views[id].caches.model_previews[&model].material_editor.as_ref().and_then(|editor| editor.hovered.clone())
+        };
+        let dropdown = h.painted_rects.iter().find(|(text, _)| text.trim() == "smoke").map(|(_, rect)| rect.center()).unwrap();
+        h.frame(vec![pointer_at(dropdown)]);
+        idle(&mut h);
+        assert_eq!(hovered(&h).map(|key| key.path), Some("shaders\\smoke".to_owned()), "lit while over the dropdown");
+        h.frame(vec![pointer_at(egui::pos2(5.0, 5.0))]);
+        idle(&mut h);
+        assert_eq!(hovered(&h), None, "unlit away from it");
+
+        // Closed from its header, its clean shader goes.
+        h.click("Materials", 0);
+        idle(&mut h);
+        assert!(!h.app.model.kits[0].parsed_tags.contains_key(&shader), "let go");
+        assert!(h.app.model.kits[0].held_documents.is_empty());
+
+        // Opened again, it shows the shader it showed, not None.
+        h.click("Materials", 0);
+        frames_until(&mut h, "the shader to open again", |h| h.app.model.kits[0].parsed_tags.contains_key(&shader));
+        idle(&mut h);
+        let selected = h.app.views[id].caches.model_previews[&model].material_editor.as_ref().and_then(|editor| editor.selected.clone());
+        assert_eq!(selected.map(|key| key.path), Some("shaders\\smoke".to_owned()), "as it was closed on");
+    }
+
+    /// On a sidebar narrower than a shader's grid, the Materials card draws
+    /// at the sidebar's width, its dropdown inside it, and never scrolls
+    /// sideways.
+    #[test]
+    fn the_materials_card_fits_a_narrow_sidebar() {
+        let mut h = Harness::new();
+        let kit = crate::app::loose_fixture::LooseKit::new("material_editor_narrow", "halo3_mcc");
+        kit.write_mcc("objects\\smoke", "render_model", |_| {});
+        kit.install(&mut h.app);
+        let model = kit.open(&mut h.app, "objects\\smoke.render_model");
+        let id = h.app.model.kits[h.app.model.active].id;
+        h.app.model.prefs.model_setup_width = crate::app::model_preview::state::MIN_MODEL_SETUP_WIDTH;
+        let mut state = crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(
+            &model,
+            &[(b"rmsh", "shaders\\smoke")],
+        );
+        state.material_editor = Some(Default::default());
+        h.app.views[id].caches.model_previews.insert(model.clone(), state);
+        idle(&mut h);
+        let header = h.painted_rects.iter().find(|(text, _)| text.trim() == "Materials").map(|(_, rect)| *rect).unwrap();
+        let count = h
+            .painted_rects
+            .iter()
+            .find(|(text, rect)| text.trim() == "(1)" && rect.top() > header.bottom())
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("the dropdown's count: {:?}", h.painted));
+        // The sidebar's right edge: Permutations' own dropdown count is
+        // inside it, as far right as a row reaches.
+        let sidebar_right = h.screen.x - crate::app::model_preview::SETUP_PANEL_PADDING;
+        assert!(count.right() < sidebar_right, "inside the sidebar: {count:?} {sidebar_right}");
+    }
+
+    /// Press the Materials card's action `which`: 0 Save, 1 Reset, 2 Save
+    /// All, 3 Reset All.
+    fn press_material_action(h: &mut Harness, which: usize) {
+        let rects: [egui::Rect; 4] = h
+            .ctx
+            .data(|data| data.get_temp(crate::app::editor::material_actions_id()))
+            .expect("the card's actions drawn");
+        h.click_at(rects[which].center());
+        idle(h);
+    }
+
+    /// A Materials card on the shaders `shaders`, its editor open on the
+    /// first, over a loose Halo 3 kit whose `objects\smoke` render model
+    /// names `shaders\smoke` in slot 0, with `shaders\smoke` and
+    /// `shaders\other` beside it; opened from its `opened` tag (the render
+    /// model itself, or a `.model` naming it).
+    fn switch_card(h: &mut Harness, name: &str, opened: &str, shaders: &[(&[u8; 4], &str)]) -> (crate::app::loose_fixture::LooseKit, String) {
+        let rmsh = u32::from_be_bytes(*b"rmsh");
+        let kit = crate::app::loose_fixture::LooseKit::new(name, "halo3_mcc");
+        kit.write_mcc("shaders\\smoke", "shader", |_| {});
+        kit.write_mcc("shaders\\other", "shader", |_| {});
+        kit.write_mcc("shaders\\held", "shader", |_| {});
+        kit.write_mcc("objects\\smoke", "model", |_| {});
+        kit.write_mcc("objects\\smoke", "render_model", |tag| {
+            let mut root = tag.root_mut();
+            let mut materials = root.field_mut("materials").unwrap();
+            let mut block = materials.as_block_mut().unwrap();
+            block.add_element();
+            block.element_mut(0).unwrap().field_mut("render method").unwrap()
+                .set(blam_tags::TagFieldData::TagReference(blam_tags::TagReferenceData {
+                    group_tag_and_name: Some((rmsh, "shaders\\smoke".to_owned())),
+                }))
+                .unwrap();
+        });
+        kit.install(&mut h.app);
+        let model = kit.open(&mut h.app, opened);
+        let id = h.app.model.kits[h.app.model.active].id;
+        let mut state = crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(&model, shaders);
+        if let Some(Ok(data)) = state.data.as_mut() {
+            data.render_model_path = "objects\\smoke".to_owned();
+        }
+        state.open_material_editor_for_test();
+        h.app.model.prefs.model_setup_width = 760.0;
+        h.screen = egui::vec2(SCREEN.x, 2400.0);
+        h.app.views[id].caches.model_previews.insert(model.clone(), state);
+        (kit, model)
+    }
+
+    /// Type `input` into the Materials card's shader reference, showing
+    /// `current`, and commit it.
+    fn type_shader_reference(h: &mut Harness, current: &str, input: &str) {
+        let field = h.painted_rects.iter().find(|(text, _)| text.trim() == current).map(|(_, rect)| *rect).unwrap();
+        h.click_at(field.center());
+        press_key(h, egui::Key::A, egui::Modifiers::COMMAND);
+        h.frame(vec![egui::Event::Text(input.to_owned())]);
+        press_key(h, egui::Key::Enter, egui::Modifiers::NONE);
+        idle(h);
+    }
+
+    /// The Materials card's shader reference is the render model's own
+    /// field, with no label or type caption and its own Open, under the
+    /// dropdown, its buttons in line with the dropdown row's; no header line
+    /// of group, version and endian shows over the shader. Switching it
+    /// rewrites the render model's slot, unsaved, as switching it in the
+    /// render model's tab would, and the preview loads again, to show the
+    /// slot's new material.
+    #[test]
+    fn switching_the_cards_shader_rewrites_the_render_models_slot() {
+        let rmsh = u32::from_be_bytes(*b"rmsh");
+        let mut h = Harness::new();
+        h.app.model.prefs.expert_mode = true;
+        let (kit, model) = switch_card(&mut h, "material_editor_switch", "objects\\smoke.render_model", &[(b"rmsh", "shaders\\smoke"), (b"rmsh", "shaders\\held")]);
+        let id = h.app.model.kits[0].id;
+        let shader = kit.key("shaders\\smoke.shader");
+        frames_until(&mut h, "the shader and its reference", |h| {
+            h.app.model.kits[0].parsed_tags.contains_key(&shader) && h.painted_contains("shaders\\smoke.shader")
+        });
+        idle(&mut h);
+        assert!(!h.painted_contains("Open in Tab"), "the field's own Open");
+        let headers = h.painted_rects.iter().filter(|(text, _)| text.trim() == "Header group:").count();
+        assert_eq!(headers, 1, "only the tab's: {:?}", h.painted);
+        let field = h.painted_rects.iter().find(|(text, _)| text.trim() == "shaders\\smoke.shader").map(|(_, rect)| *rect).unwrap();
+        let caption = h.painted_rects.iter().any(|(text, rect)| text.trim() == "tag reference" && (rect.center().y - field.center().y).abs() < 8.0);
+        assert!(!caption, "no type caption on the row");
+        // The dropdown row's four buttons line up with the reference row's.
+        let actions: [egui::Rect; 4] = h.ctx.data(|data| data.get_temp(crate::app::editor::material_actions_id())).unwrap();
+        let reference_right: f32 = h
+            .ctx
+            .data(|data| data.get_temp(crate::app::editor::material_actions_id().with("reference_row_right")))
+            .unwrap();
+        assert!((actions[3].right() - reference_right).abs() < 0.5, "aligned: {:?} {reference_right}", actions[3]);
+
+        let before = h.app.views[id].caches.model_previews[&model].data.as_ref().unwrap().as_ref().unwrap().geometry_id;
+        type_shader_reference(&mut h, "shaders\\smoke.shader", "shaders\\other.shader");
+        let document = &h.app.model.kits[0].parsed_tags[&model];
+        assert!(document.dirty.is_set(), "the render model has unsaved edits");
+        let switched = document
+            .tag
+            .root()
+            .field("materials")
+            .and_then(|field| field.as_block())
+            .and_then(|block| block.element(0))
+            .and_then(|element| element.read_tag_ref_with_group("render method"));
+        assert_eq!(switched, Some((rmsh, "shaders\\other".to_owned())));
+        // Loaded again: this test's model has no geometry, so the load that
+        // replaced the page drawn says so.
+        let state = &h.app.views[id].caches.model_previews[&model];
+        let geometry = state.data.as_ref().and_then(|data| data.as_ref().ok()).map(|data| data.geometry_id);
+        assert!(geometry != Some(before), "the preview loaded again");
+        let follow = state.material_editor.as_ref().and_then(|editor| editor.follow_slot);
+        assert_eq!(follow, Some((0, before)), "shows slot 0's material once loaded");
+    }
+
+    /// Opened from its `.model`, the render model the switch rewrites is held
+    /// for the preview with no tab, as the shaders are: its edit loads the
+    /// preview again, and it stays held while it has unsaved edits.
+    #[test]
+    fn switching_a_models_shader_holds_its_render_model_without_a_tab() {
+        let mut h = Harness::new();
+        let (kit, model) = switch_card(&mut h, "material_editor_switch_hlmt", "objects\\smoke.model", &[(b"rmsh", "shaders\\smoke")]);
+        let id = h.app.model.kits[0].id;
+        let render_model = kit.key("objects\\smoke.render_model");
+        frames_until(&mut h, "the render model's slot", |h| h.painted_contains("shaders\\smoke.shader"));
+        idle(&mut h);
+        let kit_state = &h.app.model.kits[0];
+        assert!(kit_state.held_documents[&render_model].contains(&model), "held for the preview");
+        assert!(!kit_state.open_tabs.contains(&render_model), "no tab of its own");
+
+        let before = h.app.views[id].caches.model_previews[&model].data.as_ref().unwrap().as_ref().unwrap().geometry_id;
+        type_shader_reference(&mut h, "shaders\\smoke.shader", "shaders\\other.shader");
+        assert!(h.app.model.kits[0].parsed_tags[&render_model].dirty.is_set(), "the render model has unsaved edits");
+        assert!(!h.app.model.kits[0].parsed_tags[&model].dirty.is_set(), "the model itself is untouched");
+        let state = &h.app.views[id].caches.model_previews[&model];
+        let geometry = state.data.as_ref().and_then(|data| data.as_ref().ok()).map(|data| data.geometry_id);
+        assert!(geometry != Some(before), "the preview loaded again");
+
+        // Closed with the switch unsaved, the render model stays held. (The
+        // test's model has no geometry, so its reload shows no sidebar.)
+        if let Some(state) = h.app.views[id].caches.model_previews.get_mut(&model) {
+            state.material_editor = None;
+        }
+        idle(&mut h);
+        assert!(h.app.model.kits[0].held_documents.get(&render_model).is_some_and(|holders| holders.contains(&model)), "kept: it has unsaved edits");
+    }
+
+    /// A shader no slot of the render model names (a held object's) shows
+    /// its path, with an Open, not a field to switch.
+    #[test]
+    fn a_shader_the_render_model_doesnt_name_isnt_offered_to_switch() {
+        let mut h = Harness::new();
+        let (kit, _model) = switch_card(&mut h, "material_editor_unswitchable", "objects\\smoke.render_model", &[(b"rmsh", "shaders\\held")]);
+        let shader = kit.key("shaders\\held.shader");
+        frames_until(&mut h, "the shader", |h| h.app.model.kits[0].parsed_tags.contains_key(&shader));
+        idle(&mut h);
+        assert!(h.painted_contains("shaders\\held"), "its path: {:?}", h.painted);
+        assert!(!h.painted_contains("shaders\\held.shader"), "not a field: {:?}", h.painted);
+        assert!(h.painted.iter().any(|text| text.trim() == "Open"), "still opens in a tab");
+    }
+
+    /// The preview's snapshot: a camera right of the View menu, then its
+    /// scale menu. Pressed, it asks for the frame on screen at the scale's
+    /// size; once drawn, the image goes to the clipboard and the status bar
+    /// says so.
+    #[test]
+    fn the_camera_copies_the_frame_on_screen_at_its_scale() {
+        use crate::app::model_preview::snapshot::{SnapshotImage, SnapshotPhase, TEST_CLIPBOARD};
+        let mut h = Harness::new();
+        let _kit = model_preview_pane(&mut h);
+        idle(&mut h);
+        let rect = |h: &Harness, needle: &str| {
+            h.painted_rects.iter().find(|(text, _)| text.trim() == needle).map(|(_, rect)| *rect)
+        };
+        let view = rect(&h, "View").expect("the View menu");
+        let scale = rect(&h, "1×").expect("the camera, with its scale");
+        let chevron = h.ctx.data(|data| data.get_temp::<egui::Rect>(crate::app::model_preview::snapshot_chevron_id())).expect("its chevron");
+        assert!(scale.left() > view.right() + 16.0, "the camera right of View: {view:?} {scale:?}");
+        assert!(chevron.left() >= scale.right() && chevron.left() - scale.right() < 16.0, "one button: the chevron joined on its right");
+        let id = h.app.model.kits[0].id;
+        let key = h.app.views[id].caches.model_previews.keys().next().unwrap().clone();
+        fn preview<'a>(h: &'a Harness, id: crate::app::kits::KitId, key: &str) -> &'a crate::app::model_preview::state::ModelPreviewState {
+            &h.app.views[id].caches.model_previews[key]
+        }
+        let points = preview(&h, id, &key).snapshot_source.as_ref().expect("the frame on screen kept").points;
+
+        // The camera half: the icon and its scale.
+        h.click_at(scale.center());
+        let SnapshotPhase::Drawing(request) = &preview(&h, id, &key).snapshot else {
+            panic!("asked for a snapshot")
+        };
+        let ppp = h.ctx.pixels_per_point();
+        assert_eq!(request.size, [points.x, points.y].map(|edge| (edge * ppp).round() as i32), "the viewport's size at 1×");
+        // The paint draws it (no GL here): as it leaves its result.
+        request.set_result(Ok(SnapshotImage { width: 2, height: 1, rgba: vec![255, 0, 0, 255, 0, 0, 0, 0] }));
+        frames_until(&mut h, "the copy", |h| matches!(preview(h, id, &key).snapshot, SnapshotPhase::Idle));
+        idle(&mut h);
+        let copied = TEST_CLIPBOARD.lock().unwrap().take().expect("written to the clipboard");
+        assert_eq!((copied.width, copied.height), (2, 1));
+        assert!(h.painted_contains("Copied the preview to the clipboard (2 × 1)"), "{:?}", h.painted);
+
+        // Past a gigabyte of image, the first press asks; the second copies.
+        h.app.model.prefs.model_preview_snapshot_scale = 25.0;
+        idle(&mut h);
+        let scale = rect(&h, "25×").expect("the camera at 25×");
+        h.click_at(scale.center());
+        idle(&mut h);
+        assert!(matches!(preview(&h, id, &key).snapshot, SnapshotPhase::Confirming(_)), "asks first");
+        assert!(h.painted.iter().any(|text| text.contains("press the camera again")), "{:?}", h.painted);
+        h.click_at(scale.center());
+        let SnapshotPhase::Drawing(request) = &preview(&h, id, &key).snapshot else {
+            panic!("the second press copies")
+        };
+        assert_eq!(request.size, [points.x, points.y].map(|edge| (edge * ppp * 25.0).round() as i32));
+    }
+
+    /// The scale menu: a typed scale past the slider's reach is taken and
+    /// kept in the preferences, the size it gives shown; 0, a negative and
+    /// text are refused, the scale kept as it was.
+    #[test]
+    fn the_snapshot_scale_menu_takes_any_scale_above_zero() {
+        let mut h = Harness::new();
+        let _kit = model_preview_pane(&mut h);
+        idle(&mut h);
+        let id = h.app.model.kits[0].id;
+        let key = h.app.views[id].caches.model_previews.keys().next().unwrap().clone();
+        let points = h.app.views[id].caches.model_previews[&key].snapshot_source.as_ref().unwrap().points;
+        let ppp = h.ctx.pixels_per_point();
+        let open_menu = |h: &mut Harness| {
+            let chevron = h.ctx.data(|data| data.get_temp::<egui::Rect>(crate::app::model_preview::snapshot_chevron_id())).expect("the chevron");
+            h.click_at(chevron.center());
+            idle(h);
+        };
+        open_menu(&mut h);
+        assert!(h.painted_contains("Snapshot scale"), "{:?}", h.painted);
+        let id_preview = h.app.views[id].caches.model_previews[&key].snapshot.busy();
+        assert!(!id_preview, "the chevron opens the menu; it copies nothing");
+        let size = |scale: f32| [points.x, points.y].map(|edge| (edge * ppp * scale).round() as i32);
+        let shows = |h: &Harness, [width, height]: [i32; 2]| {
+            [width, height].iter().all(|edge| h.painted.iter().any(|text| text.trim() == edge.to_string()))
+        };
+        assert!(shows(&h, size(1.0)), "the size at 1×: {:?}", h.painted);
+        let typed = |h: &mut Harness, text: &str| {
+            let label = h.painted_rects.iter().find(|(painted, _)| painted.trim() == "Scale").map(|(_, rect)| *rect).unwrap();
+            h.click_at(egui::pos2(label.right() + 40.0, label.center().y));
+            press_key(h, egui::Key::A, egui::Modifiers::COMMAND);
+            h.frame(vec![egui::Event::Text(text.to_owned())]);
+            press_key(h, egui::Key::Enter, egui::Modifiers::NONE);
+            idle(h);
+        };
+        typed(&mut h, "25");
+        assert_eq!(h.app.model.prefs.model_preview_snapshot_scale, 25.0, "past the slider, kept");
+        if !h.painted_contains("Snapshot scale") {
+            open_menu(&mut h);
+        }
+        assert!(shows(&h, size(25.0)), "the size at 25×: {:?}", h.painted);
+        // The size boxes: a width typed sets the scale, the height following
+        // at the viewport's ratio; a height typed, the width.
+        let in_box = |h: &mut Harness, nth: usize, text: &str| {
+            if !h.painted_contains("Snapshot scale") {
+                open_menu(h);
+            }
+            let size = h.painted_rects.iter().find(|(painted, _)| painted.trim() == "Size").map(|(_, rect)| *rect).unwrap();
+            let times = h.painted_rects.iter().find(|(painted, rect)| painted.trim() == "×" && (rect.center().y - size.center().y).abs() < 6.0).map(|(_, rect)| *rect).unwrap();
+            let x = if nth == 0 { (size.right() + times.left()) / 2.0 } else { times.right() + 30.0 };
+            h.click_at(egui::pos2(x, size.center().y));
+            press_key(h, egui::Key::A, egui::Modifiers::COMMAND);
+            h.frame(vec![egui::Event::Text(text.to_owned())]);
+            press_key(h, egui::Key::Enter, egui::Modifiers::NONE);
+            idle(h);
+        };
+        let viewport = [points.x * ppp, points.y * ppp];
+        in_box(&mut h, 0, "2000");
+        let scale = h.app.model.prefs.model_preview_snapshot_scale;
+        assert!((scale - 2000.0 / viewport[0]).abs() < 1e-4, "the width sets the scale: {scale}");
+        assert!(h.painted.iter().any(|text| text.trim() == ((viewport[1] * scale).round() as i32).to_string()), "the height follows: {:?}", h.painted);
+        in_box(&mut h, 1, "500");
+        let scale = h.app.model.prefs.model_preview_snapshot_scale;
+        assert!((scale - 500.0 / viewport[1]).abs() < 1e-4, "the height sets the scale: {scale}");
+        assert!(h.painted.iter().any(|text| text.trim() == ((viewport[0] * scale).round() as i32).to_string()), "the width follows: {:?}", h.painted);
+        in_box(&mut h, 0, "12.5");
+        assert!(
+            (h.app.model.prefs.model_preview_snapshot_scale - scale).abs() < 1e-6,
+            "a fraction of a pixel refused: {} was {scale}",
+            h.app.model.prefs.model_preview_snapshot_scale
+        );
+        h.app.model.prefs.model_preview_snapshot_scale = 25.0;
+        idle(&mut h);
+        for refused in ["0", "-2", "abc"] {
+            if !h.painted_contains("Snapshot scale") {
+                open_menu(&mut h);
+            }
+            typed(&mut h, refused);
+            assert_eq!(h.app.model.prefs.model_preview_snapshot_scale, 25.0, "{refused:?} refused");
+        }
+    }
+
+    /// The shading last picked from the Shading menu is kept, and a preview
+    /// opens on it; a preview made later of another model opens on Game
+    /// Shaders too, without the menu. Only a pick is kept: a preview drawing
+    /// Solid because its game draws no textures doesn't change it.
+    #[test]
+    fn the_preview_opens_on_the_shading_last_picked() {
+        use crate::app::model_preview::ModelShading;
+        let mut h = Harness::new();
+        let _kit = model_preview_pane(&mut h);
+        idle(&mut h);
+        assert_eq!(h.app.model.prefs.model_preview_shading, ModelShading::Textured, "Textured to begin with");
+        // The menu's button pads its label.
+        let menu = h.painted_rects.iter().find(|(text, _)| text.trim() == "Textured").map(|(_, rect)| *rect).expect("the Shading menu");
+        h.click_at(menu.center());
+        idle(&mut h);
+        h.click("Game Shaders", 0);
+        idle(&mut h);
+        assert_eq!(h.app.model.prefs.model_preview_shading, ModelShading::GameShaders, "the pick kept");
+
+        // A preview made afresh (as for another tag) opens on it.
+        let id = h.app.model.kits[0].id;
+        let key = h.app.views[id].caches.model_previews.keys().next().unwrap().clone();
+        h.app.views[id].caches.model_previews.insert(
+            key.clone(),
+            crate::app::model_preview::state::ModelPreviewState::loaded_empty_for_test(&key),
+        );
+        idle(&mut h);
+        assert_eq!(h.app.views[id].caches.model_previews[&key].shading(), ModelShading::GameShaders, "opens on it");
+
+        // A game's own fallback isn't a pick.
+        if let Some(state) = h.app.views[id].caches.model_previews.get_mut(&key) {
+            state.set_shading(ModelShading::Solid);
+        }
+        idle(&mut h);
+        assert_eq!(h.app.model.prefs.model_preview_shading, ModelShading::GameShaders, "kept as picked");
+    }
+
+    /// The centre of the rightmost `text` painted on `label`'s row.
+    fn rightmost_on_row(h: &Harness, label: &str, text: &str) -> egui::Pos2 {
+        let row = h
+            .painted_rects
+            .iter()
+            .find(|(painted, _)| painted.trim() == label)
+            .map(|(_, rect)| rect.center().y)
+            .unwrap_or_else(|| panic!("no {label:?} in {:?}", h.painted));
+        // A text cut short to fit ends in an ellipsis: matched by what it
+        // shows of `text`.
+        let shows = |painted: &str| {
+            let painted = painted.trim();
+            painted == text || painted.strip_suffix('…').is_some_and(|start| !start.is_empty() && text.starts_with(start))
+        };
+        h.painted_rects
+            .iter()
+            .filter(|(painted, rect)| shows(painted) && (rect.center().y - row).abs() < 6.0)
+            .map(|(_, rect)| rect.center())
+            .max_by(|a, b| a.x.total_cmp(&b.x))
+            .unwrap_or_else(|| panic!("no {text:?} on {label:?}'s row in {:?}", h.painted))
+    }
+
+    /// An edit made in the Material Editor's window lands in the shader's
+    /// document, as one made in its tab would: a Halo 4 material's default,
+    /// overridden from the window, is a parameter of the material, unsaved.
+    #[test]
+    fn an_edit_in_the_material_editor_lands_in_the_shaders_document() {
+        let kit_tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        let material = "objects\\multi\\darth_shader.material";
+        let shader = "shaders\\material_shaders\\materials\\srf_lambert.material_shader";
+        if !kit_tags.join(material.replace('\\', "/")).exists() {
+            eprintln!("skipping: set BLAM_TEST_H4EK");
+            return;
+        }
+        let mut h = Harness::new();
+        let kit = crate::app::loose_fixture::LooseKit::new("material_editor_edit", "halo4_mcc");
+        for tag in [material, shader] {
+            let to = kit.path(tag);
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::copy(kit_tags.join(tag.replace('\\', "/")), to).unwrap();
+        }
+        kit.write_mcc("objects\\smoke", "render_model", |_| {});
+        kit.install(&mut h.app);
+        let model = kit.open(&mut h.app, "objects\\smoke.render_model");
+        let material_key = kit.key(material);
+        let id = h.app.model.kits[h.app.model.active].id;
+        let mut state = crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(
+            &model,
+            &[(b"mat ", "objects\\multi\\darth_shader")],
+        );
+        state.open_material_editor_for_test();
+        // Room for the shader's grid at its own width, as the editor wants,
+        // and for the whole card without scrolling the sidebar.
+        h.app.model.prefs.model_setup_width = 760.0;
+        h.screen = egui::vec2(SCREEN.x, 2400.0);
+        h.app.views[id].caches.model_previews.insert(model.clone(), state);
+        frames_until(&mut h, "the material's grid", |h| h.painted_contains("Diffuse Intensity"));
+        // The card's room follows what it drew.
+        idle(&mut h);
+        // The card is as tall as the shader's fields, scrolling with the
+        // sidebar rather than in a box of its own: it ends just under its
+        // last row, however much room the sidebar has.
+        let top = h.painted_rects.iter().find(|(text, _)| text.trim() == "darth_shader").map(|(_, rect)| rect.top()).unwrap();
+        let room = h.app.views[id].caches.model_previews[&model].material_content_height.expect("measured");
+        let sidebar = h.painted_rects.iter().find(|(text, _)| text.trim() == "Materials").map(|(_, rect)| rect.left()).unwrap() - 40.0;
+        let last = h
+            .painted_rects
+            .iter()
+            .filter(|(text, rect)| !text.trim().is_empty() && rect.top() > top && rect.bottom() <= top + room + 1.0 && rect.left() > sidebar)
+            .map(|(_, rect)| rect.bottom())
+            .fold(top, f32::max);
+        assert!(top + room - last < 60.0, "ends under its last row: room {room}, last row {}", last - top);
+
+        let at = rightmost_on_row(&h, "Diffuse Intensity", "Override Default");
+        h.click_at(at);
+        idle(&mut h);
+        let document = &h.app.model.kits[0].parsed_tags[&material_key];
+        assert!(document.dirty.is_set(), "the material has unsaved edits");
+        let names: Vec<String> = document
+            .tag
+            .root()
+            .field("material parameters")
+            .and_then(|field| field.as_block())
+            .map(|block| block.iter().map(|element| element.read_string_id("parameter name").unwrap_or_default()).collect())
+            .unwrap_or_default();
+        assert!(names.contains(&"diffuse_intensity".to_owned()), "{names:?}");
+        assert!(!h.app.model.kits[0].open_tabs.contains(&material_key), "still no tab");
+    }
+
+    /// A Halo 4 material's preview, with its Material Editor open on it and
+    /// its material drawn as a load resolved it, in a loose kit holding the
+    /// kit's `darth_shader.material`; `None` without the kit.
+    fn material_editor_on_darth(h: &mut Harness, name: &str) -> Option<(crate::app::loose_fixture::LooseKit, String, String)> {
+        let kit_tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        let material = "objects\\multi\\darth_shader.material";
+        let shader = "shaders\\material_shaders\\materials\\srf_lambert.material_shader";
+        if !kit_tags.join(material.replace('\\', "/")).exists() {
+            eprintln!("skipping: set BLAM_TEST_H4EK");
+            return None;
+        }
+        let kit = crate::app::loose_fixture::LooseKit::new(name, "halo4_mcc");
+        for tag in [material, shader] {
+            let to = kit.path(tag);
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::copy(kit_tags.join(tag.replace('\\', "/")), to).unwrap();
+        }
+        kit.write_mcc("objects\\smoke", "render_model", |_| {});
+        kit.install(&mut h.app);
+        let model = kit.open(&mut h.app, "objects\\smoke.render_model");
+        let material_key = kit.key(material);
+        let id = h.app.model.kits[h.app.model.active].id;
+        let mut state = crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(
+            &model,
+            &[(b"mat ", "objects\\multi\\darth_shader")],
+        );
+        state.open_material_editor_for_test();
+        // Room for the shader's grid at its own width, as the editor wants,
+        // and for the whole card without scrolling the sidebar.
+        h.app.model.prefs.model_setup_width = 760.0;
+        h.screen = egui::vec2(SCREEN.x, 2400.0);
+        if let Some(Ok(data)) = state.data.as_mut() {
+            data.set_textures(vec![Default::default()], false);
+        }
+        h.app.views[id].caches.model_previews.insert(model.clone(), state);
+        frames_until(h, "the material's grid", |h| h.painted_contains("Color Tint"));
+        // The card's room follows what it drew.
+        idle(h);
+        Some((kit, model, material_key))
+    }
+
+    /// Where the Color Tint row's override swatch is: left of its override
+    /// cell's label, the row's second "color:", where the grid is wide enough
+    /// to label it; else right of its default cell, whose label is then the
+    /// row's only one (the override draws as a preview, with none).
+    fn color_tint_swatch(h: &Harness) -> egui::Pos2 {
+        let row = h.painted_rects.iter().find(|(text, _)| text.trim() == "Color Tint").map(|(_, rect)| rect.center().y).unwrap();
+        let mut cells: Vec<egui::Rect> = h
+            .painted_rects
+            .iter()
+            .filter(|(text, rect)| text.trim().starts_with("color:") && (rect.center().y - row).abs() < 6.0)
+            .map(|(_, rect)| *rect)
+            .collect();
+        cells.sort_by(|a, b| a.left().total_cmp(&b.left()));
+        match cells[..] {
+            // The swatch is left of its label.
+            [_, override_cell, ..] => egui::pos2(override_cell.left() - 14.0, row),
+            [default] => egui::pos2(default.right() + 40.0, row),
+            [] => panic!("no Color Tint cells in {:?}", h.painted),
+        }
+    }
+
+    fn live<'a>(h: &'a Harness, model: &str) -> &'a crate::app::model_preview::material_editor::MaterialLive {
+        let id = h.app.model.kits[0].id;
+        &h.app.views[id].caches.model_previews[model].material_live
+    }
+
+    /// A colour picker opened in the Material Editor draws what it picks in
+    /// the preview while it is dragged, writing nothing; Cancel draws the
+    /// material as it was. One opened outside the editor draws nothing.
+    #[test]
+    fn a_picker_opened_in_the_material_editor_previews_live_and_writes_nothing() {
+        let mut h = Harness::new();
+        let Some((_kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_picker") else { return };
+        h.click_at(color_tint_swatch(&h));
+        frames_until(&mut h, "the colour picker", |h| h.app.dialogs.get::<ColorPopupWindow>().is_some());
+        assert!(h.app.dialogs.get::<ColorPopupWindow>().unwrap().live.is_some(), "opened live");
+
+        h.app.dialogs.get_mut::<ColorPopupWindow>().unwrap().popup.as_mut().unwrap().pick_for_test(1.0, 0.0, 0.0);
+        frames_until(&mut h, "the draft to be drawn", |h| {
+            live(h, &model).draft.is_some() && live(h, &model).drawn.get(&material).is_some_and(|drawn| drawn.draft > 0)
+        });
+        assert!(!h.app.model.kits[0].parsed_tags[&material].dirty.is_set(), "nothing written while dragging");
+
+        h.click("Cancel", 0);
+        frames_until(&mut h, "the material drawn as it was", |h| {
+            live(h, &model).draft.is_none() && live(h, &model).drawn.get(&material).is_some_and(|drawn| drawn.draft == 0)
+        });
+        assert!(!h.app.model.kits[0].parsed_tags[&material].dirty.is_set(), "cancelled: still nothing written");
+
+        // The other case: the same picker without the editor's target.
+        let kit = h.app.model.kits[0].id;
+        let mut popup = MaterialColorPopup::new("Color Tint", 1.0, 1.0, 1.0, 1.0)
+            .with_write(material.clone(), "material parameters[0]/function parameters[0]/function/data");
+        popup.pick_for_test(0.0, 1.0, 0.0);
+        h.app.dialogs.open(ColorPopupWindow { popup: Some(popup), kit, opened_at: None, live: None });
+        idle(&mut h);
+        assert!(live(&h, &model).draft.is_none(), "a picker from elsewhere draws nothing here");
+    }
+
+    /// A live picker's draft goes when another picker takes its place
+    /// before it could say so.
+    #[test]
+    fn a_live_pickers_draft_goes_when_another_picker_replaces_it() {
+        let mut h = Harness::new();
+        let Some((_kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_replaced") else { return };
+        h.click_at(color_tint_swatch(&h));
+        frames_until(&mut h, "the colour picker", |h| h.app.dialogs.get::<ColorPopupWindow>().is_some());
+        h.app.dialogs.get_mut::<ColorPopupWindow>().unwrap().popup.as_mut().unwrap().pick_for_test(0.0, 0.0, 1.0);
+        frames_until(&mut h, "the draft", |h| live(h, &model).draft.is_some());
+
+        let kit = h.app.model.kits[0].id;
+        let other = MaterialColorPopup::new("Other", 1.0, 1.0, 1.0, 1.0).with_write(material, "material parameters[0]/color");
+        h.app.dialogs.open(ColorPopupWindow { popup: Some(other), kit, opened_at: None, live: None });
+        frames_until(&mut h, "the draft to go", |h| live(h, &model).draft.is_none());
+    }
+
+    /// A live picker's draft goes when its document's blocks change shape
+    /// while it is open: its path may name another element by then, and OK
+    /// would refuse it.
+    #[test]
+    fn a_live_pickers_draft_goes_when_its_documents_layout_moves() {
+        let mut h = Harness::new();
+        let Some((_kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_layout") else { return };
+        h.click_at(color_tint_swatch(&h));
+        frames_until(&mut h, "the colour picker", |h| h.app.dialogs.get::<ColorPopupWindow>().is_some());
+        h.app.dialogs.get_mut::<ColorPopupWindow>().unwrap().popup.as_mut().unwrap().pick_for_test(0.2, 0.4, 0.6);
+        frames_until(&mut h, "the draft", |h| live(h, &model).draft.is_some());
+
+        // A parameter added: the material's blocks change shape.
+        let ops = crate::core::document::apply::DeferredOps {
+            shader_param_ops: vec![crate::core::document::ops::ShaderParamOp {
+                parameters_block_path: "material parameters".to_owned(),
+                parameter_name: "added".to_owned(),
+                initial_fields: Vec::new(),
+                animated_parameters: Vec::new(),
+            }],
+            ..Default::default()
+        };
+        h.app.apply_doc_ops(0, &material, "Add", ops, crate::core::document::apply::UndoStep::Own);
+        frames_until(&mut h, "the draft to go", |h| live(h, &model).draft.is_none());
+    }
+
+    /// Override Diffuse Intensity in the Material Editor's window, as a user
+    /// would, and wait for it to land.
+    fn override_diffuse_intensity(h: &mut Harness, material: &str) {
+        h.click_at(rightmost_on_row(h, "Diffuse Intensity", "Override Default"));
+        frames_until(h, "the edit", |h| h.app.model.kits[0].parsed_tags[material].dirty.is_set());
+    }
+
+    fn parameter_names(tag: &TagFile) -> Vec<String> {
+        tag.root()
+            .field("material parameters")
+            .and_then(|field| field.as_block())
+            .map(|block| block.iter().map(|element| element.read_string_id("parameter name").unwrap_or_default()).collect())
+            .unwrap_or_default()
+    }
+
+    /// A modified material is marked in the card's dropdown, and its Save
+    /// (the first icon right of the dropdown) writes its file; the preview,
+    /// which already draws it, is not loaded again.
+    #[test]
+    fn the_cards_save_writes_the_material_without_a_load() {
+        let mut h = Harness::new();
+        let Some((kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_save") else { return };
+        override_diffuse_intensity(&mut h, &material);
+        idle(&mut h);
+        assert!(h.painted.iter().any(|text| text.trim() == "● darth_shader"), "marked: {:?}", h.painted);
+        assert!(!h.painted_contains("Modified ("), "no list at the foot");
+        let id = h.app.model.kits[0].id;
+        let geometry = |h: &Harness| match &h.app.views[id].caches.model_previews[&model].data {
+            Some(Ok(data)) => data.geometry_id,
+            _ => 0,
+        };
+        let before = geometry(&h);
+
+        press_material_action(&mut h, 0);
+        assert!(!h.app.model.kits[0].parsed_tags[&material].dirty.is_set(), "saved");
+        let on_disk = TagFile::read(kit.path("objects\\multi\\darth_shader.material")).unwrap();
+        assert!(parameter_names(&on_disk).contains(&"diffuse_intensity".to_owned()));
+        let state = &h.app.views[id].caches.model_previews[&model];
+        assert!(!state.reads_changed && !state.needs_preview_load(&model), "no load for a save it already draws");
+        assert_eq!(geometry(&h), before);
+        assert!(h.painted.iter().any(|text| text.trim() == "darth_shader"), "no longer marked: {:?}", h.painted);
+    }
+
+    /// The card's Reset asks first, then discards: the material opens again
+    /// from its file, its preview drawn so.
+    #[test]
+    fn the_cards_reset_asks_then_puts_the_material_back() {
+        let mut h = Harness::new();
+        let Some((_kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_reset") else { return };
+        override_diffuse_intensity(&mut h, &material);
+        idle(&mut h);
+        press_material_action(&mut h, 1);
+        assert!(h.app.model.kits[0].parsed_tags[&material].dirty.is_set(), "one click discards nothing");
+        assert!(h.painted_contains("Discard the unsaved changes to darth_shader"), "{:?}", h.painted);
+        assert!(!h.painted_contains("its tab"), "it has no tab");
+
+        h.click("Discard", 0);
+        frames_until(&mut h, "the material opened again", |h| {
+            h.app.model.kits[0].parsed_tags.get(&material).is_some_and(|document| !document.dirty.is_set())
+        });
+        let document = &h.app.model.kits[0].parsed_tags[&material];
+        assert!(!parameter_names(&document.tag).contains(&"diffuse_intensity".to_owned()), "back to its file");
+        let stamp = document.content_stamp();
+        frames_until(&mut h, "the preview drawn from it", |h| {
+            live(h, &model).drawn.get(&material).is_some_and(|drawn| drawn.stamp.is_none() || drawn.stamp == Some(stamp))
+        });
+    }
+
+    /// Reset with the shader open in a tab too says that tab's edits go with
+    /// it, and leaves the tab open on the file.
+    #[test]
+    fn reset_with_the_shader_in_a_tab_warns_and_reloads_the_tab() {
+        let mut h = Harness::new();
+        let Some((_kit, _model, material)) = material_editor_on_darth(&mut h, "material_editor_reset_tab") else { return };
+        // The path row's Open: the one on the row of the shader's path.
+        h.click_at(rightmost_on_row(&h, "objects\\multi\\darth_shader", "Open"));
+        frames_until(&mut h, "the shader's tab", |h| h.app.model.kits[0].open_tabs.contains(&material));
+        // An edit, then back to the model, whose preview the editor is over.
+        let ops = crate::core::document::apply::DeferredOps {
+            shader_param_ops: vec![crate::core::document::ops::ShaderParamOp {
+                parameters_block_path: "material parameters".to_owned(),
+                parameter_name: "diffuse_intensity".to_owned(),
+                initial_fields: Vec::new(),
+                animated_parameters: Vec::new(),
+            }],
+            ..Default::default()
+        };
+        h.app.apply_doc_ops(0, &material, "Add", ops, crate::core::document::apply::UndoStep::Own);
+        let model = h.app.model.kits[0].open_tabs.iter().find(|key| key.ends_with("smoke.render_model")).unwrap().clone();
+        h.app.kit_and_view(0).open_tag_pane(&model);
+        h.app.kit_and_view(0).focus_pane(model);
+        frames_until(&mut h, "the model's editor", |h| h.painted.iter().any(|text| text.trim() == "● darth_shader"));
+        press_material_action(&mut h, 1);
+        assert!(h.painted_contains("its tab"), "{:?}", h.painted);
+        h.click("Discard", 0);
+        frames_until(&mut h, "the tab's material read again", |h| {
+            h.app.model.kits[0].parsed_tags.get(&material).is_some_and(|document| !document.dirty.is_set())
+        });
+        assert!(h.app.model.kits[0].open_tabs.contains(&material), "its tab stays");
+    }
+
+    /// A Halo 4 material's own tab edits it in the grid too: Override
+    /// Default there adds the parameter.
+    #[test]
+    fn a_halo_4_materials_own_tab_overrides_a_default() {
+        let kit_tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        let material = "objects\\multi\\darth_shader.material";
+        let shader = "shaders\\material_shaders\\materials\\srf_lambert.material_shader";
+        if !kit_tags.join(material.replace('\\', "/")).exists() {
+            eprintln!("skipping: set BLAM_TEST_H4EK");
+            return;
+        }
+        let mut h = Harness::new();
+        let kit = crate::app::loose_fixture::LooseKit::new("material_tab_edit", "halo4_mcc");
+        for tag in [material, shader] {
+            let to = kit.path(tag);
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::copy(kit_tags.join(tag.replace('\\', "/")), to).unwrap();
+        }
+        kit.install(&mut h.app);
+        let key = kit.open(&mut h.app, material);
+        frames_until(&mut h, "the material's grid", |h| h.painted_contains("Diffuse Intensity"));
+        // The card's room follows what it drew.
+        idle(&mut h);
+        h.click_at(rightmost_on_row(&h, "Diffuse Intensity", "Override Default"));
+        frames_until(&mut h, "the edit", |h| h.app.model.kits[0].parsed_tags[&key].dirty.is_set());
+        assert!(parameter_names(&h.app.model.kits[0].parsed_tags[&key].tag).contains(&"diffuse_intensity".to_owned()));
+    }
+
+    /// A material that can't be saved says why, in the window and on its
+    /// Save, which writes nothing.
+    #[test]
+    fn an_unsaveable_material_says_why_and_its_save_writes_nothing() {
+        let mut h = Harness::new();
+        let Some((kit, _model, material)) = material_editor_on_darth(&mut h, "material_editor_unsaveable") else { return };
+        // As a big-endian (Xbox 360) tag is: the MCC writer has no round trip.
+        h.app.model.kits[0].parsed_tags.get_mut(&material).unwrap().tag.endian = blam_tags::Endian::Be;
+        // Drawn so, with the note above its grid, before the click.
+        idle(&mut h);
+        override_diffuse_intensity(&mut h, &material);
+        idle(&mut h);
+        assert!(h.painted_contains("Cannot be saved: Only little-endian MCC tags can be saved"), "{:?}", h.painted);
+        let file = kit.path("objects\\multi\\darth_shader.material");
+        let before = std::fs::read(&file).unwrap();
+        press_material_action(&mut h, 0);
+        press_material_action(&mut h, 2);
+        idle(&mut h);
+        assert!(h.app.model.kits[0].parsed_tags[&material].dirty.is_set(), "still unsaved");
+        assert_eq!(std::fs::read(&file).unwrap(), before, "nothing written");
+    }
+
+    /// OK on a live picker writes what it drew.
+    #[test]
+    fn ok_on_a_live_picker_writes_what_it_drew() {
+        let mut h = Harness::new();
+        let Some((_kit, model, material)) = material_editor_on_darth(&mut h, "material_editor_ok") else { return };
+        h.click_at(color_tint_swatch(&h));
+        frames_until(&mut h, "the colour picker", |h| h.app.dialogs.get::<ColorPopupWindow>().is_some());
+        frames_until(&mut h, "the picker's OK", |h| h.painted.iter().any(|text| text == "OK"));
+        assert!(live(&h, &model).draft.is_none(), "an unchanged picker shows no draft");
+        h.app.dialogs.get_mut::<ColorPopupWindow>().unwrap().popup.as_mut().unwrap().pick_for_test(1.0, 0.5, 0.0);
+        frames_until(&mut h, "the draft", |h| live(h, &model).draft.is_some());
+        let drafted = live(&h, &model).draft.as_ref().unwrap().ops.clone();
+        let before = h.app.model.kits[0].parsed_tags[&material].tag.write_to_bytes().unwrap();
+        frames_until(&mut h, "the picker's OK", |h| h.painted.iter().any(|text| text == "OK"));
+        h.click("OK", 0);
+        frames_until(&mut h, "the edit to land", |h| h.app.model.kits[0].parsed_tags[&material].dirty.is_set());
+        // Each field the draft wrote holds, in the document as OK left it,
+        // what it held in the copy the preview drew.
+        let paths: Vec<String> = drafted.pending.iter().map(|edit| edit.path.clone()).collect();
+        assert!(!paths.is_empty(), "the draft wrote something");
+        let mut copy = crate::core::document::TagDocument::clean(TagFile::read_from_bytes(&before).unwrap());
+        crate::core::document::apply::apply_deferred_ops(&mut copy, drafted, "draft");
+        let document = &h.app.model.kits[0].parsed_tags[&material].tag;
+        for path in &paths {
+            let value = |tag: &TagFile| format!("{:?}", tag.root().field_path(path).and_then(|field| field.value()));
+            assert_eq!(value(document), value(&copy.tag), "{path}: OK wrote what the draft drew");
+            assert_ne!(value(document), value(&TagFile::read_from_bytes(&before).unwrap()), "{path} changed");
+        }
+        frames_until(&mut h, "the draft to go", |h| live(h, &model).draft.is_none());
+    }
+
+    /// An edit in the Material Editor redraws the preview with that
+    /// material resolved again from the edited document, without loading
+    /// the model again.
+    #[test]
+    fn an_edit_in_the_material_editor_redraws_its_material_without_a_load() {
+        let kit_tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        let material = "objects\\multi\\darth_shader.material";
+        let shader = "shaders\\material_shaders\\materials\\srf_lambert.material_shader";
+        if !kit_tags.join(material.replace('\\', "/")).exists() {
+            eprintln!("skipping: set BLAM_TEST_H4EK");
+            return;
+        }
+        let mut h = Harness::new();
+        let kit = crate::app::loose_fixture::LooseKit::new("material_editor_live", "halo4_mcc");
+        for tag in [material, shader] {
+            let to = kit.path(tag);
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::copy(kit_tags.join(tag.replace('\\', "/")), to).unwrap();
+        }
+        kit.write_mcc("objects\\smoke", "render_model", |_| {});
+        kit.install(&mut h.app);
+        let model = kit.open(&mut h.app, "objects\\smoke.render_model");
+        let material_key = kit.key(material);
+        let id = h.app.model.kits[h.app.model.active].id;
+        let mut state = crate::app::model_preview::state::ModelPreviewState::loaded_with_shaders_for_test(
+            &model,
+            &[(b"mat ", "objects\\multi\\darth_shader")],
+        );
+        state.open_material_editor_for_test();
+        // Room for the shader's grid at its own width, as the editor wants,
+        // and for the whole card without scrolling the sidebar.
+        h.app.model.prefs.model_setup_width = 760.0;
+        h.screen = egui::vec2(SCREEN.x, 2400.0);
+        // Drawn with its material as a load resolved it.
+        if let Some(Ok(data)) = state.data.as_mut() {
+            data.set_textures(vec![Default::default()], false);
+        }
+        h.app.views[id].caches.model_previews.insert(model.clone(), state);
+        frames_until(&mut h, "the material's grid", |h| h.painted_contains("Diffuse Intensity"));
+        // The card's room follows what it drew.
+        idle(&mut h);
+        let loaded = |h: &Harness| {
+            let state = &h.app.views[id].caches.model_previews[&model];
+            let Some(Ok(data)) = state.data.as_ref() else { panic!("the preview is loaded") };
+            (data.geometry_id, data.textures_id)
+        };
+        let (geometry, textures) = loaded(&h);
+
+        h.click_at(rightmost_on_row(&h, "Diffuse Intensity", "Override Default"));
+        let edited = h.app.model.kits[0].parsed_tags[&material_key].content_stamp();
+        frames_until(&mut h, "the material to be resolved from the edit", |h| {
+            h.app.views[id].caches.model_previews[&model].material_live.drawn.get(&material_key).is_some_and(|drawn| drawn.stamp == Some(edited))
+        });
+        let (geometry_after, textures_after) = loaded(&h);
+        assert_eq!(geometry_after, geometry, "the model was not loaded again");
+        assert_ne!(textures_after, textures, "its materials were replaced");
+        let state = &h.app.views[id].caches.model_previews[&model];
+        assert!(state.preview_load_id.is_none() && !state.needs_preview_load(&model));
+        let Some(Ok(data)) = state.data.as_ref() else { unreachable!() };
+        let resolved = &data.textures.as_ref().expect("textures")[0];
+        assert!(resolved.error.is_none(), "the edited material resolved: {:?}", resolved.error);
     }
 
     /// Refresh Model sits in the viewport's header, left of the Camera
@@ -8658,6 +9596,9 @@ mod tests {
         };
         let root = std::path::PathBuf::from(root.replace('/', std::path::MAIN_SEPARATOR_STR));
         let mut h = Harness::recording();
+        // Tall enough for every card it watches, the Materials card's header
+        // among them.
+        h.screen = egui::vec2(SCREEN.x, SCREEN.y + 200.0);
         h.frame(Vec::new());
         let entries =
             install_kit_subtree(&mut h, &root, GameId::Halo2, "objects/characters/brute");

@@ -34,7 +34,7 @@ pub(crate) struct AppliedFieldEdits {
 
 /// Every kind of edit a tag pane collects while it draws. They are applied
 /// together once the draw has finished, behind one undo snapshot.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct DeferredOps {
     pub(crate) pending: Vec<PendingFieldEdit>,
     pub(crate) block_ops: Vec<BlockOp>,
@@ -1397,11 +1397,36 @@ pub(crate) fn apply_one_shader_param_op(
     })
 }
 
+/// The blocks of functions a parameter carries, by game: a render method's
+/// `parameters[]` call theirs `animated parameters`, a Halo 4 material's
+/// `material parameters[]` (and H2A's and Halo 5's) `function parameters`.
+/// The fields inside (`type`, `input name`, `range name`, `time period`,
+/// `function/data`) are the same in both.
+const PARAMETER_FUNCTION_BLOCKS: [&str; 2] = ["animated parameters", "function parameters"];
+
+/// `path`, a parameter's function block named as a render method names it,
+/// turned into the block this tag's parameter has. The shader grid's rows
+/// are shared by render methods and materials, and name the block the
+/// render-method way; the parameter's own schema says which it is.
+fn parameter_function_block(tag: &TagFile, path: &str) -> String {
+    let Some(parameter) = PARAMETER_FUNCTION_BLOCKS
+        .iter()
+        .find_map(|block| path.strip_suffix(block).and_then(|rest| rest.strip_suffix('/')))
+    else {
+        return path.to_owned();
+    };
+    PARAMETER_FUNCTION_BLOCKS
+        .iter()
+        .map(|block| format!("{parameter}/{block}"))
+        .find(|candidate| tag.root().field_path(candidate).is_some())
+        .unwrap_or_else(|| path.to_owned())
+}
+
 pub(crate) fn apply_one_shader_op(
     tag: &mut TagFile,
     op: &ShaderOp,
 ) -> Result<String, String> {
-    let block_path = &op.animated_block_path;
+    let block_path = &parameter_function_block(tag, &op.animated_block_path);
     with_new_element(tag, block_path, |tag, new_idx| {
         let type_path = format!("{block_path}[{new_idx}]/type");
         apply_field_edit(tag, &type_path, &op.output_type_index.to_string())?;

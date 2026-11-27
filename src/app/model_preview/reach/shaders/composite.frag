@@ -1,6 +1,8 @@
 #version 410 core
 uniform sampler2D accumulation;
 uniform sampler2D bloom;
+// Where this draw sits in the bloom's picture (a snapshot's tile).
+uniform vec4 bloom_window;
 uniform sampler2D scene_depth;
 uniform sampler2D noise;
 uniform mat4 hue_saturation;
@@ -17,7 +19,7 @@ void main() {
     if (place.x < 0.0 || place.x > 1.0 || place.y < 0.0 || place.y > 1.0) {
         accumulated = vec4(0.0);
     }
-    vec3 combined = (accumulated.rgb + texture(bloom, place).rgb) * dark_multiplier;
+    vec3 combined = (accumulated.rgb + texture(bloom, place * bloom_window.zw + bloom_window.xy).rgb) * dark_multiplier;
     combined = pow(max(combined, vec3(0.0)), vec3(gamma));
     color.rgb = clamp((vec4(combined, 1.0) * hue_saturation).rgb, 0.0, 1.0);
     // `apply_noise`: the map tiled a texel a pixel (its 256 square in the

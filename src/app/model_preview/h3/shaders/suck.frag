@@ -7,12 +7,16 @@ uniform vec3 moved;
 uniform float most_pixels;
 uniform float blur_step;
 uniform vec2 center_falloff;
+// Where this draw sits in the whole picture: a snapshot's tile measures from
+// the picture's centre, not its own.
+uniform vec4 window;
 out vec4 color;
 void main() {
     vec2 size = vec2(textureSize(picture, 0));
     ivec2 at = ivec2(gl_FragCoord.xy);
     vec3 center = texelFetch(picture, at, 0).rgb;
-    vec2 from_center = (gl_FragCoord.xy - size * 0.5) * sqrt(center_falloff) / size;
+    vec2 whole = gl_FragCoord.xy / size * window.zw + window.xy;
+    vec2 from_center = (whole - 0.5) * sqrt(center_falloff);
     float weight = clamp(clamp(dot(from_center, from_center), 0.0, 1.0) - 0.1, 0.0, 1.0);
     color = vec4(center, 1.0);
     if (weight > 0.0) {

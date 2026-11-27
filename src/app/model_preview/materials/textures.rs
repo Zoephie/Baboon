@@ -86,6 +86,11 @@ pub(crate) struct MaterialTextures {
     /// The dx9 passes by `Dx9Layer`, drawn in place of the slots above; empty
     /// for other games and outside a loose kit, whose `.psh` sources they need.
     pub dx9_layers: [Vec<Dx9DrawPass>; DX9_LAYER_COUNT],
+    /// `dx9_layers` as this material's own shader resolved them, before
+    /// `finish_dx9_layers` shared an object's overlay and damage passes
+    /// among its materials: what sharing them again starts from when one
+    /// material is resolved anew (`resolve_model_materials`).
+    pub own_dx9_layers: [Vec<Dx9DrawPass>; DX9_LAYER_COUNT],
     /// A gen3 game's own shader, translated from the kit's source.
     pub gen3: Option<Arc<Gen3Material>>,
     /// Why Game Shaders could not translate the game's own shader for this

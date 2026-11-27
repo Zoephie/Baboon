@@ -89,8 +89,11 @@ pub(in crate::app::model_preview) fn draw_model_shading_menu(
                     response
                 };
                 // What Game Shaders reads changes, so the preview reads again.
-                if response.clicked() && state.set_shading(shading) {
-                    super::weapons::carry_through_reload(data, state);
+                if response.clicked() {
+                    state.shading_picked = true;
+                    if state.set_shading(shading) {
+                        super::weapons::carry_through_reload(data, state);
+                    }
                 }
             }
             ui.separator();

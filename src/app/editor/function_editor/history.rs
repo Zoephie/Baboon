@@ -153,6 +153,7 @@ mod tests {
             popup: Some(popup),
             kit,
             opened_at: None,
+            live: None,
         });
         assert!(app.can_undo_current());
         app.undo_current_tag();

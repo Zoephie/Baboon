@@ -960,10 +960,23 @@ pub(in crate::app) fn draw_foundation_box(
     id_salt: impl std::hash::Hash + std::fmt::Debug,
     contents: impl FnMut(&mut Ui, BoxPart),
 ) -> bool {
+    draw_foundation_box_opened(ui, title, id_salt, None, contents)
+}
+
+/// A [`draw_foundation_box`] whose openness is `open` when given, rather
+/// than what it was last left as: for a box that stands for state of its
+/// own. Returns whether it is open after this pass's clicks.
+pub(in crate::app) fn draw_foundation_box_opened(
+    ui: &mut Ui,
+    title: String,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    open: Option<bool>,
+    contents: impl FnMut(&mut Ui, BoxPart),
+) -> bool {
     let contents = std::cell::RefCell::new(contents);
     add_foundation_header_spacing(ui);
     let header = ui.scope(|ui| {
-        draw_foundation_collapsing_header_inner(ui, title, id_salt, 0, true, None,
+        draw_foundation_collapsing_header_inner(ui, title, id_salt, 0, open.unwrap_or(true), open,
             foundation_block_bar(), FindTargetKind::Label, true, None, false,
             Some(&mut |ui: &mut Ui, part: BoxPart| (contents.borrow_mut())(ui, part)),
             |ui| {

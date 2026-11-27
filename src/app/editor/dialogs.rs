@@ -10,6 +10,18 @@ use super::*;
 pub(in crate::app) struct TagReferencePickerWindow {
     pub(in crate::app) state: TagReferencePickerState,
     pub(in crate::app) kit: KitId,
+    /// Opened over a Material Editor's shader reference: the pick switches
+    /// the shader of every render model slot naming it, as typing one does.
+    pub(in crate::app) shader_switch: Option<ShaderSwitchTarget>,
+}
+
+/// The render model slots a Material Editor's shader reference writes.
+#[derive(Clone)]
+pub(in crate::app) struct ShaderSwitchTarget {
+    pub(in crate::app) preview: String,
+    pub(in crate::app) render_model: String,
+    pub(in crate::app) paths: Vec<String>,
+    pub(in crate::app) slot: u16,
 }
 
 impl Dialog for TagReferencePickerWindow {
@@ -52,6 +64,17 @@ impl Dialog for TagReferencePickerWindow {
             });
 
         if let Some(input) = picked {
+            if let Some(target) = self.shader_switch.clone() {
+                cx.send(EditorCommand::MaterialEditor(MaterialEditorCommand::SwitchShader {
+                    kit: self.kit,
+                    preview: target.preview,
+                    render_model: target.render_model,
+                    paths: target.paths,
+                    input,
+                    slot: target.slot,
+                }));
+                return false;
+            }
             cx.send(EditorCommand::PickTagReference {
                 kit: self.kit,
                 tag_key: self.state.tag_key.clone(),
@@ -62,6 +85,42 @@ impl Dialog for TagReferencePickerWindow {
         }
         open
     }
+}
+
+/// A picker opened in a Model Preview's Material Editor: what it is
+/// picking shows in that preview as it changes, before OK writes it.
+#[derive(Clone)]
+pub(in crate::app) struct LivePreviewTarget {
+    /// The previewed tag whose editor opened it.
+    pub(in crate::app) preview: String,
+    /// This picker's own, so the preview can tell its draft from another's.
+    pub(in crate::app) draft_id: u64,
+}
+
+impl LivePreviewTarget {
+    pub(in crate::app) fn new(preview: &str) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self {
+            preview: preview.to_owned(),
+            draft_id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        }
+    }
+}
+
+/// What a live picker last sent of its draft, so it sends again only when
+/// that changes.
+#[derive(Clone, Copy, PartialEq)]
+enum SentDraft {
+    Nothing,
+    Draft(u64),
+}
+
+/// A hash of `value`'s `Debug`, to tell one draft from the next.
+fn draft_signature(value: &impl std::fmt::Debug) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    format!("{value:?}").hash(&mut hasher);
+    hasher.finish()
 }
 
 /// The color picker popup over a field, and the kit it was opened from: its
@@ -76,6 +135,82 @@ pub(in crate::app) struct ColorPopupWindow {
     /// writes to one: OK is refused once it moves, since the path the popup
     /// holds may point at another element by then.
     pub(in crate::app) opened_at: Option<(u64, u64)>,
+    /// Set when the Material Editor opened it: the preview shows its draft.
+    pub(in crate::app) live: Option<LivePreviewTarget>,
+}
+
+impl ColorPopupWindow {
+    /// Send the live preview what OK would write now, when it differs from
+    /// what was last sent; nothing once it closes.
+    fn send_draft(&self, cx: &Ctx) {
+        let Some(live) = &self.live else { return };
+        let id = egui::Id::unique(("live_color_draft", live.draft_id));
+        let last = cx.egui.data(|data| data.get_temp::<SentDraft>(id)).unwrap_or(SentDraft::Nothing);
+        let draft = self
+            .popup
+            .as_ref()
+            .filter(|popup| popup.picked_another())
+            .and_then(|popup| Some((popup.draft_result()?, popup.channels())));
+        let now = draft.as_ref().map_or(SentDraft::Nothing, |(_, channels)| SentDraft::Draft(draft_signature(channels)));
+        if now == last {
+            return;
+        }
+        cx.egui.data_mut(|data| data.insert_temp(id, now));
+        match draft {
+            // A function editor's own colour: its draft, not the tag's.
+            Some((ColorPopupResult::FunctionDraftColor { target, argb }, _)) => {
+                cx.send(EditorCommand::FunctionDraftColorPreview { target, argb: Some(argb) });
+            }
+            Some((result, _)) => {
+                let Some((tag_key, _, ops)) = color_result_ops(result) else { return };
+                cx.send(EditorCommand::DraftPreview {
+                    kit: self.kit,
+                    preview: live.preview.clone(),
+                    draft_id: live.draft_id,
+                    tag_key,
+                    opened_at: self.opened_at,
+                    ops: Some(ops),
+                });
+            }
+            // Closed, or showing nothing: whichever it was showing goes. Only
+            // one colour picker is open at a time, so a function editor's
+            // tentative colour can only have been this one's.
+            None => {
+                cx.send(EditorCommand::FunctionDraftColorPreview { target: FunctionDraftColorTarget::Logical(0), argb: None });
+                cx.send(EditorCommand::DraftPreview {
+                    kit: self.kit,
+                    preview: live.preview.clone(),
+                    draft_id: live.draft_id,
+                    tag_key: String::new(),
+                    opened_at: self.opened_at,
+                    ops: None,
+                });
+            }
+        }
+    }
+}
+
+/// The tag, undo label and edits a colour picker's result writes, when it
+/// writes the tag: what OK applies, and what the live preview draws.
+fn color_result_ops(result: ColorPopupResult) -> Option<(String, &'static str, DeferredOps)> {
+    Some(match result {
+        ColorPopupResult::FieldEdit { tag_key, edit } => {
+            (tag_key, "Edit color", DeferredOps { pending: vec![edit], ..DeferredOps::default() })
+        }
+        ColorPopupResult::ShaderOp { tag_key, op } => {
+            (tag_key, "Shader edit", DeferredOps { shader_ops: vec![op], ..DeferredOps::default() })
+        }
+        ColorPopupResult::ShaderParamOp { tag_key, op } => {
+            (tag_key, "Shader parameter", DeferredOps { shader_param_ops: vec![op], ..DeferredOps::default() })
+        }
+        ColorPopupResult::H2ShaderParamOp { tag_key, op } => {
+            (tag_key, "Shader parameter", DeferredOps { h2_shader_param_ops: vec![op], ..DeferredOps::default() })
+        }
+        ColorPopupResult::StringListOp { tag_key, op } => {
+            (tag_key, "Edit color", DeferredOps { string_list_ops: vec![op], ..DeferredOps::default() })
+        }
+        ColorPopupResult::FunctionDraftColor { .. } => return None,
+    })
 }
 
 impl Dialog for ColorPopupWindow {
@@ -92,46 +227,13 @@ impl Dialog for ColorPopupWindow {
             });
         }
         if let Some(result) = result {
-            let (tag_key, label, ops) = match result {
-                ColorPopupResult::FieldEdit { tag_key, edit } => {
-                    let ops = DeferredOps {
-                        pending: vec![edit],
-                        ..DeferredOps::default()
-                    };
-                    (tag_key, "Edit color", ops)
-                }
-                ColorPopupResult::ShaderOp { tag_key, op } => {
-                    let ops = DeferredOps {
-                        shader_ops: vec![op],
-                        ..DeferredOps::default()
-                    };
-                    (tag_key, "Shader edit", ops)
-                }
-                ColorPopupResult::ShaderParamOp { tag_key, op } => {
-                    let ops = DeferredOps {
-                        shader_param_ops: vec![op],
-                        ..DeferredOps::default()
-                    };
-                    (tag_key, "Shader parameter", ops)
-                }
-                ColorPopupResult::H2ShaderParamOp { tag_key, op } => {
-                    let ops = DeferredOps {
-                        h2_shader_param_ops: vec![op],
-                        ..DeferredOps::default()
-                    };
-                    (tag_key, "Shader parameter", ops)
-                }
-                ColorPopupResult::StringListOp { tag_key, op } => {
-                    let ops = DeferredOps {
-                        string_list_ops: vec![op],
-                        ..DeferredOps::default()
-                    };
-                    (tag_key, "Edit color", ops)
-                }
-                ColorPopupResult::FunctionDraftColor { target, argb } => {
-                    cx.send(EditorCommand::FunctionDraftColor { target, argb });
-                    return self.popup.is_some();
-                }
+            if let ColorPopupResult::FunctionDraftColor { target, argb } = result {
+                cx.send(EditorCommand::FunctionDraftColor { target, argb });
+                self.send_draft(cx);
+                return self.popup.is_some();
+            }
+            let Some((tag_key, label, ops)) = color_result_ops(result) else {
+                return self.popup.is_some();
             };
             cx.send(EditorCommand::ApplyPopupOps {
                 opened_from: Some(self.kit),
@@ -141,6 +243,7 @@ impl Dialog for ColorPopupWindow {
                 ops,
             });
         }
+        self.send_draft(cx);
         self.popup.is_some()
     }
 }
@@ -151,6 +254,41 @@ pub(in crate::app) struct FunctionPopupWindow {
     pub(in crate::app) kit: KitId,
     /// As [`ColorPopupWindow::opened_at`].
     pub(in crate::app) opened_at: Option<(u64, u64)>,
+    /// As [`ColorPopupWindow::live`].
+    pub(in crate::app) live: Option<LivePreviewTarget>,
+}
+
+impl FunctionPopupWindow {
+    /// As [`ColorPopupWindow::send_draft`], with its colour picker's colour
+    /// not yet picked.
+    fn send_draft(&self, cx: &Ctx) {
+        let Some(live) = &self.live else { return };
+        let id = egui::Id::unique(("live_function_draft", live.draft_id));
+        let last = cx.egui.data(|data| data.get_temp::<SentDraft>(id)).unwrap_or(SentDraft::Nothing);
+        let batch = self.popup.as_ref().and_then(|popup| popup.batch(true));
+        let now = batch.as_ref().map_or(SentDraft::Nothing, |batch| {
+            SentDraft::Draft(draft_signature(&(
+                batch.edits.iter().map(|edit| (&edit.path, &edit.input)).collect::<Vec<_>>(),
+                batch.data_ops.iter().map(|op| (&op.block_path, &op.data)).collect::<Vec<_>>(),
+            )))
+        });
+        if now == last {
+            return;
+        }
+        cx.egui.data_mut(|data| data.insert_temp(id, now));
+        cx.send(EditorCommand::DraftPreview {
+            kit: self.kit,
+            preview: live.preview.clone(),
+            draft_id: live.draft_id,
+            tag_key: batch.as_ref().map(|batch| batch.tag_key.clone()).unwrap_or_default(),
+            opened_at: self.opened_at,
+            ops: batch.map(|batch| DeferredOps {
+                pending: batch.edits,
+                function_data_ops: batch.data_ops,
+                ..DeferredOps::default()
+            }),
+        });
+    }
 }
 
 impl Dialog for FunctionPopupWindow {
@@ -174,13 +312,16 @@ impl Dialog for FunctionPopupWindow {
             });
         }
         if let Some(popup) = color {
-            // Its color goes to this editor's draft, not to the tag.
+            // Its color goes to this editor's draft, not to the tag; shown
+            // live as this editor's is.
             cx.open_dialog(ColorPopupWindow {
                 popup: Some(popup),
                 kit: self.kit,
                 opened_at: None,
+                live: self.live.as_ref().map(|live| LivePreviewTarget::new(&live.preview)),
             });
         }
+        self.send_draft(cx);
         self.popup.is_some()
     }
 }
@@ -209,8 +350,26 @@ pub(in crate::app) enum EditorCommand {
         target: FunctionDraftColorTarget,
         argb: u32,
     },
+    /// The color picker a live function popup opened shows `argb` for
+    /// `target`, not yet picked (`None`: shows nothing now).
+    FunctionDraftColorPreview {
+        target: FunctionDraftColorTarget,
+        argb: Option<u32>,
+    },
+    /// What a picker the Material Editor opened would write now, for its
+    /// preview to draw (`None`: nothing, as it closed or matches the tag).
+    DraftPreview {
+        kit: KitId,
+        preview: String,
+        draft_id: u64,
+        tag_key: String,
+        opened_at: Option<(u64, u64)>,
+        ops: Option<DeferredOps>,
+    },
     /// Apply what a tag pane collected while it drew.
     PaneDrawn(Box<PaneDrawn>),
+    /// What a Model Preview's Material Editor asked for.
+    MaterialEditor(MaterialEditorCommand),
     StringRows(Box<super::string_row_clipboard::RowCommand>),
     /// The pane showing `key` in `kit` took focus: it is the tag the file
     /// actions act on.
@@ -244,6 +403,7 @@ impl Baboon {
         match command {
             EditorCommand::StringRows(command) => self.apply_string_row_command(*command, ctx),
             EditorCommand::PaneDrawn(drawn) => return self.apply_pane_drawn(*drawn, ctx),
+            EditorCommand::MaterialEditor(command) => self.apply_material_editor_command(command, ctx),
             EditorCommand::SyncOpenTabs { kit } => {
                 return self
                     .model
@@ -321,6 +481,18 @@ impl Baboon {
                 field_path,
                 input,
             } => self.apply_picked_tag_reference(kit, &tag_key, &field_path, input),
+            EditorCommand::FunctionDraftColorPreview { target, argb } => {
+                if let Some(popup) = self
+                    .dialogs
+                    .get_mut::<FunctionPopupWindow>()
+                    .and_then(|window| window.popup.as_mut())
+                {
+                    popup.set_tentative_color(argb.map(|argb| (target, argb)));
+                }
+            }
+            EditorCommand::DraftPreview { kit, preview, draft_id, tag_key, opened_at, ops } => {
+                self.apply_draft_preview(kit, preview, draft_id, tag_key, opened_at, ops);
+            }
             EditorCommand::FunctionDraftColor { target, argb } => {
                 if let Some(popup) = self
                     .dialogs

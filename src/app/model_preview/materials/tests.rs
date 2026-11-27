@@ -863,3 +863,81 @@ fn game_shaders_say_what_they_left_out() {
          Context: OpenGL 3.3"
     );
 }
+
+/// A resolved material, as a hash of everything it holds: written out as
+/// `Debug` straight into the hasher, maps and all, so a large map costs no
+/// string.
+fn fingerprint(texture: &MaterialTextures) -> u64 {
+    use std::fmt::Write as _;
+    use std::hash::Hasher as _;
+    struct Hashing(std::collections::hash_map::DefaultHasher);
+    impl std::fmt::Write for Hashing {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            self.0.write(text.as_bytes());
+            Ok(())
+        }
+    }
+    let mut hashing = Hashing(Default::default());
+    // Its own passes are bookkeeping; what draws is the rest.
+    let drawn = MaterialTextures { own_dx9_layers: Default::default(), ..texture.clone() };
+    write!(hashing, "{drawn:?}").unwrap();
+    hashing.0.finish()
+}
+
+/// The Material Editor resolves one shader's materials again on each edit.
+/// Unedited, what that gives must be what resolving the whole model gave,
+/// for every material, an object's shared passes and all: a Halo 2 Master
+/// Chief's shield and hologram shaders hand their passes to every material
+/// of his, and a material resolved alone would lose them.
+#[test]
+fn resolving_one_material_again_gives_what_the_whole_model_did() {
+    let cases: [(GameId, &str, &str, &[u8; 4], usize); 5] = [
+        (GameId::HaloCe, r"characters\cyborg\cyborg", "biped", b"bipd", usize::MAX),
+        (GameId::Halo2, r"objects\characters\masterchief\masterchief", "biped", b"bipd", usize::MAX),
+        (GameId::Halo3, r"objects\characters\masterchief\masterchief", "biped", b"bipd", usize::MAX),
+        (GameId::HaloReach, r"objects\vehicles\human\warthog\warthog", "vehicle", b"vehi", 8),
+        (GameId::Halo4, r"objects\vehicles\human\storm_warthog\storm_warthog", "vehicle", b"vehi", 8),
+    ];
+    let mut checked = 0;
+    let mut shared_somewhere = false;
+    for (game, path, extension, group, limit) in cases {
+        let Some(source) = kit_source(game) else { continue };
+        let Some(root) = kit_root(game) else { continue };
+        let data = crate::app::model_preview::harness::kit::kit_preview(&root, game, path, extension, group);
+        let materials = &data.preview.materials;
+        let whole = resolve_model_textures(&source, None, materials, true);
+        let mut caches = resolve_caches(&source);
+        for index in (0..whole.len()).filter(|&index| !materials[index].shader_path.is_empty()).take(limit) {
+            let again = resolve_model_materials(&source, None, materials, &whole, &[index as u16], None, true, &mut caches);
+            for (at, (before, after)) in whole.iter().zip(&again).enumerate() {
+                if let Some(folder) = std::env::var_os("BABOON_RESOLVE_DUMP")
+                    && fingerprint(before) != fingerprint(after)
+                {
+                    let folder = std::path::PathBuf::from(folder);
+                    let _ = std::fs::create_dir_all(&folder);
+                    let scrub = |texture: &MaterialTextures| format!("{:#?}", MaterialTextures { own_dx9_layers: Default::default(), ..texture.clone() });
+                    std::fs::write(folder.join("before.txt"), scrub(before)).unwrap();
+                    std::fs::write(folder.join("after.txt"), scrub(after)).unwrap();
+                }
+                assert_eq!(
+                    fingerprint(before),
+                    fingerprint(after),
+                    "{game:?} {path}: material {at} ({}) after resolving {index} ({}) again",
+                    materials[at].shader_path,
+                    materials[index].shader_path,
+                );
+            }
+            // The disagreeing case: what sharing gave it, the material's own
+            // resolve alone does not have.
+            let counts = |layers: &[Vec<_>]| layers.iter().map(Vec::len).collect::<Vec<_>>();
+            if counts(&whole[index].dx9_layers) != counts(&whole[index].own_dx9_layers) {
+                shared_somewhere = true;
+            }
+            checked += 1;
+        }
+    }
+    eprintln!("{checked} materials resolved again");
+    if kit_root(GameId::Halo2).is_some() {
+        assert!(shared_somewhere, "Halo 2's Master Chief shares passes among his materials");
+    }
+}

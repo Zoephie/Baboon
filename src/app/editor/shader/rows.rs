@@ -915,6 +915,7 @@ pub(in crate::app) fn shader_scalar_row(
                 parameters_block_path,
                 parameter_name: parameter.parameter_name.clone(),
                 parameter_type_index: shader_parameter_type_index(parameter),
+                field: "real",
             },
         })
     } else {

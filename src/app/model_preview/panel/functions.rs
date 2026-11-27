@@ -20,6 +20,8 @@ pub(in crate::app::model_preview) fn draw_setup_body(
     ui: &mut Ui,
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
+    // The game's materials are drawn: the Materials card shows.
+    materials: bool,
     variant_actions: &mut dyn FnMut(&mut Ui, &mut ModelPreviewState),
 ) {
     let own = super::super::load::rules(data.preview.game).object_controls;
@@ -45,6 +47,7 @@ pub(in crate::app::model_preview) fn draw_setup_body(
             reset_model_preview_selection(state, data, state.selected_variant);
         }
     }
+    draw_materials_card(ui, data, state, materials);
     let shared_weapons = data
         .weapons
         .as_ref()
@@ -134,6 +137,64 @@ pub(in crate::app::model_preview) fn draw_setup_body(
 /// with a Reset at the right of its header that is enabled when `changed`;
 /// `contents` draws its other header controls and its body. Whether Reset
 /// was pressed.
+/// The Materials card: room for the Material Editor, which the tag pane
+/// draws there once its own drawing is done. Open, the editor is; closed,
+/// it lets go of the shaders it holds that have no unsaved edits. Only for a
+/// game whose materials the preview draws, and a model that names some.
+fn draw_materials_card(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState, materials: bool) {
+    let live = ui.is_enabled();
+    let names_some = data.preview.materials.iter().any(|material| !material.shader_path.trim().is_empty());
+    if !materials || !names_some {
+        if live {
+            state.material_editor = None;
+        }
+        return;
+    }
+    let mut slot = None;
+    let open = super::super::super::editor::fields::draw_foundation_box_opened(
+        ui,
+        "Materials".to_owned(),
+        ("model_setup_section", "Materials"),
+        Some(state.material_editor.is_some()),
+        |ui, part| {
+            if part == BoxPart::Body {
+                // As tall as the editor drew last pass; its dropdown's height
+                // before it has drawn.
+                let height = state
+                    .material_content_height
+                    .unwrap_or(super::super::material_editor::MATERIAL_SLOT_PICKER_HEIGHT);
+                let size = eframe::egui::vec2(ui.available_width(), height);
+                let (rect, _) = ui.allocate_exact_size(size, eframe::egui::Sense::hover());
+                slot = Some(super::super::material_editor::MaterialSlot {
+                    rect,
+                    clip: ui.clip_rect(),
+                    layer: ui.layer_id(),
+                    enabled: ui.is_enabled(),
+                });
+            }
+        },
+    );
+    state.material_slot = slot;
+    // Still, while the model loads again: shown as it was, kept as it is.
+    // Closed, it is kept as it was, to show again when opened.
+    if live {
+        match (open, state.material_editor.is_some()) {
+            (true, false) => {
+                state.material_editor = Some(state.material_editor_closed.take().unwrap_or_default());
+            }
+            (false, true) => {
+                let mut kept = state.material_editor.take();
+                if let Some(kept) = kept.as_mut() {
+                    kept.hovered = None;
+                    kept.confirm_reset = None;
+                }
+                state.material_editor_closed = kept;
+            }
+            _ => {}
+        }
+    }
+}
+
 pub(in crate::app::model_preview) fn setup_section(
     ui: &mut Ui,
     title: &str,

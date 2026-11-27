@@ -17,7 +17,54 @@ use eframe::glow::HasContext as _;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// [`H4Game::hologram_window_of`]'s copy.
+const WINDOW_COPY_FRAGMENT: &str = include_str!("shaders/window_copy.frag");
+
 impl H4Game {
+    /// `window` of the held hologram bloom `held`, copied into a target of
+    /// `size` for the combine to read at its own places. Leaves `framebuffer`
+    /// bound.
+    unsafe fn hologram_window_of(
+        &mut self,
+        gl: &glow::Context,
+        vertices: glow::NativeVertexArray,
+        held: glow::NativeTexture,
+        window: [f32; 4],
+        size: [i32; 2],
+        framebuffer: glow::NativeFramebuffer,
+    ) -> Option<glow::NativeTexture> {
+        use crate::app::model_preview::gl::target::{ColorTarget, Sampling, Texels};
+        unsafe {
+            if self.hologram_window.as_ref().is_none_or(|(_, target)| target.size != size) {
+                let program = match self.hologram_window.take() {
+                    Some((program, old)) => {
+                        old.delete(gl);
+                        program
+                    }
+                    None => crate::app::model_preview::gl::screen::screen_program(gl, WINDOW_COPY_FRAGMENT)?,
+                };
+                let target = ColorTarget::new(gl, size, Texels::RGBA16F, Sampling::LINEAR_CLAMPED)?;
+                self.hologram_window = Some((program, target));
+            }
+            let (program, target) = self.hologram_window.as_ref()?;
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
+            gl.viewport(0, 0, size[0], size[1]);
+            gl.disable(glow::BLEND);
+            gl.disable(glow::DEPTH_TEST);
+            gl.disable(glow::SCISSOR_TEST);
+            gl.use_program(Some(*program));
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(held));
+            gl.uniform_1_i32(gl.get_uniform_location(*program, "source").as_ref(), 0);
+            gl.uniform_4_f32_slice(gl.get_uniform_location(*program, "window").as_ref(), &window);
+            gl.uniform_2_f32(gl.get_uniform_location(*program, "size").as_ref(), size[0] as f32, size[1] as f32);
+            gl.bind_vertex_array(Some(vertices));
+            gl.draw_arrays(glow::TRIANGLES, 0, 3);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+            Some(target.texture)
+        }
+    }
+
     /// `RenderHolograms`' generate pass, after the albedo (`c_player_view::render`
     /// X360 0x82A3B5F4): the holograms into their own surface, then its bloom
     /// and `final_combine_hologram`. `scene` holds the depth to test against.
@@ -154,17 +201,26 @@ impl H4Game {
             gl.blend_equation(glow::FUNC_ADD);
             gl.disable(glow::BLEND);
             gl.disable(glow::SCISSOR_TEST);
-            // Its bloom, by the hologram camera fx.
+            // Its bloom, by the hologram camera fx; held, the window of the
+            // bloom the whole picture's draw built.
             let vertices = state.empty_array(gl);
-            if self.bloom.is_none() {
-                self.bloom =
-                    super::super::bloom::H4Bloom::new(gl, core.black_flat, core.white_volume);
-            }
-            let settings = H4BloomSettings::hologram(screen.bloom_scale);
-            let bloom =
-                self.bloom
+            let bloom = if core.held_bloom {
+                let held = self.held_hologram_bloom;
+                let window = core.bloom_window;
+                held.and_then(|held| self.hologram_window_of(gl, vertices, held, window, size, framebuffer))
+            } else {
+                if self.hologram_bloom.is_none() {
+                    self.hologram_bloom =
+                        super::super::bloom::H4Bloom::new(gl, core.black_flat, core.white_volume);
+                }
+                let settings = H4BloomSettings::hologram(screen.bloom_scale);
+                let bloom = self
+                    .hologram_bloom
                     .as_mut()?
                     .build(gl, vertices, framebuffer, color, size, None, &settings);
+                self.held_hologram_bloom = bloom;
+                bloom
+            };
             // Pass 3, "hologram postbloom": layer 3, by its own blend.
             gl.enable(glow::SCISSOR_TEST);
             gl.scissor(x0, y0, x1 - x0, y1 - y0);

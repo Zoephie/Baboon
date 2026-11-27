@@ -25,6 +25,9 @@ use eframe::glow::HasContext as _;
 /// The GL state the preview draws with: the shared program, slots and
 /// targets, and, until each game's drawing moves to its own folder, every
 /// game's own state too.
+/// A draw's whole picture, as [`RenderCore::bloom_window`] has it.
+pub(in crate::app::model_preview) const WHOLE_WINDOW: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+
 pub(in crate::app::model_preview) struct RenderCore {
     /// The gen3 targets between frames. Every gen3 pipeline draws through
     /// the one set, taking it for its frame and handing it back, so a session
@@ -59,6 +62,28 @@ pub(in crate::app::model_preview) struct RenderCore {
     pub(in crate::app::model_preview) black_volume: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) white_volume: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) scene: Option<SceneTarget>,
+    /// How the frame-sized targets that hold the background store colour:
+    /// bytes for the viewport, half floats for a snapshot, whose render on a
+    /// white background must not clamp where light is added to it.
+    pub(in crate::app::model_preview) frame_texels: crate::app::model_preview::gl::target::Texels,
+    /// Add the bloom the last draw built rather than building this one's: a
+    /// snapshot builds its bloom once, from the whole picture at the
+    /// viewport's size on black (the model's alone, as the viewport's), and
+    /// every render after adds it (its tiles, on black and on white). Halo 2's
+    /// bright pass reads the whole scene, so on white the background itself
+    /// would bloom; and a tile's own bloom would stop at its edges.
+    pub(in crate::app::model_preview) held_bloom: bool,
+    /// The bloom the last gen3 draw built, which a held draw adds.
+    pub(in crate::app::model_preview) held_bloom_texture: Option<glow::NativeTexture>,
+    /// Where this draw sits in the held bloom's picture: its texture
+    /// coordinates times `[2..4]` plus `[0..2]`. The whole of it, but in a
+    /// snapshot's tile.
+    pub(in crate::app::model_preview) bloom_window: [f32; 4],
+    /// The field-of-view zoom a tile's composite left out (`view_scale`),
+    /// which the snapshot applies to the whole image once its tiles are put
+    /// together: a tile can't sample its neighbours.
+    pub(in crate::app::model_preview) tile_view_scale: f32,
+
     pub(in crate::app::model_preview) program: glow::NativeProgram,
     pub(in crate::app::model_preview) slots: Vec<ModelGpuSlot>,
     pub(super) lru: ModelSlotLru,
@@ -66,6 +91,7 @@ pub(in crate::app::model_preview) struct RenderCore {
     pub(in crate::app::model_preview) scale: glow::NativeUniformLocation,
     pub(super) angles: glow::NativeUniformLocation,
     pub(in crate::app::model_preview) clip_scale: glow::NativeUniformLocation,
+    pub(in crate::app::model_preview) clip_offset: Option<glow::NativeUniformLocation>,
     pub(in crate::app::model_preview) depth_scale: glow::NativeUniformLocation,
     pub(in crate::app::model_preview) depth_map: glow::NativeUniformLocation,
     pub(in crate::app::model_preview) perspective: glow::NativeUniformLocation,
@@ -183,6 +209,11 @@ impl RenderCore {
                 white_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [255; 4]),
                 dx9: Dx9Gl::new(gl),
                 scene: None,
+                frame_texels: crate::app::model_preview::gl::target::Texels::RGBA8,
+                held_bloom: false,
+                held_bloom_texture: None,
+                bloom_window: WHOLE_WINDOW,
+                tile_view_scale: 1.0,
                 program,
                 slots: Vec::new(),
                 lru: ModelSlotLru::default(),
@@ -190,6 +221,7 @@ impl RenderCore {
                 scale: uniform("u_scale")?,
                 angles: uniform("u_angles")?,
                 clip_scale: uniform("u_clip_scale")?,
+                clip_offset: gl.get_uniform_location(program, "u_clip_offset"),
                 depth_scale: uniform("u_depth_scale")?,
                 depth_map: uniform("u_depth_map")?,
                 perspective: uniform("u_perspective")?,
@@ -288,6 +320,7 @@ impl RenderCore {
                 frame.camera.clip_scale[0],
                 frame.camera.clip_scale[1],
             );
+            gl.uniform_2_f32_slice(self.clip_offset.as_ref(), &frame.camera.clip_offset);
             gl.uniform_1_f32(Some(&self.depth_scale), frame.camera.depth_scale);
             gl.uniform_2_f32(
                 Some(&self.depth_map),
@@ -485,6 +518,82 @@ impl RenderCore {
         }
     }
 
+    /// The Material Editor's hovered material over the finished picture:
+    /// its parts filled in see-through amber, with white edges. Drawn last,
+    /// with the shared program, so it lies over every game's passes, its
+    /// bloom and its sprites alike, and follows the skinning they do.
+    ///
+    /// It shows the material whole, wherever its parts are, as the rest of
+    /// the model doesn't hide them: the depth it tests against is its own
+    /// alone, laid afresh. Against the picture's, what showed would hang on
+    /// the shading: the game's passes lay depth for some materials and not
+    /// others (a gen3 frame keeps none for one its passes don't draw), so a
+    /// Warthog's tyre core lit whole under Game Shaders and only at its
+    /// treads, through its motion-blur shell, under Textured. Only its own
+    /// nearest surface facing the camera fills, so its far side doesn't
+    /// double up.
+    pub(super) unsafe fn draw_material_highlight(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+    ) {
+        if frame.highlight.is_empty() {
+            return;
+        }
+        // fixed: the editor's highlight reads the same over every background.
+        let fill = Color32::from_rgb(255, 176, 32);
+        let edge = Color32::from_rgb(255, 255, 255);
+        unsafe {
+            gl.use_program(Some(self.program));
+            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            gl.enable(glow::DEPTH_TEST);
+            // Faces turned away stay dark, as the model draws them: lit,
+            // a part on the far side of the body would show through it.
+            if frame.show_backfaces {
+                gl.disable(glow::CULL_FACE);
+            } else {
+                gl.enable(glow::CULL_FACE);
+                gl.cull_face(glow::BACK);
+            }
+            gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
+            // Its own depth alone: the frame's is finished with, and the
+            // paint's scissor keeps the clear to the viewport.
+            gl.depth_mask(true);
+            gl.clear(glow::DEPTH_BUFFER_BIT);
+            gl.enable(glow::POLYGON_OFFSET_FILL);
+            gl.polygon_offset(-1.0, -1.0);
+            let draw = |core: &Self, wire: bool, color: Color32| {
+                core.draw_batches_in(gl, frame, &frame.highlight, wire, &|_, _| false, &[], Some(color));
+            };
+            gl.color_mask(false, false, false, false);
+            gl.depth_func(glow::LESS);
+            gl.depth_mask(true);
+            draw(self, false, fill);
+            gl.color_mask(true, true, true, true);
+            gl.depth_func(glow::LEQUAL);
+            gl.depth_mask(false);
+            gl.enable(glow::BLEND);
+            gl.blend_color(0.0, 0.0, 0.0, HIGHLIGHT_FILL_OPACITY);
+            gl.blend_func(glow::CONSTANT_ALPHA, glow::ONE_MINUS_CONSTANT_ALPHA);
+            gl.uniform_1_f32(Some(&self.unlit), 1.0);
+            draw(self, false, fill);
+            gl.disable(glow::BLEND);
+            // Edges are lines, which the fill offset leaves where they are:
+            // behind the depth laid above. Pulled further forward, they win.
+            gl.enable(glow::POLYGON_OFFSET_LINE);
+            gl.polygon_offset(-2.0, -2.0);
+            gl.polygon_mode(glow::FRONT_AND_BACK, glow::LINE);
+            gl.line_width(1.0);
+            draw(self, true, edge);
+            gl.disable(glow::POLYGON_OFFSET_LINE);
+            gl.disable(glow::POLYGON_OFFSET_FILL);
+            gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
+            gl.depth_mask(true);
+            gl.depth_func(glow::LESS);
+        }
+    }
+
     /// The frame's end: fill polygons again, `scene` copied to where the
     /// frame belonged, and nothing left bound.
     pub(super) unsafe fn end_frame(&mut self, gl: &glow::Context, scene: Option<PostScope>) {
@@ -498,6 +607,27 @@ impl RenderCore {
             gl.bind_vertex_array(None);
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
             gl.use_program(None);
+        }
+    }
+
+    /// A final composite's `view_scale` and `bloom_window`, for `program`.
+    /// In a tile the zoom is left out and kept for the whole image.
+    pub(in crate::app::model_preview) unsafe fn set_composite_window(
+        &mut self,
+        gl: &glow::Context,
+        program: glow::NativeProgram,
+        view_scale: f32,
+    ) {
+        let tiled = self.bloom_window != WHOLE_WINDOW;
+        if tiled {
+            self.tile_view_scale = view_scale;
+        }
+        unsafe {
+            gl.uniform_1_f32(
+                gl.get_uniform_location(program, "view_scale").as_ref(),
+                if tiled { 1.0 } else { view_scale },
+            );
+            gl.uniform_4_f32_slice(gl.get_uniform_location(program, "bloom_window").as_ref(), &self.bloom_window);
         }
     }
 
@@ -550,11 +680,12 @@ impl RenderCore {
         unsafe {
             let state = PostScope::capture(gl);
             let size = state.size();
-            if self.scene.as_ref().is_none_or(|scene| scene.size != size) {
+            let texels = self.frame_texels;
+            if self.scene.as_ref().is_none_or(|scene| scene.size != size || scene.texels != texels) {
                 if let Some(old) = self.scene.take() {
                     old.delete(gl);
                 }
-                match SceneTarget::new(gl, size[0], size[1]) {
+                match SceneTarget::new(gl, size[0], size[1], texels) {
                     Ok(scene) => self.scene = Some(scene),
                     Err(error) => self.note(format!("the scene target was not made: {error}")),
                 }
@@ -681,6 +812,21 @@ impl RenderCore {
         replaced: &dyn Fn(&Self, usize) -> bool,
         materials: &[MaterialGlTextures],
     ) {
+        unsafe { self.draw_batches_in(gl, frame, batches, wire, replaced, materials, None) }
+    }
+
+    /// [`Self::draw_batches`], every batch in `fixed` when given one.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn draw_batches_in(
+        &self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        batches: &[usize],
+        wire: bool,
+        replaced: &dyn Fn(&Self, usize) -> bool,
+        materials: &[MaterialGlTextures],
+        fixed: Option<Color32>,
+    ) {
         for &batch_index in batches {
             let Some(batch) = frame.preview.batches.get(batch_index) else {
                 continue;
@@ -695,7 +841,9 @@ impl RenderCore {
             let overlay = batch.flat_color.filter(|_| {
                 matches!(batch.layer, ModelPreviewLayer::Collision | ModelPreviewLayer::Physics)
             });
-            let color = if let Some([r, g, b]) = overlay {
+            let color = if let Some(fixed) = fixed {
+                fixed
+            } else if let Some([r, g, b]) = overlay {
                 Color32::from_rgb(r, g, b)
             } else if wire && background_is_dark(frame.background) {
                 Color32::from_rgb(190, 205, 215)
@@ -747,6 +895,9 @@ impl RenderCore {
 
 /// How strongly collision and physics faces cover what is behind them.
 const OVERLAY_FACE_OPACITY: f32 = 0.5;
+
+/// How strongly the Material Editor's highlight covers the parts it lights.
+const HIGHLIGHT_FILL_OPACITY: f32 = 0.45;
 
 /// The context's version, renderer and vendor as the driver names them, and
 /// its profile: what decides which of the games' shaders it can run.

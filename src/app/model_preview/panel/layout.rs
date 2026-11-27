@@ -72,7 +72,7 @@ pub(in crate::app) fn draw_model_preview_panel(
         ui.available_height().max(MIN_MODEL_PREVIEW_PANEL_HEIGHT),
     );
     let (page, _) = ui.allocate_exact_size(size, Sense::hover());
-    let rects = panel_rects(page, *model_setup_width);
+    let rects = panel_rects(page, setup_width_for(state, *model_setup_width));
 
     let own_view = super::super::load::own_view_settings(tag);
     if state.needs_preview_load(&entry.key) {
@@ -295,6 +295,18 @@ pub(in crate::app::model_preview) fn panel_rects(page: Rect, setup_width: f32) -
     }
 }
 
+/// The sidebar's width: as it was left, but wide enough for a shader's grid
+/// while the Materials card shows one, as the page allows. What was left is
+/// kept, for when it shows none.
+fn setup_width_for(state: &ModelPreviewState, setup_width: f32) -> f32 {
+    let editing = state.material_editor.as_ref().is_some_and(|editor| editor.selected.is_some());
+    if editing { setup_width.max(MATERIALS_SETUP_WIDTH) } else { setup_width }
+}
+
+/// The sidebar's width for a shader's grid: the grid's least, with the
+/// sidebar's and the card's padding.
+const MATERIALS_SETUP_WIDTH: f32 = crate::app::editor::SHADER_GRID_MIN_WIDTH + 4.0 * SETUP_PANEL_PADDING + 24.0;
+
 /// The sidebar's left edge: dragging it widens or narrows the sidebar, and
 /// the viewport takes what is left.
 fn draw_setup_resize_handle(
@@ -403,7 +415,8 @@ pub(in crate::app::model_preview) fn draw_setup_cards(
                     // the first has nothing before it, and starts level with
                     // the viewport's card.
                     ui.add_space(-(8.0 - ui.spacing().item_spacing.y).max(0.0));
-                    draw_setup_body(ui, panel.data, state, &mut |ui, state| {
+                    let materials = panel.supports_textures;
+                    draw_setup_body(ui, panel.data, state, materials, &mut |ui, state| {
                         draw_setup_header_actions(ui, panel, state, edit, requests)
                     })
                 });
@@ -423,6 +436,8 @@ pub(in crate::app::model_preview) fn draw_preview_header(
     state: &mut ModelPreviewState,
     requests: &mut SetupRequests,
 ) {
+    // Right of the View menu, as the header lays out from the right.
+    super::snapshot::draw_snapshot_controls(ui, state);
     draw_model_view_settings_menu(
         ui,
         panel.data,
@@ -430,6 +445,7 @@ pub(in crate::app::model_preview) fn draw_preview_header(
         panel.supports_textures,
         panel.own_view,
     );
+    // Right of Refresh Model, as the header lays out from the right.
     if icon_text_button(ui, ButtonIcon::Refresh, "Refresh Model", true)
         .on_hover_text("Load the model again from its tags.")
         .clicked()

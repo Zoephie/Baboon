@@ -19,7 +19,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        let Some(key) = self.model.kits[self.model.active].selected_key.clone() else {
+        let Some(key) = self.history_target() else {
             self.model.status = "Nothing to undo".to_owned();
             return;
         };
@@ -46,7 +46,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        let Some(key) = self.model.kits[self.model.active].selected_key.clone() else {
+        let Some(key) = self.history_target() else {
             self.model.status = "Nothing to redo".to_owned();
             return;
         };
@@ -57,6 +57,18 @@ impl Baboon {
             .get_mut(&key)
             .and_then(|doc| doc.journal.redo(&doc.tag));
         self.restore_snapshot(&key, restored, "Redo");
+    }
+
+    /// The document Undo and Redo act on: one a window over the tabs claimed
+    /// for them this pass or the last (the Material Editor, for the shader
+    /// it shows, while it has focus), else the selected tag. A claim from
+    /// another kit is ignored, as the actions land in the active one.
+    fn history_target(&self) -> Option<String> {
+        let kit = &self.model.kits[self.model.active];
+        claimed_history_target(&self.egui_ctx)
+            .filter(|(claimant, key)| *claimant == kit.id && kit.parsed_tags.contains_key(key))
+            .map(|(_, key)| key)
+            .or_else(|| kit.selected_key.clone())
     }
 
     /// A tag reading again from disk (after a move rewrote it, say) is
@@ -135,7 +147,7 @@ impl Baboon {
             return false;
         }
         let kit = &self.model.kits[self.model.active];
-        kit.selected_key
+        self.history_target()
             .as_ref()
             .filter(|key| !kit.loading_tags.contains(*key))
             .and_then(|key| kit.parsed_tags.get(key))
@@ -155,7 +167,7 @@ impl Baboon {
             return false;
         }
         let kit = &self.model.kits[self.model.active];
-        kit.selected_key
+        self.history_target()
             .as_ref()
             .filter(|key| !kit.loading_tags.contains(*key))
             .and_then(|key| kit.parsed_tags.get(key))
@@ -231,4 +243,25 @@ mod tests {
         app.undo_current_tag();
         assert!(!can_undo_tag(&app));
     }
+}
+
+/// Where a window claims Undo and Redo for a document of its own.
+fn history_target_id() -> egui::Id {
+    egui::Id::unique("baboon_history_target")
+}
+
+/// Claim Undo and Redo for `key` in `kit` for this pass: a window that shows
+/// a document other than the selected tab's calls it every pass it has focus.
+pub(in crate::app) fn claim_history_target(ctx: &egui::Context, kit: KitId, key: &str) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(history_target_id(), (kit, key.to_owned(), pass)));
+}
+
+/// The document claimed for Undo and Redo, if the claim is from this pass or
+/// the one before: shortcuts are read before the windows draw.
+fn claimed_history_target(ctx: &egui::Context) -> Option<(KitId, String)> {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<(KitId, String, u64)>(history_target_id()))
+        .filter(|(_, _, claimed)| claimed + 1 >= pass)
+        .map(|(kit, key, _)| (kit, key))
 }

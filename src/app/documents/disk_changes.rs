@@ -216,7 +216,8 @@ impl Baboon {
         }
     }
 
-    /// Start a check of one kit's open loose tags against their files.
+    /// Start a check of one kit's open loose tags (tabs and held documents)
+    /// against their files.
     fn check_open_tags_in(&mut self, index: usize, ctx: &egui::Context) {
         // Baboon's own move is renaming files under open tabs; it reloads
         // them itself when it ends, and the check runs after.
@@ -231,9 +232,11 @@ impl Baboon {
         if !matches!(source.source, TagSource::LooseFolder { .. }) {
             return;
         }
+        // Held documents (a Material Editor's shaders) are checked as tabs are.
         let files: Vec<(String, PathBuf, DiskStamp)> = kit
             .open_tabs
             .iter()
+            .chain(kit.held_documents.keys().filter(|key| !kit.open_tabs.contains(key)))
             .filter_map(|key| {
                 let stamp = kit.parsed_tags.get(key)?.disk?;
                 let TagEntryLocation::LooseFile(path) = &kit.entry_for_key(key)?.location else {
@@ -738,6 +741,25 @@ mod tests {
         assert!(!preview(&app, &key).reads_changed, "still editing");
         app.check_previews_for_unsaved_edits_at(10.6, &ctx);
         assert!(preview(&app, &key).reads_changed, "the edits paused: load again");
+    }
+
+    /// A preview's own Material Editor shaders are read from their edits by
+    /// every load, with Show Unsaved Edits off; another open tag's are not.
+    #[test]
+    fn a_load_reads_its_material_editors_edits_whatever_the_option_says() {
+        use crate::core::source::reads::file_key;
+        let (fixture, mut app, key, shader) = previewed_rock("preview-held-edits");
+        let rock = fixture.hold(&mut app, "objects/rock/shaders/rock.shader", &key);
+        let bark = fixture.open(&mut app, "objects/tree/shaders/bark.shader");
+        for edited in [&rock, &bark] {
+            app.model.kits[0].parsed_tags.get_mut(edited).unwrap().dirty.touch();
+        }
+        let id = app.model.kits[0].id;
+        let state = app.views[id].caches.model_previews.get_mut(&key).unwrap();
+        assert!(!state.show_unsaved_edits);
+        state.invalidate_load();
+        assert!(app.maybe_request_model_preview(0, &key, &ctx()), "a load starts");
+        assert_eq!(preview(&app, &key).reads.edited_files(), vec![file_key(&shader)], "the held shader's edits, not the bark's");
     }
 
     /// With the option off, the preview keeps drawing the saved shader.

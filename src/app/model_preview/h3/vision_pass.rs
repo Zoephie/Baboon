@@ -48,6 +48,7 @@ impl H3Game {
         unsafe {
             copies.copy_depth(cx.gl);
             copies.screen_copy(cx.gl, true);
+            let window = cx.core.bloom_window;
             self.draw_suck(
                 cx.gl,
                 cx.state,
@@ -56,6 +57,7 @@ impl H3Game {
                 moved,
                 copies.behind,
                 copies.depth_copy,
+                window,
             );
         }
     }
@@ -107,6 +109,8 @@ impl H3Game {
         moved: [f32; 3],
         picture: glow::NativeTexture,
         depth: glow::NativeTexture,
+        // Where this draw sits in the whole picture (`RenderCore::bloom_window`).
+        window: [f32; 4],
     ) {
         let matrix = view_projection(&frame.camera);
         let Some(to_world) = inverted(&matrix) else {
@@ -133,6 +137,7 @@ impl H3Game {
             gl.uniform_1_f32(spot("most_pixels").as_ref(), blur.most_pixels);
             gl.uniform_1_f32(spot("blur_step").as_ref(), blur.step);
             gl.uniform_2_f32_slice(spot("center_falloff").as_ref(), &blur.center_falloff);
+            gl.uniform_4_f32_slice(spot("window").as_ref(), &window);
             gl.disable(glow::BLEND);
             gl.bind_vertex_array(Some(state.empty_array(gl)));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);

@@ -4,7 +4,8 @@
 use super::*;
 
 impl Baboon {
-    /// Applies `WorkerMessage::TagLoaded`, discarding results for tabs closed while loading.
+    /// Applies `WorkerMessage::TagLoaded`, discarding results for tabs closed
+    /// (and documents released) while loading.
     pub(in crate::app) fn handle_tag_loaded(
         &mut self,
         kit: KitId,
@@ -19,7 +20,7 @@ impl Baboon {
         };
         self.model.kits[index].loading_tags.remove(&key);
         let disk_reload = self.model.kits[index].disk.reloads.remove(&key);
-        if !self.model.kits[index].open_tabs.iter().any(|tab| tab == &key) {
+        if !self.model.kits[index].document_is_wanted(&key) {
             return true;
         }
         match result {

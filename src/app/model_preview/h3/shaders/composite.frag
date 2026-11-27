@@ -1,6 +1,8 @@
 #version 410 core
 uniform sampler2D accumulation;
 uniform sampler2D bloom;
+// Where this draw sits in the bloom's picture (a snapshot's tile).
+uniform vec4 bloom_window;
 uniform vec4 tone_curve_constants;
 uniform mat4 hue_saturation;
 uniform float contrast;
@@ -15,7 +17,7 @@ void main() {
     if (place.x < 0.0 || place.x > 1.0 || place.y < 0.0 || place.y > 1.0) {
         accumulated = vec4(0.0);
     }
-    vec3 blend = (accumulated.rgb + texture(bloom, place).rgb) * exposure;
+    vec3 blend = (accumulated.rgb + texture(bloom, place * bloom_window.zw + bloom_window.xy).rgb) * exposure;
     blend = (vec4(blend, 1.0) * hue_saturation).rgb;
     float luminance = dot(blend, vec3(0.333));
     if (luminance > 0.0) {

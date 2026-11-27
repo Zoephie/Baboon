@@ -275,6 +275,9 @@ impl Baboon {
                     game_shaders,
                     textures,
                 ),
+                WorkerMessage::MaterialsResolved { stamp, key, textures_id, document, drawn, textures } => {
+                    self.handle_materials_resolved(stamp, key, textures_id, document, drawn, textures)
+                }
                 WorkerMessage::BitmapThumbnailDecoded { stamp, key, result } => {
                     self.handle_thumbnail_ready::<Bitmaps>(stamp, key, result, ctx)
                 }

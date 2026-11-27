@@ -71,7 +71,8 @@ fn h2_load_shader_template(
     templates.get(source, &reference)
 }
 
-/// The `.shader_template`s the H2 shader grid has read, by reference.
+/// The `.shader_template`s the H2 shader grid has read, and the
+/// `.material_shader`s the Halo 4 material grid has, by reference.
 ///
 /// The grid is rebuilt every frame, and it used to read and parse the
 /// template off disk each time. An entry is reused while the file's size and
@@ -93,8 +94,22 @@ struct CachedTemplate {
 
 impl H2TemplateCache {
     fn get(&mut self, source: &TagSource, reference: &str) -> Option<Arc<TagFile>> {
-        let stamp = template_stamp(source, reference);
-        if let Some(cached) = self.entries.get(reference)
+        self.get_tag(source, reference, "shader_template", *b"stem")
+    }
+
+    /// A tag the grid reads beside the one it edits: a Halo 2 shader's
+    /// `.shader_template`, or a Halo 4 material's `.material_shader`, by
+    /// reference and extension.
+    pub(in crate::app) fn get_tag(
+        &mut self,
+        source: &TagSource,
+        reference: &str,
+        extension: &str,
+        group: [u8; 4],
+    ) -> Option<Arc<TagFile>> {
+        let key = format!("{extension}|{reference}");
+        let stamp = template_stamp(source, reference, extension);
+        if let Some(cached) = self.entries.get(&key)
             && cached.stamp == stamp
         {
             return cached.tag.clone();
@@ -103,11 +118,11 @@ impl H2TemplateCache {
         {
             self.loads += 1;
         }
-        let tag = load_referenced_tag_from_source(source, reference, "shader_template", b"stem")
+        let tag = load_referenced_tag_from_source(source, reference, extension, &group)
             .ok()
             .map(Arc::new);
         self.entries.insert(
-            reference.to_owned(),
+            key,
             CachedTemplate {
                 stamp,
                 tag: tag.clone(),
@@ -120,14 +135,14 @@ impl H2TemplateCache {
 /// Size and modified time of a loose template, the one kind of source whose
 /// files can change during a session. `None` for everything else, and for a
 /// loose file that is not there.
-fn template_stamp(source: &TagSource, reference: &str) -> Option<(u64, std::time::SystemTime)> {
+fn template_stamp(source: &TagSource, reference: &str, extension: &str) -> Option<(u64, std::time::SystemTime)> {
     let root = match source {
         TagSource::LooseFolder { root, .. } => root.clone(),
         TagSource::SingleFile { path } => blam_tags::paths::derive_tags_root(path)
             .or_else(|| path.parent().map(Path::to_path_buf))?,
         TagSource::MonolithicCache { .. } | TagSource::IoStoreContainerSet { .. } => return None,
     };
-    let metadata = std::fs::metadata(resolve_tag_path(&root, reference, "shader_template")).ok()?;
+    let metadata = std::fs::metadata(resolve_tag_path(&root, reference, extension)).ok()?;
     Some((metadata.len(), metadata.modified().ok()?))
 }
 

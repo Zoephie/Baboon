@@ -111,6 +111,39 @@ impl Baboon {
         self.close_tag_popups(kit, |tag| tag == key);
     }
 
+    /// Save the active kit's document at `key` wherever its kind of tag
+    /// saves to, as the save-changes prompt's Save and the Material Editor's
+    /// do: what it was saved as, or why not, each labelled with the tag.
+    ///
+    /// Container tags have no loose file to write. A brand-new one saves via
+    /// a file dialog (new override container); an existing one is
+    /// overwritten inside the game's pak, the Save asked for standing in for
+    /// the separate overwrite confirmation. Both report through `status`
+    /// instead of returning a path, so success is read back off the
+    /// document's dirty flag.
+    pub(in crate::app) fn save_tag_routed(&mut self, key: &str) -> Result<String, String> {
+        let label = self.model.tag_path_label(key);
+        match close_prompt_save_route(self.model.entry_for_key(key).map(|entry| &entry.location)) {
+            ClosePromptSave::NewContainer => {
+                self.save_new_container_tag(key);
+                if self.model.tag_is_dirty(key) { Err(format!("{label}: not saved")) } else { Ok(key.to_owned()) }
+            }
+            ClosePromptSave::ContainerInPlace => {
+                self.overwrite_current_tag_in_place(key);
+                if self.model.tag_is_dirty(key) {
+                    // The overwrite failure reason is in `status`.
+                    Err(format!("{label}: {}", self.model.status))
+                } else {
+                    Ok(key.to_owned())
+                }
+            }
+            ClosePromptSave::File => self
+                .save_tag_by_key(key)
+                .map(|path| path.display().to_string())
+                .map_err(|error| format!("{label}: {error}")),
+        }
+    }
+
     /// Close the color and function popups editing those of `kit`'s tags
     /// that `closing` names. A popup for any other tag stays, with its
     /// unconfirmed edits: closing one tab used to throw away the popup open
@@ -435,46 +468,9 @@ impl Baboon {
                 let mut saved = Vec::new();
                 let mut errors = Vec::new();
                 for tag_id in tag_ids {
-                    // Container tags have no loose file to write. A brand-new
-                    // one saves via a file dialog (new override container); an
-                    // existing one is overwritten inside the game's pak, with
-                    // this prompt's Save button standing in for the separate
-                    // overwrite confirmation. Both report through `status`
-                    // instead of returning a path, so success is read back off
-                    // the document's dirty flag.
-                    match close_prompt_save_route(
-                        self.model.entry_for_key(&tag_id).map(|entry| &entry.location),
-                    ) {
-                        ClosePromptSave::NewContainer => {
-                            self.save_new_container_tag(&tag_id);
-                            if self.model.tag_is_dirty(&tag_id) {
-                                let label = self.model.tag_path_label(&tag_id);
-                                errors.push(format!("{label}: not saved"));
-                            } else {
-                                saved.push(tag_id.clone());
-                            }
-                            continue;
-                        }
-                        ClosePromptSave::ContainerInPlace => {
-                            self.overwrite_current_tag_in_place(&tag_id);
-                            if self.model.tag_is_dirty(&tag_id) {
-                                // The overwrite failure reason is in `status`.
-                                let label = self.model.tag_path_label(&tag_id);
-                                let detail = self.model.status.clone();
-                                errors.push(format!("{label}: {detail}"));
-                            } else {
-                                saved.push(tag_id.clone());
-                            }
-                            continue;
-                        }
-                        ClosePromptSave::File => {}
-                    }
-                    match self.save_tag_by_key(&tag_id) {
-                        Ok(path) => saved.push(path.display().to_string()),
-                        Err(error) => {
-                            let label = self.model.tag_path_label(&tag_id);
-                            errors.push(format!("{label}: {error}"));
-                        }
+                    match self.save_tag_routed(&tag_id) {
+                        Ok(saved_as) => saved.push(saved_as),
+                        Err(error) => errors.push(error),
                     }
                 }
                 if errors.is_empty() {
@@ -753,19 +749,36 @@ impl Model {
         }
     }
 
+    /// The documents a close would drop, which the save prompt asks about:
+    /// the tabs it closes, then the documents those held (a model's Material
+    /// Editor shaders). Closing the app or the kit drops every document,
+    /// with a tab or without one: a dirty one left out of the prompt kept
+    /// the app from quitting, as `execute_close_action` still found it.
     pub(in crate::app) fn close_action_tag_keys(&self, action: &PendingCloseAction) -> Vec<String> {
+        let kit = &self.kits[self.active];
+        let tabless = |held: Vec<String>| held.into_iter().filter(|key| !kit.open_tabs.contains(key)).collect::<Vec<_>>();
         match action {
-            PendingCloseAction::CloseApp | PendingCloseAction::CloseAllTabs => {
-                ordered_unique_keys(self.kits[self.active].open_tabs.iter())
-            }
-            PendingCloseAction::CloseTabGroup {kit,keys,..} => {
-                if self.kits[self.active].id==*kit {ordered_unique_keys(keys.iter())}else{Vec::new()}
-            }
-            PendingCloseAction::CloseTab(key) => vec![key.clone()],
             // `request_close_action` has already made this kit active, so the
-            // active-kit lookups above address the right documents.
-            PendingCloseAction::CloseKit(_) => {
-                ordered_unique_keys(self.kits[self.active].open_tabs.iter())
+            // active-kit lookups here address the right documents.
+            PendingCloseAction::CloseApp | PendingCloseAction::CloseKit(_) => {
+                let mut rest: Vec<&String> = kit.parsed_tags.keys().filter(|key| !kit.open_tabs.contains(key)).collect();
+                rest.sort();
+                ordered_unique_keys(kit.open_tabs.iter().chain(rest))
+            }
+            PendingCloseAction::CloseAllTabs => {
+                let held = tabless(kit.documents_held_only_by(|_| true));
+                ordered_unique_keys(kit.open_tabs.iter().chain(held.iter()))
+            }
+            PendingCloseAction::CloseTabGroup {kit: group_kit,keys,..} => {
+                if kit.id != *group_kit {
+                    return Vec::new();
+                }
+                let held = tabless(kit.documents_held_only_by(|holder| keys.iter().any(|key| key == holder)));
+                ordered_unique_keys(keys.iter().chain(held.iter()))
+            }
+            PendingCloseAction::CloseTab(key) => {
+                let held = tabless(kit.documents_held_only_by(|holder| holder == key));
+                ordered_unique_keys(std::iter::once(key).chain(held.iter()))
             }
         }
     }
@@ -897,6 +910,138 @@ mod tests {
         edit_field(&mut app, &key, DISTANCE, "12.5");
         assert!(is_dirty(&app, &key));
         (kit, app, key, other)
+    }
+
+    // Documents held without a tab (a model's Material Editor shaders).
+
+    fn prompt_keys(app: &Baboon) -> Vec<String> {
+        app.dialogs
+            .get::<SaveChangesPrompt>()
+            .map(|prompt| prompt.dirty_tags.iter().map(|entry| entry.tag_id.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// A held document's load lands with no tab, where any other tab-less
+    /// load is dropped.
+    #[test]
+    fn a_held_document_loads_without_a_tab_and_an_unheld_one_does_not() {
+        let kit = kit("held-load");
+        let mut app = app();
+        kit.install(&mut app);
+        let model = kit.open(&mut app, MODEL);
+        let held = kit.hold(&mut app, OTHER, &model);
+        assert!(!tab_open(&app, &held));
+        assert!(app.model.kits[0].parsed_tags.contains_key(&held));
+
+        // The disagreeing case: the same load, held by nothing, is dropped.
+        app.kit_and_view(0).drop_document(&held);
+        app.load_tag_in(0, held.clone(), ctx(), false);
+        drain_messages(&mut app, std::time::Duration::from_millis(300));
+        assert!(!app.model.kits[0].parsed_tags.contains_key(&held), "an unheld tab-less load is dropped");
+    }
+
+    /// Closing the model's tab asks about the edits to what it holds, and
+    /// Don't Save drops them with it.
+    #[test]
+    fn closing_a_holder_asks_about_its_held_edits_and_drops_them() {
+        let kit = kit("held-close-tab");
+        let mut app = app();
+        kit.install(&mut app);
+        let model = kit.open(&mut app, MODEL);
+        let held = kit.hold(&mut app, OTHER, &model);
+        edit_field(&mut app, &held, DISTANCE, "3");
+
+        app.request_close_action(PendingCloseAction::CloseTab(model.clone()), &ctx());
+        assert_eq!(prompt_keys(&app), vec![held.clone()], "the held edits are asked about with the tab");
+
+        PromptDriver::new().click(&mut app, "Don't Save");
+        assert!(!tab_open(&app, &model));
+        assert!(!app.model.kits[0].parsed_tags.contains_key(&held), "the held document went with its holder");
+        assert!(app.model.kits[0].held_documents.is_empty());
+    }
+
+    /// A held document with a tab of its own outlives its holder, and isn't
+    /// asked about when only the holder closes.
+    #[test]
+    fn a_held_document_with_its_own_tab_stays_when_its_holder_closes() {
+        let kit = kit("held-with-tab");
+        let mut app = app();
+        kit.install(&mut app);
+        let other = kit.open(&mut app, OTHER);
+        let model = kit.open(&mut app, MODEL);
+        app.model.kits[0].hold_document(&other, &model);
+        edit_field(&mut app, &other, DISTANCE, "3");
+
+        app.request_close_action(PendingCloseAction::CloseTab(model.clone()), &ctx());
+        assert!(app.dialogs.get::<SaveChangesPrompt>().is_none(), "the tab's edits are its own tab's business");
+        assert!(!tab_open(&app, &model));
+        assert!(is_dirty(&app, &other), "the document and its edits stay with its tab");
+        assert!(app.model.kits[0].held_documents.is_empty(), "but it is held no longer");
+    }
+
+    /// Quitting lists a dirty document with no tab. Left out, it kept the
+    /// app from closing: the prompt had nothing to ask and the close then
+    /// refused over the edits it never listed.
+    #[test]
+    fn closing_the_app_lists_and_saves_a_dirty_tab_less_document() {
+        let kit = kit("held-close-app");
+        let mut app = app();
+        kit.install(&mut app);
+        let model = kit.open(&mut app, MODEL);
+        let held = kit.hold(&mut app, OTHER, &model);
+        edit_field(&mut app, &held, DISTANCE, "7.5");
+
+        app.request_close_action(PendingCloseAction::CloseApp, &ctx());
+        assert_eq!(prompt_keys(&app), vec![held.clone()]);
+        PromptDriver::new().click(&mut app, "Save");
+        assert_eq!(distance_on_disk(&kit, OTHER), 7.5);
+        assert!(app.dialogs.get::<SaveChangesPrompt>().is_none());
+        assert!(!app.model.any_kit_dirty());
+        assert_ne!(app.model.status, "Could not close while unsaved workspace data remains");
+    }
+
+    /// Closing every tab asks about held edits too; a clean held document
+    /// is not listed.
+    #[test]
+    fn closing_all_tabs_lists_dirty_held_documents_only() {
+        let kit = kit("held-close-all");
+        let mut app = app();
+        kit.install(&mut app);
+        let model = kit.open(&mut app, MODEL);
+        let held = kit.hold(&mut app, OTHER, &model);
+        app.request_close_action(PendingCloseAction::CloseAllTabs, &ctx());
+        assert!(app.dialogs.get::<SaveChangesPrompt>().is_none(), "clean: nothing to ask");
+        assert!(app.model.kits[0].parsed_tags.is_empty());
+
+        let model = kit.open(&mut app, MODEL);
+        let held_again = kit.hold(&mut app, OTHER, &model);
+        assert_eq!(held, held_again);
+        edit_field(&mut app, &held, DISTANCE, "2");
+        app.request_close_action(PendingCloseAction::CloseAllTabs, &ctx());
+        assert_eq!(prompt_keys(&app), vec![held]);
+    }
+
+    /// Undo acts on a document a window claims, not the selected tab.
+    #[test]
+    fn undo_acts_on_the_claimed_document_then_the_selected_tab() {
+        let kit = kit("held-undo");
+        let mut app = app();
+        kit.install(&mut app);
+        let model = kit.open(&mut app, MODEL);
+        let held = kit.hold(&mut app, OTHER, &model);
+        edit_field(&mut app, &model, DISTANCE, "4");
+        edit_field(&mut app, &held, DISTANCE, "5");
+
+        let kit_id = app.model.kits[0].id;
+        crate::app::documents::claim_history_target(&app.egui_ctx, kit_id, &held);
+        app.undo_current_tag();
+        assert!(!is_dirty(&app, &held), "the claimed document stepped back");
+        assert!(is_dirty(&app, &model), "the selected tab did not");
+
+        // The disagreeing case: unclaimed, Undo is the selected tab's.
+        crate::app::documents::claim_history_target(&app.egui_ctx, kit_id, "nothing open");
+        app.undo_current_tag();
+        assert!(!is_dirty(&app, &model));
     }
 
     #[test]
@@ -1735,7 +1880,7 @@ mod tests {
         let b = kit.open(&mut app, "weapons\\b.weapon");
         let kit_id = app.model.kits[0].id;
         let popup = MaterialColorPopup::new("tint", 1.0, 0.5, 0.0, 1.0).with_write(&a, "tint");
-        app.dialogs.open(ColorPopupWindow { popup: Some(popup), kit: kit_id, opened_at: None });
+        app.dialogs.open(ColorPopupWindow { popup: Some(popup), kit: kit_id, opened_at: None, live: None });
 
         app.close_tab(&b);
         assert!(app.dialogs.get::<ColorPopupWindow>().is_some(), "a's popup outlives b's tab");

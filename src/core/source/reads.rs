@@ -26,6 +26,11 @@ pub(crate) enum ReadAs {
     Disk(Option<DiskStamp>),
     /// From an open document's unsaved edits, at its content stamp.
     Edits((u64, u64)),
+    /// A file the work keeps up to date itself, whatever it holds: a shader
+    /// a Model Preview's Material Editor holds, which the preview resolves
+    /// again on each edit. Neither a change on disk nor an edit makes the
+    /// work stale.
+    Live,
 }
 
 /// An open document's unsaved edits, handed to background work to read in
@@ -118,6 +123,33 @@ impl ReadFiles {
         Self { read: Arc::default(), edits: Arc::new(edits) }
     }
 
+    /// The files whose reads take unsaved edits, by [`file_key`].
+    #[cfg(test)]
+    pub(crate) fn edited_files(&self) -> Vec<String> {
+        let mut files: Vec<String> = self.edits.keys().cloned().collect();
+        files.sort();
+        files
+    }
+
+    /// Note `path` as [`ReadAs::Live`], read or not: the work keeps it up
+    /// to date itself from now on. A read of it later keeps that.
+    pub(crate) fn mark_live(&self, path: &Path) {
+        if let Ok(mut read) = self.read.lock() {
+            read.insert(file_key(path), ReadAs::Live);
+        }
+    }
+
+    /// The work no longer keeps `path` up to date: it is noted as the file
+    /// is now, so a later change makes the work stale again.
+    pub(crate) fn unmark_live(&self, path: &Path) {
+        if let Ok(mut read) = self.read.lock()
+            && let Some(read_as) = read.get_mut(&file_key(path))
+            && *read_as == ReadAs::Live
+        {
+            *read_as = ReadAs::Disk(DiskStamp::of_file(path).ok());
+        }
+    }
+
     /// How many files have been read so far.
     pub(crate) fn len(&self) -> usize {
         self.read.lock().map(|read| read.len()).unwrap_or_default()
@@ -137,7 +169,7 @@ impl ReadFiles {
             return false;
         };
         let differs = |path: &Path, read_as: &ReadAs| match read_as {
-            ReadAs::Edits(_) => false,
+            ReadAs::Edits(_) | ReadAs::Live => false,
             ReadAs::Disk(None) => path.is_file(),
             ReadAs::Disk(Some(stamp)) => !matches!(stamp.check(path), DiskCheck::Same | DiskCheck::Unreadable(_)),
         };
@@ -175,6 +207,7 @@ impl ReadFiles {
                 (ReadAs::Edits(stamp), Some(document)) => document.stamp == *stamp,
                 (ReadAs::Edits(_), None) => false,
                 (ReadAs::Disk(_), document) => !document.is_some_and(|document| document.dirty),
+                (ReadAs::Live, _) => true,
             };
             if !same {
                 differs = true;

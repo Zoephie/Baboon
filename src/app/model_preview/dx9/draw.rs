@@ -393,12 +393,12 @@ impl RenderCore {
                 .dx9
                 .texaccum_target
                 .as_ref()
-                .is_none_or(|target| target.size != size)
+                .is_none_or(|target| target.size != size || target.texels != self.frame_texels)
             {
                 if let Some(old) = self.dx9.texaccum_target.take() {
                     old.delete(gl);
                 }
-                self.dx9.texaccum_target = SceneTarget::new(gl, size[0], size[1])
+                self.dx9.texaccum_target = SceneTarget::new(gl, size[0], size[1], self.frame_texels)
                     .map_err(|error| {
                         self.note(format!("the texaccum target was not made: {error}"))
                     })
@@ -453,18 +453,18 @@ impl RenderCore {
         let Some(scene) = self.scene.as_ref().filter(|_| needed) else {
             return;
         };
-        let (framebuffer, [width, height]) = (scene.framebuffer, scene.size);
+        let (framebuffer, [width, height], scene_texels) = (scene.framebuffer, scene.size, scene.texels);
         unsafe {
             if self
                 .dx9
                 .frame_copy
                 .as_ref()
-                .is_none_or(|copy| copy.size != [width, height])
+                .is_none_or(|copy| copy.size != [width, height] || copy.texels != scene_texels)
             {
                 if let Some(old) = self.dx9.frame_copy.take() {
                     old.delete(gl);
                 }
-                self.dx9.frame_copy = SceneTarget::new(gl, width, height)
+                self.dx9.frame_copy = SceneTarget::new(gl, width, height, scene_texels)
                     .map_err(|error| self.note(format!("the frame copy was not made: {error}")))
                     .ok();
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
@@ -713,6 +713,8 @@ impl RenderCore {
             gl.uniform_2_f32(location.as_ref(), camera.yaw, camera.pitch);
             let location = program.location(gl, "u_clip_scale");
             gl.uniform_2_f32_slice(location.as_ref(), &camera.clip_scale);
+            let location = program.location(gl, "u_clip_offset");
+            gl.uniform_2_f32_slice(location.as_ref(), &camera.clip_offset);
             let location = program.location(gl, "u_depth_map");
             gl.uniform_2_f32_slice(location.as_ref(), &camera.depth_map);
             if let Some(rows) = frame.bones.as_ref() {

@@ -1167,7 +1167,7 @@ mod tests {
                 crate::app::editor::draw_tag_pane(&cx!(app, ctx), ui, 0, &entry, scope, false,
                     crate::app::editor::PaneInputs {
                         find: &app.search.find, field_nav: app.references.field_nav.as_ref(), audio: &app.audio,
-                        def_docs: None, ce_sound: None,
+                        def_docs: None, ce_sound: None, live_preview: None,
                     }, &mut app.views[app.model.active_kit_id()], &mut app.editor);
             });
         });

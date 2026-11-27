@@ -464,18 +464,7 @@ impl Gen3State {
             }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(drawing.framebuffer));
             if drawing.bloomed && bloom.is_none() {
-                bloom = game.bloom(
-                    &mut Gen3Cx {
-                        gl,
-                        frame,
-                        core,
-                        slot,
-                        state: self,
-                    },
-                    drawing.framebuffer,
-                    drawing.accumulation,
-                    drawing.size,
-                );
+                bloom = self.bloom(core, game, gl, frame, slot, drawing.framebuffer, drawing.accumulation, drawing.size);
             }
             let (framebuffer, accumulation, screen, size) = (
                 drawing.framebuffer,
@@ -832,6 +821,30 @@ impl Gen3State {
         }
     }
 
+    /// The game's bloom of `accumulation`, or, in a held draw, the bloom the
+    /// last draw built (`RenderCore::held_bloom`), which is kept for it.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn bloom(
+        &mut self,
+        core: &mut RenderCore,
+        game: &mut dyn Gen3Game,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        framebuffer: glow::NativeFramebuffer,
+        accumulation: glow::NativeTexture,
+        size: [i32; 2],
+    ) -> Option<glow::NativeTexture> {
+        if core.held_bloom {
+            return core.held_bloom_texture;
+        }
+        let bloom = unsafe {
+            game.bloom(&mut Gen3Cx { gl, frame, core, slot, state: self }, framebuffer, accumulation, size)
+        };
+        core.held_bloom_texture = bloom;
+        bloom
+    }
+
     /// The game's camo, over what lies behind it. Camo shows what is behind
     /// it, which the game blooms the same with or without the object, so
     /// with bloom on the bloom is built here, under the camo. The bloom,
@@ -874,18 +887,7 @@ impl Gen3State {
                             self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
                         }
                     }
-                    bloom = game.bloom(
-                        &mut Gen3Cx {
-                            gl,
-                            frame,
-                            core,
-                            slot,
-                            state: self,
-                        },
-                        drawing.accumulation_target,
-                        drawing.accumulation,
-                        size,
-                    );
+                    bloom = self.bloom(core, game, gl, frame, slot, drawing.accumulation_target, drawing.accumulation, size);
                     gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
                     gl.enable(glow::DEPTH_TEST);
                     gl.enable(glow::BLEND);

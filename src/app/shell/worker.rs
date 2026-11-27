@@ -237,6 +237,19 @@ pub(in crate::app) enum WorkerMessage {
         game_shaders: bool,
         textures: Vec<MaterialTextures>,
     },
+    /// The materials of one shader a Model Preview's Material Editor holds,
+    /// resolved again from its document (`textures` for the whole model,
+    /// the rest as they were), or `None` when the resolve failed.
+    MaterialsResolved {
+        stamp: KitStamp,
+        key: String,
+        /// The textures these replace.
+        textures_id: u64,
+        /// The shader document's key, and what of it the resolve read.
+        document: String,
+        drawn: crate::app::model_preview::material_editor::DrawnFrom,
+        textures: Option<Vec<MaterialTextures>>,
+    },
     BitmapReimportFinished {
         kit: KitId,
         key: String,

@@ -165,6 +165,35 @@ pub(in crate::app) struct ModelPreviewState {
     /// around what the user framed — screen-space panning made orbiting a
     /// BSP's far corner swing it offscreen.
     pub(in crate::app) focus: [f32; 3],
+    /// The Material Editor, while the sidebar's Materials card is open: what
+    /// it shows and what the pointer is over, which the viewport lights.
+    pub(in crate::app) material_editor: Option<super::material_editor::MaterialEditorState>,
+    /// The Material Editor as the Materials card was closed on: opened
+    /// again, it shows what it did.
+    pub(in crate::app) material_editor_closed: Option<super::material_editor::MaterialEditorState>,
+    /// Where the Materials card left room for the editor this pass, for the
+    /// tag pane to draw it in; taken when drawn.
+    pub(in crate::app) material_slot: Option<super::material_editor::MaterialSlot>,
+    /// How tall the Material Editor drew last pass: the room the Materials
+    /// card leaves it.
+    pub(in crate::app) material_content_height: Option<f32>,
+    /// The snapshot's scale over the viewport's size, as the preferences
+    /// keep it.
+    pub(in crate::app) snapshot_scale: f32,
+    /// What the viewport drew last pass, for a snapshot of the frame on
+    /// screen.
+    pub(in crate::app) snapshot_source: Option<super::snapshot::SnapshotSource>,
+    pub(in crate::app) snapshot: super::snapshot::SnapshotPhase,
+    /// What a snapshot has to say, for the status bar.
+    pub(in crate::app) snapshot_message: Option<String>,
+    /// The shading the preferences keep has been taken, once, as the
+    /// preview was made.
+    pub(in crate::app) shading_from_prefs: bool,
+    /// A shading was picked from the menu this pass, for the preferences to
+    /// keep. A game's own fallback (Solid where it draws no textures) isn't.
+    pub(in crate::app) shading_picked: bool,
+    /// What keeps the materials as the Material Editor's shaders have them.
+    pub(in crate::app) material_live: super::material_editor::MaterialLive,
 }
 
 /// The last loaded model and how its player stood, drawn while the same
@@ -253,6 +282,17 @@ impl Default for ModelPreviewState {
             yaw: -0.45,
             pitch: 0.25,
             focus: [0.0; 3],
+            material_editor: None,
+            material_editor_closed: None,
+            material_slot: None,
+            material_content_height: None,
+            snapshot_scale: 1.0,
+            snapshot_source: None,
+            snapshot: Default::default(),
+            snapshot_message: None,
+            shading_from_prefs: false,
+            shading_picked: false,
+            material_live: Default::default(),
         }
     }
 }
@@ -381,6 +421,41 @@ impl ModelPreviewState {
         state.campaign_evolved.loaded_high_detail = state.campaign_evolved.high_detail;
         state
     }
+
+    /// [`Self::loaded_empty_for_test`], drawing a part with each of
+    /// `shaders`, `(group, path)`, under its own region.
+    #[cfg(test)]
+    /// The Material Editor open on the first material the preview lists, as
+    /// picking it from the dropdown leaves it.
+    #[cfg(test)]
+    pub(in crate::app) fn open_material_editor_for_test(&mut self) {
+        let first = match &self.data {
+            Some(Ok(data)) => super::material_editor::editor_materials(&data.preview).first().map(|material| material.key.clone()),
+            _ => None,
+        };
+        self.material_editor = Some(super::material_editor::MaterialEditorState { selected: first, ..Default::default() });
+    }
+
+    pub(in crate::app) fn loaded_with_shaders_for_test(entry_key: &str, shaders: &[(&[u8; 4], &str)]) -> Self {
+        let mut state = Self::loaded_empty_for_test(entry_key);
+        let Some(Ok(data)) = state.data.as_mut() else { unreachable!() };
+        let mut preview = (*data.preview).clone();
+        for (index, (group, path)) in shaders.iter().enumerate() {
+            preview.materials.push(super::RenderModelPreviewMaterial {
+                shader_path: (*path).to_owned(),
+                shader_group: u32::from_be_bytes(**group),
+                ..Default::default()
+            });
+            preview.batches.push(super::RenderModelPreviewBatch {
+                region_name: "body".to_owned(),
+                permutation_name: "base".to_owned(),
+                material_index: index as u16,
+                ..Default::default()
+            });
+        }
+        data.preview = std::sync::Arc::new(preview);
+        state
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -461,6 +536,20 @@ impl ModelShading {
 
     pub(in crate::app) fn uses_textures(self) -> bool {
         matches!(self, Self::Textured | Self::GameShaders)
+    }
+
+    /// The name the preferences keep it by.
+    pub(in crate::app) fn as_str(self) -> &'static str {
+        match self {
+            Self::Wireframe => "wireframe",
+            Self::Solid => "solid",
+            Self::Textured => "textured",
+            Self::GameShaders => "game_shaders",
+        }
+    }
+
+    pub(in crate::app) fn from_str(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|shading| shading.as_str() == name)
     }
 }
 

@@ -439,6 +439,120 @@ pub(in crate::app) enum ColorPopupResult {
 /// Draw the color inspector / editor popup.
 ///
 /// Returns a write result when the user clicks OK on an editable popup.
+impl MaterialColorPopup {
+    /// What OK writes, picked as the popup stands: the live preview of a
+    /// picker opened in the Material Editor shows exactly this.
+    pub(in crate::app) fn draft_result(&self) -> Option<ColorPopupResult> {
+        if self.string_list_colour.is_some() {
+            return self.string_list_colour_ok();
+        } else if let Some(target) = self.function_draft_color.clone() {
+            let argb = ((target.original_alpha as u32) << 24)
+                | ((float_channel_to_u8(self.red) as u32) << 16)
+                | ((float_channel_to_u8(self.green) as u32) << 8)
+                | float_channel_to_u8(self.blue) as u32;
+            return self.function_color_result(target, argb);
+        } else if let Some(field) = self.write_color_field.clone() {
+            // Plain color value: emit the channel string the field
+            // parser expects (RGB = "r, g, b", ARGB = "a, r, g, b").
+            let input = if field.argb {
+                format!(
+                    "{}, {}, {}, {}",
+                    self.alpha, self.red, self.green, self.blue
+                )
+            } else {
+                format!("{}, {}, {}", self.red, self.green, self.blue)
+            };
+            return Some(ColorPopupResult::FieldEdit {
+                tag_key: self.tag_key.clone(),
+                edit: PendingFieldEdit {
+                    path: field.path,
+                    input,
+                },
+            });
+        } else if let Some(path) = self.write_path.clone() {
+            let hex = constant_color_function_hex(
+                self.red,
+                self.green,
+                self.blue,
+                self.alpha,
+            );
+            return Some(ColorPopupResult::FieldEdit {
+                tag_key: self.tag_key.clone(),
+                edit: PendingFieldEdit { path, input: hex },
+            });
+        } else if let Some(mut op) = self.create_shader_op.clone() {
+            op.initial_function_hex = constant_color_function_hex(
+                self.red,
+                self.green,
+                self.blue,
+                self.alpha,
+            );
+            return Some(ColorPopupResult::ShaderOp {
+                tag_key: self.tag_key.clone(),
+                op,
+            });
+        } else if let Some(mut op) = self.create_shader_param_op.clone() {
+            if let Some(animated) = op.animated_parameters.first_mut() {
+                animated.initial_function_hex = constant_color_function_hex(
+                    self.red,
+                    self.green,
+                    self.blue,
+                    self.alpha,
+                );
+            }
+            return Some(ColorPopupResult::ShaderParamOp {
+                tag_key: self.tag_key.clone(),
+                op,
+            });
+        } else if let Some(mut op) = self.create_h2_shader_param_op.clone() {
+            match &mut op {
+                H2ShaderParamOp::EditTemplateBackedValue { input, .. } => {
+                    *input =
+                        format!("{}, {}, {}", self.red, self.green, self.blue);
+                }
+                H2ShaderParamOp::EnsureAnimationProperty {
+                    initial_function_data,
+                    ..
+                }
+                | H2ShaderParamOp::EditFunctionData {
+                    data: initial_function_data,
+                    ..
+                } => {
+                    *initial_function_data = h2_constant_color_function_data(
+                        self.red,
+                        self.green,
+                        self.blue,
+                        self.alpha,
+                        Some(initial_function_data.as_slice()),
+                    );
+                }
+            }
+            return Some(ColorPopupResult::H2ShaderParamOp {
+                tag_key: self.tag_key.clone(),
+                op,
+            });
+        }
+        None
+    }
+
+    /// The picked channels, red, green, blue and alpha: what changes a draft.
+    pub(in crate::app) fn channels(&self) -> [f32; 4] {
+        [self.red, self.green, self.blue, self.alpha]
+    }
+
+    /// Whether anything other than the colour it opened with is picked: an
+    /// unchanged picker has no draft to show.
+    pub(in crate::app) fn picked_another(&self) -> bool {
+        self.channels() != self.original_color
+    }
+
+    /// Pick `red`, `green` and `blue`, as dragging the picker would.
+    #[cfg(test)]
+    pub(in crate::app) fn pick_for_test(&mut self, red: f32, green: f32, blue: f32) {
+        self.set_rgb_components(red, green, blue);
+    }
+}
+
 pub(in crate::app) fn draw_color_popup(
     ctx: &egui::Context,
     color_popup: &mut Option<MaterialColorPopup>,
@@ -494,95 +608,7 @@ pub(in crate::app) fn draw_color_popup(
                         close = true;
                     }
                     if editable && icon_text_button(ui, ButtonIcon::Confirm, "OK", true).clicked() {
-                        if color.string_list_colour.is_some() {
-                            result = color.string_list_colour_ok();
-                        } else if let Some(target) = color.function_draft_color.clone() {
-                            let argb = ((target.original_alpha as u32) << 24)
-                                | ((float_channel_to_u8(color.red) as u32) << 16)
-                                | ((float_channel_to_u8(color.green) as u32) << 8)
-                                | float_channel_to_u8(color.blue) as u32;
-                            result = color.function_color_result(target, argb);
-                        } else if let Some(field) = color.write_color_field.clone() {
-                            // Plain color value: emit the channel string the field
-                            // parser expects (RGB = "r, g, b", ARGB = "a, r, g, b").
-                            let input = if field.argb {
-                                format!(
-                                    "{}, {}, {}, {}",
-                                    color.alpha, color.red, color.green, color.blue
-                                )
-                            } else {
-                                format!("{}, {}, {}", color.red, color.green, color.blue)
-                            };
-                            result = Some(ColorPopupResult::FieldEdit {
-                                tag_key: color.tag_key.clone(),
-                                edit: PendingFieldEdit {
-                                    path: field.path,
-                                    input,
-                                },
-                            });
-                        } else if let Some(path) = color.write_path.clone() {
-                            let hex = constant_color_function_hex(
-                                color.red,
-                                color.green,
-                                color.blue,
-                                color.alpha,
-                            );
-                            result = Some(ColorPopupResult::FieldEdit {
-                                tag_key: color.tag_key.clone(),
-                                edit: PendingFieldEdit { path, input: hex },
-                            });
-                        } else if let Some(mut op) = color.create_shader_op.clone() {
-                            op.initial_function_hex = constant_color_function_hex(
-                                color.red,
-                                color.green,
-                                color.blue,
-                                color.alpha,
-                            );
-                            result = Some(ColorPopupResult::ShaderOp {
-                                tag_key: color.tag_key.clone(),
-                                op,
-                            });
-                        } else if let Some(mut op) = color.create_shader_param_op.clone() {
-                            if let Some(animated) = op.animated_parameters.first_mut() {
-                                animated.initial_function_hex = constant_color_function_hex(
-                                    color.red,
-                                    color.green,
-                                    color.blue,
-                                    color.alpha,
-                                );
-                            }
-                            result = Some(ColorPopupResult::ShaderParamOp {
-                                tag_key: color.tag_key.clone(),
-                                op,
-                            });
-                        } else if let Some(mut op) = color.create_h2_shader_param_op.clone() {
-                            match &mut op {
-                                H2ShaderParamOp::EditTemplateBackedValue { input, .. } => {
-                                    *input =
-                                        format!("{}, {}, {}", color.red, color.green, color.blue);
-                                }
-                                H2ShaderParamOp::EnsureAnimationProperty {
-                                    initial_function_data,
-                                    ..
-                                }
-                                | H2ShaderParamOp::EditFunctionData {
-                                    data: initial_function_data,
-                                    ..
-                                } => {
-                                    *initial_function_data = h2_constant_color_function_data(
-                                        color.red,
-                                        color.green,
-                                        color.blue,
-                                        color.alpha,
-                                        Some(initial_function_data.as_slice()),
-                                    );
-                                }
-                            }
-                            result = Some(ColorPopupResult::H2ShaderParamOp {
-                                tag_key: color.tag_key.clone(),
-                                op,
-                            });
-                        }
+                        result = color.draft_result();
                         close = true;
                     }
                 });
