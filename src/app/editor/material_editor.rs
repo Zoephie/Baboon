@@ -604,7 +604,7 @@ fn follow_switched_slot(
 /// The render model a preview names, as `(group, path)`: Halo CE's names
 /// its `gbxmodel` with the extension, the later games' their `render_model`
 /// without one.
-fn render_model_reference(render_model_path: &str) -> Option<(u32, String)> {
+pub(in crate::app) fn render_model_reference(render_model_path: &str) -> Option<(u32, String)> {
     let path = render_model_path.replace('/', "\\");
     if path.is_empty() {
         return None;
