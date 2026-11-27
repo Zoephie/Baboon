@@ -492,7 +492,8 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
     }
 }
 
-#[cfg(test)]
+// Only where the harness makes a GL context.
+#[cfg(all(test, any(target_os = "macos", windows)))]
 mod tests {
     use super::*;
 
@@ -514,6 +515,13 @@ mod tests {
     #[test]
     fn a_bitmap_without_mips_samples_its_one_level() {
         let gl = crate::app::model_preview::harness::gl::headless_gl();
+        // A machine with no GPU (Windows CI) gives GDI's GL 1.1, which has
+        // no max level at all; the preview itself needs 4.1.
+        let version = gl.version();
+        if (version.major, version.minor) < (4, 1) {
+            eprintln!("skipped: GL {}.{}", version.major, version.minor);
+            return;
+        }
         let max_level = |mips: Option<&[Image]>| unsafe {
             let texture = upload_image_linear(&gl, &flat(8), ImageTexels::Linear, mips, None).unwrap();
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
