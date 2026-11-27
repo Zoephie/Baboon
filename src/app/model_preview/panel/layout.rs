@@ -188,6 +188,9 @@ pub(in crate::app) fn draw_model_preview_panel(
         state.invalidate_load();
     } else if !requests.reload {
         state.data = restore_data.take();
+        if let Some(Ok(data)) = state.data.as_mut() {
+            super::super::decorators::relayout(data, state.decorator_layout);
+        }
     }
 }
 

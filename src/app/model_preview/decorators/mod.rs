@@ -16,15 +16,23 @@
 //! render flag, and Reach renamed every `render shader` option.
 
 mod bake;
+mod gpu;
+mod instances;
 mod layout;
 mod material;
 mod read;
 mod shader;
+mod wind;
 
-pub(in crate::app::model_preview) use bake::bake_placements;
+pub(in crate::app::model_preview) use bake::{PERMUTATION, bake_placements, relayout, type_name};
+pub(in crate::app::model_preview) use gpu::{
+    DecoratorBuffers, INSTANCE_ATTRIBUTES, decorator_value,
+};
 pub(in crate::app::model_preview) use layout::{Layout, scatter};
 pub(in crate::app::model_preview) use material::resolve_decorator_material;
 pub(in crate::app::model_preview) use read::read_decorator_set;
+pub(in crate::app::model_preview) use shader::DecoratorShader;
+pub(in crate::app::model_preview) use wind::WindDefinition;
 
 #[cfg(test)]
 mod tests;
@@ -32,11 +40,28 @@ mod tests;
 /// A decorator set, as the preview draws it.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DecoratorSet {
+    /// The shader `render shader` names; `None` for an option this build
+    /// does not know.
+    pub shader: Option<DecoratorShader>,
     /// `render two sided`: drawn with no culling.
     pub two_sided: bool,
+    /// The set's only material.
+    pub texture: String,
+    /// `translucency A`, `B`, `C` and `translucency`, as the tag has them:
+    /// the shader's `translucency`, which its dynamic lights and sun read.
+    pub translucency: [f32; 4],
+    /// `wavelength X`, `wavelength Y`, `wave speed` and `wave frequency`: the
+    /// wavy shader's `wave_flow`, as the tag has them.
+    pub wave: [f32; 4],
+    /// `shaded dark` and `shaded bright`: the shaded shader's `contrast`.
+    pub shaded: [f32; 2],
+    /// The wind it sways in: the globals' default.
+    pub wind: Option<std::sync::Arc<WindDefinition>>,
     pub types: Vec<DecoratorType>,
     /// Each type's mesh, by type.
     pub meshes: Vec<DecoratorMesh>,
+    /// The patch [`Self::placements`] fill.
+    pub layout: Layout,
     /// Where the preview stands each decorator.
     pub placements: Vec<Placement>,
 }
@@ -86,4 +111,17 @@ pub(crate) struct Placement {
     pub tint: [f32; 3],
     /// How far its colour leans toward the ground's.
     pub ground_tint: f32,
+}
+
+impl DecoratorSet {
+    /// Whether its shader moves it on the clock: the wind's, or the waves'.
+    pub(crate) fn moves(&self) -> bool {
+        self.shader.is_some_and(DecoratorShader::moves)
+    }
+
+    /// The type a batch's region names ([`bake::type_name`]).
+    pub(crate) fn type_of_region(&self, region: &str) -> Option<usize> {
+        (0..self.types.len())
+            .find(|&index| bake::type_name(index, &self.types[index].mesh_name) == region)
+    }
 }

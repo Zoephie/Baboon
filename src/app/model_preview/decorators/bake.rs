@@ -3,12 +3,15 @@
 //! 1.20). Game Shaders draws the placements instanced instead.
 
 use super::super::common::geometry::{Overflow, VertexBase, expand_preview_bounds_local};
+use super::super::{ModelPreviewData, NEXT_MODEL_GEOMETRY_ID};
 use super::super::{
     RenderModelPreview, RenderModelPreviewBatch, RenderModelPreviewMaterial,
     RenderModelPreviewRegion, RenderModelPreviewVertex,
 };
 use super::DecoratorSet;
 use super::layout::rotate;
+use super::layout::{Layout, scatter};
+use std::sync::Arc;
 
 /// Each type's one permutation: a type is a region of its own, so every type
 /// shows at once, as a model shows a permutation of each region.
@@ -107,4 +110,30 @@ pub(crate) fn type_name(type_index: usize, mesh_name: &str) -> String {
     } else {
         format!("{type_index}: {mesh_name}")
     }
+}
+
+/// `data`'s set laid out again as `layout` asks, if it was laid out
+/// otherwise: its placements scattered anew and baked, the textures kept
+/// (`textures_id` stays), the geometry uploaded again (`mesh_id` is new).
+pub(in crate::app::model_preview) fn relayout(data: &mut ModelPreviewData, layout: Layout) {
+    let Some(set) = data
+        .preview
+        .decorators
+        .as_ref()
+        .filter(|set| set.layout != layout)
+    else {
+        return;
+    };
+    let mut set = (**set).clone();
+    set.layout = layout;
+    set.placements = scatter(&set, layout);
+    let Some(material) = data.preview.materials.first().cloned() else {
+        return;
+    };
+    let mut preview = bake_placements(&set, material);
+    preview.game = data.preview.game;
+    preview.generation = data.preview.generation;
+    preview.decorators = Some(Arc::new(set));
+    data.preview = Arc::new(preview);
+    data.mesh_id = NEXT_MODEL_GEOMETRY_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }

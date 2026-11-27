@@ -2,8 +2,7 @@
 
 use super::super::common::fields::{elements, has_flag};
 use super::super::load::TagReader;
-use super::shader::DecoratorShader;
-use super::{DecoratorMesh, DecoratorSet, DecoratorType};
+use super::{DecoratorMesh, DecoratorSet, DecoratorShader, DecoratorType, WindDefinition};
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 /// The set `tag`, with each type's mesh read from its render model.
@@ -21,7 +20,8 @@ pub(in crate::app::model_preview) fn read_decorator_set(
         Some(_) => root.read_enum_option("render shader").unwrap_or_default(),
         None => DecoratorShader::first_option(game).name().to_owned(),
     };
-    if DecoratorShader::from_option_name(&shader_name).is_none() {
+    let shader = DecoratorShader::from_option_name(&shader_name);
+    if shader.is_none() {
         notes.push(format!(
             "Its render shader, \"{shader_name}\", is one this build does not know."
         ));
@@ -52,10 +52,33 @@ pub(in crate::app::model_preview) fn read_decorator_set(
         .load(&render_model, "render_model", b"mode")
         .map_err(|error| format!("Could not load {render_model}.render_model: {error}"))?;
     let meshes = read_meshes(&model, &types, notes)?;
+    let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     Ok(DecoratorSet {
+        shader,
         two_sided: has_flag(root, "render flags", "render two sided"),
+        texture: root
+            .read_tag_ref_path("texture")
+            .map(|path| path.trim().to_owned())
+            .unwrap_or_default(),
+        translucency: [
+            "translucency A",
+            "translucency B",
+            "translucency C",
+            "translucency",
+        ]
+        .map(real),
+        wave: [
+            "wavelength X",
+            "wavelength Y",
+            "wave speed",
+            "wave frequency",
+        ]
+        .map(real),
+        shaded: ["shaded dark", "shaded bright"].map(real),
+        wind: WindDefinition::default_for(reader).map(std::sync::Arc::new),
         types,
         meshes,
+        layout: Default::default(),
         placements: Vec::new(),
     })
 }

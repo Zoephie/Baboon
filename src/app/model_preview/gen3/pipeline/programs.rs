@@ -108,6 +108,7 @@ unsafe fn link_pass(
             }
         }
         attributes.extend(PRT_ATTRIBUTES.into_iter().zip(PRT_NAMES));
+        attributes.extend(crate::app::model_preview::decorators::INSTANCE_ATTRIBUTES);
         match super::super::super::gl::link::link(gl, &stages, &attributes) {
             Ok(program) => Ok(Rc::new(Gen3Program {
                 linked: Linked::new(program),

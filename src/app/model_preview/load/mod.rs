@@ -99,8 +99,7 @@ fn load_tag_preview(
         return imposter::load_imposter_tag(model_tag, entry);
     }
     if group == DECORATOR_SET_GROUP {
-        let layout = super::decorators::Layout::default();
-        return decorators::load_decorator_set(model_tag, entry, names, reader, layout);
+        return decorators::load_decorator_set(model_tag, entry, names, reader, settings.decorator_layout);
     }
     if let Some(result) = load_own_object(model_tag, entry, reader, settings) {
         return result;

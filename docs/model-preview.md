@@ -66,9 +66,17 @@ Heat haze, refraction and other effects that bend what is behind the model have 
 
 ## Decorator sets
 
-A Halo 3 or ODST `.decorator_set` opens in a **Decorator Set** preview. A level bakes where its decorators stand and how they are lit, so a set on its own has neither: the preview stands its types on a 4-unit patch of flat ground, 250 tries' worth, filled the way the game's brush fills one. Each decorator gets a type (by its placement weight, where the game has one), a spot kept its type's minimum distance from the others of its type, a random spin if the type rotates at random, and a tilt, hover and scale from the type's ranges. The patch is the same every time it opens. The ground is flat, so *align to normal* changes nothing, and *align random* and *rotate x axis down* aren't applied yet.
+A Halo 3 or ODST `.decorator_set` opens in a **Decorator Set** preview. A level bakes where its decorators stand and how they are lit, so a set on its own has neither: the preview stands its types on a patch of flat ground, filled the way the game's brush fills one. Each decorator gets a type (by its placement weight, where the game has one), a spot kept its type's minimum distance from the others of its type, a random spin if the type rotates at random, and a tilt, hover, scale, wind motion and mix of the type's three colours from its ranges. The ground is flat, so *align to normal* changes nothing, and *align random* and *rotate x axis down* aren't applied yet.
 
-Each type is a region of its own in the sidebar. A type whose mesh its render model no longer has draws nothing, as in the game, and the footer says which. For now the set draws in Solid and Textured: its texture, cut out by its alpha. A two-sided set draws each face's back too. Game Shaders, the wind, and the set's own cards come next; see `docs/decorator-preview-plan.md`.
+With **Game Shaders**, the set draws through the explicit shader its `render shader` names (`decorator_default`, `decorator_wavy` and the rest), translated from the kit's own source, each type's mesh drawn once per decorator as the game draws it. The wind is the globals' **default wind settings**, run on the preview's clock as the game runs it, so a set that sways in the wind moves, and a wavy one ripples. The light a level would bake into each decorator comes from the preview's own light probe instead, its colour leaning toward a mid-grey ground by its ground tint. Without Game Shaders the set draws its texture, cut out by its alpha, and a two-sided set draws each face's back too.
+
+The sidebar has three cards in place of Permutations:
+
+- **Decorator Set**: its render shader, whether it draws both sides, its texture, and the wind it sways in.
+- **Types**: a row per type, ticked to show it, with how many the patch stands. A type whose mesh its render model no longer has draws nothing, as in the game, and says so.
+- **Layout**: the patch's edge in world units, how many decorators it tries to stand (any number; past 100,000 it warns that it's slow), and its seed. A change lays the patch out again at once. Fewer fit than asked where types keep their distance, and the card says how many did.
+
+The game fades decorators out with distance; the preview doesn't yet. See `docs/decorator-preview-plan.md` for what comes next.
 
 ## The footer
 

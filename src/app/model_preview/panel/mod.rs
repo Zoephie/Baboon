@@ -4,6 +4,7 @@
 mod layout;
 pub(in crate::app) use layout::*;
 mod animation;
+mod decorators;
 mod section;
 mod setup;
 mod snapshot;

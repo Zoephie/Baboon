@@ -23,6 +23,7 @@ pub(super) fn load_decorator_set(
 ) -> Result<ModelPreviewData, String> {
     let mut notes = Vec::new();
     let mut set = read_decorator_set(tag, reader, &mut notes)?;
+    set.layout = layout;
     set.placements = scatter(&set, layout);
     let material = RenderModelPreviewMaterial {
         shader_path: crate::app::references::dependency_entry_reference_path(entry, names)

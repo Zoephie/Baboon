@@ -882,6 +882,40 @@ fn halo_3s_self_shadow_reads_its_own_normals_after_another_gen3_preview() {
     );
 }
 
+/// With `BLAM_TEST_H3EK`: Game Shaders draw a Halo 3 decorator set through
+/// its own explicit shader, instanced: the Isolation dead grass, whose
+/// `wind + dynamic lights` sways, moves between two times, and the
+/// Bunkerworld crapweed, `still + dynamic lights`, does not.
+#[test]
+fn a_halo_3_decorator_set_sways_only_in_the_wind() {
+    let Some(halo3) = super::kit::kit_source(GameId::Halo3) else {
+        return;
+    };
+    let shot = |model: &str| Shot {
+        model: model.to_owned(),
+        shaders: true,
+        lights: false,
+        yaw: 0.6,
+        pitch: 0.12,
+        kind: Some("decorator_set".to_owned()),
+    };
+    let at = |time: f32| ShotOptions {
+        time,
+        ..ShotOptions::new(GameId::Halo3)
+    };
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let grass = shot("levels\\shared\\decorators\\outskirts_tall_grass\\isolation_deadgrass");
+    let still = shot("levels\\dlc\\bunkerworld\\decorators\\crapweed");
+    let [grass_before, grass_after, still_before, still_after] = [(&grass, 0.0), (&grass, 2.5), (&still, 0.0), (&still, 2.5)]
+        .map(|(shot, time)| render(&gl, &mut renderer, &halo3, shot, &at(time)).pixels);
+    let drawn = |pixels: &[u8]| pixels.chunks(4).filter(|pixel| pixel[..3] != grass_before[..3]).count();
+    assert!(drawn(&grass_before) > 10_000 && drawn(&still_before) > 10_000, "both sets drew");
+    let moved = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(a, b)| a[..3] != b[..3]).count();
+    assert!(moved(&grass_before, &grass_after) > 10_000, "the wind moved the grass");
+    assert_eq!(moved(&still_before, &still_after), 0, "nothing moved the still set");
+}
+
 /// The gen3 pipelines share one set of targets: a Reach frame after a Halo 3
 /// one, at the same size, draws through the set Halo 3 made rather than a
 /// second, and hands it back.

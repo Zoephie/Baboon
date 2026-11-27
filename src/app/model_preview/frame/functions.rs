@@ -201,6 +201,8 @@ pub(in crate::app::model_preview) fn object_moves(
                             .is_some_and(|extension| extension.moves())
                         || (material.shield.is_some()
                             && gen3::pipeline::gen3_shield_showing(function_values))
+                        || (material.decorator
+                            && data.preview.decorators.as_ref().is_some_and(|set| set.moves()))
                 })
             })
 }

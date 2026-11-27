@@ -98,6 +98,45 @@ impl DecoratorShader {
         }
     }
 
+    /// The `hlsl_include` Halo 3's and ODST's `rasterizer_globals` name for
+    /// it among their explicit shaders (`get_decorator_explicit_shader`
+    /// returns the table's 47, 70, 71, 72, 73 and 82), compiled from source.
+    /// `None` for Reach's and Halo 4's options, whose shaders are their own.
+    pub(crate) fn halo_3_source(self) -> Option<&'static str> {
+        Some(match self {
+            Self::WindDynamicLights => "decorator_default",
+            Self::StillDynamicLights => "decorator_no_wind",
+            Self::StillNoLights => "decorator_static",
+            Self::StillSunLight => "decorator_sun",
+            Self::WavyDynamicLights => "decorator_wavy",
+            Self::ShadedDynamicLights => "decorator_shaded",
+            _ => return None,
+        })
+    }
+
+    /// Whether its shader is built with `DECORATOR_WIND` or `DECORATOR_WAVY`,
+    /// which move it on the clock.
+    pub(crate) fn moves(self) -> bool {
+        matches!(
+            self,
+            Self::WindDynamicLights
+                | Self::WavyDynamicLights
+                | Self::BillboardWindDynamicLights
+                | Self::UnderwaterDynamicLights
+                | Self::VolumetricBillboardWindDynamicLights
+        )
+    }
+
+    /// Whether the wind sways it: its shader is built with `DECORATOR_WIND`.
+    pub(crate) fn moves_in_the_wind(self) -> bool {
+        matches!(
+            self,
+            Self::WindDynamicLights
+                | Self::BillboardWindDynamicLights
+                | Self::VolumetricBillboardWindDynamicLights
+        )
+    }
+
     /// The option's name.
     pub(crate) fn name(self) -> &'static str {
         NAMES

@@ -35,7 +35,9 @@ pub(in crate::app::model_preview) fn draw_setup_body(
             state.scenario_bsp_selection.clear();
         }
     }
-    if has_permutations(data) {
+    if data.preview.decorators.is_some() {
+        super::decorators::draw_decorator_cards(ui, data, state);
+    } else if has_permutations(data) {
         let changed = permutations_changed(data, state);
         if setup_section(ui, "Permutations", changed, |ui, part| {
             if part == BoxPart::Body {

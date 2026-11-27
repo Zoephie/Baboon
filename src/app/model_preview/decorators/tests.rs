@@ -45,6 +45,37 @@ fn a_halo_3_set_lays_its_types_on_the_ground() {
     assert!(!data.preview.batches.is_empty() && data.preview.batches.len() <= 4);
 }
 
+/// With `BLAM_TEST_H3EK`: a new layout lays the patch out again in place:
+/// other placements and new geometry, the same textures, and nothing done
+/// for the layout it already has.
+#[test]
+fn a_new_layout_lays_the_patch_out_again_in_place() {
+    let Some(root) = kit_root(GameId::Halo3) else {
+        return;
+    };
+    let mut data = kit_preview(
+        &root,
+        GameId::Halo3,
+        "levels\\shared\\decorators\\outskirts_tall_grass\\isolation_deadgrass",
+        "decorator_set",
+        b"dctr",
+    );
+    let (mesh, textures) = (data.mesh_id, data.textures_id);
+    super::relayout(&mut data, super::Layout::default());
+    assert_eq!(data.mesh_id, mesh, "the layout it has changes nothing");
+    let layout = super::Layout {
+        count: 40,
+        seed: 9,
+        ..Default::default()
+    };
+    super::relayout(&mut data, layout);
+    let set = data.preview.decorators.as_ref().unwrap();
+    assert_eq!((set.layout, set.placements.len()), (layout, 40));
+    assert_ne!(data.mesh_id, mesh);
+    assert_eq!(data.textures_id, textures);
+    assert_eq!(data.preview.game, Some(GameId::Halo3));
+}
+
 /// With `BLAM_TEST_H3EK`: every kit set reads without a panic and knows its
 /// render shader by name; one that cannot draw says why. The kit has sets
 /// whose types name meshes their model has lost, and one model
